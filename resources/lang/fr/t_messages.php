@@ -1,6 +1,11 @@
 <?php
 
 return [
+    'admin_announcement' => [
+        'from' => 'Administration',
+        'subject' => ':subject',
+        'body' => ':body',
+    ],
     'welcome_message' => [
         'from' => 'OGameX Francophone',
         'subject' => 'Bienvenue sur OGameX Francophone !',

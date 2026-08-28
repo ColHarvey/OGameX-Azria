@@ -7,6 +7,7 @@ use OGame\GameMessages\Abstracts\GameMessage;
 use OGame\GameMessages\AcsDefendArrivalHost;
 use OGame\GameMessages\AcsDefendArrivalSender;
 use OGame\GameMessages\AllianceApplicationReceived;
+use OGame\GameMessages\AdminAnnouncement;
 use OGame\GameMessages\AllianceBroadcast;
 use OGame\GameMessages\BattleReport;
 use OGame\GameMessages\BuddyRemoved;
@@ -62,6 +63,7 @@ class GameMessageFactory
      * @var array<string, class-string<GameMessage>>
      */
     private static array $gameMessageClasses = [
+        'admin_announcement' => AdminAnnouncement::class,
         'welcome_message' => WelcomeMessage::class,
         'return_of_fleet_with_resources' => ReturnOfFleetWithResources::class,
         'return_of_fleet' => ReturnOfFleet::class,

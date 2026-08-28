@@ -264,6 +264,10 @@ Route::middleware(['auth', 'globalgame', 'locale', 'admin'])->group(function () 
     Route::post('/admin/server-settings', [AdminServerSettingsController::class, 'update'])->name('admin.serversettings.update');
 
     // Rules
+    // Annonces aux joueurs
+    Route::get('/admin/announcement', [\OGame\Http\Controllers\Admin\AnnouncementController::class, 'index'])->name('admin.announcement.index');
+    Route::post('/admin/announcement', [\OGame\Http\Controllers\Admin\AnnouncementController::class, 'send'])->name('admin.announcement.send');
+
     Route::get('/admin/rules', [AdminRulesController::class, 'index'])->name('admin.rules.index');
     Route::post('/admin/rules', [AdminRulesController::class, 'update'])->name('admin.rules.update');
 
