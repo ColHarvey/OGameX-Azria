@@ -21,6 +21,13 @@ return Application::configure(basePath: dirname(__DIR__))
         ['middleware' => ['web', 'auth']],
     )
     ->withMiddleware(function (Middleware $middleware) {
+        // Proxies de confiance : NPM sur le VPS via le tunnel WireGuard.
+        $middleware->trustProxies(at: [
+            '10.8.0.0/24',
+            '172.16.0.0/12',
+            '192.168.0.0/16',
+        ]);
+
         $middleware->prepend(ServerTiming::class);
         // Locale must be APPENDED (not prepended) to the web group so that it executes
         // after StartSession. Prepending would place it before StartSession, making
