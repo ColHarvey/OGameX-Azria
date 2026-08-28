@@ -1891,8 +1891,8 @@ However, the Space Dock's engineers think that some of the remains can be salvag
             <a href="#TODO_changelog&ajax=1" class="tooltip js_hideTipOnMobile overlay" data-class="noXScrollbar"
                data-overlay-iframe="true" data-iframe-width="680" data-overlay-title="{{ __('t_ingame.layout.patch_notes') }}">
                 {{ \OGame\Facades\GitInfoUtil::getAppVersion() }}</a>
-            <a class="homeLink" href="https://github.com/lanedirt/ogamex" target="_blank">©
-                OGameX. {{ __('t_ingame.layout.all_rights_reserved') }}</a>
+            <span>©
+                OGameX Francophone. {{ __('t_ingame.layout.all_rights_reserved') }}</span>
         </div>
         <div class="fright textRight">
             <a href="{{ route('serversettings.overlay') }}" class="overlay"
