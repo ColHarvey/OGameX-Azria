@@ -2,30 +2,23 @@
 
 return [
     'welcome_message' => [
-        'from' => 'OGameX',
-        'subject' => 'Bienvenue sur OGameX !',
-        'body' => 'Salutations Empereur :player !
+        'from' => 'OGameX Francophone',
+        'subject' => 'Bienvenue sur OGameX Francophone !',
+        'body' => 'Salutations Empereur :player !
 
-Félicitations pour le début de votre illustre carrière. Je serai là pour vous guider dans vos premiers pas.
+Bienvenue sur OGameX Francophone. Felicitations pour le debut de votre illustre carriere, je serai la pour vous guider dans vos premiers pas.
 
-Sur la gauche vous pouvez voir le menu qui vous permet de superviser et de gouverner votre empire galactique.
+Sur la gauche, le menu vous permet de superviser et de gouverner votre empire galactique. Les ressources et les installations vous permettent de construire des batiments pour etendre votre territoire.
 
-Vous avez déjà vu l\'aperçu. Les ressources et les installations vous permettent de construire des bâtiments pour vous aider à étendre votre empire. Commencez par construire une centrale solaire pour récupérer de l\'énergie pour vos mines.
+Commencez par batir une centrale solaire afin d\'alimenter vos mines en energie. Developpez ensuite votre mine de metal et votre mine de cristal pour produire les ressources vitales a votre expansion. Puis explorez par vous-meme : vous vous sentirez bientot chez vous, j\'en suis sur.
 
-Développez ensuite votre mine de métal et votre mine de cristal pour produire des ressources vitales. Sinon, jetez simplement un œil par vous-même. Vous vous sentirez bientôt bien chez vous, j’en suis sûr.
+Votre pseudo a ete genere automatiquement. Pour le personnaliser, cliquez sur votre nom en haut a gauche, saisissez le pseudo souhaite et confirmez avec votre mot de passe.
 
-Vous pouvez trouver plus d’aide, de conseils et de tactiques ici :
+Une question, un souci, une suggestion ? Ecrivez a admin@azriagaming.ca
 
-Chat Discord : serveur Discord
-Forum : Forum OGameX
-Assistance : assistance au jeu
+L\'univers est vaste et les ressources ne s\'extraient pas toutes seules. Bonne chance, Empereur.
 
-Vous ne trouverez que les annonces actuelles et les modifications apportées au jeu dans les forums.
-
-
-Vous êtes désormais prêt pour l’avenir. Bonne chance!
-
-Ce message sera supprimé dans 7 jours.',
+Ce message sera supprime dans 7 jours.',
     ],
     'return_of_fleet_with_resources' => [
         'from' => 'Commandement de la flotte',
