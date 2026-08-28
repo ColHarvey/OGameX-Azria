@@ -206,7 +206,7 @@
                     </div>
                 </div>
                 <input type="submit" id="loginSubmit" value="{{ __('t_external.login.submit') }}"/>
-                <a href="#" id="pwLost" target="_blank" title="{{ __('t_external.login.forgot_password') }}">{{ __('t_external.login.forgot_password') }}</a>
+                <a href="{{ url('/forgot-password') }}" id="pwLost" target="_blank" title="{{ __('t_external.login.forgot_password') }}">{{ __('t_external.login.forgot_password') }}</a>
                 <br/>
                 <a href="#" id="emailLost" target="_blank" title="{{ __('t_external.login.forgot_email') }}">{{ __('t_external.login.forgot_email') }}</a>
                 <p id="TermsAndConditionsAcceptWithLogin">
@@ -410,6 +410,13 @@
                 "type": "range"
             }
         });
+    });
+</script>
+<script type="text/javascript" id="azria-pwlost-fix">
+    // Le script OGame d'origine reecrit le lien vers /game/reg/mail.php au clic.
+    $(document).ready(function () {
+        $('#pwLost').off('click').attr('href', '{{ url('/forgot-password') }}');
+        $('#emailLost').hide();
     });
 </script>
 </body>
