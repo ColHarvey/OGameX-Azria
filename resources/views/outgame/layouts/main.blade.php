@@ -286,13 +286,6 @@
                     <div>
                         <input type="submit" id="regSubmit" value="{{ __('t_external.register.submit') }}"/>
                     </div>
-                    <div id="ipadapp">
-                        <a href="#"
-                        >
-                            <img src="/img/outgame/1817433e4a8d432a8d8ed25a4d6060.png" alt=""/>
-                            <img src="/img/outgame/c98a4685de676300b80da072ab6ad7.png" alt=""/>
-                        </a>
-                    </div>
                 </div>
             </form>
         </div>
