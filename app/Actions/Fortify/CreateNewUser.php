@@ -161,7 +161,7 @@ class CreateNewUser implements CreatesNewUsers
         for ($attempt = 0; $attempt < 5; $attempt++) {
             try {
                 $user = User::create([
-                    'lang' => 'en',
+                    'lang' => config('app.locale', 'en'),
                     'username' => $this->generateUniqueName(),
                     'email' => $input['email'],
                     'password' => Hash::make($input['password']),
@@ -213,5 +213,26 @@ class CreateNewUser implements CreatesNewUsers
         // Send welcome message to player
         $message = new MessageService($playerService);
         $message->sendWelcomeMessage();
+
+        // Send welcome email to player
+        try {
+            \Illuminate\Support\Facades\Mail::raw(
+                "Bienvenue sur OGameX Francophone !\n\n"
+                . "Ton compte a bien ete cree.\n\n"
+                . "Pseudo : {$user->username}\n"
+                . "Adresse : {$user->email}\n\n"
+                . "Ton pseudo a ete genere automatiquement. Pour le changer :\n"
+                . "clique sur ton nom en haut a gauche dans le jeu, saisis le\n"
+                . "pseudo souhaite, puis confirme avec le mot de passe choisi\n"
+                . "a l'inscription.\n\n"
+                . "Connecte-toi ici : " . config('app.url') . "\n\n"
+                . "Bon jeu,\nL'equipe Azria",
+                function ($m) use ($user) {
+                    $m->to($user->email)->subject('Bienvenue sur OGameX Francophone');
+                }
+            );
+        } catch (Exception $e) {
+            \Illuminate\Support\Facades\Log::warning('Welcome email failed: ' . $e->getMessage());
+        }
     }
 }
