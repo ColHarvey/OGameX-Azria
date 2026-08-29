@@ -258,6 +258,11 @@ Route::middleware(['auth', 'banned', 'globalgame', 'locale', 'firstlogin'])->gro
 });
 
 // Group: all logged in pages:
+Route::middleware(['auth', 'globalgame', 'locale'])->group(function () {
+    Route::get('/support', [\OGame\Http\Controllers\SupportController::class, 'index'])->name('support.index');
+    Route::post('/support', [\OGame\Http\Controllers\SupportController::class, 'send'])->name('support.send');
+});
+
 Route::middleware(['auth', 'globalgame', 'locale', 'admin'])->group(function () {
     // Server settings
     Route::get('/admin/server-settings', [AdminServerSettingsController::class, 'index'])->name('admin.serversettings.index');

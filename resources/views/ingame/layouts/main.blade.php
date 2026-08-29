@@ -173,7 +173,7 @@
                            accesskey="">{{ __('t_ingame.layout.search') }}</a>
                     </li>
                     <li><a href="{{ route('options.index') }}" accesskey="">{{ __('t_ingame.layout.options') }}</a></li>
-                    <li><a href="#">{{ __('t_ingame.layout.support') }}</a></li>
+                    <li><a href="{{ route('support.index') }}">{{ __('t_ingame.layout.support') }}</a></li>
                     <li>
                         <a href="{{ route('logout') }}" onclick="event.preventDefault();
                                                      document.getElementById('logout-form').submit();">{{ __('t_ingame.layout.log_out') }}</a>
