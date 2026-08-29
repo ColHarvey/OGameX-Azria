@@ -167,6 +167,7 @@
             html += '<th class="allyTag">' + locaSearch.tag + '</th>';
             html += '<th class="allyName">' + locaSearch.allianceName + '</th>';
             html += '<th class="allyMembers">' + locaSearch.member + '</th>';
+            html += '<th class="allyMembers">#</th>';
             html += '<th class="allyPoints">' + locaSearch.points + '</th>';
             html += '<th class="action">' + locaSearch.action + '</th>';
             html += '</tr>';
@@ -182,12 +183,13 @@
 
                 html += '<tr class="' + rowClass + '">';
                 html += '<td class="allyTag">';
-                html += '<a class="dark_highlight_tablet" target="_ally" href="' + infoUrl + '">' + escapeHtml(result.tag) + '</a>';
+                html += '<span class="dark_highlight_tablet">' + escapeHtml(result.tag) + '</span>';
                 html += '</td>';
                 html += '<td class="allyName">';
-                html += '<a class="dark_highlight_tablet alliance_class small none" target="_ally" href="' + infoUrl + '">' + escapeHtml(result.name) + '</a>';
+                html += '<span class="dark_highlight_tablet alliance_class small none">' + escapeHtml(result.name) + '</span>';
                 html += '</td>';
                 html += '<td class="allyMembers">' + result.member_count + '</td>';
+                html += '<td class="allyMembers">' + (result.rank || '?') + '</td>';
                 html += '<td class="allyPoints">';
                 html += '<a class="dark_highlight_tablet" target="_parent" href="' + highscoreUrl + '">' + formattedPoints + '</a>';
                 html += '</td>';
@@ -196,7 +198,7 @@
                 // Only show apply link if user is not in an alliance AND alliance is open
                 @if(!auth()->user()->alliance_id)
                 if (result.is_open) {
-                    html += '<a title="' + locaSearch.applyForAlliance + '" class="tooltip js_hideTipOnMobile icon" href="' + applyUrl + '">';
+                    html += '<a title="' + locaSearch.applyForAlliance + '" class="tooltip js_hideTipOnMobile icon js-apply-alliance" href="javascript:void(0);" data-alliance-id="' + result.id + '" data-alliance-name="' + escapeHtml(result.name) + '">';
                     html += '<span class="icon icon_mail"></span>';
                     html += '</a>';
                 }
@@ -209,13 +211,59 @@
                 rowClass = (rowClass === 'alt') ? '' : 'alt';
             });
 
-            html += '<tr><th colspan="5"></th></tr>';
-            html += '<tr><td colspan="5" class="pagebar" align="right"><p></p></td></tr>';
+            html += '<tr><th colspan="6"></th></tr>';
+            html += '<tr><td colspan="6" class="pagebar" align="right"><p></p></td></tr>';
             html += '</tbody></table>';
         }
 
         $('.ajaxContent').html(html);
     }
+
+    // Candidature a une alliance directement depuis la fenetre de recherche
+    $(document).off('click.applyAlliance').on('click.applyAlliance', '.js-apply-alliance', function (e) {
+        e.preventDefault();
+
+        var $lien = $(this);
+        var allianceId = $lien.data('alliance-id');
+        var allianceName = $lien.data('alliance-name');
+
+        if (!confirm('Envoyer une candidature a l\'alliance ' + allianceName + ' ?')) {
+            return;
+        }
+
+        var $cellule = $lien.closest('td');
+        $lien.hide();
+        $cellule.append('<span class="js-apply-status" style="color:#848484;">...</span>');
+
+        $.ajax({
+            url: '{{ route('alliance.apply') }}',
+            type: 'POST',
+            data: {
+                alliance_id: allianceId,
+                message: '',
+                _token: '{{ csrf_token() }}'
+            },
+            success: function (response) {
+                $cellule.find('.js-apply-status').remove();
+                if (response && response.success) {
+                    $lien.attr('title', 'Candidature envoyee').show();
+                    $lien.find('span').css('opacity', '0.4');
+                    $lien.off('click.applyAlliance').on('click', function (ev) { ev.preventDefault(); });
+                } else {
+                    $lien.attr('title', (response && response.message) || 'Echec').show();
+                }
+            },
+            error: function (xhr) {
+                $cellule.find('.js-apply-status').remove();
+                var msg = 'Echec de l\'envoi';
+                if (xhr.responseJSON && xhr.responseJSON.message) {
+                    msg = xhr.responseJSON.message;
+                }
+                $lien.attr('title', msg).show();
+                alert(msg);
+            }
+        });
+    });
 
     function escapeHtml(text) {
         const map = {

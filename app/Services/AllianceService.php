@@ -53,7 +53,7 @@ class AllianceService
         // Validate that user is not already in an alliance
         $user = User::findOrFail($userId);
         if ($user->alliance_id !== null) {
-            throw new Exception('User is already in an alliance');
+            throw new Exception('Ce joueur est deja membre d\'une alliance');
         }
 
         // Check if user left an alliance recently (configurable cooldown)
@@ -63,23 +63,23 @@ class AllianceService
             if (now()->isBefore($cooldownEnd)) {
                 $remainingHours = now()->diffInHours($cooldownEnd);
                 $remainingDays = ceil($remainingHours / 24);
-                throw new Exception("You must wait {$remainingDays} more day(s) before you can create or join an alliance.");
+                throw new Exception("Vous devez encore attendre {$remainingDays} jour(s) avant de pouvoir creer ou rejoindre une alliance.");
             }
         }
 
         // Validate tag length (3-8 characters)
         if (strlen($tag) < 3 || strlen($tag) > 8) {
-            throw new Exception('Alliance tag must be between 3 and 8 characters');
+            throw new Exception('Le tag doit contenir entre 3 et 8 caracteres');
         }
 
         // Validate name length (3-30 characters)
         if (strlen($name) < 3 || strlen($name) > 30) {
-            throw new Exception('Alliance name must be between 3 and 30 characters');
+            throw new Exception('Le nom doit contenir entre 3 et 30 caracteres');
         }
 
         // Check if tag is unique
         if (Alliance::where('alliance_tag', $tag)->exists()) {
-            throw new Exception('Alliance tag is already taken');
+            throw new Exception('Ce tag est deja utilise');
         }
 
         DB::beginTransaction();
@@ -178,7 +178,7 @@ class AllianceService
         // Validate that user is not already in an alliance
         $user = User::findOrFail($userId);
         if ($user->alliance_id !== null) {
-            throw new Exception('User is already in an alliance');
+            throw new Exception('Ce joueur est deja membre d\'une alliance');
         }
 
         // Check if user left an alliance recently (configurable cooldown)
@@ -188,14 +188,14 @@ class AllianceService
             if (now()->isBefore($cooldownEnd)) {
                 $remainingHours = now()->diffInHours($cooldownEnd);
                 $remainingDays = ceil($remainingHours / 24);
-                throw new Exception("You must wait {$remainingDays} more day(s) before you can create or join an alliance.");
+                throw new Exception("Vous devez encore attendre {$remainingDays} jour(s) avant de pouvoir creer ou rejoindre une alliance.");
             }
         }
 
         // Validate that alliance exists and is open
         $alliance = Alliance::findOrFail($allianceId);
         if (!$alliance->is_open) {
-            throw new Exception('Alliance is not accepting applications');
+            throw new Exception('Cette alliance n\'accepte pas de candidatures');
         }
 
         // Check if user already has an application (any status)
@@ -206,7 +206,7 @@ class AllianceService
         if ($existingApplication) {
             // If there's a pending application, don't allow a new one
             if ($existingApplication->status === AllianceApplication::STATUS_PENDING) {
-                throw new Exception('You already have a pending application to this alliance');
+                throw new Exception('Vous avez deja une candidature en attente pour cette alliance');
             }
 
             // If there's an old rejected/accepted application, delete it first
@@ -257,13 +257,13 @@ class AllianceService
         // Verify the accepting user has permission
         $member = $this->getAllianceMember($application->alliance_id, $acceptingUserId);
         if (!$member || !$member->hasPermission(AllianceRank::PERMISSION_EDIT_APPLICATIONS)) {
-            throw new Exception('You do not have permission to accept applications');
+            throw new Exception('Vous n\'avez pas la permission d\'accepter les candidatures');
         }
 
         // Verify applicant is not already in an alliance
         $applicant = User::findOrFail($application->user_id);
         if ($applicant->alliance_id !== null) {
-            throw new Exception('Applicant is already in an alliance');
+            throw new Exception('Le candidat est deja membre d\'une alliance');
         }
 
         DB::beginTransaction();
@@ -312,7 +312,7 @@ class AllianceService
         // Verify the rejecting user has permission
         $member = $this->getAllianceMember($application->alliance_id, $rejectingUserId);
         if (!$member || !$member->hasPermission(AllianceRank::PERMISSION_EDIT_APPLICATIONS)) {
-            throw new Exception('You do not have permission to reject applications');
+            throw new Exception('Vous n\'avez pas la permission de refuser les candidatures');
         }
 
         // Reject the application
@@ -334,18 +334,18 @@ class AllianceService
         // Verify the kicking user has permission
         $kickingMember = $this->getAllianceMember($allianceId, $kickingUserId);
         if (!$kickingMember || !$kickingMember->hasPermission(AllianceRank::PERMISSION_KICK_USER)) {
-            throw new Exception('You do not have permission to kick members');
+            throw new Exception('Vous n\'avez pas la permission d\'exclure des membres');
         }
 
         // Get the member to kick
         $memberToKick = $this->getAllianceMember($allianceId, $memberUserId);
         if (!$memberToKick) {
-            throw new Exception('Member not found in alliance');
+            throw new Exception('Membre introuvable dans l\'alliance');
         }
 
         // Cannot kick the founder
         if ($memberToKick->isFounder()) {
-            throw new Exception('Cannot kick the alliance founder');
+            throw new Exception('Impossible d\'exclure le fondateur de l\'alliance');
         }
 
         DB::beginTransaction();
@@ -377,17 +377,17 @@ class AllianceService
         $user = User::findOrFail($userId);
 
         if ($user->alliance_id === null) {
-            throw new Exception('User is not in an alliance');
+            throw new Exception('Ce joueur n\'est membre d\'aucune alliance');
         }
 
         $member = $this->getAllianceMember($user->alliance_id, $userId);
         if (!$member) {
-            throw new Exception('Member not found in alliance');
+            throw new Exception('Membre introuvable dans l\'alliance');
         }
 
         // Founder cannot leave, must disband or transfer ownership
         if ($member->isFounder()) {
-            throw new Exception('Founder cannot leave alliance. You must disband the alliance or transfer ownership.');
+            throw new Exception('Le fondateur ne peut pas quitter l\'alliance. Dissolvez-la ou transferez la propriete.');
         }
 
         DB::beginTransaction();
@@ -422,7 +422,7 @@ class AllianceService
         // Verify the creating user has permission
         $member = $this->getAllianceMember($allianceId, $creatingUserId);
         if (!$member || !$member->hasPermission(AllianceRank::PERMISSION_MANAGE_ALLY)) {
-            throw new Exception('You do not have permission to create ranks');
+            throw new Exception('Vous n\'avez pas la permission de creer des rangs');
         }
 
         // Get next sort order
@@ -451,13 +451,13 @@ class AllianceService
         // Verify the assigning user has permission
         $assigningMember = $this->getAllianceMember($allianceId, $assigningUserId);
         if (!$assigningMember || !$assigningMember->hasPermission(AllianceRank::PERMISSION_MANAGE_ALLY)) {
-            throw new Exception('You do not have permission to assign ranks');
+            throw new Exception('Vous n\'avez pas la permission d\'attribuer des rangs');
         }
 
         // Get the member
         $member = $this->getAllianceMember($allianceId, $memberUserId);
         if (!$member) {
-            throw new Exception('Member not found in alliance');
+            throw new Exception('Membre introuvable dans l\'alliance');
         }
 
         // Cannot assign rank to founder
@@ -657,7 +657,7 @@ class AllianceService
 
         // Validate tag length (3-8 characters)
         if (strlen($newTag) < 3 || strlen($newTag) > 8) {
-            throw new Exception('Alliance tag must be between 3 and 8 characters');
+            throw new Exception('Le tag doit contenir entre 3 et 8 caracteres');
         }
 
         // Check if tag is already taken by another alliance
@@ -665,7 +665,7 @@ class AllianceService
             ->where('id', '!=', $allianceId)
             ->first();
         if ($existingAlliance) {
-            throw new Exception('Alliance tag is already taken');
+            throw new Exception('Ce tag est deja utilise');
         }
 
         $alliance = Alliance::findOrFail($allianceId);
@@ -692,7 +692,7 @@ class AllianceService
 
         // Validate name length (3-30 characters)
         if (strlen($newName) < 3 || strlen($newName) > 30) {
-            throw new Exception('Alliance name must be between 3 and 30 characters');
+            throw new Exception('Le nom doit contenir entre 3 et 30 caracteres');
         }
 
         // Check if name is already taken by another alliance
