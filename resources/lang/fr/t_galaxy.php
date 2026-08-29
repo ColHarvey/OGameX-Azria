@@ -15,4 +15,9 @@ return [
             'no_ship' => 'Il n’est pas possible de coloniser une planète sans vaisseau colonisateur.',
         ],
     ],
+
+    // -- discovery --
+    'discovery' => [
+        'locked' => 'Vous n\'avez pas encore debloque la recherche permettant de decouvrir de nouvelles formes de vie.\\n',
+    ],
 ];

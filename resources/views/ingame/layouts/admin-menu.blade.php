@@ -67,7 +67,7 @@
             @if(!empty($isImpersonating))
                 {{ __('Masquerading as user') }}
             @else
-                Server admin
+                Administration
             @endif
         </div>
         @if(!empty($isImpersonating) && !empty($impersonateLeaveUrl))
@@ -80,12 +80,12 @@
             </ul>
         @else
             <ul>
-                <li><a class="{{(Request::is('admin/developer-shortcuts') ? 'active' : '') }}" href="{{ route('admin.developershortcuts.index') }}">Developer shortcuts</a></li>
-                <li><a class="{{(Request::is('admin/server-settings') ? 'active' : '') }}" href="{{ route('admin.serversettings.index') }}">Server settings</a></li>
-                <li><a class="{{(Request::is('admin/fleet-timing*') ? 'active' : '') }}" href="{{ route('admin.fleettiming.index') }}">Fleet Timing</a></li>
-                <li><a class="{{(Request::is('admin/rules') ? 'active' : '') }}" href="{{ route('admin.rules.index') }}">Rules & Legal</a></li>
+                <li><a class="{{(Request::is('admin/developer-shortcuts') ? 'active' : '') }}" href="{{ route('admin.developershortcuts.index') }}">Raccourcis developpeur</a></li>
+                <li><a class="{{(Request::is('admin/server-settings') ? 'active' : '') }}" href="{{ route('admin.serversettings.index') }}">Parametres du serveur</a></li>
+                <li><a class="{{(Request::is('admin/fleet-timing*') ? 'active' : '') }}" href="{{ route('admin.fleettiming.index') }}">Chronologie des flottes</a></li>
+                <li><a class="{{(Request::is('admin/rules') ? 'active' : '') }}" href="{{ route('admin.rules.index') }}">Reglement et mentions legales</a></li>
                 <li><a class="{{(Request::is('admin/announcement') ? 'active' : '') }}" href="{{ route('admin.announcement.index') }}">Annonces</a></li>
-                <li><a class="{{(Request::is('admin/server-administration*') ? 'active' : '') }}" href="{{ route('admin.server-administration.index') }}">Server Administration</a></li>
+                <li><a class="{{(Request::is('admin/server-administration*') ? 'active' : '') }}" href="{{ route('admin.server-administration.index') }}">Administration du serveur</a></li>
             </ul>
         @endif
     </div>

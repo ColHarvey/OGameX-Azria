@@ -81,7 +81,7 @@
                         </style>
                         <div class="group bborder" style="display: block;">
                             <div class="fieldwrapper">
-                                <label class="styled textBeefy" for="attack_block_until_date" title="Hostile fleet missions are espionage, attack, ACS attack, and moon destruction.">Block hostile fleets until:</label>
+                                <label class="styled textBeefy" for="attack_block_until_date" title="Hostile fleet missions are espionage, attack, ACS attack, and moon destruction.">Bloquer les flottes hostiles jusqu'a :</label>
                                 <div class="thefield">
                                     <input type="date"
                                            id="attack_block_until_date"
@@ -101,12 +101,12 @@
                                 @if ($attackBlockActive)
                                     Active until {{ \Illuminate\Support\Carbon::createFromTimestamp($attackBlockUntil)->format('d.m.Y H:i:s') }}.
                                 @else
-                                    No attack block is active.
+                                    Aucun blocage d'attaque n'est actif.
                                 @endif
                             </p>
                             <div class="fieldwrapper" style="text-align: center; margin-top: 10px; margin-bottom: 10px;">
-                                <input type="submit" class="btn_blue" value="Save Attack Block">
-                                <button type="submit" class="btn_blue" name="clear_attack_block" value="1" style="margin-left: 8px;">Clear</button>
+                                <input type="submit" class="btn_blue" value="Enregistrer le blocage">
+                                <button type="submit" class="btn_blue" name="clear_attack_block" value="1" style="margin-left: 8px;">Effacer</button>
                             </div>
                         </div>
                     </form>
@@ -122,9 +122,9 @@
                     @if ($nothingFlagged)
                         <div class="group bborder" style="display: block;">
                             <p style="text-align: center; padding: 10px;">
-                                No suspicious accounts detected.
+                                Aucun compte suspect detecte.
                                 @if ($totalDismissed > 0)
-                                    <span style="color: #666; font-size: 11px;">({{ $totalDismissed }} dismissed)</span>
+                                    <span style="color: #666; font-size: 11px;">({{ $totalDismissed }} ignore(s))</span>
                                 @endif
                             </p>
                         </div>
@@ -136,7 +136,7 @@
                                 <div style="padding: 6px 10px; background: #0d0d1a; color: #888; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">
                                     Shared IP Groups
                                     @if ($dismissedIpCount > 0)
-                                        <span style="color: #555; font-size: 10px; text-transform: none; letter-spacing: 0; margin-left: 8px;">({{ $dismissedIpCount }} dismissed)</span>
+                                        <span style="color: #555; font-size: 10px; text-transform: none; letter-spacing: 0; margin-left: 8px;">({{ $dismissedIpCount }} ignore(s))</span>
                                     @endif
                                 </div>
                                 @foreach ($sharedIpGroups as $group)
@@ -153,7 +153,7 @@
                                                 {{ csrf_field() }}
                                                 <input type="hidden" name="type" value="shared_ip">
                                                 <input type="hidden" name="value" value="{{ $group['ip'] }}">
-                                                <input type="submit" class="btn_blue" value="Dismiss" style="font-size: 10px; padding: 2px 8px;" title="Hide this IP group from the panel">
+                                                <input type="submit" class="btn_blue" value="Ignorer" style="font-size: 10px; padding: 2px 8px;" title="Hide this IP group from the panel">
                                             </form>
                                         </div>
 
@@ -161,11 +161,11 @@
                                             <thead>
                                                 <tr style="background: #0d0d1a; color: #aaa; font-size: 11px;">
                                                     <th style="padding: 4px 6px; text-align: left;">ID</th>
-                                                    <th style="padding: 4px 6px; text-align: left;">Username</th>
-                                                    <th style="padding: 4px 6px; text-align: left;">Email</th>
-                                                    <th style="padding: 4px 6px; text-align: left;">Registered</th>
-                                                    <th style="padding: 4px 6px; text-align: left;">Last Active</th>
-                                                    <th style="padding: 4px 6px; text-align: left;">Status</th>
+                                                    <th style="padding: 4px 6px; text-align: left;">Pseudo</th>
+                                                    <th style="padding: 4px 6px; text-align: left;">Courriel</th>
+                                                    <th style="padding: 4px 6px; text-align: left;">Inscrit le</th>
+                                                    <th style="padding: 4px 6px; text-align: left;">Derniere activite</th>
+                                                    <th style="padding: 4px 6px; text-align: left;">Statut</th>
                                                     <th style="padding: 4px 6px; text-align: left;">Action</th>
                                                 </tr>
                                             </thead>
@@ -184,9 +184,9 @@
                                                         <td style="padding: 4px 6px;">{{ $user->time ? \Illuminate\Support\Carbon::createFromTimestamp((int)$user->time)->format('Y-m-d H:i') : '-' }}</td>
                                                         <td style="padding: 4px 6px;">
                                                             @if ($user->isBanned())
-                                                                <span style="color: #e74c3c;">Banned</span>
+                                                                <span style="color: #e74c3c;">Banni</span>
                                                             @else
-                                                                <span style="color: #2ecc71;">Active</span>
+                                                                <span style="color: #2ecc71;">Actif</span>
                                                             @endif
                                                         </td>
                                                         <td style="padding: 4px 6px;">
@@ -194,15 +194,15 @@
                                                                 <form action="{{ route('admin.server-administration.ban') }}" method="post" style="display:inline;">
                                                                     {{ csrf_field() }}
                                                                     <input type="hidden" name="username" value="{{ $user->username }}">
-                                                                    <input type="hidden" name="reason" value="Multi-account violation">
+                                                                    <input type="hidden" name="reason" value="Infraction multicompte">
                                                                     <input type="hidden" name="duration" value="permanent">
-                                                                    <input type="submit" class="btn_blue" value="Quick Ban" style="font-size: 10px; padding: 2px 6px;">
+                                                                    <input type="submit" class="btn_blue" value="Bannissement rapide" style="font-size: 10px; padding: 2px 6px;">
                                                                 </form>
                                                             @elseif (!$user->hasRole('admin') && $user->isBanned())
                                                                 <form action="{{ route('admin.server-administration.unban') }}" method="post" style="display:inline;">
                                                                     {{ csrf_field() }}
                                                                     <input type="hidden" name="user_id" value="{{ $user->id }}">
-                                                                    <input type="submit" class="btn_blue" value="Unban" style="font-size: 10px; padding: 2px 6px;">
+                                                                    <input type="submit" class="btn_blue" value="Debannir" style="font-size: 10px; padding: 2px 6px;">
                                                                 </form>
                                                             @else
                                                                 <span style="color: #666; font-size: 10px;">—</span>
@@ -247,14 +247,14 @@
                                             @endif
 
                                             <div style="margin-top: 4px;">
-                                                <div style="font-size: 11px; color: #aaa; margin-bottom: 4px;">Fleet missions between these accounts (most recent 20):</div>
+                                                <div style="font-size: 11px; color: #aaa; margin-bottom: 4px;">Missions de flotte entre ces comptes (20 plus recentes) :</div>
                                                 <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
                                                     <thead>
                                                         <tr style="background: #1a0a0a; color: #aaa;">
                                                             <th style="padding: 3px 6px; text-align: left;">Type</th>
-                                                            <th style="padding: 3px 6px; text-align: left;">From</th>
+                                                            <th style="padding: 3px 6px; text-align: left;">De</th>
                                                             <th style="padding: 3px 6px; text-align: left;">To</th>
-                                                            <th style="padding: 3px 6px; text-align: left;">Resources</th>
+                                                            <th style="padding: 3px 6px; text-align: left;">Ressources</th>
                                                             <th style="padding: 3px 6px; text-align: left;">Date</th>
                                                         </tr>
                                                     </thead>
@@ -294,17 +294,17 @@
                                 <div style="padding: 6px 10px; background: #0d0d1a; color: #888; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">
                                     Unusual Activity
                                     @if ($dismissedSuspectCount > 0)
-                                        <span style="color: #555; font-size: 10px; text-transform: none; letter-spacing: 0; margin-left: 8px;">({{ $dismissedSuspectCount }} dismissed)</span>
+                                        <span style="color: #555; font-size: 10px; text-transform: none; letter-spacing: 0; margin-left: 8px;">({{ $dismissedSuspectCount }} ignore(s))</span>
                                     @endif
                                 </div>
                                 <table style="width: 100%; border-collapse: collapse;">
                                     <thead>
                                         <tr style="background: #0d0d1a; color: #aaa; font-size: 11px;">
-                                            <th style="padding: 4px 6px; text-align: left;">Username</th>
-                                            <th style="padding: 4px 6px; text-align: left;" title="18+ distinct active hours AND missions/slot/day above threshold">Round-the-clock</th>
-                                            <th style="padding: 4px 6px; text-align: left;" title="Expedition re-dispatched within {{ $detectionSettings['expedition_gap_seconds'] }}s of return">Instant re-dispatch</th>
-                                            <th style="padding: 4px 6px; text-align: left;" title="Fleet sent within {{ $detectionSettings['attack_reaction_seconds'] }}s of incoming attack">Instant fleet-save</th>
-                                            <th style="padding: 4px 6px; text-align: left;">Status</th>
+                                            <th style="padding: 4px 6px; text-align: left;">Pseudo</th>
+                                            <th style="padding: 4px 6px; text-align: left;" title="18+ distinct active hours AND missions/slot/day above threshold">Activite 24h/24</th>
+                                            <th style="padding: 4px 6px; text-align: left;" title="Expedition re-dispatched within {{ $detectionSettings['expedition_gap_seconds'] }}s of return">Reenvoi instantane</th>
+                                            <th style="padding: 4px 6px; text-align: left;" title="Fleet sent within {{ $detectionSettings['attack_reaction_seconds'] }}s of incoming attack">Mise a l'abri instantanee</th>
+                                            <th style="padding: 4px 6px; text-align: left;">Statut</th>
                                             <th style="padding: 4px 6px; text-align: left;">Action</th>
                                         </tr>
                                     </thead>
@@ -349,9 +349,9 @@
                                                 </td>
                                                 <td style="padding: 4px 6px;">
                                                     @if ($user->isBanned())
-                                                        <span style="color: #e74c3c;">Banned</span>
+                                                        <span style="color: #e74c3c;">Banni</span>
                                                     @else
-                                                        <span style="color: #2ecc71;">Active</span>
+                                                        <span style="color: #2ecc71;">Actif</span>
                                                     @endif
                                                 </td>
                                                 <td style="padding: 4px 6px; white-space: nowrap;">
@@ -359,15 +359,15 @@
                                                         <form action="{{ route('admin.server-administration.ban') }}" method="post" style="display:inline;">
                                                             {{ csrf_field() }}
                                                             <input type="hidden" name="username" value="{{ $user->username }}">
-                                                            <input type="hidden" name="reason" value="Suspected botting">
+                                                            <input type="hidden" name="reason" value="Suspicion de bot">
                                                             <input type="hidden" name="duration" value="permanent">
-                                                            <input type="submit" class="btn_blue" value="Quick Ban" style="font-size: 10px; padding: 2px 6px;">
+                                                            <input type="submit" class="btn_blue" value="Bannissement rapide" style="font-size: 10px; padding: 2px 6px;">
                                                         </form>
                                                     @elseif (!$user->hasRole('admin') && $user->isBanned())
                                                         <form action="{{ route('admin.server-administration.unban') }}" method="post" style="display:inline;">
                                                             {{ csrf_field() }}
                                                             <input type="hidden" name="user_id" value="{{ $user->id }}">
-                                                            <input type="submit" class="btn_blue" value="Unban" style="font-size: 10px; padding: 2px 6px;">
+                                                            <input type="submit" class="btn_blue" value="Debannir" style="font-size: 10px; padding: 2px 6px;">
                                                         </form>
                                                     @else
                                                         <span style="color: #666; font-size: 10px;">—</span>
@@ -376,7 +376,7 @@
                                                         {{ csrf_field() }}
                                                         <input type="hidden" name="type" value="bot_suspect">
                                                         <input type="hidden" name="value" value="{{ $user->id }}">
-                                                        <input type="submit" class="btn_blue" value="Dismiss" style="font-size: 10px; padding: 2px 6px;" title="Hide this player from the panel">
+                                                        <input type="submit" class="btn_blue" value="Ignorer" style="font-size: 10px; padding: 2px 6px;" title="Hide this player from the panel">
                                                     </form>
                                                 </td>
                                             </tr>
@@ -401,19 +401,19 @@
                         {{ csrf_field() }}
                         <div class="group bborder" style="display: block;">
                             <div class="fieldwrapper">
-                                <label class="styled textBeefy" for="stuck_min_overdue_hours" title="Only show missions that have been overdue for at least this many hours. Filters out healthy missions that are simply waiting for the player to log in.">Min. overdue (hours):</label>
+                                <label class="styled textBeefy" for="stuck_min_overdue_hours" title="Only show missions that have been overdue for at least this many hours. Filters out healthy missions that are simply waiting for the player to log in.">Retard min. (heures) :</label>
                                 <div class="thefield">
                                     <input type="text" id="stuck_min_overdue_hours" name="stuck_missions_min_overdue_hours" class="textInput w80 textCenter textBeefy" pattern="^[0-9]+$" value="{{ $stuckMissionsSettings['min_overdue_hours'] }}">
                                 </div>
                             </div>
                             <div class="fieldwrapper" style="text-align: center; margin-top: 10px; margin-bottom: 10px;">
-                                <input type="submit" class="btn_blue" value="Save Settings">
+                                <input type="submit" class="btn_blue" value="Enregistrer">
                             </div>
                         </div>
                     </form>
                     @if ($stuckMissions->isEmpty())
                         <div class="group bborder" style="display: block;">
-                            <p style="text-align: center; padding: 10px;">No missions overdue by more than {{ $stuckMissionsSettings['min_overdue_hours'] }}h found.</p>
+                            <p style="text-align: center; padding: 10px;">Aucune mission en retard de plus de {{ $stuckMissionsSettings['min_overdue_hours'] }}h trouvee.</p>
                         </div>
                     @else
                         <div class="group bborder" style="display: block;">
@@ -434,11 +434,11 @@
                                     <thead>
                                         <tr style="background: #0d0d1a; color: #aaa; font-size: 11px;">
                                             <th style="padding: 4px 6px; text-align: left;">Mission</th>
-                                            <th style="padding: 4px 6px; text-align: left;">Player</th>
-                                            <th style="padding: 4px 6px; text-align: left;">From</th>
+                                            <th style="padding: 4px 6px; text-align: left;">Joueur</th>
+                                            <th style="padding: 4px 6px; text-align: left;">De</th>
                                             <th style="padding: 4px 6px; text-align: left;">To</th>
-                                            <th style="padding: 4px 6px; text-align: left;">Arrival (overdue)</th>
-                                            <th style="padding: 4px 6px; text-align: left;">Status</th>
+                                            <th style="padding: 4px 6px; text-align: left;">Arrivee (en retard)</th>
+                                            <th style="padding: 4px 6px; text-align: left;">Statut</th>
                                             <th style="padding: 4px 6px; text-align: left;">Actions</th>
                                         </tr>
                                     </thead>
@@ -473,14 +473,14 @@
                                                             <form action="{{ route('admin.server-administration.stuck-missions.process') }}" method="post" style="display: inline-block; margin: 0;">
                                                                 {{ csrf_field() }}
                                                                 <input type="hidden" name="mission_id" value="{{ $mission['id'] }}">
-                                                                <input type="submit" class="btn_blue" value="Process" style="font-size: 10px; padding: 2px 8px;">
+                                                                <input type="submit" class="btn_blue" value="Traiter" style="font-size: 10px; padding: 2px 8px;">
                                                             </form>
                                                         @else
-                                                            <span style="color: #555; font-size: 10px;">Processing blocked</span>
+                                                            <span style="color: #555; font-size: 10px;">Traitement bloque</span>
                                                             <form action="{{ route('admin.server-administration.stuck-missions.recover-homeworld') }}" method="post" style="display: inline-block; margin: 0;">
                                                                 {{ csrf_field() }}
                                                                 <input type="hidden" name="mission_id" value="{{ $mission['id'] }}">
-                                                                <input type="submit" class="btn_blue" value="Recover to Homeworld" style="font-size: 10px; padding: 2px 6px;">
+                                                                <input type="submit" class="btn_blue" value="Renvoyer a la planete mere" style="font-size: 10px; padding: 2px 6px;">
                                                             </form>
                                                         @endif
                                                     </div>
@@ -501,25 +501,25 @@
 
                             <p class="box_highlight textCenter no_buddies">@lang('Signal 1 — Round-the-clock activity')</p>
                             <div class="fieldwrapper">
-                                <label class="styled textBeefy" for="bd_lookback_days" title="How many days back to scan for all signals">Lookback period (days):</label>
+                                <label class="styled textBeefy" for="bd_lookback_days" title="How many days back to scan for all signals">Periode d'analyse (jours) :</label>
                                 <div class="thefield">
                                     <input type="text" id="bd_lookback_days" name="bot_detection_lookback_days" class="textInput w80 textCenter textBeefy" pattern="^[0-9]+$" value="{{ $detectionSettings['lookback_days'] }}">
                                 </div>
                             </div>
                             <div class="fieldwrapper">
-                                <label class="styled textBeefy" for="bd_active_hours" title="Minimum distinct hours of the day (0–23) that must have mission activity">Min. active hours/day:</label>
+                                <label class="styled textBeefy" for="bd_active_hours" title="Minimum distinct hours of the day (0–23) that must have mission activity">Heures actives min./jour :</label>
                                 <div class="thefield">
                                     <input type="text" id="bd_active_hours" name="bot_detection_active_hours" class="textInput w80 textCenter textBeefy" pattern="^[0-9]+$" value="{{ $detectionSettings['active_hours'] }}">
                                 </div>
                             </div>
                             <div class="fieldwrapper">
-                                <label class="styled textBeefy" for="bd_rate" title="Missions per fleet slot per day. Fleet slots = computer technology level + 1. Scales automatically with player progression.">Min. missions/slot/day:</label>
+                                <label class="styled textBeefy" for="bd_rate" title="Missions per fleet slot per day. Fleet slots = computer technology level + 1. Scales automatically with player progression.">Missions min./emplacement/jour :</label>
                                 <div class="thefield">
                                     <input type="text" id="bd_rate" name="bot_detection_missions_per_slot_per_day" class="textInput w80 textCenter textBeefy" pattern="^[0-9]+$" value="{{ $detectionSettings['missions_per_slot_per_day'] }}">
                                 </div>
                             </div>
                             <div class="fieldwrapper">
-                                <label class="styled textBeefy" for="bd_floor" title="Minimum total missions required before a player can be flagged by signal 1. Protects new players whose rate looks suspicious due to tiny sample size.">Min. total missions (floor):</label>
+                                <label class="styled textBeefy" for="bd_floor" title="Minimum total missions required before a player can be flagged by signal 1. Protects new players whose rate looks suspicious due to tiny sample size.">Missions totales min. (plancher) :</label>
                                 <div class="thefield">
                                     <input type="text" id="bd_floor" name="bot_detection_min_missions_floor" class="textInput w80 textCenter textBeefy" pattern="^[0-9]+$" value="{{ $detectionSettings['min_missions_floor'] }}">
                                 </div>
@@ -527,13 +527,13 @@
 
                             <p class="box_highlight textCenter no_buddies">@lang('Signal 2 — Instant expedition re-dispatch')</p>
                             <div class="fieldwrapper">
-                                <label class="styled textBeefy" for="bd_exp_gap" title="Maximum seconds between an expedition returning and the next one departing from the same planet to count as an instant re-dispatch">Max. re-dispatch gap (seconds):</label>
+                                <label class="styled textBeefy" for="bd_exp_gap" title="Maximum seconds between an expedition returning and the next one departing from the same planet to count as an instant re-dispatch">Ecart max. de reenvoi (secondes) :</label>
                                 <div class="thefield">
                                     <input type="text" id="bd_exp_gap" name="bot_detection_expedition_gap_seconds" class="textInput w80 textCenter textBeefy" pattern="^[0-9]+$" value="{{ $detectionSettings['expedition_gap_seconds'] }}">
                                 </div>
                             </div>
                             <div class="fieldwrapper">
-                                <label class="styled textBeefy" for="bd_exp_min" title="How many instant re-dispatches must be observed before flagging">Min. occurrences to flag:</label>
+                                <label class="styled textBeefy" for="bd_exp_min" title="How many instant re-dispatches must be observed before flagging">Occurrences min. pour signaler :</label>
                                 <div class="thefield">
                                     <input type="text" id="bd_exp_min" name="bot_detection_expedition_min_occurrences" class="textInput w80 textCenter textBeefy" pattern="^[0-9]+$" value="{{ $detectionSettings['expedition_min_occurrences'] }}">
                                 </div>
@@ -541,19 +541,19 @@
 
                             <p class="box_highlight textCenter no_buddies">@lang('Signal 3 — Instant fleet-save after attack')</p>
                             <div class="fieldwrapper">
-                                <label class="styled textBeefy" for="bd_atk_gap" title="Maximum seconds between an attack being dispatched and the defender sending a fleet">Max. reaction gap (seconds):</label>
+                                <label class="styled textBeefy" for="bd_atk_gap" title="Maximum seconds between an attack being dispatched and the defender sending a fleet">Ecart de reaction max. (secondes) :</label>
                                 <div class="thefield">
                                     <input type="text" id="bd_atk_gap" name="bot_detection_attack_reaction_seconds" class="textInput w80 textCenter textBeefy" pattern="^[0-9]+$" value="{{ $detectionSettings['attack_reaction_seconds'] }}">
                                 </div>
                             </div>
                             <div class="fieldwrapper">
-                                <label class="styled textBeefy" for="bd_atk_min" title="How many instant reactions must be observed before flagging">Min. occurrences to flag:</label>
+                                <label class="styled textBeefy" for="bd_atk_min" title="How many instant reactions must be observed before flagging">Occurrences min. pour signaler :</label>
                                 <div class="thefield">
                                     <input type="text" id="bd_atk_min" name="bot_detection_attack_reaction_min_occurrences" class="textInput w80 textCenter textBeefy" pattern="^[0-9]+$" value="{{ $detectionSettings['attack_reaction_min_occurrences'] }}">
                                 </div>
                             </div>
                             <div class="fieldwrapper" style="text-align: center; margin-top: 10px; margin-bottom: 10px;">
-                                <input type="submit" class="btn_blue" value="Save Settings">
+                                <input type="submit" class="btn_blue" value="Enregistrer">
                             </div>
                         </div>
                     </form>
@@ -561,7 +561,7 @@
                     <form action="{{ route('admin.server-administration.clear-cache') }}" method="post">
                         {{ csrf_field() }}
                         <div class="fieldwrapper" style="text-align: center; margin-bottom: 10px;">
-                            <input type="submit" class="btn_blue" value="Refresh Detection Results" title="Clears the 30-minute cache and recomputes all detection results immediately">
+                            <input type="submit" class="btn_blue" value="Actualiser les resultats de detection" title="Clears the 30-minute cache and recomputes all detection results immediately">
                         </div>
                     </form>
 
@@ -571,29 +571,29 @@
                         {{ csrf_field() }}
                         <div class="group bborder" style="display: block;">
                             <div class="fieldwrapper">
-                                <label class="styled textBeefy" for="ban_username">Username:</label>
+                                <label class="styled textBeefy" for="ban_username">Pseudo :</label>
                                 <div class="thefield">
                                     <input type="text"
                                            id="ban_username"
                                            name="username"
                                            class="textInput w150 textCenter textBeefy"
-                                           placeholder="Enter username"
+                                           placeholder="Saisir le pseudo"
                                            required>
                                 </div>
                             </div>
                             <div class="fieldwrapper">
-                                <label class="styled textBeefy" for="ban_reason">Reason:</label>
+                                <label class="styled textBeefy" for="ban_reason">Motif :</label>
                                 <div class="thefield">
                                     <input type="text"
                                            id="ban_reason"
                                            name="reason"
                                            class="textInput w150 textBeefy"
-                                           placeholder="Reason for ban"
+                                           placeholder="Motif du bannissement"
                                            required>
                                 </div>
                             </div>
                             <div class="fieldwrapper">
-                                <label class="styled textBeefy" for="ban_duration">Duration:</label>
+                                <label class="styled textBeefy" for="ban_duration">Duree :</label>
                                 <div class="thefield">
                                     <select id="ban_duration" name="duration" class="w130">
                                         <option value="86400">1 Day</option>
@@ -605,7 +605,7 @@
                                 </div>
                             </div>
                             <div class="fieldwrapper" style="text-align: center; margin-top: 10px;">
-                                <input type="submit" class="btn_blue" value="Ban Player">
+                                <input type="submit" class="btn_blue" value="Bannir le joueur">
                             </div>
                         </div>
                     </form>
@@ -615,16 +615,16 @@
 
                     @if ($activeBans->isEmpty())
                         <div class="group bborder" style="display: block;">
-                            <p style="text-align: center; padding: 10px;">No players are currently banned.</p>
+                            <p style="text-align: center; padding: 10px;">Aucun joueur n'est actuellement banni.</p>
                         </div>
                     @else
                         <div class="group bborder" style="display: block;">
                             <table style="width: 100%; border-collapse: collapse;">
                                 <thead>
                                     <tr style="background: #0d0d1a; color: #aaa; font-size: 11px;">
-                                        <th style="padding: 5px 8px; text-align: left;">Username</th>
-                                        <th style="padding: 5px 8px; text-align: left;">Reason</th>
-                                        <th style="padding: 5px 8px; text-align: left;">Banned Until</th>
+                                        <th style="padding: 5px 8px; text-align: left;">Pseudo</th>
+                                        <th style="padding: 5px 8px; text-align: left;">Motif</th>
+                                        <th style="padding: 5px 8px; text-align: left;">Banni jusqu'au</th>
                                         <th style="padding: 5px 8px; text-align: left;">Action</th>
                                     </tr>
                                 </thead>
@@ -640,7 +640,7 @@
                                                 <form action="{{ route('admin.server-administration.unban') }}" method="post" style="display:inline;">
                                                     {{ csrf_field() }}
                                                     <input type="hidden" name="user_id" value="{{ $ban->user_id }}">
-                                                    <input type="submit" class="btn_blue" value="Unban" style="font-size: 10px; padding: 2px 8px;">
+                                                    <input type="submit" class="btn_blue" value="Debannir" style="font-size: 10px; padding: 2px 8px;">
                                                 </form>
                                             </td>
                                         </tr>
@@ -657,11 +657,11 @@
                             <table style="width: 100%; border-collapse: collapse;">
                                 <thead>
                                     <tr style="background: #0d0d1a; color: #aaa; font-size: 11px;">
-                                        <th style="padding: 4px 8px; text-align: left;">Username</th>
-                                        <th style="padding: 4px 8px; text-align: left;">Reason</th>
-                                        <th style="padding: 4px 8px; text-align: left;">Banned Until</th>
-                                        <th style="padding: 4px 8px; text-align: left;">Banned At</th>
-                                        <th style="padding: 4px 8px; text-align: left;">Status</th>
+                                        <th style="padding: 4px 8px; text-align: left;">Pseudo</th>
+                                        <th style="padding: 4px 8px; text-align: left;">Motif</th>
+                                        <th style="padding: 4px 8px; text-align: left;">Banni jusqu'au</th>
+                                        <th style="padding: 4px 8px; text-align: left;">Banni le</th>
+                                        <th style="padding: 4px 8px; text-align: left;">Statut</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -681,11 +681,11 @@
                                             </td>
                                             <td style="padding: 4px 8px; font-size: 11px;">
                                                 @if ($isActive)
-                                                    <span style="color: #e74c3c;">Active</span>
+                                                    <span style="color: #e74c3c;">Actif</span>
                                                 @elseif ($ban->canceled)
                                                     <span style="color: #aaa;">Canceled {{ $ban->canceled_at?->format('Y-m-d H:i') }}</span>
                                                 @else
-                                                    <span style="color: #666;">Expired</span>
+                                                    <span style="color: #666;">Expire</span>
                                                 @endif
                                             </td>
                                         </tr>

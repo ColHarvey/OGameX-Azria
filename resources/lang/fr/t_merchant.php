@@ -137,4 +137,7 @@ return [
         'merchant_called' => 'Le commerçant a appelé avec succès.',
         'trade_completed' => 'Commerce terminé avec succès.',
     ],
+    'no_defensive_structures' => 'Aucune structure defensive disponible',
+    'objects_to_be_scrapped'  => 'Objets a recycler',
+    'reset_choice'            => 'Reinitialiser la selection',
 ];
