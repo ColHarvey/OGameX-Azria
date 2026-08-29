@@ -780,7 +780,7 @@ return [
         'astrophysics_note_3' => 'Les positions 1 et 15 peuvent être occupées à partir du niveau 8.',
     ],
     'options' => [
-        'page_title' => 'Possibilités',
+        'page_title' => 'Compte',
         'tab_userdata' => 'Données utilisateur',
         'tab_general' => 'Général',
         'tab_display' => 'Afficher',
@@ -906,7 +906,7 @@ return [
         'buddies' => 'Amis',
         'search' => 'Recherche',
         'search_overlay_title' => 'Univers de recherche',
-        'options' => 'Possibilités',
+        'options' => 'Compte',
         'support' => 'Soutien',
         'log_out' => 'Se déconnecter',
         'unread_messages' => 'message(s) non lu(s)',
