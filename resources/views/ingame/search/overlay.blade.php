@@ -147,9 +147,17 @@
         if (category === 2) {
             // Player results
             html += '<table class="searchresults" cellpadding="0" cellspacing="0">';
-            html += '<tbody><tr><th>' + locaSearch.playerName + '</th></tr>';
+            html += '<tbody><tr><th>' + locaSearch.playerName + '</th><th class="action">' + locaSearch.action + '</th></tr>';
             results.forEach(function(result) {
-                html += '<tr><td>' + escapeHtml(result.name) + '</td></tr>';
+                html += '<tr><td>' + escapeHtml(result.name) + '</td>';
+                html += '<td class="action" style="white-space:nowrap;">';
+                @if(auth()->check())
+                if (result.id != {{ auth()->id() }}) {
+                    html += '<a href="javascript:void(0);" class="sendMail js_openChat tooltip" style="display:inline-block;vertical-align:middle;margin-right:4px;" data-playerid="' + result.id + '" title="Ecrire un message"><span class="icon icon_chat"></span></a>';
+                    html += '<a href="javascript:void(0);" class="tooltip js_hideTipOnMobile icon sendBuddyRequest" style="display:inline-block;vertical-align:middle;" data-playerid="' + result.id + '" data-playername="' + escapeHtml(result.name) + '" title="Demande d\'ami"><span class="icon icon_user"></span></a>';
+                }
+                @endif
+                html += '</td></tr>';
             });
             html += '</tbody></table>';
         } else if (category === 3) {

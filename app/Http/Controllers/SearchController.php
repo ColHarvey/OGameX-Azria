@@ -86,7 +86,7 @@ class SearchController extends OGameController
      */
     private function searchPlanets(string $searchText): array
     {
-        $planets = Planet::where('planet_name', 'LIKE', '%' . $searchText . '%')
+        $planets = Planet::where('name', 'LIKE', '%' . $searchText . '%')
             ->where('planet_type', 1) // Only planets, not moons
             ->limit(50)
             ->get();
