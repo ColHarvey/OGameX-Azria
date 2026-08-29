@@ -215,6 +215,19 @@
         </div>
     </div>
     <div id="content" class="clearfix">
+        <style>
+            /* Le cadre du formulaire est fige a 400px par l'image de fond de la page.
+               Les hauteurs d'origine (45px par champ, 53px pour Univers, 170px pour le
+               bas) etaient calibrees pour 2 champs. Avec 4 champs et la zone d'erreur,
+               il faut les resserrer pour ne pas depasser le cadre. */
+            #subscribeForm .input-wrap { height: 42px; }
+            #subscribeForm .first { height: 34px; }
+            #subscribeForm .input-wrap.expand { min-height: 100px; }
+            /* Zone d'erreurs a hauteur reservee : toujours presente, donc le bouton
+               ne bouge jamais selon qu'il y ait une erreur ou non. */
+            #registerErrors { height: 34px; width: 188px; margin: 0 auto; overflow-y: auto; }
+            #registerErrors div { color: #e74c3c; font-size: 11px; line-height: 1.2; margin-bottom: 2px; }
+        </style>
         <div id="subscribe">
             <form id="subscribeForm"
                   class=""
@@ -223,6 +236,7 @@
                   onsubmit="changeAction('register','subscribeForm');"
                   action="{{ route('register') }}"
                   autocomplete="off"
+                  style="height: auto; min-height: 400px;"
             >
                 {{ csrf_field() }}
                 <input style="display:none;" type="text" name="somefakename"/>
@@ -235,6 +249,21 @@
                 <input type="hidden" name="is_utf8" value="1"/>
 
                 <h2>{{ __('t_external.register.play_free') }}</h2>
+                <div class="input-wrap">
+                    <div class="input-wrap">
+                        <label for="username">{{ __('t_external.register.username_label') }}</label>
+                        <div class="black-border">
+                            <input class="validate[required]"
+                                   type="text"
+                                   id="username"
+                                   name="username"
+                                   value="{{ old('username') }}"
+                                   maxlength="20"
+                            />
+                        </div>
+                    </div>
+                </div>
+
                 <div class="input-wrap">
                     <div class="input-wrap">
                         <label for="email">{{ __('t_external.register.email_label') }}</label>
@@ -256,7 +285,6 @@
                                id="password"
                                name="password"
                                autocomplete="new-password"
-                               value="{{ old('password') }}"
                                maxlength="128"
                         />
                     </div>
@@ -265,24 +293,33 @@
                     </div>
 
                 </div>
+                <div class="input-wrap">
+                    <label for="password_confirmation">{{ __('t_external.register.password_confirm_label') }}</label>
+                    <div class="black-border">
+                        <input class="validate[required]"
+                               type="password"
+                               id="password_confirmation"
+                               name="password_confirmation"
+                               autocomplete="new-password"
+                               maxlength="128"
+                        />
+                    </div>
+                </div>
                 <div class="input-wrap first">
                     <label for="server">{{ __('t_external.register.universe_label') }} (<a class="overlay" data-type="ajax" href="/ajax/main/distinctions">{{ __('t_external.register.distinctions') }}</a>)</label>
+                </div>
+                <div id="registerErrors">
+                    @if ($errors->register->any())
+                        @foreach ($errors->register->all() as $registerError)
+                            <div>{{ $registerError }}</div>
+                        @endforeach
+                    @endif
                 </div>
                 <div class="input-wrap expand">
                     <input type="hidden" id="agb" name="agb" value="on"/>
                     <label id="agbLabel">
                         <span>{!! __('t_external.register.terms_html') !!}</span>
                     </label>
-                    @if ($errors->register->has('email'))
-                        <span class="help-block" style="color: #e74c3c;">
-                                        <strong>{{ $errors->register->first('email') }}</strong>
-                                    </span>
-                    @endif
-                    @if ($errors->register->has('password'))
-                        <span class="help-block" style="color: #e74c3c;">
-                                        <strong>{{ $errors->register->first('password') }}</strong>
-                                    </span>
-                    @endif
                     <div>
                         <input type="submit" id="regSubmit" value="{{ __('t_external.register.submit') }}"/>
                     </div>

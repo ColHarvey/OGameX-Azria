@@ -138,8 +138,10 @@ abstract class AccountTestCase extends TestCase
 
         $formData = [
             '_token' => csrf_token(),
+            'username' => 'Test' . Str::random(8),
             'email' => $randomEmail,
             'password' => 'password',
+            'password_confirmation' => 'password',
             'v' => '3',
             'step' => 'validate',
             'kid' => '',

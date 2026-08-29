@@ -38,6 +38,17 @@ return [
         'distinctions' => 'Distinctions',
         'terms_html'   => 'Our <a class="" target="_blank" href="#" title="T&amp;Cs"> T&amp;Cs </a> and <a class="" target="_blank" href="#" title="Privacy Policy"> Privacy Policy </a> apply in the game',
         'submit'       => 'Register',
+        'username_label' => 'Username:',
+        'password_confirm_label' => 'Confirm password:',
+        'username_required' => 'Please choose a username.',
+        'username_invalid' => 'Invalid username: 3 to 20 characters, must start with a letter.',
+        'username_taken' => 'This username is already taken, please choose another one.',
+        'password_mismatch' => 'The two passwords do not match.',
+        'email_required' => 'Please enter an email address.',
+        'email_invalid' => 'This email address is not valid.',
+        'email_taken' => 'This email address is already taken.',
+        'password_required' => 'Please enter a password.',
+        'password_too_short' => 'The password must be at least 8 characters.',
     ],
 
     // Top navigation tabs

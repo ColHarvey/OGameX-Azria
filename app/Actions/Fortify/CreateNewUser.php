@@ -14,7 +14,6 @@ use OGame\Models\User;
 use OGame\Models\UserTech;
 use OGame\Services\MessageService;
 use OGame\Services\SettingsService;
-use RuntimeException;
 
 class CreateNewUser implements CreatesNewUsers
 {
@@ -146,6 +145,16 @@ class CreateNewUser implements CreatesNewUsers
     public function create(array $input): User
     {
         Validator::make($input, [
+            'username' => [
+                'required',
+                'string',
+                'min:3',
+                'max:20',
+                // Meme expression que PlayerService::validateUsername(), pour que
+                // l'inscription et le renommage en jeu acceptent les memes pseudos.
+                'regex:/^[A-Za-z][A-Za-z0-9\s]*(?:_[A-Za-z0-9\s]+)*$/',
+                Rule::unique(User::class),
+            ],
             'email' => [
                 'required',
                 'string',
@@ -153,40 +162,49 @@ class CreateNewUser implements CreatesNewUsers
                 'max:255',
                 Rule::unique(User::class),
             ],
-            'password' => $this->passwordRules(),
+            // 'confirmed' est ajoute ici uniquement : le formulaire d'options en jeu
+            // utilise newpass1/newpass2 et n'envoie pas password_confirmation.
+            'password' => [...$this->passwordRules(), 'confirmed'],
+        ], [
+            'username.required' => __('t_external.register.username_required'),
+            'username.min' => __('t_external.register.username_invalid'),
+            'username.max' => __('t_external.register.username_invalid'),
+            'username.regex' => __('t_external.register.username_invalid'),
+            'username.unique' => __('t_external.register.username_taken'),
+            'email.required' => __('t_external.register.email_required'),
+            'email.email' => __('t_external.register.email_invalid'),
+            'email.unique' => __('t_external.register.email_taken'),
+            'password.required' => __('t_external.register.password_required'),
+            'password.min' => __('t_external.register.password_too_short'),
+            'password.confirmed' => __('t_external.register.password_mismatch'),
         ])->validateWithBag('register');
 
-        // Add try/catch to retry creating user 5 times because exception could be triggered
-        // if the username is already taken.
-        for ($attempt = 0; $attempt < 5; $attempt++) {
-            try {
-                $user = User::create([
-                    'lang' => config('app.locale', 'en'),
-                    'username' => $this->generateUniqueName(),
-                    'email' => $input['email'],
-                    'password' => Hash::make($input['password']),
-                ]);
-
-                // Check if the user is the first registered user
-                if (User::count() === 1) {
-                    $user->assignRole('admin');
-                    $user->username = 'Admin';
-                    $user->save();
-                }
-
-                $this->createInitialGameDataForUser($user);
-
-                return $user;
-            } catch (Exception $e) {
-                if ($e->getCode() === 23000) {
-                    // If the username is already taken, retry creating the user.
-                    continue;
-                }
-                throw $e;
+        // Le pseudo est choisi par le joueur et deja valide comme unique ci-dessus.
+        // Le try/catch ne couvre plus que la course entre la validation et l'insertion.
+        try {
+            $user = User::create([
+                'lang' => config('app.locale', 'en'),
+                'username' => $input['username'],
+                'email' => $input['email'],
+                'password' => Hash::make($input['password']),
+            ]);
+        } catch (Exception $e) {
+            if ($e->getCode() === 23000) {
+                throw ValidationException::withMessages([
+                    'username' => __('t_external.register.username_taken'),
+                ])->errorBag('register');
             }
+            throw $e;
         }
 
-        throw new RuntimeException('Failed to create a unique username after 5 attempts.');
+        // Le premier inscrit devient administrateur, mais garde le pseudo qu'il a choisi.
+        if (User::count() === 1) {
+            $user->assignRole('admin');
+        }
+
+        $this->createInitialGameDataForUser($user);
+
+        return $user;
     }
 
     /**
@@ -221,10 +239,9 @@ class CreateNewUser implements CreatesNewUsers
                 . "Ton compte a bien ete cree.\n\n"
                 . "Pseudo : {$user->username}\n"
                 . "Adresse : {$user->email}\n\n"
-                . "Ton pseudo a ete genere automatiquement. Pour le changer :\n"
-                . "clique sur ton nom en haut a gauche dans le jeu, saisis le\n"
-                . "pseudo souhaite, puis confirme avec le mot de passe choisi\n"
-                . "a l'inscription.\n\n"
+                . "Pour changer ton pseudo plus tard : clique sur ton nom en haut\n"
+                . "a gauche dans le jeu, saisis le pseudo souhaite, puis confirme\n"
+                . "avec ton mot de passe.\n\n"
                 . "Connecte-toi ici : " . config('app.url') . "\n\n"
                 . "Bon jeu,\nL'equipe Azria",
                 function ($m) use ($user) {

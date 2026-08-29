@@ -17,7 +17,7 @@ Sur la gauche, le menu vous permet de superviser et de gouverner votre empire ga
 
 Commencez par batir une centrale solaire afin d\'alimenter vos mines en energie. Developpez ensuite votre mine de metal et votre mine de cristal pour produire les ressources vitales a votre expansion. Puis explorez par vous-meme : vous vous sentirez bientot chez vous, j\'en suis sur.
 
-Votre pseudo a ete genere automatiquement. Pour le personnaliser, cliquez sur votre nom en haut a gauche, saisissez le pseudo souhaite et confirmez avec votre mot de passe.
+Pour changer votre pseudo, cliquez sur votre nom en haut a gauche, saisissez le pseudo souhaite et confirmez avec votre mot de passe.
 
 Une question, un souci, une suggestion ? Ecrivez a admin@azriagaming.ca
 
