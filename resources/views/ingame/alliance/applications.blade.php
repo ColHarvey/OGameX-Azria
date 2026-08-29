@@ -80,7 +80,8 @@
                             $(this).remove();
 
                             // Check if there are any applications left
-                            var remainingApplications = $('table.members tbody tr').length;
+                            var remainingApplications = $('table.members tbody tr[id^="application_"]').length;
+                            updateApplicationCount(remainingApplications);
                             if (remainingApplications === 0) {
                                 // Reload the tab to show "No applications found" message
                                 if (typeof alliance !== 'undefined' && alliance.fetch) {
@@ -128,7 +129,8 @@
                                     $(this).remove();
 
                                     // Check if there are any applications left
-                                    var remainingApplications = $('table.members tbody tr').length;
+                                    var remainingApplications = $('table.members tbody tr[id^="application_"]').length;
+                                    updateApplicationCount(remainingApplications);
                                     if (remainingApplications === 0) {
                                         // Reload the tab to show "No applications found" message
                                         if (typeof alliance !== 'undefined' && alliance.fetch) {
@@ -178,11 +180,11 @@
         });
 
         // Helper function to update the application count in the tab header
-        function updateApplicationCount(count) {
+        window.updateApplicationCount = function (count) {
             var $applicationTab = $('#applicationTab');
             if ($applicationTab.length) {
                 $applicationTab.html(@json(__('t_ingame.alliance.tab_applications')) + ' (' + count + ')<span class="newApplications undermark" style="display: ' + (count > 0 ? 'inline' : 'none') + '"></span>');
             }
-        }
+        };
     });
 </script>
