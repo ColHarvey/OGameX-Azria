@@ -13,22 +13,26 @@
                                 </a>
                             </td>
                             <td class="date">{{ $application->created_at->format('d.m.Y H:i:s') }}</td>
-                            <td class="msg">
-                                <div class="application_message">
-                                    {{ $application->application_message ?? '' }}
-                                </div>
+                            <td class="msg" style="min-height:0;background:none;">
+                                @if(!empty($application->application_message))
+                                    <div class="application_message">
+                                        {{ $application->application_message }}
+                                    </div>
+                                @endif
                             </td>
                             <td class="action">
                                 @if($member && $member->hasPermission(\OGame\Models\AllianceRank::PERMISSION_EDIT_APPLICATIONS))
-                                    <a class="accept_application" data-application-id="{{ $application->id }}" href="javascript:void(0);">
-                                        {{ __('t_ingame.alliance.accept_btn') }}
-                                    </a>
-                                    <a class="reject_application" data-application-id="{{ $application->id }}" href="javascript:void(0);">
-                                        {{ __('t_ingame.alliance.deny_btn') }}
-                                    </a>
-                                    <a class="report_application" data-application-id="{{ $application->id }}" data-user-id="{{ $application->user_id }}" href="javascript:void(0);">
-                                        {{ __('t_ingame.alliance.report_btn') }}
-                                    </a>
+                                    <div style="text-align:center;">
+                                        <a class="btn_blue accept_application" data-application-id="{{ $application->id }}" href="javascript:void(0);" style="display:inline-block;margin:1px;padding:2px 8px;width:auto;min-width:0;font-size:11px;">
+                                            Accepter
+                                        </a>
+                                        <a class="btn_blue reject_application" data-application-id="{{ $application->id }}" href="javascript:void(0);" style="display:inline-block;margin:1px;padding:2px 8px;width:auto;min-width:0;font-size:11px;">
+                                            Refuser
+                                        </a>
+                                        <a class="btn_blue report_application" data-application-id="{{ $application->id }}" data-user-id="{{ $application->user_id }}" href="javascript:void(0);" style="display:inline-block;margin:1px;padding:2px 8px;width:auto;min-width:0;font-size:11px;" title="Signaler ce joueur a l'administration">
+                                            Signaler
+                                        </a>
+                                    </div>
                                 @endif
                             </td>
                         </tr>
