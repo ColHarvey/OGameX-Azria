@@ -6,7 +6,7 @@
         <div id="characterclassselection">
             <div id="inhalt">
                 <div class="header small" id="planet">
-                    <h2>Class Selection</h2>
+                    <h2>Selection de classe</h2>
                 </div>
                 <div class="c-left shortCorner"></div>
                 <div class="c-right shortCorner"></div>
@@ -14,8 +14,8 @@
                     <div class="header">
                     </div>
                     <div class="content">
-                        <h2>Choose Your Class</h2>
-                        <p>Select a class to receive additional benefits. You can change your class in the class selection section in the top-right.</p>
+                        <h2>Choisissez votre classe</h2>
+                        <p>Choisissez une classe pour beneficier d'avantages supplementaires. Vous pourrez en changer depuis la section de selection en haut a droite.</p>
                         <div class="characterclass boxes">
                             @foreach($classes as $class)
                                 <div class="characterclass box {{ $currentClass && $currentClass->value === $class->value ? 'selected' : '' }}"
@@ -25,20 +25,20 @@
                                     <div class="buttons">
                                         @if($currentClass && $currentClass->value === $class->value)
                                             <a class="deactivate-it deactivate" href="javascript:void(0);" onclick="deselectCharacterClass()">
-                                                <span>Deactivate</span>
+                                                <span>Desactiver</span>
                                             </a>
                                         @else
                                             @if($isFreeSelection)
                                                 <a class="build-it" href="javascript:void(0);" onclick="selectCharacterClass({{ $class->value }}, '{{ $class->getName() }}', {{ $changeCost }})">
-                                                    <span>Select for Free</span>
+                                                    <span>Choisir gratuitement</span>
                                                 </a>
                                             @elseif($darkMatter >= $changeCost)
                                                 <a class="build-it" href="javascript:void(0);" onclick="selectCharacterClass({{ $class->value }}, '{{ $class->getName() }}', {{ $changeCost }})">
-                                                    <span>Buy for<br>{{ number_format($changeCost, 0, ',', '.') }} DM</span>
+                                                    <span>Acheter pour<br>{{ number_format($changeCost, 0, ',', '.') }} DM</span>
                                                 </a>
                                             @else
                                                 <a class="build-it_disabled nodarkmatter" href="/premium">
-                                                    <span>Buy for<br>{{ number_format($changeCost, 0, ',', '.') }} DM</span>
+                                                    <span>Acheter pour<br>{{ number_format($changeCost, 0, ',', '.') }} DM</span>
                                                 </a>
                                             @endif
                                         @endif
@@ -124,9 +124,9 @@
 
         function deselectCharacterClass() {
             errorBoxDecision(
-                'Deactivate Character Class',
+                'Desactiver Character Class',
                 'Do you really want to deactivate your character class? Reactivation requires {{ number_format($changeCost, 0, ',', '.') }} Dark Matter.',
-                'Deactivate',
+                'Desactiver',
                 'Cancel',
                 function() {
                     fetch('{{ route('characterclass.deselect') }}', {

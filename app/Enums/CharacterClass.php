@@ -14,9 +14,9 @@ enum CharacterClass: int
     public function getName(): string
     {
         return match($this) {
-            self::COLLECTOR => 'Collector',
+            self::COLLECTOR => 'Collectionneur',
             self::GENERAL => 'General',
-            self::DISCOVERER => 'Discoverer',
+            self::DISCOVERER => 'Explorateur',
         };
     }
 
@@ -50,9 +50,9 @@ enum CharacterClass: int
     public function getClassShipName(): string
     {
         return match($this) {
-            self::COLLECTOR => 'Crawler',
-            self::GENERAL => 'Reaper',
-            self::DISCOVERER => 'Pathfinder',
+            self::COLLECTOR => 'Foreuse',
+            self::GENERAL => 'Faucheur',
+            self::DISCOVERER => 'Eclaireur',
         };
     }
 
@@ -73,38 +73,38 @@ enum CharacterClass: int
     {
         return match($this) {
             self::COLLECTOR => [
-                '+25% mine production',
-                '+10% energy production',
-                '+100% speed for Transporters',
-                '+25% cargo bay for Transporters',
-                '+50% Crawler bonus',
-                '+10% more usable Crawlers with Geologist',
-                'Overload the Crawlers up to 150%',
-                '+10% discount on acceleration (building)',
+                '+25% de production des mines',
+                '+10% de production d\'energie',
+                '+100% de vitesse pour les transporteurs',
+                '+25% de capacite pour les transporteurs',
+                '+50% de bonus de foreuse',
+                '+10% de foreuses utilisables avec le Geologue',
+                'Surcharge des foreuses jusqu\'a 150%',
+                '+10% de reduction sur l\'acceleration (construction)',
             ],
             self::GENERAL => [
-                '+100% speed for combat ships',
-                '+100% speed for Recyclers',
-                '-50% deuterium consumption for all ships',
-                '+20% cargo bay for Recyclers and Pathfinders',
-                'A small chance to immediately destroy a Deathstar once in a battle using a light fighter.',
-                'Wreckage at attack (transport to starting planet)',
-                '+2 combat research levels',
-                '+2 fleet slots',
-                '+5 additional Moon Fields',
-                'Detailed fleet speed settings',
-                '+10% discount on acceleration (shipyard)',
+                '+100% de vitesse pour les vaisseaux de combat',
+                '+100% de vitesse pour les recycleurs',
+                '-50% de consommation de deuterium pour tous les vaisseaux',
+                '+20% de capacite pour les recycleurs et eclaireurs',
+                'Faible chance de detruire instantanement une Etoile de la mort avec un chasseur leger lors d\'un combat.',
+                'Epaves lors des attaques (transport vers la planete de depart)',
+                '+2 niveaux de recherches militaires',
+                '+2 emplacements de flotte',
+                '+5 cases lunaires supplementaires',
+                'Reglages detailles de vitesse de flotte',
+                '+10% de reduction sur l\'acceleration (chantier spatial)',
             ],
             self::DISCOVERER => [
-                '-25% research time',
-                'Increased gain on successful expeditions',
-                '+10% larger planets on colonisation',
-                'Debris fields created on expeditions will be visible in the Galaxy view.',
+                '-25% de temps de recherche',
+                'Gains accrus lors des expeditions reussies',
+                '+10% de cases sur les planetes colonisees',
+                'Les champs de debris crees en expedition sont visibles dans la vue Galaxie.',
                 '+2 expeditions',
-                '-50% chance of expedition enemies',
-                '+20% phalanx range',
-                '75% loot from inactive players',
-                '+10% discount on acceleration (research)',
+                '-50% de risque de rencontre hostile en expedition',
+                '+20% de portee du phalange',
+                '75% de butin sur les joueurs inactifs',
+                '+10% de reduction sur l\'acceleration (recherche)',
             ],
         };
     }
@@ -115,9 +115,9 @@ enum CharacterClass: int
     public function getShipDescription(): string
     {
         return match($this) {
-            self::COLLECTOR => 'The Crawler is a large trench vehicle that increases the production of mines and synthesizers. It is more agile than it looks but it is not particularly robust. Each Crawler increases metal production by 0.02%, crystal production by 0.02% and Deuterium production by 0.02%. As a collector, production also increases. The maximum total bonus depends on the overall level of your mines.',
-            self::GENERAL => "There's hardly anything more destructive than a ship of the Reaper class. These vessels combine fire power, strong shields, speed and capacity along with the unique ability to mine a portion of the created debris field directly after a battle. However this ability doesn't apply to combat against pirates or aliens.",
-            self::DISCOVERER => 'Pathfinders are fast and spacious. Their construction method is optimised for pushing into unknown territory. They are capable of discovering and mining debris fields during expeditions. Additionally they can find items out on expeditions. Total yield also increases.',
+            self::COLLECTOR => "La foreuse est un large vehicule de tranchee qui augmente la production des mines et des synthetiseurs. Elle est plus agile qu'elle n'en a l'air mais reste fragile. Chaque foreuse augmente la production de metal, de cristal et de deuterium de 0,02%. En tant que Collectionneur, la production augmente davantage. Le bonus total maximal depend du niveau global de vos mines.",
+            self::GENERAL => "Il n'existe guere plus destructeur qu'un vaisseau de classe Faucheur. Ces batiments combinent puissance de feu, boucliers solides, vitesse et capacite, avec la faculte unique de recolter une partie du champ de debris juste apres un combat. Cette capacite ne s'applique toutefois pas aux combats contre les pirates ou les extraterrestres.",
+            self::DISCOVERER => "Les eclaireurs sont rapides et spacieux. Leur conception est optimisee pour s'aventurer en territoire inconnu. Ils peuvent decouvrir et recolter des champs de debris pendant les expeditions, et y trouver des objets. Le rendement total s'en trouve accru.",
         };
     }
 }
