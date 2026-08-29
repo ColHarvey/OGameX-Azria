@@ -639,6 +639,12 @@ class PlayerService
                 $this->user->time = (string)Date::now()->timestamp;
                 $this->user->last_ip = request()->ip();
 
+                // Pays du joueur fourni par Cloudflare (en-tete CF-IPCountry).
+                $cfCountry = request()->header('CF-IPCountry');
+                if ($cfCountry && preg_match('/^[A-Za-z]{2}$/', $cfCountry) && strtoupper($cfCountry) !== 'XX') {
+                    $this->user->country = strtolower($cfCountry);
+                }
+
                 $this->user->save();
             } else {
                 throw new Exception('Could not acquire player update lock.');

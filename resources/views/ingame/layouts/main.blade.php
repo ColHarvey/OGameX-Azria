@@ -132,7 +132,7 @@
                     <li id="playerName">
                         {{ __('t_ingame.layout.player') }}:
                         <selected-language-icon
-                                style="background-image: url('/img/flags/a176fcd6f3e3de2bed6a73a8b1d5e7.png');"></selected-language-icon>
+                                style="background-image: url('/img/flags/{{ $currentPlayer->getUser()->country ?? 'default' }}.png');"></selected-language-icon>
 
                         <span class="textBeefy">
                                 <a href="{{ route('changenick.overlay') }}"
