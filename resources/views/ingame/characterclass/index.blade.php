@@ -2,6 +2,7 @@
 
 @section('content')
 
+    <div id="characterclassselectioncomponent" class="maincontent">
         <div id="characterclassselection">
             <div id="inhalt">
                 <div class="header small" id="planet">
@@ -65,6 +66,7 @@
                 </div>
             </div>
         </div>
+    </div>
 
     <script type="text/javascript">
         function selectCharacterClass(classId, className, price) {
