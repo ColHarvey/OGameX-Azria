@@ -736,6 +736,7 @@ return [
         'msg_rank_not_found' => 'Rang introuvable',
         'msg_no_permission' => 'Vous n\'avez pas la permission d\'effectuer cette action',
         'msg_member_not_found' => 'Membre introuvable dans l\'alliance',
+        'msg_no_member_selected' => 'Aucun membre n\'a été sélectionné',
         'msg_transfer_self' => 'Vous ne pouvez pas vous transférer l\'alliance à vous-même',
         'msg_transfer_needs_right_hand' => 'Ce membre doit posséder le droit « Main droite » pour reprendre l\'alliance',
         'msg_leadership_transferred' => 'Vous avez cédé l\'alliance. Vous en êtes désormais un membre ordinaire.',

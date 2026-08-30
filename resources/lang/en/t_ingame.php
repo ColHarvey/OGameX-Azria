@@ -929,6 +929,7 @@ return [
         'msg_rank_not_found'            => 'Rank not found',
         'msg_no_permission'             => 'You do not have permission to perform this action',
         'msg_member_not_found'          => 'Member not found in the alliance',
+        'msg_no_member_selected'        => 'No member selected',
         'msg_transfer_self'             => 'You cannot transfer the alliance to yourself',
         'msg_transfer_needs_right_hand' => 'This member needs the `Right hand` permission to take over the alliance',
         'msg_leadership_transferred'    => 'You have handed over the alliance. You are now an ordinary member.',

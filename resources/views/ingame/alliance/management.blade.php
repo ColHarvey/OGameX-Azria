@@ -502,6 +502,11 @@
         // Initialize custom dropdown for Applications select
         $('#allySettings select#state').ogameDropDown();
 
+        // Le theme masque tout <select> brut (body.ogame select { visibility: hidden }
+        // dans base1.css) : sans cette initialisation, le menu existe mais reste
+        // invisible, comme tous les autres menus deroulants du jeu.
+        $('#assignally select#newLeaderId').ogameDropDown();
+
         // Leave alliance handler
         $('.leaveAlliance').on('click', function(e) {
             e.preventDefault();
@@ -557,6 +562,7 @@
 
             var nouveauChef = $('#assignally #newLeaderId').val();
             if (!nouveauChef) {
+                fadeBox(@json(__('t_ingame.alliance.msg_no_member_selected')), true);
                 return;
             }
 
