@@ -24,13 +24,15 @@
             display: inline-block; width: 102px; height: 38px; margin-right: 8px; padding: 0;
             background: transparent url("/img/icons/18e4684df27114667e11541e5b2ef8.png") 0 -241px no-repeat;
             border: 0; color: #fff; cursor: pointer; font-family: inherit; font-size: 11px;
-            font-weight: 700; line-height: 36px; text-align: center;
+            font-weight: 700; line-height: 1; text-align: center; padding-top: 7px;
             text-shadow: -1px 1px 3px #123f02;
             transition: filter .12s ease, transform .06s ease;
         }
         #officerHire .hireBtn:hover:not([disabled]) { background-position: -104px -241px; filter: brightness(1.1); }
         #officerHire .hireBtn:active:not([disabled]) { transform: translateY(1px); filter: brightness(.9); }
         #officerHire .hireBtn[disabled] { opacity: .35; cursor: default; filter: none; transform: none; }
+        #officerHire .hireBtn .btnDays { display: block; font-size: 11px; }
+        #officerHire .hireBtn .btnPrice { display: block; font-size: 10px; font-weight: normal; margin-top: 3px; }
 
         /* La ligne de bonus sert aussi a afficher les effets d'un officier au clic. */
         #officerBenefits { cursor: default; }
@@ -143,7 +145,7 @@
                                         <input type="hidden" name="officer" value="{{ $officer['officer'] }}">
                                         <input type="hidden" name="days" value="{{ $days }}">
                                         <button type="submit" class="hireBtn" {{ $darkMatter < $price ? 'disabled' : '' }}
-                                                title="{{ __('t_ingame.premium.hire_title', ['officer' => __('t_ingame.premium.officer_' . $officer['officer']), 'days' => $days, 'price' => number_format($price, 0, ',', ' ')]) }}">{{ __('t_ingame.premium.hire_button', ['days' => $days, 'price' => number_format($price, 0, ',', ' ')]) }}</button>
+                                                title="{{ __('t_ingame.premium.hire_title', ['officer' => __('t_ingame.premium.officer_' . $officer['officer']), 'days' => $days, 'price' => number_format($price, 0, ',', ' ')]) }}"><span class="btnDays">{{ __('t_ingame.premium.btn_days', ['days' => $days]) }}</span><span class="btnPrice">{{ __('t_ingame.premium.btn_price', ['price' => number_format($price, 0, ',', ' ')]) }}</span></button>
                                     </form>
                                 @endforeach
                             </td>
@@ -156,6 +158,8 @@
             </div>
         </div>
     </div>
+
+    <div style="clear: both; height: 1px;"></div>
 
     <script>
         // Un clic sur une grosse tete affiche les effets de cet officier dans la boite
