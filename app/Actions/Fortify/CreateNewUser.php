@@ -4,29 +4,20 @@ namespace OGame\Actions\Fortify;
 
 use Exception;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Laravel\Fortify\Contracts\CreatesNewUsers;
-use OGame\Factories\PlanetServiceFactory;
-use OGame\Factories\PlayerServiceFactory;
 use OGame\Models\User;
-use OGame\Models\UserTech;
-use OGame\Services\MessageService;
-use OGame\Services\SettingsService;
+use OGame\Services\InitialUserDataService;
 
 class CreateNewUser implements CreatesNewUsers
 {
     use PasswordValidationRules;
 
-    /**
-     * Create a new controller instance.
-     *
-     * @param PlayerServiceFactory $playerServiceFactory
-     * @param PlanetServiceFactory $planetServiceFactory
-     * @param SettingsService $settings
-     */
-    public function __construct(private PlayerServiceFactory $playerServiceFactory, private PlanetServiceFactory $planetServiceFactory, private SettingsService $settings)
+    public function __construct(private InitialUserDataService $initialUserDataService)
     {
     }
 
@@ -182,6 +173,7 @@ class CreateNewUser implements CreatesNewUsers
         // Le pseudo est choisi par le joueur et deja valide comme unique ci-dessus.
         // Le try/catch ne couvre plus que la course entre la validation et l'insertion.
         try {
+            /** @var User $user */
             $user = User::create([
                 'lang' => config('app.locale', 'en'),
                 'username' => $input['username'],
@@ -194,6 +186,7 @@ class CreateNewUser implements CreatesNewUsers
                     'username' => __('t_external.register.username_taken'),
                 ])->errorBag('register');
             }
+
             throw $e;
         }
 
@@ -202,39 +195,22 @@ class CreateNewUser implements CreatesNewUsers
             $user->assignRole('admin');
         }
 
-        $this->createInitialGameDataForUser($user);
+        $this->initialUserDataService->createFor($user);
+        $this->sendWelcomeEmail($user);
 
         return $user;
     }
 
     /**
-     * Create initial data for the player such as planets and tech records.
+     * Envoie le courriel de bienvenue. L'echec n'empeche jamais la creation du compte.
      *
      * @param User $user
-     * @throws Exception
+     * @return void
      */
-    private function createInitialGameDataForUser($user): void
+    private function sendWelcomeEmail(User $user): void
     {
-        // Create initial player tech record.
-        $tech = new UserTech();
-        $tech->user_id = $user->id;
-        $tech->save();
-
-        // Create initial planet(s) for the player.
-        $playerService = $this->playerServiceFactory->make($user->id);
-        $planetNames = ['Homeworld', 'Colony'];
-        // The amount of planets to create is defined in the settings and defaults to 1.
-        for ($i = 0; $i < $this->settings->registrationPlanetAmount(); $i++) {
-            $this->planetServiceFactory->createInitialPlanetForPlayer($playerService, $planetNames[$i === 0 ? 0 : 1]);
-        }
-
-        // Send welcome message to player
-        $message = new MessageService($playerService);
-        $message->sendWelcomeMessage();
-
-        // Send welcome email to player
         try {
-            \Illuminate\Support\Facades\Mail::raw(
+            Mail::raw(
                 "Bienvenue sur OGameX Francophone !\n\n"
                 . "Ton compte a bien ete cree.\n\n"
                 . "Pseudo : {$user->username}\n"
@@ -249,7 +225,7 @@ class CreateNewUser implements CreatesNewUsers
                 }
             );
         } catch (Exception $e) {
-            \Illuminate\Support\Facades\Log::warning('Welcome email failed: ' . $e->getMessage());
+            Log::warning('Welcome email failed: ' . $e->getMessage());
         }
     }
 }

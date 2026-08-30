@@ -4,10 +4,11 @@ namespace Tests;
 
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Str;
-use OGame\Actions\Fortify\CreateNewUser;
+use LogicException;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\Models\User;
+use OGame\Services\InitialUserDataService;
 use OGame\Services\SettingsService;
 
 /**
@@ -16,11 +17,10 @@ use OGame\Services\SettingsService;
  * Differences from AccountTestCase:
  *  - Wraps each test in a database transaction (DatabaseTransactions) so no rows leak
  *    between tests and tests no longer depend on execution order.
- *  - Creates the user via the production CreateNewUser action + actingAs(), instead of a
- *    real HTTP /register + /login round-trip.
+ *  - Creates the user via the standard Eloquent factories (User::factory()) + actingAs(),
+ *    instead of a real HTTP /register + /login round-trip.
  *  - Starts the session up-front so csrf_token() returns a real token, avoiding a
  *    session-initializing GET request; CSRF stays fully enforced.
- *  - Neutralizes the "first user becomes admin" side effect (see createUser()).
  *  - Resets the stateful singleton services (SettingsService + service factories) on
  *    teardown, because their in-memory caches are NOT rolled back by DatabaseTransactions.
  *
@@ -62,11 +62,20 @@ abstract class IsolatedAccountTestCase extends AccountTestCase
     }
 
     /**
+     * Refreshing the application creates a connection outside this test's transaction,
+     * making its fixtures unavailable. Remove the underlying cache dependency before
+     * converting a test that needs this behavior.
+     */
+    final public function reloadApplication(): void
+    {
+        throw new LogicException('reloadApplication() is incompatible with IsolatedAccountTestCase.');
+    }
+
+    /**
      * Create a user and authenticate without HTTP round-trips.
      *
-     * Reuses the production CreateNewUser action (creates User + UserTech + initial planets
-     * + welcome message), then authenticates via actingAs() and wires up the planet services
-     * from the real factories — mirroring retrieveMetaFields() without the HTML parsing.
+        * Authenticates via actingAs() and wires up the planet services from the real factories,
+        * mirroring retrieveMetaFields() without the HTML parsing.
      *
      * @return void
      */
@@ -96,29 +105,26 @@ abstract class IsolatedAccountTestCase extends AccountTestCase
     }
 
     /**
-     * Create a normal (non-admin) user through the production code path.
+     * Create a normal (non-admin) user using the standard Eloquent factories.
      *
-     * Each isolated test runs in its own transaction, so CreateNewUser treats this user as
-     * the "first" registered user and promotes it to admin (username "Admin"). Tests need a
-     * normal user, so we revert that first-user side effect here.
+        * Creates a normal user with a collision-safe username, then delegates initial game data
+        * setup to the production service used during registration.
      *
      * @return User
      */
     protected function createUser(): User
     {
-        $creator = resolve(CreateNewUser::class);
-        $user = $creator->create([
-            'username' => 'Test' . Str::random(8),
-            'email' => Str::random(10) . '@example.com',
-            'password' => 'password',
-            'password_confirmation' => 'password',
-        ]);
+        $user = User::factory()->create(['username' => 'test_' . Str::random(16)]);
 
+        // User::factory() skips CreateNewUser, but the User model's `created` hook still
+        // promotes each transaction's first user to admin. Revert that for a normal player.
         if ($user->hasRole('admin')) {
             $user->removeRole('admin');
-            $user->username = Str::random(10);
+            $user->username = 'test_' . Str::random(16);
             $user->save();
         }
+
+        resolve(InitialUserDataService::class)->createFor($user);
 
         return $user;
     }
