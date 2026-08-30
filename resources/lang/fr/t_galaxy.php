@@ -8,6 +8,7 @@ return [
             'biggest' => 'Généralement, les plus grandes planètes du système solaire se trouvent dans cette position. Le soleil fournit suffisamment d\'énergie et on peut s\'attendre à des sources suffisantes de deutérium.',
             'farthest' => 'En raison de la grande distance qui nous sépare du soleil, la collecte de l\'énergie solaire est limitée. Cependant, ces planètes fournissent généralement d’importantes sources de deutérium.',
         ],
+        'destroyed' => 'Planète détruite',
     ],
     'mission' => [
         'colonize' => [
