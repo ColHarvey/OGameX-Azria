@@ -120,7 +120,9 @@ class PlanetServiceFactory
                 }
 
                 $player = $this->playerServiceFactory->make($planet->user_id);
-                $player->refreshUser();
+                // refresh() plutot que refreshUser() : les niveaux de recherche vivent dans
+                // une table distincte et le moteur de combat les lit a chaque bataille.
+                $player->refresh();
             }
 
             /** @var PlanetService */

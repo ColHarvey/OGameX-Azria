@@ -175,6 +175,35 @@ class PlayerService
     }
 
     /**
+     * Reload every piece of state this service keeps in memory.
+     *
+     * refreshUser() ne recharge que le modele User. Or ce service garde aussi les niveaux de
+     * recherche, qui vivent dans une table distincte, et un score general mis en cache. Le
+     * moteur de combat lit les technologies d'arme, de bouclier et de blindage a chaque
+     * bataille : sans ce rechargement, un combat traite plus tard dans la meme instance
+     * applicative utilise des niveaux perimes, ce qui change l'issue du combat.
+     *
+     * La liste des planetes n'est volontairement pas rechargee : PlanetServiceFactory
+     * recharge deja la planete concernee, et repasser par PlanetListService depuis la
+     * fabrique creerait une recursion.
+     *
+     * @return void
+     */
+    public function refresh(): void
+    {
+        $this->refreshUser();
+
+        $tech = $this->user->tech()->first();
+        if ($tech instanceof UserTech) {
+            $this->setUserTech($tech);
+        }
+
+        // Le score se recalcule paresseusement au prochain acces : inutile d'interroger la
+        // base maintenant si personne ne le demande.
+        $this->cachedGeneralScore = null;
+    }
+
+    /**
      * Saves current player object to DB.
      */
     public function save(): void
