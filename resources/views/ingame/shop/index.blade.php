@@ -226,9 +226,25 @@
                 });
             }
 
+            // Confirmation avant tout achat : la matiere noire est rare et un clic
+            // malencontreux ne doit pas la depenser.
             $('.ogx-buy').on('click', function(e) {
                 e.preventDefault();
-                envoyer('{{ route('shop.buy') }}', $(this).data('ref'), @json(__('t_ingame.shop.msg_buy_error')));
+
+                var bouton = $(this);
+                var question = @json(__('t_ingame.shop.confirm_buy'))
+                    .replace(':item', bouton.data('name'))
+                    .replace(':price', bouton.data('price'));
+
+                errorBoxDecision(
+                    @json(__('t_ingame.shared.caution')),
+                    question,
+                    @json(__('t_ingame.shared.yes')),
+                    @json(__('t_ingame.shared.no')),
+                    function() {
+                        envoyer('{{ route('shop.buy') }}', bouton.data('ref'), @json(__('t_ingame.shop.msg_buy_error')));
+                    }
+                );
             });
 
             $('.ogx-use').on('click', function(e) {

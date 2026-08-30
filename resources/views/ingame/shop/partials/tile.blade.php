@@ -21,7 +21,7 @@
     <span class="ogx-item-name">{{ $itemName }}</span>
 
     @if($action === 'buy')
-        <a class="ogx-item-action ogx-buy btn btn_confirm" data-ref="{{ $item['ref'] }}" href="javascript:void(0);">
+        <a class="ogx-item-action ogx-buy btn btn_confirm" data-ref="{{ $item['ref'] }}" data-name="{{ $itemName }}" data-price="{{ number_format($item['price'], 0, '', ' ') }}" href="javascript:void(0);">
             {{ __('t_ingame.shop.btn_buy') }}
         </a>
         <span class="ogx-item-owned">{{ $owned > 0 ? __('t_ingame.shop.item_in_inventory') . ' : ' . $owned : '' }}&nbsp;</span>
