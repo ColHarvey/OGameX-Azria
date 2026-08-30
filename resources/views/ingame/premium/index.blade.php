@@ -28,7 +28,8 @@
         /* Bouton de la page Recompenses : 141x25, sans motif grave, et c'est la paire
            du sprite dont le survol contraste le plus (vert 189 -> 255). */
         #officerDetail .hireBtn {
-            display: inline-block; width: 141px; height: 15px; margin: 0 12px 0 0; padding: 5px 0;
+            display: inline-block; box-sizing: content-box; width: 141px; height: 15px;
+            margin: 0 12px 12px 0; padding: 5px 0;
             background: transparent url("/img/icons/18e4684df27114667e11541e5b2ef8.png") 0 -214px no-repeat;
             border: 0; color: #fff; cursor: pointer; font-family: inherit; font-size: 10px;
             font-weight: 600; line-height: 15px; text-align: center; white-space: nowrap;
@@ -40,7 +41,10 @@
             text-shadow: 0 0 7px #7dff2e, -1px 1px 3px #123f02;
         }
         #officerDetail .hireBtn:active:not([disabled]) { transform: translateY(1px); filter: brightness(.9); }
-        #officerDetail .hireBtn[disabled] { opacity: .35; cursor: default; filter: none; transform: none; }
+        #officerDetail .hireBtn[disabled] {
+            filter: grayscale(1) brightness(.65); color: #9aa0a6; cursor: default;
+            transform: none; text-shadow: none;
+        }
         #officerDetail .odTooPoor { display: block; margin-top: 8px; color: #a94442; }
 
         /* Ligne de bonus sans marqueur tant qu'aucun officier n'est choisi. */
