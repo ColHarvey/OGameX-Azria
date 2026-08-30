@@ -18,17 +18,21 @@
         #officerDetail .odBuy { margin-top: 12px; }
         #officerDetail form { display: inline; }
 
-        /* Bouton "Ameliorer" du jeu : sprite a trois etats natifs, 224x54.
-           Normal 0 0, survol 0 -54px, desactive 0 -108px. */
+        /* Bouton de la page Recompenses : 141x25, sans motif grave, et c'est la paire
+           du sprite dont le survol contraste le plus (vert 189 -> 255). */
         #officerDetail .hireBtn {
-            display: inline-block; width: 224px; height: 54px; margin: 0 10px 0 0; padding: 0;
-            background: transparent url("/img/icons/f5f81e8302aaad56c958c033677fb8.png") 0 0 no-repeat;
-            border: 0; color: #fff; cursor: pointer; font-family: inherit; font-size: 13px;
-            font-weight: bold; line-height: 54px; text-align: center; text-decoration: none;
+            display: inline-block; width: 141px; height: 15px; margin: 0 12px 0 0; padding: 5px 0;
+            background: transparent url("/img/icons/18e4684df27114667e11541e5b2ef8.png") 0 -188px no-repeat;
+            border: 0; color: #fff; cursor: pointer; font-family: inherit; font-size: 11px;
+            font-weight: 600; line-height: 15px; text-align: center; text-shadow: -1px 1px 5px #246a05;
+            transition: filter .12s ease, transform .06s ease;
         }
-        #officerDetail .hireBtn:hover:not([disabled]) { background-position: 0 -54px; }
-        #officerDetail .hireBtn:active:not([disabled]) { background-position: 0 -54px; position: relative; top: 1px; }
-        #officerDetail .hireBtn[disabled] { background-position: 0 -108px; color: #848484; cursor: default; }
+        #officerDetail .hireBtn:hover:not([disabled]) {
+            background-position: 0 -214px; filter: brightness(1.2);
+            text-shadow: 0 0 6px #2e8b0a, -1px 1px 3px #123f02;
+        }
+        #officerDetail .hireBtn:active:not([disabled]) { transform: translateY(1px); filter: brightness(.9); }
+        #officerDetail .hireBtn[disabled] { opacity: .35; cursor: default; filter: none; transform: none; }
         #officerDetail .odTooPoor { display: block; margin-top: 8px; color: #a94442; }
 
         /* Ligne de bonus sans marqueur tant qu'aucun officier n'est choisi. */
@@ -128,7 +132,6 @@
                     @foreach ($officers as $officer)
                         <div class="odPanel" id="odPanel-{{ $officer['officer'] }}" style="display: none;">
                             <span class="odName">{{ __('t_ingame.premium.officer_' . $officer['officer']) }}</span>
-                            <span class="odEffects">{{ __('t_ingame.premium.effects_' . $officer['officer']) }}</span>
 
                             @if ($officer['active'])
                                 <span class="odOwned">{{ __('t_ingame.premium.already_owned', ['date' => $officer['expires_at']->format('d/m/Y H:i')]) }}</span>
