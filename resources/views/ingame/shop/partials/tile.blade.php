@@ -19,7 +19,6 @@
     </div>
 
     <span class="ogx-item-name">{{ $itemName }}</span>
-    <span class="ogx-item-duration">{{ $item['duration'] }}</span>
 
     @if($action === 'buy')
         <a class="ogx-item-action ogx-buy btn btn_confirm" data-ref="{{ $item['ref'] }}" href="javascript:void(0);">

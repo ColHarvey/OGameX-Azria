@@ -60,11 +60,6 @@
         text-align: center;
     }
 
-    .ogx-item-duration {
-        font-size: 10px;
-        color: #8fa7bd;
-    }
-
     .ogx-item-action {
         margin-top: 3px;
         cursor: pointer;
