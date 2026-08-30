@@ -116,6 +116,11 @@ class FleetController extends OGameController
             'tacticalRetreatRatio' => $tacticalRetreatRatio,
             'tacticalRetreatDeuteriumCost' => $tacticalRetreatDeuteriumCost,
             'hasAdmiral' => $player->hasAdmiral(),
+            'hasCommander' => $player->hasCommander(),
+            'isOnVacation' => $player->isInVacationMode(),
+            // La classe General accorde +2 emplacements de flotte : son icone ne doit
+            // apparaitre que pour les joueurs qui l'ont reellement choisie.
+            'isGeneral' => $characterClassService->isGeneral($player->getUser()),
         ]);
     }
 

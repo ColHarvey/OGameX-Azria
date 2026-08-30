@@ -280,9 +280,9 @@
             var warningsEnabled = true;
 
             var playerId = {{ $player->getId() }};
-            var hasAdmiral = false;
-            var hasCommander = false;
-            var isOnVacation = false;
+            var hasAdmiral = {{ ($hasAdmiral ?? false) ? 'true' : 'false' }};
+            var hasCommander = {{ ($hasCommander ?? false) ? 'true' : 'false' }};
+            var isOnVacation = {{ ($isOnVacation ?? false) ? 'true' : 'false' }};
 
             var moveInProgress = false;
             var planetCount = {{ $player->planets->planetCount() }};
@@ -797,9 +797,14 @@
                     <div id="slots" class="fleft">
                         <div class="fleft">
                             <span class="tooltip advice {{ $fleetSlotsInUse >= $fleetSlotsMax ? 'overmark' : '' }}" title="{{ __('t_ingame.fleet.tooltip_slots') }}"><span>{{ __('t_ingame.fleet.fleets') }}:</span> {{ $fleetSlotsInUse }}/{{ $fleetSlotsMax }}</span>
-                            <div class="tooltip bonus dark_highlight_tablet" title="{{ __('t_ingame.fleet.general_slot_bonus') }}">
-                                <span class="sprite characterclass small warrior"></span>
-                            </div>
+                            {{-- L'icone du bonus n'apparait que pour les joueurs ayant
+                                 reellement choisi la classe General, qui accorde ces
+                                 +2 emplacements. Elle s'affichait auparavant pour tous. --}}
+                            @if($isGeneral ?? false)
+                                <div class="tooltip bonus dark_highlight_tablet" title="{{ __('t_ingame.fleet.general_slot_bonus') }}">
+                                    <span class="sprite characterclass small warrior"></span>
+                                </div>
+                            @endif
                         </div>
                         <div class="fleft">
                                         <span class="tooltip advice {{ $expeditionSlotsInUse >= $expeditionSlotsMax ? 'overmark' : '' }}" title="{{ __('t_ingame.fleet.tooltip_exp_slots') }}">

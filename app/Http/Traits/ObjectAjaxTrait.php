@@ -279,6 +279,9 @@ trait ObjectAjaxTrait
             'title' => $object->title,
             'price' => $price,
             'planet' => $planet,
+            // La file de construction etendue est un avantage du Commandant : sans cette
+            // valeur, le JavaScript du jeu la refusait meme aux joueurs qui l'ont paye.
+            'has_commander' => $player !== null && $player->hasCommander(),
             'production_time' => $production_time,
             'production_datetime' => $production_datetime,
             'production_next' => $production_next,
