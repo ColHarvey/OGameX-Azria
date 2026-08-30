@@ -35,8 +35,10 @@ class BootstrapTest extends TestCase
 
         $formData = [
             '_token' => csrf_token(),
+            'username' => 'Test' . Str::random(8),
             'email' => $randomEmail,
             'password' => 'asdasdasd',
+            'password_confirmation' => 'asdasdasd',
             'v' => '3',
             'step' => 'validate',
             'kid' => '',

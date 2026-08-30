@@ -99,8 +99,10 @@ abstract class TestCommand extends Command
         // Create a test user
         $creator = resolve(CreateNewUser::class);
         $user = $creator->create([
+            'username' => 'Test' . substr(md5($this->email), 0, 8),
             'email' => $this->email,
             'password' => $this->password,
+            'password_confirmation' => $this->password,
         ]);
 
         $this->info("Test user created with ID: {$user->id}");

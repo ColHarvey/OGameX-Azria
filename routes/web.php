@@ -232,6 +232,7 @@ Route::middleware(['auth', 'banned', 'globalgame', 'locale', 'firstlogin'])->gro
     Route::get('/buddies/online', [BuddiesController::class, 'getOnlineBuddies'])->name('buddies.online');
 
     Route::get('/rewards', [RewardsController::class, 'index'])->name('rewards.index');
+    Route::post('/rewards/claim', [RewardsController::class, 'claim'])->name('rewards.claim');
     Route::get('/planet-move', [PlanetMoveController::class, 'index'])->name('planetMove.index');
     Route::post('/ajax/planet-move', [PlanetMoveController::class, 'move'])->name('planetMove.move');
     Route::get('/ajax/planet-move/cancel', [PlanetMoveController::class, 'cancel'])->name('planetMove.cancel');

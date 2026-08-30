@@ -108,8 +108,10 @@ abstract class IsolatedAccountTestCase extends AccountTestCase
     {
         $creator = resolve(CreateNewUser::class);
         $user = $creator->create([
+            'username' => 'Test' . Str::random(8),
             'email' => Str::random(10) . '@example.com',
             'password' => 'password',
+            'password_confirmation' => 'password',
         ]);
 
         if ($user->hasRole('admin')) {
