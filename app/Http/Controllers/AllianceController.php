@@ -713,6 +713,15 @@ class AllianceController extends OGameController
                     $message = __('t_ingame.alliance.msg_rank_perms_updated');
                     break;
 
+                case 'delete_rank':
+                    $allianceId = $player->getUser()->alliance_id;
+                    if ($allianceId === null) {
+                        throw new Exception(__('t_ingame.alliance.msg_not_in_alliance'));
+                    }
+                    $allianceService->deleteRank($allianceId, (int) $request->input('rankId'), $userId);
+                    $message = __('t_ingame.alliance.msg_rank_deleted');
+                    break;
+
                 case 'update_texts':
                     $allianceId = $player->getUser()->alliance_id;
                     if ($allianceId === null) {

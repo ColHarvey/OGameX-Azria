@@ -127,7 +127,7 @@
                                            data-rankvalue="{{ $permission['value'] }}"
                                            value="1"
                                            {{ $rank->hasPermission($permission['name']) ? 'checked' : '' }}
-                                           {{ $member && $member->hasPermission(\OGame\Models\AllianceRank::PERMISSION_MANAGE_ALLY) ? '' : 'disabled' }}>
+                                           {{ $member && $member->hasPermission(\OGame\Models\AllianceRank::PERMISSION_MANAGE_ALLY) && $member->hasPermission($permission['name']) ? '' : 'disabled' }}>
                                 </td>
                             @endforeach
                         </tr>
@@ -476,6 +476,46 @@
                     });
                 }
             );
+        });
+
+        // Le JavaScript embarque du jeu attend #form_newTag/.newTag et #form_newName/.newName,
+        // qui n'existent pas dans cette vue : sans ce gestionnaire, le bouton ne fait rien.
+        $('.newTagName').on('click', function(e) {
+            e.preventDefault();
+
+            alliance.loadingIndicator.show();
+            $.ajax({
+                url: '{{ route('alliance.action') }}',
+                type: 'POST',
+                data: {
+                    action: 'update_tag_name',
+                    newTag: $('#newTag').val(),
+                    newName: $('#newName').val(),
+                    _token: alliance.token
+                },
+                success: function(response) {
+                    alliance.loadingIndicator.hide();
+                    if (response.status === 'success') {
+                        fadeBox(response.message, false);
+                        setTimeout(function() {
+                            window.location.reload();
+                        }, 1500);
+                    } else {
+                        fadeBox(response.message || @json(__('t_ingame.alliance.msg_error')), true);
+                    }
+                    if (response.newAjaxToken) {
+                        alliance.updateToken(response.newAjaxToken);
+                    }
+                },
+                error: function(xhr) {
+                    alliance.loadingIndicator.hide();
+                    var errorMessage = @json(__('t_ingame.alliance.msg_error'));
+                    if (xhr.responseJSON && xhr.responseJSON.message) {
+                        errorMessage = xhr.responseJSON.message;
+                    }
+                    fadeBox(errorMessage, true);
+                }
+            });
         });
     });
 </script>

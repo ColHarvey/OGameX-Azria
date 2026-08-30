@@ -437,6 +437,40 @@ class AllianceService
     }
 
     /**
+     * Delete an alliance rank.
+     *
+     * Les membres qui portaient ce rang repassent au rang de nouveau venu.
+     *
+     * @param int $allianceId
+     * @param int $rankId
+     * @param int $deletingUserId
+     * @return void
+     * @throws Exception
+     */
+    public function deleteRank(int $allianceId, int $rankId, int $deletingUserId): void
+    {
+        $member = $this->getAllianceMember($allianceId, $deletingUserId);
+        if (!$member || !$member->hasPermission(AllianceRank::PERMISSION_MANAGE_ALLY)) {
+            throw new Exception(__('t_ingame.alliance.msg_no_permission'));
+        }
+
+        $rank = AllianceRank::where('alliance_id', $allianceId)
+            ->where('id', $rankId)
+            ->first();
+
+        if ($rank === null) {
+            throw new Exception(__('t_ingame.alliance.msg_rank_not_found'));
+        }
+
+        // Les membres concernes doivent perdre leur rang avant la suppression, sinon
+        // ils garderaient un rank_id pointant dans le vide.
+        DB::transaction(function () use ($rank): void {
+            AllianceMember::where('rank_id', $rank->id)->update(['rank_id' => null]);
+            $rank->delete();
+        });
+    }
+
+    /**
      * Assign a rank to a member.
      *
      * @param int $allianceId
@@ -487,34 +521,44 @@ class AllianceService
             throw new Exception('You do not have permission to update rank permissions');
         }
 
-        foreach ($rankPermissions as $rankId => $permissionsBitmask) {
-            $rank = AllianceRank::where('alliance_id', $allianceId)
-                ->where('id', $rankId)
-                ->first();
+        // Le formulaire affiche tous les rangs, mais le JavaScript du jeu n'envoie une
+        // entree que pour les rangs ayant au moins une case cochee. On parcourt donc
+        // tous les rangs de l'alliance et on traite un rang absent comme « aucune
+        // permission » : sans cela, il serait impossible de tout retirer a un rang.
+        $ranks = AllianceRank::where('alliance_id', $allianceId)->get();
 
-            if (!$rank) {
-                continue; // Skip if rank doesn't exist
+        foreach ($ranks as $rank) {
+            $requested = $this->convertBitmaskToPermissions((int) ($rankPermissions[$rank->id] ?? 0));
+            $current = $rank->permissions ?? [];
+
+            // « Vous ne pouvez accorder que les autorisations dont vous disposez
+            // vous-meme » : la page l'annonce, on l'applique ici. Une permission que
+            // l'auteur ne possede pas garde la valeur qu'elle avait deja, il ne peut
+            // donc ni l'accorder ni la retirer.
+            $permissions = [];
+            foreach ($this->permissionBitmap() as $permission) {
+                $granted = $member->hasPermission($permission)
+                    ? in_array($permission, $requested, true)
+                    : in_array($permission, $current, true);
+
+                if ($granted) {
+                    $permissions[] = $permission;
+                }
             }
 
-            // Convert bitmask to array of permission strings
-            $permissions = $this->convertBitmaskToPermissions($permissionsBitmask);
-
-            // Update permissions
             $rank->permissions = $permissions;
             $rank->save();
         }
     }
 
     /**
-     * Convert permission bitmask to array of permission strings.
+     * Correspondance entre les bits envoyes par la page de gestion et les permissions.
      *
-     * @param int $bitmask
-     * @return array
+     * @return array<int, string>
      */
-    private function convertBitmaskToPermissions(int $bitmask): array
+    private function permissionBitmap(): array
     {
-        $permissions = [];
-        $permissionMap = [
+        return [
             1 => AllianceRank::PERMISSION_SEE_APPLICATIONS,
             2 => AllianceRank::PERMISSION_EDIT_APPLICATIONS,
             4 => AllianceRank::PERMISSION_SEE_MEMBERS,
@@ -526,8 +570,19 @@ class AllianceService
             256 => AllianceRank::PERMISSION_RIGHT_HAND,
             2048 => AllianceRank::PERMISSION_MANAGE_CLASSES,
         ];
+    }
 
-        foreach ($permissionMap as $bit => $permission) {
+    /**
+     * Convert permission bitmask to array of permission strings.
+     *
+     * @param int $bitmask
+     * @return array<int, string>
+     */
+    private function convertBitmaskToPermissions(int $bitmask): array
+    {
+        $permissions = [];
+
+        foreach ($this->permissionBitmap() as $bit => $permission) {
             if (($bitmask & $bit) === $bit) {
                 $permissions[] = $permission;
             }
