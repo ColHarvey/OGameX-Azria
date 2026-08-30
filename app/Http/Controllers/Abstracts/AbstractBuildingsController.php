@@ -180,7 +180,9 @@ abstract class AbstractBuildingsController extends OGameController
         }
 
         // Max amount of buildings that can be in the queue in a given time.
-        $max_build_queue_count = 4; //@TODO: refactor into global / constant?
+        // Commandant : la file de construction passe de 4 a 8. Dans OGame, le commandant
+        // est precisement l'officier de la file d'attente.
+        $max_build_queue_count = $player->hasCommander() ? 8 : 4;
         $build_queue_max = false;
         if (count($build_queue) >= $max_build_queue_count) {
             $build_queue_max = true;

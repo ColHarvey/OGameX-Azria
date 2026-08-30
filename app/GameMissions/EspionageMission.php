@@ -107,8 +107,11 @@ class EspionageMission extends GameMission
         // Calculate counter-espionage chance
         $counterEspionageService = resolve(CounterEspionageService::class);
         $attackerProbeCount = $mission->espionage_probe;
-        $attackerEspionageLevel = $originPlayer->getResearchLevel('espionage_technology');
-        $defenderEspionageLevel = $targetPlayer->getResearchLevel('espionage_technology');
+        // Technocrate : +2 niveaux d'espionnage, pour l'attaquant comme pour le defenseur.
+        $attackerEspionageLevel = $originPlayer->getResearchLevel('espionage_technology')
+            + ($originPlayer->hasTechnocrat() ? 2 : 0);
+        $defenderEspionageLevel = $targetPlayer->getResearchLevel('espionage_technology')
+            + ($targetPlayer->hasTechnocrat() ? 2 : 0);
 
         // TODO: Include ACS Defend fleets in counter-espionage chance calculation
         // Currently only counts planet owner's ships via getDefenderShipCount()
@@ -487,8 +490,11 @@ class EspionageMission extends GameMission
         }
 
         // TODO: Validate this does not cause issues when probing slot 16
-        $attackerEspionageLevel = $originPlayer->getResearchLevel('espionage_technology');
-        $defenderEspionageLevel = $targetPlayer->getResearchLevel('espionage_technology');
+        // Technocrate : +2 niveaux d'espionnage, pour l'attaquant comme pour le defenseur.
+        $attackerEspionageLevel = $originPlayer->getResearchLevel('espionage_technology')
+            + ($originPlayer->hasTechnocrat() ? 2 : 0);
+        $defenderEspionageLevel = $targetPlayer->getResearchLevel('espionage_technology')
+            + ($targetPlayer->hasTechnocrat() ? 2 : 0);
         $techDifference = $defenderEspionageLevel - $attackerEspionageLevel;
         $levelDifference = max(0, $techDifference);
         $extraProbesRequired = pow($levelDifference, 2);

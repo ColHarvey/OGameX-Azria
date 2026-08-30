@@ -559,7 +559,10 @@ class PlayerService
         $user = $this->getUser();
         $fleet_slots_bonus = $characterClassService->getAdditionalFleetSlots($user);
 
-        return $fleet_slots_from_research + $fleet_slots_bonus;
+        // Amiral : +2 emplacements de flotte.
+        $officer_bonus = $this->hasAdmiral() ? 2 : 0;
+
+        return $fleet_slots_from_research + $fleet_slots_bonus + $officer_bonus;
     }
 
     /**
@@ -604,7 +607,10 @@ class PlayerService
         $user = $this->getUser();
         $expedition_slots_bonus = $characterClassService->getExpeditionSlotsBonus($user);
 
-        return $expedition_slots_from_research + $bonus_slots + $expedition_slots_bonus;
+        // Amiral : +1 expedition simultanee.
+        $officer_bonus = $this->hasAdmiral() ? 1 : 0;
+
+        return $expedition_slots_from_research + $bonus_slots + $expedition_slots_bonus + $officer_bonus;
     }
 
     /**
@@ -947,34 +953,71 @@ class PlayerService
         return false;
     }
 
+    /**
+     * Le joueur a-t-il un commandant actif ?
+     *
+     * @return bool
+     */
     public function hasCommander(): bool
     {
-        // TODO: add logic
-        return false;
+        return $this->hasActiveOfficer('commander');
     }
 
+    /**
+     * Le joueur a-t-il un amiral actif ?
+     *
+     * @return bool
+     */
     public function hasAdmiral(): bool
     {
-        // TODO: add logic
-        return false;
+        return $this->hasActiveOfficer('admiral');
     }
 
+    /**
+     * Le joueur a-t-il un ingenieur actif ?
+     *
+     * @return bool
+     */
     public function hasEngineer(): bool
     {
-        // TODO: add logic
-        return false;
+        return $this->hasActiveOfficer('engineer');
     }
 
+    /**
+     * Le joueur a-t-il un geologue actif ?
+     *
+     * @return bool
+     */
     public function hasGeologist(): bool
     {
-        // TODO: add logic
-        return false;
+        return $this->hasActiveOfficer('geologist');
     }
 
+    /**
+     * Le joueur a-t-il un technocrate actif ?
+     *
+     * @return bool
+     */
     public function hasTechnocrat(): bool
     {
-        // TODO: add logic
-        return false;
+        return $this->hasActiveOfficer('technocrat');
+    }
+
+    /**
+     * Un officier est actif tant que sa date d'expiration est dans le futur.
+     *
+     * La verification se fait directement sur la colonne, sans passer par
+     * OfficerService : ces methodes sont appelees a chaque calcul de production,
+     * donc a chaque chargement de page.
+     *
+     * @param string $officer
+     * @return bool
+     */
+    private function hasActiveOfficer(string $officer): bool
+    {
+        $expiry = $this->user->{$officer . '_until'};
+
+        return $expiry !== null && $expiry->isFuture();
     }
 
     public function hasCommandingStaff(): bool

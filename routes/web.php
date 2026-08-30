@@ -200,6 +200,7 @@ Route::middleware(['auth', 'banned', 'globalgame', 'locale', 'firstlogin'])->gro
     Route::post('/alliance/text/update', [AllianceController::class, 'updateAllianceText'])->name('alliance.text.update');
 
     Route::get('/premium', [PremiumController::class, 'index'])->name('premium.index');
+    Route::post('/premium/hire', [PremiumController::class, 'hire'])->name('premium.hire');
     Route::get('/shop', [ShopController::class, 'index'])->name('shop.index');
 
     // Character Class

@@ -305,23 +305,23 @@
                 </a>
             </div>
             <div id="officers" class="  fright">
-                <a href="#TODO_=premium&amp;openDetail=2" class="tooltipHTML   commander js_hideTipOnMobile "
+                <a href="{{ route('premium.index') }}" class="tooltipHTML   commander js_hideTipOnMobile  {{ $currentPlayer->hasCommander() ? 'on' : '' }}"
                    title="{!! __('t_ingame.premium.hire_commander_tooltip') !!}">
                     <img src="/img/layout/pixel.gif" width="30" height="30">
                 </a>
-                <a href="#TODO_page=premium&amp;openDetail=3" class="tooltipHTML    admiral js_hideTipOnMobile "
+                <a href="{{ route('premium.index') }}" class="tooltipHTML    admiral js_hideTipOnMobile  {{ $currentPlayer->hasAdmiral() ? 'on' : '' }}"
                    title="{!! __('t_ingame.premium.hire_admiral_tooltip') !!}">
                     <img src="/img/layout/pixel.gif" width="30" height="30">
                 </a>
-                <a href="#TODO_page=premium&amp;openDetail=4" class="tooltipHTML    engineer js_hideTipOnMobile "
+                <a href="{{ route('premium.index') }}" class="tooltipHTML    engineer js_hideTipOnMobile  {{ $currentPlayer->hasEngineer() ? 'on' : '' }}"
                    title="{!! __('t_ingame.premium.hire_engineer_tooltip') !!}">
                     <img src="/img/layout/pixel.gif" width="30" height="30">
                 </a>
-                <a href="#TODO_page=premium&amp;openDetail=5" class="tooltipHTML    geologist js_hideTipOnMobile "
+                <a href="{{ route('premium.index') }}" class="tooltipHTML    geologist js_hideTipOnMobile  {{ $currentPlayer->hasGeologist() ? 'on' : '' }}"
                    title="{!! __('t_ingame.premium.hire_geologist_tooltip') !!}">
                     <img src="/img/layout/pixel.gif" width="30" height="30">
                 </a>
-                <a href="#TODO_page=premium&amp;openDetail=6" class="tooltipHTML    technocrat js_hideTipOnMobile "
+                <a href="{{ route('premium.index') }}" class="tooltipHTML    technocrat js_hideTipOnMobile  {{ $currentPlayer->hasTechnocrat() ? 'on' : '' }}"
                    title="{!! __('t_ingame.premium.hire_technocrat_tooltip') !!}">
                     <img src="/img/layout/pixel.gif" width="30" height="30">
                 </a>
