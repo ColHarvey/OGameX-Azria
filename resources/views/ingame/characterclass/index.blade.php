@@ -37,7 +37,7 @@
                                                     <span>{{ __('t_ingame.characterclass.btn_buy_for') }}<br>{{ number_format($changeCost, 0, ',', '.') }} DM</span>
                                                 </a>
                                             @else
-                                                <a class="build-it_disabled nodarkmatter" href="/premium">
+                                                <a class="build-it_disabled nodarkmatter" href="javascript:void(0);">
                                                     <span>{{ __('t_ingame.characterclass.btn_buy_for') }}<br>{{ number_format($changeCost, 0, ',', '.') }} DM</span>
                                                 </a>
                                             @endif
@@ -103,15 +103,9 @@
                                 location.reload();
                             }, 1000);
                         } else if (data.lackingDM) {
-                            errorBoxDecision(
-                                @json(__('t_ingame.characterclass.not_enough_dm_title')),
-                                @json(__('t_ingame.characterclass.not_enough_dm_text')),
-                                @json(__('t_ingame.characterclass.btn_get_dm')),
-                                @json(__('t_ingame.characterclass.btn_cancel')),
-                                function() {
-                                    window.location.href = '/premium';
-                                }
-                            );
+                            // On ne peut pas acheter de matiere noire sur ce serveur : on se
+                            // contente d'informer, sans proposer un achat impossible.
+                            fadeBox(@json(__('t_ingame.characterclass.not_enough_dm_text')), true);
                         } else {
                             fadeBox(data.message, true);
                         }
