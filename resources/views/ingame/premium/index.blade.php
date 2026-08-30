@@ -30,14 +30,14 @@
         #officerDetail .hireBtn {
             display: inline-block; box-sizing: content-box; width: 141px; height: 15px;
             margin: 0 12px 12px 0; padding: 5px 0;
-            background: transparent url("/img/icons/18e4684df27114667e11541e5b2ef8.png") 0 -214px no-repeat;
+            background: transparent url("/img/icons/18e4684df27114667e11541e5b2ef8.png") 0 -188px no-repeat;
             border: 0; color: #fff; cursor: pointer; font-family: inherit; font-size: 10px;
             font-weight: 600; line-height: 15px; text-align: center; white-space: nowrap;
-            text-shadow: -1px 1px 3px #123f02;
+            text-shadow: -1px 1px 5px #246a05;
             transition: filter .12s ease, transform .06s ease;
         }
         #officerDetail .hireBtn:hover:not([disabled]) {
-            filter: brightness(1.22);
+            background-position: 0 -214px; filter: brightness(1.15);
             text-shadow: 0 0 7px #7dff2e, -1px 1px 3px #123f02;
         }
         #officerDetail .hireBtn:active:not([disabled]) { transform: translateY(1px); filter: brightness(.9); }
