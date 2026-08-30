@@ -3,22 +3,32 @@
 @section('content')
 
     <style>
-        /* Tableau de recrutement : reprend les couleurs du jeu plutot que d'introduire
-           une charte etrangere. */
-        #officerHire { width: 100%; margin: 18px 0 0; border-collapse: collapse; color: #6f9fc8; font-size: 11px; }
-        #officerHire th { text-align: left; padding: 6px 8px; border-bottom: 1px solid #000; color: #848484; font-weight: normal; }
+        /* #inhalt fait 670px et ul#building 640px : le tableau s'aligne dessus. */
+        #officerHire {
+            width: 640px; margin: 6px auto 0 17px; border-collapse: collapse;
+            color: #6f9fc8; font-size: 11px; line-height: 15px;
+        }
+        #officerHire th {
+            text-align: left; padding: 5px 8px; color: #848484; font-weight: normal;
+            border-bottom: 1px solid #000; background: #10181f;
+        }
         #officerHire td { padding: 6px 8px; border-bottom: 1px solid #1b2129; vertical-align: middle; }
-        #officerHire tr.active td { color: #9ccd41; }
-        #officerHire .officerName { color: #ff9600; }
-        #officerHire .price { white-space: nowrap; }
+        #officerHire tr:last-child td { border-bottom: 0; }
+        #officerHire .colOfficer { width: 88px; color: #ff9600; white-space: nowrap; }
+        #officerHire .colEffects { width: 268px; }
+        #officerHire .colStatus { width: 104px; white-space: nowrap; }
+        #officerHire .colHire { width: 90px; text-align: center; }
+        #officerHire tr.isActive .colStatus { color: #9ccd41; }
         #officerHire button {
-            background: #22303f; border: 1px solid #3b4d5f; border-radius: 3px; color: #fff;
-            cursor: pointer; font-family: inherit; font-size: 11px; padding: 3px 10px; white-space: nowrap;
+            background: #22303f url("/img/outgame/f1c317aff2183c9b8b905bbbca9e8a.jpg") repeat-x 0 top;
+            border: 1px solid #3b4d5f; border-radius: 3px; color: #fff; cursor: pointer;
+            font-family: inherit; font-size: 11px; font-weight: bold; padding: 4px 0; width: 82px;
+            text-shadow: 0 -1px 1px rgba(0, 0, 0, .35);
             transition: filter .12s ease, transform .06s ease;
         }
-        #officerHire button:hover { filter: brightness(1.35); }
+        #officerHire button:hover { filter: brightness(1.4); }
         #officerHire button:active { transform: translateY(1px); filter: brightness(.9); }
-        #officerHire button[disabled] { opacity: .4; cursor: default; filter: none; transform: none; }
+        #officerHire button[disabled] { opacity: .35; cursor: default; filter: none; transform: none; }
     </style>
 
     <div id="eventboxContent" style="display: none">
@@ -44,11 +54,11 @@
             </div>
             <div class="content">
                 @if (session('status'))
-                    <div class="alert alert-success" style="margin: 4px 0 14px;">{{ session('status') }}</div>
+                    <div class="alert alert-success" style="margin: 8px 17px 0;">{{ session('status') }}</div>
                 @endif
 
                 @if (session('error'))
-                    <div class="alert alert-danger" style="margin: 4px 0 14px;">{{ session('error') }}</div>
+                    <div class="alert alert-danger" style="margin: 8px 17px 0;">{{ session('error') }}</div>
                 @endif
 
                 <p class="stimulus">{{ __('t_ingame.premium.intro_text') }}</p>
@@ -87,30 +97,30 @@
                                     </span>
                                 </a>
                             </div>
-                            <div class="remaining tooltip" title="">
+                            <div class="remaining tooltip" title="{{ __('t_ingame.premium.info_commanding_staff') }}">
                                 <span class="remDate">{{ __('t_ingame.premium.remaining_officers', ['current' => $activeCount, 'max' => $totalOfficers]) }}</span>
                             </div>
                         </div>
                     </li>
 
                     <li class="allOfficers {{ $activeCount === $totalOfficers ? '' : 'off' }}">
-                        <span title="{{ __('t_ingame.premium.benefit_fleet_slots_title') }}" class="tooltipCustom tooltipTop">{{ __('t_ingame.premium.benefit_fleet_slots') }}</span><span title="{{ __('t_ingame.premium.benefit_energy_title') }}" class="tooltipCustom tooltipTop">{{ __('t_ingame.premium.benefit_energy') }}</span><span title="{{ __('t_ingame.premium.benefit_mines_title') }}" class="tooltipCustom tooltipTop">{{ __('t_ingame.premium.benefit_mines') }}</span><span title="{{ __('t_ingame.premium.benefit_espionage_title') }}" class="tooltipCustom tooltipTop">{{ __('t_ingame.premium.benefit_espionage') }}</span>
+                        <span title="{{ __('t_ingame.premium.benefit_resources_title') }}" class="tooltipCustom tooltipTop">{{ __('t_ingame.premium.benefit_resources') }}</span>
                     </li>
                 </ul>
                 <br class="clearfloat">
 
                 <table id="officerHire">
                     <tr>
-                        <th>{{ __('t_ingame.premium.table_officer') }}</th>
-                        <th>{{ __('t_ingame.premium.table_effects') }}</th>
-                        <th>{{ __('t_ingame.premium.table_status') }}</th>
-                        <th colspan="2">{{ __('t_ingame.premium.table_hire') }}</th>
+                        <th class="colOfficer">{{ __('t_ingame.premium.table_officer') }}</th>
+                        <th class="colEffects">{{ __('t_ingame.premium.table_effects') }}</th>
+                        <th class="colStatus">{{ __('t_ingame.premium.table_status') }}</th>
+                        <th class="colHire" colspan="2">{{ __('t_ingame.premium.table_hire') }}</th>
                     </tr>
                     @foreach ($officers as $officer)
-                        <tr class="{{ $officer['active'] ? 'active' : '' }}">
-                            <td class="officerName">{{ __('t_ingame.premium.officer_' . $officer['officer']) }}</td>
-                            <td>{{ __('t_ingame.premium.effects_' . $officer['officer']) }}</td>
-                            <td>
+                        <tr class="{{ $officer['active'] ? 'isActive' : '' }}">
+                            <td class="colOfficer">{{ __('t_ingame.premium.officer_' . $officer['officer']) }}</td>
+                            <td class="colEffects">{{ __('t_ingame.premium.effects_' . $officer['officer']) }}</td>
+                            <td class="colStatus">
                                 @if ($officer['active'])
                                     {{ __('t_ingame.premium.active_until', ['date' => $officer['expires_at']->format('d/m H:i')]) }}
                                 @else
@@ -118,12 +128,13 @@
                                 @endif
                             </td>
                             @foreach ($officer['prices'] as $days => $price)
-                                <td class="price">
+                                <td class="colHire">
                                     <form method="POST" action="{{ route('premium.hire') }}" style="display:inline">
                                         @csrf
                                         <input type="hidden" name="officer" value="{{ $officer['officer'] }}">
                                         <input type="hidden" name="days" value="{{ $days }}">
-                                        <button type="submit" {{ $darkMatter < $price ? 'disabled' : '' }}>
+                                        <button type="submit" {{ $darkMatter < $price ? 'disabled' : '' }}
+                                                title="{{ __('t_ingame.premium.hire_title', ['officer' => __('t_ingame.premium.officer_' . $officer['officer']), 'days' => $days, 'price' => number_format($price, 0, ',', ' ')]) }}">
                                             {{ __('t_ingame.premium.hire_button', ['days' => $days, 'price' => number_format($price, 0, ',', ' ')]) }}
                                         </button>
                                     </form>
@@ -133,6 +144,7 @@
                     @endforeach
                 </table>
 
+                <br class="clearfloat">
                 <div class="footer"></div>
             </div>
         </div>
