@@ -20,7 +20,7 @@ return [
         'send_request_failed' => 'Échec de l\'envoi de la demande de contact.',
         'ignore_player_failed' => 'Impossible d\'ignorer le joueur.',
         'delete_buddy_failed' => 'Échec de la suppression du copain',
-        'search_too_short' => 'Trop peu de personnages ! Veuillez saisir au moins 2 caractères.',
+        'search_too_short' => 'Trop peu de caractères ! Veuillez saisir au moins 2 caractères.',
         'invalid_action' => 'Action invalide',
     ],
     'success' => [
