@@ -3,8 +3,15 @@
 @section('content')
 
     <style>
+        /* La rangee d'officiers est figee a 130px de haut par la CSS du jeu, alors que
+           sept tuiles de 106px passent a la ligne dans 640px. La seconde rangee debordait
+           donc par-dessus le panneau, et son z-index:2 interceptait les clics.
+           overflow:hidden fait contenir les flottants, height:auto laisse grandir. */
+        #buttonz ul#building { height: auto !important; overflow: hidden; }
+
         /* Panneau de detail, affiche au clic sur un portrait. Cale sur ul#building (640px). */
         #officerDetail {
+            position: relative; z-index: 3;
             width: 606px; margin: 10px auto 0 17px; padding: 12px 16px;
             background: #10181f; border: 1px solid #1b2129;
             color: #6f9fc8; font-size: 11px; line-height: 17px; text-align: left;
