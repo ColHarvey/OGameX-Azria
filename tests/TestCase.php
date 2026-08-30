@@ -108,6 +108,15 @@ abstract class TestCase extends BaseTestCase
 
                 return 0;
             }, -1);
+
+            // Fonctions mathematiques : SQLite ne les fournit que si le module math a ete
+            // compile, ce qui n'est pas le cas du binaire livre avec PHP sous Windows.
+            $pdo->sqliteCreateFunction('FLOOR', fn (float|int|null $v): float => floor((float) $v), 1);
+            $pdo->sqliteCreateFunction('CEIL', fn (float|int|null $v): float => ceil((float) $v), 1);
+            $pdo->sqliteCreateFunction('CEILING', fn (float|int|null $v): float => ceil((float) $v), 1);
+            $pdo->sqliteCreateFunction('SQRT', fn (float|int|null $v): float => sqrt((float) $v), 1);
+            $pdo->sqliteCreateFunction('POW', fn (float|int|null $b, float|int|null $e): float => pow((float) $b, (float) $e), 2);
+            $pdo->sqliteCreateFunction('POWER', fn (float|int|null $b, float|int|null $e): float => pow((float) $b, (float) $e), 2);
         };
 
         // La connexion courante, puis toute connexion ouverte plus tard : les fonctions
