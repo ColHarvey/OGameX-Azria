@@ -32,7 +32,7 @@
                 <td class="value">
                     <span>
                         @if($member->rank)
-                            {{ $member->rank->name }}
+                            {{ $member->rank->rank_name }}
                         @elseif($alliance->founder_user_id === auth()->id())
                             {{ $alliance->founder_rank_name }}
                         @else
@@ -112,12 +112,12 @@
                                 <option value="">{{ $alliance->newcomer_rank_name }}</option>
                                 @foreach($ranks as $rank)
                                     <option value="{{ $rank->id }}" {{ $allianceMember->rank_id == $rank->id ? 'selected="selected"' : '' }}>
-                                        {{ $rank->name }}
+                                        {{ $rank->rank_name }}
                                     </option>
                                 @endforeach
                             </select>
                         @else
-                            {{ $allianceMember->rank ? $allianceMember->rank->name : $alliance->newcomer_rank_name }}
+                            {{ $allianceMember->rank ? $allianceMember->rank->rank_name : $alliance->newcomer_rank_name }}
                         @endif
                     </td>
                     <td class="member_score">

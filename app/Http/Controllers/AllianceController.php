@@ -6,6 +6,7 @@ use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
 use Log;
 use OGame\Models\AllianceRank;
@@ -969,9 +970,12 @@ class AllianceController extends OGameController
      */
     public function assignRankAction(Request $request, AllianceService $allianceService, PlayerService $player): JsonResponse
     {
+        // Le formulaire de la page Alliance envoie tous les rangs d'un seul coup, sous
+        // la forme memberRanks[<user_id>] = <rank_id>, une entree par membre affiche.
+        // Une valeur vide signifie « rang de nouveau venu », donc rank_id a null.
         $validated = $request->validate([
-            'user_id' => 'required|integer|exists:users,id',
-            'rank_id' => 'nullable|integer|exists:alliance_ranks,id',
+            'memberRanks' => 'required|array',
+            'memberRanks.*' => 'nullable|integer|exists:alliance_ranks,id',
         ]);
 
         try {
@@ -982,24 +986,25 @@ class AllianceController extends OGameController
                 throw new Exception(__('t_ingame.alliance.msg_not_in_alliance'));
             }
 
-            $allianceService->assignRank(
-                $userAllianceId,
-                $validated['user_id'],
-                $validated['rank_id'],
-                $userId
-            );
+            /** @var array<int|string, int|null> $memberRanks */
+            $memberRanks = $validated['memberRanks'];
 
-            $alliance = $allianceService->getAllianceById($userAllianceId);
-            if ($alliance === null) {
-                throw new Exception(__('t_ingame.alliance.msg_not_in_alliance'));
-            }
-            $rankName = $validated['rank_id']
-                ? $alliance->ranks->firstWhere('id', $validated['rank_id'])?->rank_name
-                : $alliance->newcomer_rank_name;
+            // Tout ou rien : une erreur en cours de route ne doit pas laisser une partie
+            // des membres avec leur nouveau rang et le reste avec l'ancien.
+            DB::transaction(function () use ($allianceService, $memberRanks, $userAllianceId, $userId): void {
+                foreach ($memberRanks as $memberUserId => $rankId) {
+                    $allianceService->assignRank(
+                        $userAllianceId,
+                        (int) $memberUserId,
+                        $rankId !== null ? (int) $rankId : null,
+                        $userId
+                    );
+                }
+            });
 
             return response()->json([
                 'status' => 'success',
-                'message' => __('t_ingame.alliance.msg_rank_assigned_to', ['name' => $rankName]),
+                'message' => __('t_ingame.alliance.msg_ranks_assigned'),
                 'newAjaxToken' => csrf_token(),
             ]);
         } catch (Exception $e) {
