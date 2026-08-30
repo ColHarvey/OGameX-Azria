@@ -138,7 +138,7 @@ class ServerSettingsController extends OGameController
         $settingsService->set('expedition_weight_aliens', request('expedition_weight_aliens', 1.5));
         $settingsService->set('expedition_weight_dark_matter', request('expedition_weight_dark_matter', 7.5));
         $settingsService->set('expedition_weight_merchant', request('expedition_weight_merchant', 0.4));
-        $settingsService->set('expedition_weight_items', request('expedition_weight_items', 0));
+        $settingsService->set('expedition_weight_items', request('expedition_weight_items', 0.5));
 
         $settingsService->set('hamill_manoeuvre_chance', max(1, (int)request('hamill_probability', 1000)));
 

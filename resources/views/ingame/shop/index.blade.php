@@ -146,6 +146,13 @@
         $(document).ready(function() {
             // Bascule entre la boutique et l'inventaire. Les deux panneaux sont rendus par le
             // serveur : aucun aller-retour n'est necessaire pour passer de l'un a l'autre.
+            //
+            // Le JavaScript embarque du jeu contient bien un module de boutique (initShop,
+            // vers la ligne 27094 de e7c74974...js) qui gere cette bascule, mais rien ne
+            // l'appelle : il reconstruit ses carrousels depuis un catalogue cote client que
+            // nous ne fournissons pas. Ses gestionnaires ne se lient donc jamais et les
+            // notres sont les seuls actifs. Ne pas appeler initShop() sans reprendre tout
+            // ce catalogue.
             function afficherPanneau(inventaire) {
                 $('#js_shopSliderBox').toggle(!inventaire);
                 $('#js_inventorySliderBox').toggle(inventaire);

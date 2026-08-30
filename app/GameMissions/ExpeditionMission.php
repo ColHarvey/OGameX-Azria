@@ -80,6 +80,7 @@ class ExpeditionMission extends GameMission
             'pirates' => $settingsService->expeditionWeightPirates(),
             'aliens' => $settingsService->expeditionWeightAliens(),
             'merchant' => $settingsService->expeditionWeightMerchant(),
+            'items' => $settingsService->expeditionWeightItems(),
         ];
 
         // Apply Discoverer class bonus: 50% reduced chance of combat encounters
@@ -967,6 +968,7 @@ class ExpeditionMission extends GameMission
             'pirates' => ExpeditionOutcomeType::BattlePirates,
             'aliens' => ExpeditionOutcomeType::BattleAliens,
             'merchant' => ExpeditionOutcomeType::GainMerchantTrade,
+            'items' => ExpeditionOutcomeType::GainItems,
         ];
 
         // Build weighted array of enabled outcomes
