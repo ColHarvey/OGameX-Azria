@@ -18,22 +18,21 @@
         #officerDetail .odBuy { margin-top: 12px; }
         #officerDetail form { display: inline; }
 
-        /* Meme bouton et memes etats que le "Recuperer" de la page Recompenses :
-           c'est la paire du sprite dont le survol contraste le plus. */
+        /* Bouton "Ameliorer" du jeu : sprite a trois etats natifs, 224x54.
+           Normal 0 0, survol 0 -54px, desactive 0 -108px. */
         #officerDetail .hireBtn {
-            display: inline-block; width: 141px; height: 15px; padding: 5px 0; margin-right: 10px;
-            background: transparent url("/img/icons/18e4684df27114667e11541e5b2ef8.png") 0 -188px no-repeat;
-            border: 0; color: #fff; cursor: pointer; font-family: inherit; font-size: 11px;
-            font-weight: 600; line-height: 15px; text-align: center; text-shadow: -1px 1px 5px #246a05;
-            transition: filter .12s ease, transform .06s ease;
+            display: inline-block; width: 224px; height: 54px; margin: 0 10px 0 0; padding: 0;
+            background: transparent url("/img/icons/f5f81e8302aaad56c958c033677fb8.png") 0 0 no-repeat;
+            border: 0; color: #fff; cursor: pointer; font-family: inherit; font-size: 13px;
+            font-weight: bold; line-height: 54px; text-align: center; text-decoration: none;
         }
-        #officerDetail .hireBtn:hover:not([disabled]) {
-            background-position: 0 -214px; filter: brightness(1.18);
-            text-shadow: 0 0 6px #2e8b0a, -1px 1px 3px #123f02;
-        }
-        #officerDetail .hireBtn:active:not([disabled]) { transform: translateY(1px); filter: brightness(.92); }
-        #officerDetail .hireBtn[disabled] { opacity: .35; cursor: default; filter: none; transform: none; }
+        #officerDetail .hireBtn:hover:not([disabled]) { background-position: 0 -54px; }
+        #officerDetail .hireBtn:active:not([disabled]) { background-position: 0 -54px; position: relative; top: 1px; }
+        #officerDetail .hireBtn[disabled] { background-position: 0 -108px; color: #848484; cursor: default; }
         #officerDetail .odTooPoor { display: block; margin-top: 8px; color: #a94442; }
+
+        /* Ligne de bonus sans marqueur tant qu'aucun officier n'est choisi. */
+        li.allOfficers.noIcon span { background-image: none !important; padding-right: 0; }
 
         #buttonz ul#building li a.detail_button { cursor: pointer; }
     </style>
@@ -116,12 +115,16 @@
                         </div>
                     </li>
 
-                    <li class="allOfficers {{ $activeCount === $totalOfficers ? '' : 'off' }}" id="officerBenefits">
-                        <span id="officerBenefitsText" title="{{ __('t_ingame.premium.benefit_resources_title') }}" class="tooltipCustom tooltipTop">{{ __('t_ingame.premium.benefit_resources') }}</span>
+                    <li class="allOfficers noIcon" id="officerBenefits">
+                        <span id="officerBenefitsText" class="tooltipCustom tooltipTop">{{ __('t_ingame.premium.choose_officer') }}</span>
                     </li>
                 </ul>
                 <br class="clearfloat">
                 <div id="officerDetail">
+                    <div class="odPanel" id="odPanel-none">
+                        <span class="odEffects">{{ __('t_ingame.premium.choose_officer_hint') }}</span>
+                    </div>
+
                     @foreach ($officers as $officer)
                         <div class="odPanel" id="odPanel-{{ $officer['officer'] }}" style="display: none;">
                             <span class="odName">{{ __('t_ingame.premium.officer_' . $officer['officer']) }}</span>
@@ -148,7 +151,7 @@
                         </div>
                     @endforeach
 
-                    <div class="odPanel" id="odPanel-staff">
+                    <div class="odPanel" id="odPanel-staff" style="display: none;">
                         <span class="odName">{{ __('t_ingame.premium.info_commanding_staff') }}</span>
                         <span class="odEffects">{{ __('t_ingame.premium.staff_explained', ['current' => $activeCount, 'max' => $totalOfficers]) }}</span>
                         @if ($activeCount === $totalOfficers)
@@ -178,6 +181,7 @@
             var box = document.getElementById('officerBenefits');
             var text = document.getElementById('officerBenefitsText');
             if (box && text) {
+                box.classList.remove('noIcon');
                 text.textContent = link.getAttribute('data-effects') || '';
                 if (link.getAttribute('data-active') === '1') {
                     box.classList.remove('off');
