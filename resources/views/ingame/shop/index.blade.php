@@ -13,22 +13,35 @@
     </div>
 
 <style>
+    /* Le theme fige .shop_slider et .inventory_slider a 405 x 360 px sans gerer le
+       debordement : le contenu s'echappait du cadre. On le fait defiler a l'interieur. */
+    #shop .shop_slider,
+    #shop .inventory_slider {
+        overflow-y: auto;
+        overflow-x: hidden;
+    }
+
     /* Grille auto-portante : les tuiles .item_img sont stylees par le theme, mais leur
-       conteneur d'origine etait un faux carrousel aux dimensions figees. */
+       conteneur d'origine etait un faux carrousel aux dimensions figees.
+       Largeur calculee pour tenir trois colonnes dans les 405 px disponibles :
+       3 x 116 + 2 x 12 d'ecart + 2 x 10 de marge = 392 px. */
     .ogx-item-grid {
         display: flex;
         flex-wrap: wrap;
-        gap: 14px;
-        padding: 14px;
+        gap: 12px;
+        padding: 10px;
     }
 
-    /* Chaque objet dans son propre cadre, pour qu'on distingue nettement les neuf. */
+    /* Chaque objet dans son propre cadre, pour qu'on distingue nettement les neuf.
+       box-sizing indispensable : sans lui la bordure s'ajoute a la largeur et fait
+       tomber la grille a deux colonnes. */
     .ogx-item {
+        box-sizing: border-box;
         display: flex;
         flex-direction: column;
         align-items: center;
         width: 116px;
-        padding: 8px 4px 6px;
+        padding: 6px 3px 5px;
         background: rgba(255, 255, 255, .03);
         border: 1px solid rgba(255, 255, 255, .08);
         border-radius: 5px;
@@ -39,30 +52,29 @@
     }
 
     .ogx-item-name {
-        margin-top: 7px;
+        margin-top: 5px;
         font-size: 11px;
         font-weight: bold;
-        line-height: 1.2;
+        line-height: 1.15;
         color: #cfe3f5;
         text-align: center;
     }
 
     .ogx-item-duration {
-        font-size: 11px;
+        font-size: 10px;
         color: #8fa7bd;
     }
 
     .ogx-item-action {
-        margin-top: 5px;
+        margin-top: 3px;
         cursor: pointer;
     }
 
     /* Reserve la ligne meme quand elle est vide, pour que les cadres restent alignes. */
     .ogx-item-owned {
-        margin-top: 3px;
-        font-size: 11px;
+        font-size: 10px;
         color: #8fa7bd;
-        min-height: 13px;
+        min-height: 12px;
     }
 
     .ogx-empty {
