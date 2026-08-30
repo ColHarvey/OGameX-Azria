@@ -2,11 +2,10 @@
 
 @section('content')
 
-    <div id="characterclassselectioncomponent" class="maincontent">
         <div id="characterclassselection">
             <div id="inhalt">
                 <div class="header small" id="planet">
-                    <h2>Selection de classe</h2>
+                    <h2>{{ __('t_ingame.characterclass.page_title') }}</h2>
                 </div>
                 <div class="c-left shortCorner"></div>
                 <div class="c-right shortCorner"></div>
@@ -66,7 +65,6 @@
                 </div>
             </div>
         </div>
-    </div>
 
     <script type="text/javascript">
         function selectCharacterClass(classId, className, price) {

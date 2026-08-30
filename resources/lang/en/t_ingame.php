@@ -1858,6 +1858,7 @@ Improved fleet escape rate',
         'day_7_text' => 'The foundations for a powerful empire are set. The Commanding Staff will soon be available to support you in the consolidation of your empire. This reward will be enabled as soon as officer recruitment is available on this universe.',
     ],
     'characterclass' => [
+        'page_title' => 'Class selection',
         'choose_title' => 'Choose your class',
         'choose_intro' => 'Choose a class to benefit from additional advantages. You can change it later from the selection section at the top right.',
         'btn_deactivate' => 'Deactivate',

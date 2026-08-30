@@ -1519,6 +1519,7 @@ Taux d\'évasion de la flotte amélioré',
         'day_7_text' => 'Les fondations d\'un empire puissant sont posées. L\'état-major viendra bientôt vous épauler dans la consolidation de votre empire. Cette récompense sera activée dès que le recrutement d\'officiers sera disponible sur cet univers.',
     ],
     'characterclass' => [
+        'page_title' => 'Sélection de classe',
         'choose_title' => 'Choisissez votre classe',
         'choose_intro' => 'Choisissez une classe pour bénéficier d\'avantages supplémentaires. Vous pourrez en changer depuis la section de sélection en haut à droite.',
         'btn_deactivate' => 'Désactiver',
