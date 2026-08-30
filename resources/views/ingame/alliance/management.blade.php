@@ -1,4 +1,20 @@
 {{-- Alliance Management Tab --}}
+<style>
+    /* Le bouton Sauvegarder est replace par script dans le pied de l'editeur BBCode ;
+       cette marge le separe du lien Apercu. */
+    #allyText .miu_footer .submitText {
+        margin-left: 8px;
+    }
+
+    /* Filet de securite : si l'editeur ne s'initialisait pas, le bouton flottant
+       s'echapperait du formulaire et retomberait sur la section suivante. */
+    #allyText form::after {
+        content: "";
+        display: table;
+        clear: both;
+    }
+</style>
+
 <div class="section">
     <h3>
         <a id="link21" class="closed" href="javascript:void(0);" rel="allyRanks" onclick="manageTabs('link21');">
@@ -428,6 +444,18 @@
 
         // Initialize BBCode editor for alliance textareas
         initBBCodeEditor(locaKeys, {}, false, '.alliancetexts', 50000, true);
+
+        // L'editeur BBCode insere son pied de bloc (compteur + Apercu) juste apres le
+        // textarea, donc avant notre bouton Sauvegarder. Celui-ci flotte alors hors du
+        // formulaire et retombe sur la section « Options ». On le replace dans ce pied,
+        // qui porte deja une classe clearfix : les deux boutons tiennent sur une ligne
+        // et le debordement disparait.
+        $('#allyText .submitText').each(function() {
+            var $pied = $(this).closest('form').find('.miu_footer');
+            if ($pied.length) {
+                $(this).prependTo($pied);
+            }
+        });
 
         // Initialize custom dropdown for Applications select
         $('#allySettings select#state').ogameDropDown();
