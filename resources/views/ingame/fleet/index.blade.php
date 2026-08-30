@@ -274,8 +274,8 @@
 
             var fleetCount = {{ $fleetSlotsInUse }};
             var maxFleetCount = {{ $fleetSlotsMax }};
-            var expeditionCount = 0;
-            var maxExpeditionCount = 1;
+            var expeditionCount = {{ $expeditionSlotsInUse }};
+            var maxExpeditionCount = {{ $expeditionSlotsMax }};
 
             var warningsEnabled = true;
 
