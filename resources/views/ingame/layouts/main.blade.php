@@ -1856,15 +1856,6 @@ However, the Space Dock's engineers think that some of the remains can be salvag
                 </div>
             </div>
         </div>
-        <div id="bannerSkyscrapercomponent" class="">
-            <div id="banner_skyscraper" class="desktop" name="banner_skyscraper">
-                <div style="position: relative;">
-                    <a class="tooltipLeft " title="" href="#TODO=shop">
-                        <img src="/img/banners/de0dadddb0285ba78b026ce18fc898.jpg" alt="">
-                    </a>
-                </div>
-            </div>
-        </div>
     </div>
 </div>
 
