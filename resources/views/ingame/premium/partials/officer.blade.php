@@ -15,6 +15,7 @@
                title="{{ __('t_ingame.premium.officer_' . $name) }} — {{ $statusLabel }}"
                class="detail_button tooltip js_hideTipOnMobile"
                data-effects="{{ __('t_ingame.premium.effects_' . $name) }}"
+               data-panel="{{ $name }}"
                data-active="{{ $officer['active'] ? '1' : '0' }}"
                onclick="showOfficerEffects(this);">
                 <span class="ecke">

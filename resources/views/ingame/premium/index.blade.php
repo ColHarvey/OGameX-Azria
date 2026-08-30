@@ -3,40 +3,38 @@
 @section('content')
 
     <style>
-        /* Le gabarit du jeu impose #inhalt a 670px et ul#building a 640px. */
-        #officerHire {
-            width: 640px; margin: 4px auto 0 17px; border-collapse: collapse;
-            color: #6f9fc8; font-size: 11px; line-height: 15px;
+        /* Panneau de detail, affiche au clic sur un portrait. Cale sur ul#building (640px). */
+        #officerDetail {
+            width: 606px; margin: 10px auto 0 17px; padding: 12px 16px;
+            background: #10181f; border: 1px solid #1b2129;
+            color: #6f9fc8; font-size: 11px; line-height: 17px; text-align: left;
         }
-        #officerHire th {
-            text-align: left; padding: 5px 8px; color: #848484; font-weight: normal;
-            border-bottom: 1px solid #000; background: #10181f;
+        #officerDetail .odName { color: #ff9600; font-size: 12px; font-weight: bold; display: block; margin-bottom: 4px; }
+        #officerDetail .odEffects { display: block; }
+        #officerDetail .odOwned {
+            display: block; margin-top: 10px; color: #9ccd41;
+            background: url("/img/icons/b1c7ef5b1164eba44e55b7f6d25d35.gif") no-repeat 0 3px; padding-left: 18px;
         }
-        #officerHire td { padding: 5px 8px; border-bottom: 1px solid #1b2129; vertical-align: middle; }
-        #officerHire tr:last-child td { border-bottom: 0; }
-        #officerHire .colOfficer { width: 120px; color: #ff9600; white-space: nowrap; }
-        #officerHire .colStatus { width: 150px; white-space: nowrap; }
-        #officerHire .colHire { width: 214px; text-align: left; white-space: nowrap; }
-        #officerHire tr.isActive .colStatus { color: #9ccd41; }
+        #officerDetail .odBuy { margin-top: 12px; }
+        #officerDetail form { display: inline; }
 
-        /* Bouton vert du sprite du jeu : 102x38 px a 0 -241px, survol a -104px. */
-        #officerHire .hireBtn {
-            display: inline-block; width: 102px; height: 38px; margin-right: 8px; padding: 0;
-            background: transparent url("/img/icons/18e4684df27114667e11541e5b2ef8.png") 0 -241px no-repeat;
+        /* Meme bouton et memes etats que le "Recuperer" de la page Recompenses :
+           c'est la paire du sprite dont le survol contraste le plus. */
+        #officerDetail .hireBtn {
+            display: inline-block; width: 141px; height: 15px; padding: 5px 0; margin-right: 10px;
+            background: transparent url("/img/icons/18e4684df27114667e11541e5b2ef8.png") 0 -188px no-repeat;
             border: 0; color: #fff; cursor: pointer; font-family: inherit; font-size: 11px;
-            font-weight: 700; line-height: 1; text-align: center; padding-top: 7px;
-            text-shadow: -1px 1px 3px #123f02;
+            font-weight: 600; line-height: 15px; text-align: center; text-shadow: -1px 1px 5px #246a05;
             transition: filter .12s ease, transform .06s ease;
         }
-        #officerHire .hireBtn:hover:not([disabled]) { background-position: -104px -241px; filter: brightness(1.1); }
-        #officerHire .hireBtn:active:not([disabled]) { transform: translateY(1px); filter: brightness(.9); }
-        #officerHire .hireBtn[disabled] { opacity: .35; cursor: default; filter: none; transform: none; }
-        #officerHire .hireBtn .btnDays { display: block; font-size: 11px; }
-        #officerHire .hireBtn .btnPrice { display: block; font-size: 10px; font-weight: normal; margin-top: 3px; }
+        #officerDetail .hireBtn:hover:not([disabled]) {
+            background-position: 0 -214px; filter: brightness(1.18);
+            text-shadow: 0 0 6px #2e8b0a, -1px 1px 3px #123f02;
+        }
+        #officerDetail .hireBtn:active:not([disabled]) { transform: translateY(1px); filter: brightness(.92); }
+        #officerDetail .hireBtn[disabled] { opacity: .35; cursor: default; filter: none; transform: none; }
+        #officerDetail .odTooPoor { display: block; margin-top: 8px; color: #a94442; }
 
-        /* La ligne de bonus sert aussi a afficher les effets d'un officier au clic. */
-        #officerBenefits { cursor: default; }
-        #officerBenefits span { cursor: help; }
         #buttonz ul#building li a.detail_button { cursor: pointer; }
     </style>
 
@@ -98,6 +96,7 @@
                                    title="{{ __('t_ingame.premium.info_commanding_staff') }}"
                                    class="detail_button tooltip js_hideTipOnMobile"
                                    data-effects="{{ __('t_ingame.premium.benefit_resources') }}"
+                                   data-panel="staff"
                                    data-active="{{ $activeCount === $totalOfficers ? '1' : '0' }}"
                                    onclick="showOfficerEffects(this);">
                                     <span class="ecke">
@@ -122,36 +121,41 @@
                     </li>
                 </ul>
                 <br class="clearfloat">
-                <table id="officerHire">
-                    <tr>
-                        <th class="colOfficer">{{ __('t_ingame.premium.table_officer') }}</th>
-                        <th class="colStatus">{{ __('t_ingame.premium.table_status') }}</th>
-                        <th class="colHire">{{ __('t_ingame.premium.table_hire') }}</th>
-                    </tr>
+                <div id="officerDetail">
                     @foreach ($officers as $officer)
-                        <tr class="{{ $officer['active'] ? 'isActive' : '' }}">
-                            <td class="colOfficer">{{ __('t_ingame.premium.officer_' . $officer['officer']) }}</td>
-                            <td class="colStatus">
-                                @if ($officer['active'])
-                                    {{ __('t_ingame.premium.active_until', ['date' => $officer['expires_at']->format('d/m H:i')]) }}
-                                @else
-                                    {{ __('t_ingame.premium.inactive') }}
-                                @endif
-                            </td>
-                            <td class="colHire">
+                        <div class="odPanel" id="odPanel-{{ $officer['officer'] }}" style="display: none;">
+                            <span class="odName">{{ __('t_ingame.premium.officer_' . $officer['officer']) }}</span>
+                            <span class="odEffects">{{ __('t_ingame.premium.effects_' . $officer['officer']) }}</span>
+
+                            @if ($officer['active'])
+                                <span class="odOwned">{{ __('t_ingame.premium.already_owned', ['date' => $officer['expires_at']->format('d/m/Y H:i')]) }}</span>
+                            @endif
+
+                            <div class="odBuy">
                                 @foreach ($officer['prices'] as $days => $price)
-                                    <form method="POST" action="{{ route('premium.hire') }}" style="display:inline">
+                                    <form method="POST" action="{{ route('premium.hire') }}">
                                         @csrf
                                         <input type="hidden" name="officer" value="{{ $officer['officer'] }}">
                                         <input type="hidden" name="days" value="{{ $days }}">
-                                        <button type="submit" class="hireBtn" {{ $darkMatter < $price ? 'disabled' : '' }}
-                                                title="{{ __('t_ingame.premium.hire_title', ['officer' => __('t_ingame.premium.officer_' . $officer['officer']), 'days' => $days, 'price' => number_format($price, 0, ',', ' ')]) }}"><span class="btnDays">{{ __('t_ingame.premium.btn_days', ['days' => $days]) }}</span><span class="btnPrice">{{ __('t_ingame.premium.btn_price', ['price' => number_format($price, 0, ',', ' ')]) }}</span></button>
+                                        <button type="submit" class="hireBtn" {{ $darkMatter < $price ? 'disabled' : '' }}>{{ __('t_ingame.premium.officer_buy_for', ['days' => $days, 'price' => number_format($price, 0, ',', ' ')]) }}</button>
                                     </form>
                                 @endforeach
-                            </td>
-                        </tr>
+                            </div>
+
+                            @if ($darkMatter < min($officer['prices']))
+                                <span class="odTooPoor">{{ __('t_ingame.premium.not_enough') }}</span>
+                            @endif
+                        </div>
                     @endforeach
-                </table>
+
+                    <div class="odPanel" id="odPanel-staff">
+                        <span class="odName">{{ __('t_ingame.premium.info_commanding_staff') }}</span>
+                        <span class="odEffects">{{ __('t_ingame.premium.staff_explained', ['current' => $activeCount, 'max' => $totalOfficers]) }}</span>
+                        @if ($activeCount === $totalOfficers)
+                            <span class="odOwned">{{ __('t_ingame.premium.benefit_resources') }}</span>
+                        @endif
+                    </div>
+                </div>
 
                 <br class="clearfloat">
                 <div class="footer"></div>
@@ -162,17 +166,24 @@
     <div style="clear: both; height: 1px;"></div>
 
     <script>
-        // Un clic sur une grosse tete affiche les effets de cet officier dans la boite
-        // situee a cote du compteur. La classe "off" bascule la coche verte en croix rouge.
+        // Un clic sur un portrait affiche le panneau correspondant sous la rangee,
+        // et bascule la ligne de bonus entre coche verte et croix rouge.
         function showOfficerEffects(link) {
+            var cible = link.getAttribute('data-panel');
+            var panneaux = document.querySelectorAll('#officerDetail .odPanel');
+            for (var i = 0; i < panneaux.length; i++) {
+                panneaux[i].style.display = (panneaux[i].id === 'odPanel-' + cible) ? 'block' : 'none';
+            }
+
             var box = document.getElementById('officerBenefits');
             var text = document.getElementById('officerBenefitsText');
-            if (!box || !text) { return; }
-            text.textContent = link.getAttribute('data-effects') || '';
-            if (link.getAttribute('data-active') === '1') {
-                box.classList.remove('off');
-            } else {
-                box.classList.add('off');
+            if (box && text) {
+                text.textContent = link.getAttribute('data-effects') || '';
+                if (link.getAttribute('data-active') === '1') {
+                    box.classList.remove('off');
+                } else {
+                    box.classList.add('off');
+                }
             }
         }
     </script>
