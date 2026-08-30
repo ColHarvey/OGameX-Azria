@@ -12,23 +12,29 @@
             text-align: left; padding: 5px 8px; color: #848484; font-weight: normal;
             border-bottom: 1px solid #000; background: #10181f;
         }
-        #officerHire td { padding: 6px 8px; border-bottom: 1px solid #1b2129; vertical-align: middle; }
+        #officerHire td { padding: 7px 8px; border-bottom: 1px solid #1b2129; vertical-align: middle; }
         #officerHire tr:last-child td { border-bottom: 0; }
-        #officerHire .colOfficer { width: 88px; color: #ff9600; white-space: nowrap; }
-        #officerHire .colEffects { width: 268px; }
-        #officerHire .colStatus { width: 104px; white-space: nowrap; }
-        #officerHire .colHire { width: 90px; text-align: center; }
+        #officerHire .colOfficer { width: 78px; color: #ff9600; white-space: nowrap; }
+        #officerHire .colEffects { width: 250px; }
+        #officerHire .colStatus { width: 96px; white-space: nowrap; }
+        #officerHire .colHire { width: 145px; text-align: center; }
         #officerHire tr.isActive .colStatus { color: #9ccd41; }
-        #officerHire button {
-            background: #22303f url("/img/outgame/f1c317aff2183c9b8b905bbbca9e8a.jpg") repeat-x 0 top;
-            border: 1px solid #3b4d5f; border-radius: 3px; color: #fff; cursor: pointer;
-            font-family: inherit; font-size: 11px; font-weight: bold; padding: 4px 0; width: 82px;
-            text-shadow: 0 -1px 1px rgba(0, 0, 0, .35);
+
+        /* Meme sprite et memes etats que le bouton "Recuperer" de la page Recompenses. */
+        #officerHire .hireBtn {
+            display: block; width: 141px; height: 15px; padding: 5px 0; margin: 0 auto 4px;
+            background: transparent url("/img/icons/18e4684df27114667e11541e5b2ef8.png") 0 -188px no-repeat;
+            border: 0; color: #fff; cursor: pointer; font-family: inherit; font-size: 11px;
+            font-weight: 600; text-align: center; text-shadow: -1px 1px 5px #246a05;
             transition: filter .12s ease, transform .06s ease;
         }
-        #officerHire button:hover { filter: brightness(1.4); }
-        #officerHire button:active { transform: translateY(1px); filter: brightness(.9); }
-        #officerHire button[disabled] { opacity: .35; cursor: default; filter: none; transform: none; }
+        #officerHire .hireBtn:last-child { margin-bottom: 0; }
+        #officerHire .hireBtn:hover:not([disabled]) {
+            background-position: 0 -214px; filter: brightness(1.18);
+            text-shadow: 0 0 6px #2e8b0a, -1px 1px 3px #123f02;
+        }
+        #officerHire .hireBtn:active:not([disabled]) { transform: translateY(1px); filter: brightness(.92); }
+        #officerHire .hireBtn[disabled] { opacity: .35; cursor: default; filter: none; transform: none; }
     </style>
 
     <div id="eventboxContent" style="display: none">
@@ -114,7 +120,7 @@
                         <th class="colOfficer">{{ __('t_ingame.premium.table_officer') }}</th>
                         <th class="colEffects">{{ __('t_ingame.premium.table_effects') }}</th>
                         <th class="colStatus">{{ __('t_ingame.premium.table_status') }}</th>
-                        <th class="colHire" colspan="2">{{ __('t_ingame.premium.table_hire') }}</th>
+                        <th class="colHire">{{ __('t_ingame.premium.table_hire') }}</th>
                     </tr>
                     @foreach ($officers as $officer)
                         <tr class="{{ $officer['active'] ? 'isActive' : '' }}">
@@ -127,19 +133,17 @@
                                     {{ __('t_ingame.premium.inactive') }}
                                 @endif
                             </td>
-                            @foreach ($officer['prices'] as $days => $price)
-                                <td class="colHire">
-                                    <form method="POST" action="{{ route('premium.hire') }}" style="display:inline">
+                            <td class="colHire">
+                                @foreach ($officer['prices'] as $days => $price)
+                                    <form method="POST" action="{{ route('premium.hire') }}">
                                         @csrf
                                         <input type="hidden" name="officer" value="{{ $officer['officer'] }}">
                                         <input type="hidden" name="days" value="{{ $days }}">
-                                        <button type="submit" {{ $darkMatter < $price ? 'disabled' : '' }}
-                                                title="{{ __('t_ingame.premium.hire_title', ['officer' => __('t_ingame.premium.officer_' . $officer['officer']), 'days' => $days, 'price' => number_format($price, 0, ',', ' ')]) }}">
-                                            {{ __('t_ingame.premium.hire_button', ['days' => $days, 'price' => number_format($price, 0, ',', ' ')]) }}
-                                        </button>
+                                        <button type="submit" class="hireBtn" {{ $darkMatter < $price ? 'disabled' : '' }}
+                                                title="{{ __('t_ingame.premium.hire_title', ['officer' => __('t_ingame.premium.officer_' . $officer['officer']), 'days' => $days, 'price' => number_format($price, 0, ',', ' ')]) }}">{{ __('t_ingame.premium.hire_button', ['days' => $days, 'price' => number_format($price, 0, ',', ' ')]) }}</button>
                                     </form>
-                                </td>
-                            @endforeach
+                                @endforeach
+                            </td>
                         </tr>
                     @endforeach
                 </table>
