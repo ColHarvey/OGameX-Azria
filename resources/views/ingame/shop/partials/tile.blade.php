@@ -18,15 +18,16 @@
         </div>
     </div>
 
+    <span class="ogx-item-name">{{ $itemName }}</span>
+    <span class="ogx-item-duration">{{ $item['duration'] }}</span>
+
     @if($action === 'buy')
-        <a class="ogx-item-action ogx-buy action btn_blue" data-ref="{{ $item['ref'] }}" href="javascript:void(0);">
+        <a class="ogx-item-action ogx-buy btn btn_confirm" data-ref="{{ $item['ref'] }}" href="javascript:void(0);">
             {{ __('t_ingame.shop.btn_buy') }}
         </a>
-        @if($owned > 0)
-            <span class="ogx-item-owned">{{ __('t_ingame.shop.item_in_inventory') }} : {{ $owned }}</span>
-        @endif
+        <span class="ogx-item-owned">{{ $owned > 0 ? __('t_ingame.shop.item_in_inventory') . ' : ' . $owned : '' }}&nbsp;</span>
     @else
-        <a class="ogx-item-action ogx-use action btn_blue" data-ref="{{ $item['ref'] }}" href="javascript:void(0);">
+        <a class="ogx-item-action ogx-use btn btn_confirm" data-ref="{{ $item['ref'] }}" href="javascript:void(0);">
             {{ __('t_ingame.shop.loca_activate') }}
         </a>
         <span class="ogx-item-owned">&times; {{ $owned }}</span>

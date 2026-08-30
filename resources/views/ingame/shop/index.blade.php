@@ -18,32 +18,51 @@
     .ogx-item-grid {
         display: flex;
         flex-wrap: wrap;
-        gap: 10px;
-        padding: 10px;
+        gap: 14px;
+        padding: 14px;
     }
 
+    /* Chaque objet dans son propre cadre, pour qu'on distingue nettement les neuf. */
     .ogx-item {
         display: flex;
         flex-direction: column;
         align-items: center;
-        width: 100px;
+        width: 116px;
+        padding: 8px 4px 6px;
+        background: rgba(255, 255, 255, .03);
+        border: 1px solid rgba(255, 255, 255, .08);
+        border-radius: 5px;
     }
 
     .ogx-item .item_img {
         margin: 0;
     }
 
-    .ogx-item-action {
-        margin-top: 4px;
-        width: 96px;
+    .ogx-item-name {
+        margin-top: 7px;
+        font-size: 11px;
+        font-weight: bold;
+        line-height: 1.2;
+        color: #cfe3f5;
         text-align: center;
+    }
+
+    .ogx-item-duration {
+        font-size: 11px;
+        color: #8fa7bd;
+    }
+
+    .ogx-item-action {
+        margin-top: 5px;
         cursor: pointer;
     }
 
+    /* Reserve la ligne meme quand elle est vide, pour que les cadres restent alignes. */
     .ogx-item-owned {
-        margin-top: 2px;
+        margin-top: 3px;
         font-size: 11px;
         color: #8fa7bd;
+        min-height: 13px;
     }
 
     .ogx-empty {
@@ -104,10 +123,6 @@
                                 </li>
                             @endforeach
                         </ul>
-                        <div class="btn_wrap">
-                            <a href="#" tabindex="1" class="btn btn_confirm buyResourcesLink">
-                                {{ __('t_ingame.shop.btn_get_more_resources') }}                    </a>
-                        </div>
                     </div>
 
                     <div id="js_shopSliderBox" class="shop_slider">
@@ -163,6 +178,12 @@
             $('.to_shop').on('click', function() { afficherPanneau(false); });
             $('.to_inventory').on('click', function() { afficherPanneau(true); });
 
+            // L'icone du menu Directives pointe vers /shop#page=inventory : on ouvre donc
+            // directement l'inventaire quand ce fragment est present.
+            if (window.location.hash.indexOf('page=inventory') !== -1) {
+                afficherPanneau(true);
+            }
+
             function envoyer(url, ref, messageErreurParDefaut) {
                 $.ajax({
                     url: url,
@@ -176,7 +197,12 @@
                             fadeBox(response.message, false);
                             // La page est rechargee : le solde de matiere noire, les quantites
                             // en inventaire et le compte a rebours de la file changent tous.
+                            // On reste sur le panneau ouvert : apres avoir active un objet
+                            // depuis l'inventaire, on veut y rester.
                             setTimeout(function() {
+                                if ($('#js_inventorySliderBox').is(':visible')) {
+                                    window.location.hash = 'page=inventory';
+                                }
                                 window.location.reload();
                             }, 1200);
                         } else {
