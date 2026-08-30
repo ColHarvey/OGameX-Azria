@@ -14,8 +14,8 @@
                     <div class="header">
                     </div>
                     <div class="content">
-                        <h2>Choisissez votre classe</h2>
-                        <p>Choisissez une classe pour beneficier d'avantages supplementaires. Vous pourrez en changer depuis la section de selection en haut a droite.</p>
+                        <h2>{{ __('t_ingame.characterclass.choose_title') }}</h2>
+                        <p>{{ __('t_ingame.characterclass.choose_intro') }}</p>
                         <div class="characterclass boxes">
                             @foreach($classes as $class)
                                 <div class="characterclass box {{ $currentClass && $currentClass->value === $class->value ? 'selected' : '' }}"
@@ -25,20 +25,20 @@
                                     <div class="buttons">
                                         @if($currentClass && $currentClass->value === $class->value)
                                             <a class="deactivate-it deactivate" href="javascript:void(0);" onclick="deselectCharacterClass()">
-                                                <span>Desactiver</span>
+                                                <span>{{ __('t_ingame.characterclass.btn_deactivate') }}</span>
                                             </a>
                                         @else
                                             @if($isFreeSelection)
                                                 <a class="build-it" href="javascript:void(0);" onclick="selectCharacterClass({{ $class->value }}, '{{ $class->getName() }}', {{ $changeCost }})">
-                                                    <span>Choisir gratuitement</span>
+                                                    <span>{{ __('t_ingame.characterclass.btn_choose_free') }}</span>
                                                 </a>
                                             @elseif($darkMatter >= $changeCost)
                                                 <a class="build-it" href="javascript:void(0);" onclick="selectCharacterClass({{ $class->value }}, '{{ $class->getName() }}', {{ $changeCost }})">
-                                                    <span>Acheter pour<br>{{ number_format($changeCost, 0, ',', '.') }} DM</span>
+                                                    <span>{{ __('t_ingame.characterclass.btn_buy_for') }}<br>{{ number_format($changeCost, 0, ',', '.') }} DM</span>
                                                 </a>
                                             @else
                                                 <a class="build-it_disabled nodarkmatter" href="/premium">
-                                                    <span>Acheter pour<br>{{ number_format($changeCost, 0, ',', '.') }} DM</span>
+                                                    <span>{{ __('t_ingame.characterclass.btn_buy_for') }}<br>{{ number_format($changeCost, 0, ',', '.') }} DM</span>
                                                 </a>
                                             @endif
                                         @endif
@@ -72,16 +72,18 @@
         function selectCharacterClass(classId, className, price) {
             let message = '';
             @if($isFreeSelection)
-                message = 'Do you want to activate the ' + className + ' class for free?';
+                message = @json(__('t_ingame.characterclass.select_free_confirm')).replace(':class', className);
             @else
-                message = 'Do you want to activate the ' + className + ' class for ' + price.toLocaleString() + ' Dark Matter? In doing so, you will lose your current class.';
+                message = @json(__('t_ingame.characterclass.select_paid_confirm'))
+                    .replace(':class', className)
+                    .replace(':price', price.toLocaleString());
             @endif
 
             errorBoxDecision(
-                'Select Character Class',
+                @json(__('t_ingame.characterclass.select_title')),
                 message,
-                'Confirm',
-                'Cancel',
+                @json(__('t_ingame.characterclass.btn_confirm')),
+                @json(__('t_ingame.characterclass.btn_cancel')),
                 function() {
                     fetch('{{ route('characterclass.select') }}', {
                         method: 'POST',
@@ -96,16 +98,16 @@
                     .then(response => response.json())
                     .then(data => {
                         if (data.status === 'success') {
-                            fadeBox('Character class selected successfully!', false);
+                            fadeBox(@json(__('t_ingame.characterclass.msg_selected')), false);
                             setTimeout(function() {
                                 location.reload();
                             }, 1000);
                         } else if (data.lackingDM) {
                             errorBoxDecision(
-                                'Not enough Dark Matter',
-                                'Not enough Dark Matter available! Do you want to buy some now?',
-                                'Buy Dark Matter',
-                                'Cancel',
+                                @json(__('t_ingame.characterclass.not_enough_dm_title')),
+                                @json(__('t_ingame.characterclass.not_enough_dm_text')),
+                                @json(__('t_ingame.characterclass.btn_get_dm')),
+                                @json(__('t_ingame.characterclass.btn_cancel')),
                                 function() {
                                     window.location.href = '/premium';
                                 }
@@ -116,7 +118,7 @@
                     })
                     .catch(error => {
                         console.error('Error:', error);
-                        fadeBox('An error occurred. Please try again.', true);
+                        fadeBox(@json(__('t_ingame.characterclass.msg_error')), true);
                     });
                 }
             );
@@ -124,10 +126,10 @@
 
         function deselectCharacterClass() {
             errorBoxDecision(
-                'Desactiver Character Class',
-                'Do you really want to deactivate your character class? Reactivation requires {{ number_format($changeCost, 0, ',', '.') }} Dark Matter.',
-                'Desactiver',
-                'Cancel',
+                @json(__('t_ingame.characterclass.deactivate_title')),
+                @json(__('t_ingame.characterclass.deactivate_confirm', ['price' => number_format($changeCost, 0, ',', ' ')])),
+                @json(__('t_ingame.characterclass.btn_deactivate')),
+                @json(__('t_ingame.characterclass.btn_cancel')),
                 function() {
                     fetch('{{ route('characterclass.deselect') }}', {
                         method: 'POST',
@@ -139,7 +141,7 @@
                     .then(response => response.json())
                     .then(data => {
                         if (data.status === 'success') {
-                            fadeBox('Character class deactivated successfully!', false);
+                            fadeBox(@json(__('t_ingame.characterclass.msg_deactivated')), false);
                             setTimeout(function() {
                                 location.reload();
                             }, 1000);
@@ -149,7 +151,7 @@
                     })
                     .catch(error => {
                         console.error('Error:', error);
-                        fadeBox('An error occurred. Please try again.', true);
+                        fadeBox(@json(__('t_ingame.characterclass.msg_error')), true);
                     });
                 }
             );
