@@ -47,6 +47,7 @@ use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
+use OGame\Services\ShopService;
 use RuntimeException;
 
 class ExpeditionMission extends GameMission
@@ -662,9 +663,14 @@ class ExpeditionMission extends GameMission
         // Load the mission owner user
         $player = $this->playerServiceFactory->make($mission->user_id, true);
 
-        // TODO: Implement actual item giving logic when items themselves are implemented.
+        // L'objet est reellement ajoute a l'inventaire du joueur. Le service est resolu ici
+        // plutot qu'injecte : le constructeur de GameMission est partage par toutes les
+        // missions et c'est un des fichiers les plus sujets aux conflits avec l'amont.
+        resolve(ShopService::class)->grantRandomItem($player->getUser());
 
-        // Send a message to the player with the item found outcome.
+        // Send a message to the player with the item found outcome. Le libelle reste
+        // volontairement generique : y injecter le nom de l'objet ferait apparaitre le
+        // marqueur :item dans tous les messages deja recus par les joueurs.
         $message_variation_id = ExpeditionGainItem::getRandomMessageVariationId();
         $this->messageService->sendSystemMessageToPlayer($player, ExpeditionGainItem::class, ['message_variation_id' => $message_variation_id]);
     }

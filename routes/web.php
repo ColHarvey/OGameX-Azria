@@ -202,6 +202,8 @@ Route::middleware(['auth', 'banned', 'globalgame', 'locale', 'firstlogin'])->gro
     Route::get('/premium', [PremiumController::class, 'index'])->name('premium.index');
     Route::post('/premium/hire', [PremiumController::class, 'hire'])->name('premium.hire');
     Route::get('/shop', [ShopController::class, 'index'])->name('shop.index');
+    Route::post('/shop/buy', [ShopController::class, 'buy'])->name('shop.buy');
+    Route::post('/shop/use', [ShopController::class, 'useItem'])->name('shop.use');
 
     // Character Class
     Route::get('/characterclass', [CharacterClassController::class, 'index'])->name('characterclass.index');
