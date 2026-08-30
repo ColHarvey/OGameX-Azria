@@ -411,8 +411,8 @@
     {{-- Passer l'alliance : reserve au fondateur, vers un membre « Main droite » --}}
     @php($candidatsTransfert = $leadershipCandidates ?? collect())
     @if($member && $member->isFounder())
-        <div class="contentz" id="assignally">
-            <table class="settings_table">
+        <div class="contentz">
+            <table id="assignally" class="settings_table">
                 <tr>
                     <th colspan="2">{{ __('t_ingame.alliance.handover') }}</th>
                 </tr>
@@ -429,7 +429,11 @@
                     </tr>
                     <tr>
                         <td colspan="2">
-                            <a class="transferLeadership action btn_blue float_right" href="javascript:void(0);">{{ __('t_ingame.alliance.loca_continue') }}</a>
+                            {{-- La classe ne doit PAS etre "transferLeadership" : le JavaScript
+                                 embarque du jeu se lie a "#assignally .transferLeadership" avec un
+                                 gestionnaire casse (il affiche le voile de chargement, puis poste
+                                 vers une URL undefined et ne le masque jamais). --}}
+                            <a class="passAlliance action btn_blue float_right" href="javascript:void(0);">{{ __('t_ingame.alliance.loca_continue') }}</a>
                         </td>
                     </tr>
                 @else
@@ -557,7 +561,7 @@
         // Passer l'alliance a un autre membre. Le gestionnaire embarque du jeu existe
         // mais est casse : il lit this.urlTransferLeadership dans une callback ou
         // « this » n'est plus l'objet Alliance, donc l'URL y vaut undefined.
-        $('#assignally .transferLeadership').on('click', function(e) {
+        $('#assignally .passAlliance').on('click', function(e) {
             e.preventDefault();
 
             var nouveauChef = $('#assignally #newLeaderId').val();
