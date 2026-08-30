@@ -2,6 +2,7 @@
 
 namespace OGame\Services;
 
+use Illuminate\Support\Facades\Date;
 use OGame\GameConstants\UniverseConstants;
 use OGame\Models\Planet;
 use OGame\Models\Planet\Coordinate;
@@ -139,10 +140,16 @@ class CoordinateDistanceCalculator
         $start = min($from->system, $to->system);
         $end = max($from->system, $to->system);
 
+        // Le seuil d'activite est calcule en PHP plutot que par la base. Cela reprend
+        // exactement la regle de PlayerService::isInactive(), evite toute divergence si
+        // l'horloge ou le fuseau du serveur de base differe de celui de PHP, et rend la
+        // requete portable : DATE_SUB, INTERVAL et IF sont propres a MariaDB.
+        $seuilActivite = (int) Date::now()->subDays(7)->timestamp;
+
         // Count systems where all planets belong to inactive users
         // A user is considered inactive if time is older than 7 days (matching PlayerService::isInactive())
         $inactiveSystems = Planet::selectRaw('planets.system')
-            ->selectRaw('SUM(IF(users.time >= UNIX_TIMESTAMP(DATE_SUB(NOW(), INTERVAL 7 DAY)), 1, 0)) AS active_count')
+            ->selectRaw('SUM(CASE WHEN users.time >= ? THEN 1 ELSE 0 END) AS active_count', [$seuilActivite])
             ->join('users', 'users.id', '=', 'planets.user_id')
             ->where('planets.galaxy', '=', $from->galaxy)
             ->where('planets.system', '>=', $start)

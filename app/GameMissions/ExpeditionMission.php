@@ -23,6 +23,7 @@ use OGame\GameMissions\Abstracts\GameMission;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
+use OGame\GameMissions\BattleEngine\PhpBattleEngine;
 use OGame\GameMissions\BattleEngine\RustBattleEngine;
 use OGame\GameMissions\Models\ExpeditionOutcomeType;
 use OGame\GameMissions\Models\MissionPossibleStatus;
@@ -748,12 +749,28 @@ class ExpeditionMission extends GameMission
         $attackerFleet->isInitiator = true;
         $attackerFleet->fleetMission = $mission;
 
-        $battleEngine = new RustBattleEngine(
-            [$attackerFleet],
-            $npcPlanetService,
-            $defenders,
-            $this->settings
-        );
+        // Le moteur de combat suit le reglage du serveur, comme dans AttackMission,
+        // EspionageMission et MoonDestructionMission. Les expeditions imposaient Rust,
+        // ce qui rendait battleEngine() sans effet pour elles.
+        switch ($this->settings->battleEngine()) {
+            case 'php':
+                $battleEngine = new PhpBattleEngine(
+                    [$attackerFleet],
+                    $npcPlanetService,
+                    $defenders,
+                    $this->settings
+                );
+                break;
+            case 'rust':
+            default:
+                $battleEngine = new RustBattleEngine(
+                    [$attackerFleet],
+                    $npcPlanetService,
+                    $defenders,
+                    $this->settings
+                );
+                break;
+        }
 
         $battleResult = $battleEngine->simulateBattle();
 
