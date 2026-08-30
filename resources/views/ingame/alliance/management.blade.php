@@ -408,12 +408,54 @@
 </div>
 
 <div class="sectioncontent" id="allyDelete" style="display:none;">
+    {{-- Passer l'alliance : reserve au fondateur, vers un membre « Main droite » --}}
+    @php($candidatsTransfert = $leadershipCandidates ?? collect())
+    @if($member && $member->isFounder())
+        <div class="contentz" id="assignally">
+            <table class="settings_table">
+                <tr>
+                    <th colspan="2">{{ __('t_ingame.alliance.handover') }}</th>
+                </tr>
+                @if($candidatsTransfert->isNotEmpty())
+                    <tr>
+                        <td>{{ __('t_ingame.alliance.loca_change_founder') }}</td>
+                        <td>
+                            <select class="w300" name="newLeaderId" id="newLeaderId">
+                                @foreach($candidatsTransfert as $candidate)
+                                    <option value="{{ $candidate->user_id }}">{{ $candidate->user->username }}</option>
+                                @endforeach
+                            </select>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="2">
+                            <a class="transferLeadership action btn_blue float_right" href="javascript:void(0);">{{ __('t_ingame.alliance.loca_continue') }}</a>
+                        </td>
+                    </tr>
+                @else
+                    <tr>
+                        <td colspan="2">{{ __('t_ingame.alliance.no_transfer_candidates') }}</td>
+                    </tr>
+                @endif
+            </table>
+        </div>
+    @endif
+
     <div class="contentz" id="dissolveally">
-        @if($member && $member->hasPermission(\OGame\Models\AllianceRank::PERMISSION_DELETE_ALLY))
-            <a class="dissolve action btn_blue" href="javascript:void(0);">{{ __('t_ingame.alliance.delete_btn') }}</a>
-        @else
-            <p>{{ __('t_ingame.alliance.no_delete_perm') }}</p>
-        @endif
+        <table class="settings_table">
+            <tr>
+                <th colspan="2">{{ __('t_ingame.alliance.delete_pass_on') }}</th>
+            </tr>
+            <tr>
+                <td colspan="2">
+                    @if($member && $member->hasPermission(\OGame\Models\AllianceRank::PERMISSION_DELETE_ALLY))
+                        <a class="dissolve action btn_blue float_right" href="javascript:void(0);">{{ __('t_ingame.alliance.delete_btn') }}</a>
+                    @else
+                        {{ __('t_ingame.alliance.no_delete_perm') }}
+                    @endif
+                </td>
+            </tr>
+        </table>
     </div>
     <div class="footer"></div>
 </div>
@@ -506,6 +548,61 @@
             );
         });
 
+
+        // Passer l'alliance a un autre membre. Le gestionnaire embarque du jeu existe
+        // mais est casse : il lit this.urlTransferLeadership dans une callback ou
+        // « this » n'est plus l'objet Alliance, donc l'URL y vaut undefined.
+        $('#assignally .transferLeadership').on('click', function(e) {
+            e.preventDefault();
+
+            var nouveauChef = $('#assignally #newLeaderId').val();
+            if (!nouveauChef) {
+                return;
+            }
+
+            errorBoxDecision(
+                "{{ __('t_ingame.shared.caution') }}",
+                "{{ __('t_ingame.alliance.confirm_pass_on') }}",
+                "{{ __('t_ingame.shared.yes') }}",
+                "{{ __('t_ingame.shared.no') }}",
+                function() {
+                    alliance.loadingIndicator.show();
+                    $.ajax({
+                        url: '{{ route('alliance.action') }}',
+                        type: 'POST',
+                        data: {
+                            action: 'transfer_leadership',
+                            newLeaderId: nouveauChef,
+                            _token: alliance.token
+                        },
+                        success: function(response) {
+                            alliance.loadingIndicator.hide();
+                            if (response.status === 'success') {
+                                fadeBox(response.message, false);
+                                // La page doit etre rechargee : l'ancien fondateur perd
+                                // l'acces a cet onglet dans la seconde qui suit.
+                                setTimeout(function() {
+                                    window.location.reload();
+                                }, 1500);
+                            } else {
+                                fadeBox(response.message || @json(__('t_ingame.alliance.msg_transfer_error')), true);
+                            }
+                            if (response.newAjaxToken) {
+                                alliance.updateToken(response.newAjaxToken);
+                            }
+                        },
+                        error: function(xhr) {
+                            alliance.loadingIndicator.hide();
+                            var errorMessage = @json(__('t_ingame.alliance.msg_transfer_error'));
+                            if (xhr.responseJSON && xhr.responseJSON.message) {
+                                errorMessage = xhr.responseJSON.message;
+                            }
+                            fadeBox(errorMessage, true);
+                        }
+                    });
+                }
+            );
+        });
         // Le JavaScript embarque du jeu attend #form_newTag/.newTag et #form_newName/.newName,
         // qui n'existent pas dans cette vue : sans ce gestionnaire, le bouton ne fait rien.
         $('.newTagName').on('click', function(e) {

@@ -656,6 +656,88 @@ class AllianceService
     }
 
     /**
+     * Get the members eligible to receive the founder title.
+     *
+     * Le jeu reserve ce transfert aux membres portant la permission « Main droite »,
+     * comme l'annonce l'infobulle de la page de gestion.
+     *
+     * @param int $allianceId
+     * @return Collection<int, AllianceMember>
+     */
+    public function getLeadershipCandidates(int $allianceId): Collection
+    {
+        $alliance = $this->getAllianceById($allianceId);
+        if ($alliance === null) {
+            return new Collection();
+        }
+
+        return $this->getAllianceMembers($allianceId)
+            ->filter(function (AllianceMember $candidate) use ($alliance): bool {
+                return $candidate->user_id !== $alliance->founder_user_id
+                    && $candidate->rank !== null
+                    && $candidate->rank->hasPermission(AllianceRank::PERMISSION_RIGHT_HAND);
+            })
+            ->values();
+    }
+
+    /**
+     * Transfer the founder title to another member.
+     *
+     * L'ancien fondateur reste dans l'alliance mais retombe au rang de nouveau venu :
+     * il ne conserve aucun droit particulier.
+     *
+     * @param int $allianceId
+     * @param int $newFounderUserId
+     * @param int $currentFounderUserId
+     * @return void
+     * @throws Exception
+     */
+    public function transferLeadership(int $allianceId, int $newFounderUserId, int $currentFounderUserId): void
+    {
+        $alliance = $this->getAllianceById($allianceId);
+        if ($alliance === null) {
+            throw new Exception(__('t_ingame.alliance.msg_not_found'));
+        }
+
+        // Seul le fondateur en titre peut ceder l'alliance, quels que soient les droits
+        // des autres membres.
+        if ($alliance->founder_user_id !== $currentFounderUserId) {
+            throw new Exception(__('t_ingame.alliance.msg_no_permission'));
+        }
+
+        if ($newFounderUserId === $currentFounderUserId) {
+            throw new Exception(__('t_ingame.alliance.msg_transfer_self'));
+        }
+
+        $candidate = $this->getAllianceMember($allianceId, $newFounderUserId);
+        if ($candidate === null) {
+            throw new Exception(__('t_ingame.alliance.msg_member_not_found'));
+        }
+
+        if ($candidate->rank === null || !$candidate->rank->hasPermission(AllianceRank::PERMISSION_RIGHT_HAND)) {
+            throw new Exception(__('t_ingame.alliance.msg_transfer_needs_right_hand'));
+        }
+
+        $formerFounder = $this->getAllianceMember($allianceId, $currentFounderUserId);
+
+        DB::transaction(function () use ($alliance, $candidate, $formerFounder, $newFounderUserId): void {
+            // Le titre de fondateur decoule de founder_user_id, pas d'un rang : le
+            // nouveau fondateur n'a donc plus besoin de celui qu'il portait.
+            $alliance->founder_user_id = $newFounderUserId;
+            $alliance->save();
+
+            $candidate->rank_id = null;
+            $candidate->save();
+
+            // L'ancien fondateur redevient un membre ordinaire, sans droits.
+            if ($formerFounder !== null) {
+                $formerFounder->rank_id = null;
+                $formerFounder->save();
+            }
+        });
+    }
+
+    /**
      * Disband an alliance.
      *
      * @param int $allianceId

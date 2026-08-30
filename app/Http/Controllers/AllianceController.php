@@ -212,12 +212,19 @@ class AllianceController extends OGameController
         $member = $allianceService->getAllianceMember($userAllianceId, $userId);
         $ranks = $alliance !== null ? $alliance->ranks : collect();
 
+        // Seul le fondateur peut ceder l'alliance : inutile de calculer la liste
+        // des candidats pour les autres membres.
+        $leadershipCandidates = ($member !== null && $member->isFounder())
+            ? $allianceService->getLeadershipCandidates($userAllianceId)
+            : collect();
+
         return response()->json([
             'content' => [
                 'alliance/alliance_management' => view('ingame.alliance.management')->with([
                     'alliance' => $alliance,
                     'member' => $member,
                     'ranks' => $ranks,
+                    'leadershipCandidates' => $leadershipCandidates,
                 ])->render(),
             ],
             'files' => [
@@ -809,6 +816,19 @@ class AllianceController extends OGameController
                     $allianceService->disbandAlliance($allianceId, $userId);
                     $message = __('t_ingame.alliance.msg_disbanded');
                     $redirectUrl = route('alliance.index');
+                    break;
+
+                case 'transfer_leadership':
+                    $allianceId = $player->getUser()->alliance_id;
+                    if ($allianceId === null) {
+                        throw new Exception(__('t_ingame.alliance.msg_not_in_alliance'));
+                    }
+                    $allianceService->transferLeadership(
+                        $allianceId,
+                        (int) $request->input('newLeaderId'),
+                        $userId
+                    );
+                    $message = __('t_ingame.alliance.msg_leadership_transferred');
                     break;
 
                 case 'send_broadcast':
