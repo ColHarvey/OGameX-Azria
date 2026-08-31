@@ -155,6 +155,26 @@
             color: #9c0;
         }
 
+        /* Les deux rangees de recompenses sont declarees flex par le theme, mais avec la
+           seule valeur display:-ms-flexbox — la syntaxe d Internet Explorer 10. Aucun
+           navigateur actuel ne l applique, et les vignettes s empilaient donc en colonne
+           au lieu de s aligner. On redeclare la valeur standard. */
+        #rewardings .normalRewards,
+        #rewardings .additionalRewards {
+            display: flex;
+            flex-direction: row;
+            flex-wrap: nowrap;
+            align-items: stretch;
+        }
+
+        /* Cinq vignettes bonus dans la meme largeur : elles se partagent la place. */
+        #rewardings .additionalRewards .singleReward {
+            flex: 1 1 0;
+            min-width: 0;
+            margin: 0 3px;
+            padding: 8px 4px;
+        }
+
         /* Vignette de recompense, sur le modele du jeu : une illustration unique et sa
            quantite en badge d angle. Les elements secondaires d une recompense composee
            passent en ligne sous l image, plutot qu en pile d icones. */
