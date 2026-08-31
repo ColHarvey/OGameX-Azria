@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use Illuminate\Database\QueryException;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Date;
 use OGame\Models\EventMissionClaim;
 use OGame\Models\EventMissionDraw;
@@ -10,6 +12,7 @@ use OGame\Services\EventMissionService;
 use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
 use ReflectionClass;
+use ReflectionMethod;
 use Tests\AccountTestCase;
 
 /**
@@ -520,5 +523,282 @@ class EventMissionTest extends AccountTestCase
         foreach (array_unique($m[1]) as $src) {
             $this->assertFileExists(public_path(ltrim($src, '/')), "Broken image on the event page: $src");
         }
+    }
+
+    /**
+     * Assert that crediting is idempotent, however many times it runs.
+     */
+    public function testCreditingIsIdempotent(): void
+    {
+        $this->openEvent();
+
+        $player = resolve(PlayerService::class);
+        $eventService = resolve(EventMissionService::class);
+
+        $premier = $eventService->creditEventDays($player);
+        $this->assertGreaterThan(0, $premier, 'Nothing was credited on the first pass.');
+
+        $total = $eventService->getTritium($player);
+        $this->assertGreaterThan(0, $total);
+
+        // Deux passages de plus : aucun credit supplementaire, total inchange.
+        $this->assertEquals(0, $eventService->creditEventDays($player));
+        $this->assertEquals(0, $eventService->creditEventDays($player));
+        $this->assertEquals($total, $eventService->getTritium($player));
+
+        $this->assertEquals(
+            $premier,
+            EventMissionClaim::where('user_id', $player->getId())->count(),
+            'Repeated passes created extra claim rows.'
+        );
+    }
+
+    /**
+     * Assert that the database itself refuses a second credit for the same mission.
+     *
+     * Toute l'architecture repose la-dessus : le credit n'est pas « verifier puis ecrire »,
+     * c'est un INSERT que la contrainte d'unicite arbitre. Ce test attaque la base
+     * directement, sans passer par le code applicatif, pour prouver que deux traitements
+     * concurrents ne peuvent pas doubler le tritium.
+     */
+    public function testDatabaseRejectsADuplicateCredit(): void
+    {
+        $this->openEvent();
+
+        $player = resolve(PlayerService::class);
+        $eventService = resolve(EventMissionService::class);
+
+        $eventService->creditEventDays($player);
+
+        $existante = EventMissionClaim::where('user_id', $player->getId())->firstOrFail();
+        $avant = $eventService->getTritium($player);
+
+        $rejetee = false;
+
+        try {
+            EventMissionClaim::create([
+                'user_id' => $existante->user_id,
+                'event_start' => $existante->event_start,
+                'mission_date' => $existante->mission_date,
+                'mission_key' => $existante->mission_key,
+                'tritium' => $existante->tritium,
+                'claimed_at' => Date::now(),
+            ]);
+        } catch (QueryException $e) {
+            $rejetee = (int)$e->getCode() === 23000;
+        }
+
+        $this->assertTrue($rejetee, 'The database accepted a duplicate credit.');
+        $this->assertEquals($avant, $eventService->getTritium($player), 'The total moved despite the rejection.');
+    }
+
+    /**
+     * Assert that a mission removed from the catalogue no longer blocks its day.
+     *
+     * Non-regression : le raccourci « ce jour est solde » comparait les missions creditees
+     * au tirage entier. Une cle disparue n'etant jamais creditable, l'egalite n'arrivait
+     * jamais et la journee etait remesuree a chaque visite, indefiniment.
+     */
+    public function testMissionRemovedFromCatalogueIsIgnoredAndDoesNotBlockTheDay(): void
+    {
+        $this->openEvent();
+
+        $player = resolve(PlayerService::class);
+        $eventService = resolve(EventMissionService::class);
+        $today = Date::now()->startOfDay();
+
+        // Un tirage contenant une cle qui n'existe plus au catalogue, a cote d'une vraie.
+        EventMissionDraw::create([
+            'user_id' => $player->getId(),
+            'event_start' => Date::now()->subDay()->startOfDay(),
+            'mission_date' => $today,
+            'missions' => [
+                ['key' => 'login', 'tritium' => 100, 'target' => 1],
+                ['key' => 'mission_supprimee_du_catalogue', 'tritium' => 300, 'target' => 1],
+            ],
+        ]);
+
+        $premier = $eventService->creditEventDays($player);
+
+        // Seule la mission encore au catalogue est creditee.
+        $this->assertEquals(1, $premier);
+        $this->assertEquals(100, $eventService->getTritium($player));
+
+        // Et la journee est consideree comme soldee : plus rien a faire au passage suivant.
+        $this->assertEquals(0, $eventService->creditEventDays($player));
+    }
+
+    /**
+     * Assert that work done before going on holiday stays acquired.
+     */
+    public function testMissionCompletedBeforeVacationStaysCredited(): void
+    {
+        $this->openEvent();
+
+        $player = resolve(PlayerService::class);
+        $eventService = resolve(EventMissionService::class);
+
+        // Le joueur a ete actif aujourd hui, puis part en vacances.
+        $user = $player->getUser();
+        $user->vacation_mode = true;
+        $user->vacation_mode_activated_at = Date::now();
+        $user->vacation_mode_until = Date::now()->addHours(48);
+        $user->save();
+        $player->refresh();
+
+        $eventService->creditEventDays($player);
+
+        $this->assertEquals(
+            100,
+            $eventService->getTritium($player),
+            'Going on holiday erased work already done that day.'
+        );
+    }
+
+    /**
+     * Assert that a frozen account earns nothing for the days it was frozen.
+     */
+    public function testVacationModeEarnsNothingForFrozenDays(): void
+    {
+        $this->openEvent();
+
+        $player = resolve(PlayerService::class);
+        $eventService = resolve(EventMissionService::class);
+
+        // Gele depuis avant le debut de l evenement : aucune journee ne lui est due.
+        $user = $player->getUser();
+        $user->vacation_mode = true;
+        $user->vacation_mode_activated_at = Date::now()->subDays(10);
+        $user->vacation_mode_until = Date::now()->addDays(10);
+        $user->save();
+        $player->refresh();
+
+        $this->assertEquals(0, $eventService->creditEventDays($player));
+        $this->assertEquals(0, $eventService->getTritium($player));
+    }
+
+    /**
+     * Assert that the service reads the clock once per request.
+     *
+     * Une requete qui traverse minuit ou la cloture de l evenement doit juger sur un instant
+     * unique, sinon elle peut se croire dans l evenement au debut et hors evenement a la fin.
+     */
+    public function testTheClockIsReadOnlyOncePerRequest(): void
+    {
+        $eventService = resolve(EventMissionService::class);
+
+        $methode = new ReflectionMethod($eventService, 'now');
+        $methode->setAccessible(true);
+
+        $premier = $methode->invoke($eventService);
+
+        // L horloge avance, mais le service ne doit pas s en apercevoir.
+        Date::setTestNow(Date::now()->addHours(3));
+        $second = $methode->invoke($eventService);
+        Date::setTestNow();
+
+        $this->assertEquals(
+            $premier->timestamp,
+            $second->timestamp,
+            'The service read the clock twice within one request.'
+        );
+    }
+
+    /**
+     * Assert that a duplicate and a real database fault are two different exceptions.
+     *
+     * Le code n'attrape que UniqueConstraintViolationException. Ce test verifie que la
+     * distinction existe reellement sur notre schema et notre pilote : un doublon leve bien
+     * l'exception dediee, tandis qu'une autre atteinte a l'integrite — ici une cle etrangere
+     * — leve une QueryException ordinaire, qui doit continuer a remonter. Sans cette
+     * distinction, une panne de production passerait pour un « deja credite » silencieux.
+     */
+    public function testADuplicateAndARealFaultAreDistinctExceptions(): void
+    {
+        $this->openEvent();
+
+        $player = resolve(PlayerService::class);
+        resolve(EventMissionService::class)->creditEventDays($player);
+
+        $existante = EventMissionClaim::where('user_id', $player->getId())->firstOrFail();
+
+        // Cas 1 : doublon exact.
+        $doublon = null;
+
+        try {
+            EventMissionClaim::create([
+                'user_id' => $existante->user_id,
+                'event_start' => $existante->event_start,
+                'mission_date' => $existante->mission_date,
+                'mission_key' => $existante->mission_key,
+                'tritium' => $existante->tritium,
+                'claimed_at' => Date::now(),
+            ]);
+        } catch (QueryException $e) {
+            $doublon = $e;
+        }
+
+        $this->assertInstanceOf(
+            UniqueConstraintViolationException::class,
+            $doublon,
+            'A duplicate credit is not reported as a unique constraint violation.'
+        );
+
+        // Cas 2 : joueur inexistant, donc violation de cle etrangere.
+        $panne = null;
+
+        try {
+            EventMissionClaim::create([
+                'user_id' => 999999,
+                'event_start' => $existante->event_start,
+                'mission_date' => $existante->mission_date,
+                'mission_key' => 'login',
+                'tritium' => 100,
+                'claimed_at' => Date::now(),
+            ]);
+        } catch (QueryException $e) {
+            $panne = $e;
+        }
+
+        $this->assertInstanceOf(QueryException::class, $panne, 'The foreign key was not enforced.');
+        $this->assertNotInstanceOf(
+            UniqueConstraintViolationException::class,
+            $panne,
+            'A foreign key fault is mistaken for a duplicate, and would be swallowed as "already credited".'
+        );
+    }
+
+    /**
+     * Assert that losing a race credits nothing and raises nothing.
+     *
+     * Simule le perdant d'une course : la ligne que le service s'apprete a inserer existe
+     * deja. Il doit passer son chemin sans erreur et sans double credit — c'est le chemin de
+     * code que la contrainte declenche en production quand deux requetes arrivent ensemble.
+     */
+    public function testLosingARaceIsHandledGracefully(): void
+    {
+        $this->openEvent();
+
+        $player = resolve(PlayerService::class);
+        $eventService = resolve(EventMissionService::class);
+        $today = Date::now()->startOfDay();
+        $debut = Date::now()->subDay()->startOfDay();
+
+        // Le concurrent a deja credite la mission de connexion.
+        EventMissionClaim::create([
+            'user_id' => $player->getId(),
+            'event_start' => $debut,
+            'mission_date' => $today,
+            'mission_key' => 'login',
+            'tritium' => 100,
+            'claimed_at' => Date::now(),
+        ]);
+
+        // Notre requete arrive apres coup : elle ne doit ni echouer ni recrediter.
+        $creditees = $eventService->creditEventDays($player);
+
+        $this->assertEquals(0, $creditees, 'The losing request credited the mission a second time.');
+        $this->assertEquals(100, $eventService->getTritium($player));
+        $this->assertEquals(1, EventMissionClaim::where('user_id', $player->getId())->count());
     }
 }

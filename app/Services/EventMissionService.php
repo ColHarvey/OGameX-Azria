@@ -3,7 +3,7 @@
 namespace OGame\Services;
 
 use Exception;
-use Illuminate\Database\QueryException;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -202,6 +202,29 @@ class EventMissionService
     }
 
     /**
+     * Instant de reference de la requete en cours.
+     */
+    private Carbon|null $maintenant = null;
+
+    /**
+     * Returns the single point in time every decision of this request relies on.
+     *
+     * L'horloge n'est lue qu'une fois. Sans cela, une requete qui traverse minuit ou la
+     * cloture de l'evenement pourrait juger l'evenement ouvert au debut et ferme a la
+     * fin, ou changer de jour entre le tirage et le credit.
+     *
+     * @return Carbon
+     */
+    private function now(): Carbon
+    {
+        if ($this->maintenant === null) {
+            $this->maintenant = Date::now();
+        }
+
+        return $this->maintenant->copy();
+    }
+
+    /**
      * Returns whether the event is currently open to players.
      *
      * @return bool
@@ -219,7 +242,7 @@ class EventMissionService
             return false;
         }
 
-        $today = Date::now()->startOfDay();
+        $today = $this->now()->startOfDay();
 
         return $today->greaterThanOrEqualTo($start) && $today->lessThanOrEqualTo($end);
     }
@@ -253,7 +276,7 @@ class EventMissionService
      *
      * @param PlayerService $player
      * @param Carbon $day
-     * @return array<int, array{key: string, tritium: int}>
+     * @return array<int, array{key: string, tritium: int, target?: int}>
      */
     public function getDrawForDay(PlayerService $player, Carbon $day): array
     {
@@ -274,7 +297,11 @@ class EventMissionService
 
         $tirage = [];
         foreach ($this->drawMissionKeys($player->getId(), $day) as $key) {
-            $tirage[] = ['key' => $key, 'tritium' => self::MISSIONS[$key]['tritium']];
+            $tirage[] = [
+                'key' => $key,
+                'tritium' => self::MISSIONS[$key]['tritium'],
+                'target' => self::MISSIONS[$key]['target'],
+            ];
         }
 
         try {
@@ -284,12 +311,11 @@ class EventMissionService
                 'mission_date' => $day,
                 'missions' => $tirage,
             ]);
-        } catch (QueryException $e) {
-            if ((int)$e->getCode() !== 23000) {
-                throw $e;
-            }
-
+        } catch (UniqueConstraintViolationException) {
             // Deux onglets ont fige le tirage en meme temps : relire celui qui a gagne.
+            // Toute autre erreur de base remonte : une contrainte de cle etrangere ou une
+            // colonne manquante n'est pas un doublon, et la confondre avec un ferait
+            // passer une panne de production pour un cas metier normal.
             $existant = EventMissionDraw::where('user_id', $player->getId())
                 ->whereDate('event_start', $start)
                 ->whereDate('mission_date', $day)
@@ -328,14 +354,6 @@ class EventMissionService
             return 0;
         }
 
-        // Un compte en mode vacances est gele : sa production s'arrete et il est a l'abri
-        // des attaques. Le laisser encaisser du tritium serait injuste envers les joueurs
-        // actifs — et la mission 'se connecter', acquise d'office, la lui offrirait chaque
-        // jour sans qu'il ait rien a faire.
-        if ($player->isInVacationMode()) {
-            return 0;
-        }
-
         $start = $this->getStart();
         $end = $this->getEnd();
 
@@ -343,9 +361,8 @@ class EventMissionService
             return 0;
         }
 
-        $today = Date::now()->startOfDay();
-        $dernier = $today->lessThan($end) ? $today : $end;
         $premier = $this->firstEligibleDay($player, $start);
+        $dernier = $this->lastEligibleDay($player, $end);
 
         $creditees = 0;
 
@@ -381,7 +398,7 @@ class EventMissionService
                     continue;
                 }
 
-                if ($this->measure($player, $key, $day) < self::MISSIONS[$key]['target']) {
+                if ($this->measure($player, $key, $day) < $this->targetOf($mission)) {
                     continue;
                 }
 
@@ -405,7 +422,7 @@ class EventMissionService
      */
     public function getDailyMissions(PlayerService $player): array
     {
-        $today = Date::now()->startOfDay();
+        $today = $this->now()->startOfDay();
         $start = $this->getStart();
 
         if ($start === null) {
@@ -430,7 +447,7 @@ class EventMissionService
             }
 
             $progress = $this->measure($player, $key, $today);
-            $target = self::MISSIONS[$key]['target'];
+            $target = $this->targetOf($mission);
 
             $missions[] = [
                 'key' => $key,
@@ -475,18 +492,32 @@ class EventMissionService
                 'mission_date' => $day,
                 'mission_key' => $key,
                 'tritium' => $this->withOfficerBonus($player, $baseTritium),
-                'claimed_at' => Date::now(),
+                'claimed_at' => $this->now(),
             ]);
-        } catch (QueryException $e) {
-            // Doublon : la mission etait deja creditee, il n'y a rien a faire.
-            if ((int)$e->getCode() !== 23000) {
-                throw $e;
-            }
-
+        } catch (UniqueConstraintViolationException) {
+            // Doublon, et rien d'autre : la mission etait deja creditee. Toute autre
+            // erreur de base — connexion perdue, colonne inexistante, cle etrangere —
+            // continue de remonter. Les traiter toutes comme un doublon transformerait
+            // une panne en 'mission deja traitee', silencieusement.
             return false;
         }
 
         return true;
+    }
+
+    /**
+     * Returns the quantity a drawn mission asked for.
+     *
+     * La valeur figee au tirage prime sur le catalogue : un jour rattrape doit etre juge
+     * sur la quantite qui etait affichee au joueur ce jour-la, pas sur celle d'aujourd'hui.
+     * Le repli sur le catalogue ne sert qu'aux tirages ecrits avant l'ajout de ce champ.
+     *
+     * @param array{key: string, tritium: int, target?: int} $mission
+     * @return int
+     */
+    private function targetOf(array $mission): int
+    {
+        return $mission['target'] ?? self::MISSIONS[$mission['key']]['target'];
     }
 
     /**
@@ -511,6 +542,47 @@ class EventMissionService
         $jourInscription = $inscription->copy()->startOfDay();
 
         return $jourInscription->greaterThan($start) ? $jourInscription : $start->copy();
+    }
+
+    /**
+     * Returns the last event day a player is entitled to.
+     *
+     * Le mode vacances **borne** le balayage, il ne l'annule pas. Un joueur qui accomplit
+     * ses missions le lundi puis part en vacances le mardi garde son lundi : geler un
+     * compte ne doit pas effacer du travail deja fait. Seuls les jours ou le compte etait
+     * deja gele sont ecartes — production arretee, aucune attaque possible, et la mission
+     * 'se connecter' qui serait offerte chaque jour sans rien faire.
+     *
+     * @param PlayerService $player
+     * @param Carbon $end
+     * @return Carbon
+     */
+    private function lastEligibleDay(PlayerService $player, Carbon $end): Carbon
+    {
+        $today = $this->now()->startOfDay();
+        $dernier = $today->lessThan($end) ? $today : $end->copy();
+
+        if (!$player->isInVacationMode()) {
+            return $dernier;
+        }
+
+        // activateVacationMode() ecrit toujours les deux colonnes ensemble ; une date
+        // absente signale un enregistrement incoherent, auquel cas on ne retire rien.
+        $gel = $player->getUser()->vacation_mode_activated_at;
+
+        if ($gel === null) {
+            return $dernier;
+        }
+
+        // La coupure est a la JOURNEE, pas a l heure : le jour du depart reste entierement
+        // acquis, y compris une mission accomplie apres l activation. Tout le systeme
+        // raisonne par journee — tirage quotidien, mesures bornees a [00:00, 23:59], cle
+        // d unicite portant une date. Couper a l heure exacte obligerait a reecrire les
+        // quinze requetes de measure() pour accepter des bornes arbitraires, pour empecher
+        // quelques centaines de tritium le jour du depart.
+        $jourGel = $gel->copy()->startOfDay();
+
+        return $jourGel->lessThan($dernier) ? $jourGel : $dernier;
     }
 
     /**
@@ -548,7 +620,7 @@ class EventMissionService
             return 0;
         }
 
-        return (int)Date::now()->startOfDay()->diffInDays($end) + 1;
+        return (int)$this->now()->startOfDay()->diffInDays($end) + 1;
     }
 
     /**
@@ -673,14 +745,12 @@ class EventMissionService
                     'event_start' => $start,
                     'rank' => $rank,
                     'reward_key' => $rewardKey,
-                    'claimed_at' => Date::now(),
+                    'claimed_at' => $this->now(),
                 ]);
-            } catch (QueryException $e) {
-                if ((int)$e->getCode() === 23000) {
-                    throw new RuntimeException(__('t_ingame.events.error_rank_already_claimed'));
-                }
-
-                throw $e;
+            } catch (UniqueConstraintViolationException) {
+                // Seul le doublon devient un message au joueur ; les autres erreurs de
+                // base remontent telles quelles.
+                throw new RuntimeException(__('t_ingame.events.error_rank_already_claimed'));
             }
 
             $this->grantReward($player, $reward, $rank);

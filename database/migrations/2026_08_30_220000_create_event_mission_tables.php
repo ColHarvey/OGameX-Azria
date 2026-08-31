@@ -24,10 +24,10 @@ return new class () extends Migration {
             $table->date('event_start');
             $table->date('mission_date');
 
-            // Les missions tirees, dans l'ordre, encodees en JSON : chaque entree porte
-            // sa cle ET sa valeur en tritium. Figer la seule cle ne suffirait pas — le
-            // rattrapage des jours passes crediterait alors un ancien jour au tarif du
-            // catalogue actuel.
+            // Les missions tirees, dans l'ordre, encodees en JSON : chaque entree porte sa
+            // cle, sa valeur en tritium et la quantite demandee. Figer la seule cle ne
+            // suffirait pas — le rattrapage des jours passes jugerait un ancien jour au tarif
+            // et sur les objectifs du catalogue actuel, pas sur ceux qui etaient affiches.
             $table->text('missions');
 
             $table->unique(['user_id', 'event_start', 'mission_date']);

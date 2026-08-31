@@ -16,7 +16,7 @@ use Illuminate\Support\Carbon;
  * @property int $user_id
  * @property Carbon $event_start
  * @property Carbon $mission_date
- * @property array<int, array{key: string, tritium: int}> $missions
+ * @property array<int, array{key: string, tritium: int, target?: int}> $missions
  * @property-read User $user
  * @method static Builder|EventMissionDraw newModelQuery()
  * @method static Builder|EventMissionDraw newQuery()
