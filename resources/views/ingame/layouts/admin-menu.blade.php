@@ -7,8 +7,7 @@
         #adminbar {
             background: transparent url('/img/admin/admin-menu-bg.jpg') repeat-x;
             font: normal 11px Tahoma, Arial, Helvetica, sans-serif;
-            height: auto;
-            min-height: 32px;
+            height: 32px;
             left: 0;
             padding: 0;
             text-align: center;
@@ -18,20 +17,23 @@
         }
 
         #adminbar #mmoContent {
-            height: auto;
-            min-height: 32px;
+            height: 32px;
             margin: 0 auto;
             width: 990px;
             position: relative;
-            /* Contient les deux flottants : sans cela le conteneur garde une hauteur nulle
-               et la barre ne grandit pas avec sa liste. */
+            /* Centrage vertical du titre et des liens dans la bande orange. L ancienne mise
+               en page les posait par une marge fixe de 8px, devinee pour une seule ligne de
+               texte : le moindre ecart de hauteur les faisait deborder sous l image de fond. */
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
             overflow: hidden;
         }
 
         #adminbar #adminLogo {
-            float: left;
+            float: none;
             display: block;
-            height: 32px;
+            height: auto;
             width: auto;
             padding: 5px 10px;
             padding-left: 0;
@@ -47,9 +49,9 @@
 
         #adminbar ul {
             list-style: none;
-            margin-top: 8px;
+            margin: 0;
             padding: 0;
-            float: right;
+            float: none;
         }
 
         #adminbar ul li {
