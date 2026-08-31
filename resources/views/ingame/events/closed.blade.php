@@ -18,6 +18,8 @@
                     </div>
                     <div class="content">
                         <p style="color:#8fa7bd; padding:20px;">{{ __('t_ingame.events.closed') }}</p>
+
+                        <div class="footer"></div>
                     </div>
                 </div>
             </div>
