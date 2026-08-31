@@ -175,63 +175,53 @@
             padding: 8px 4px;
         }
 
-        /* Vignette de recompense, sur le modele du jeu : une illustration unique et sa
-           quantite en badge d angle. Les elements secondaires d une recompense composee
-           passent en ligne sous l image, plutot qu en pile d icones. */
-        #rewardings .ogx-visual {
+        /* Chaque element d une recompense : son illustration et son montant, poses cote
+           a cote. Le montant est dessine sur le coin, comme dans le jeu. */
+        #rewardings .ogx-parts {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 8px;
+            margin: 6px 0 4px;
+        }
+
+        #rewardings .ogx-part {
             position: relative;
-            width: 92px;
-            height: 68px;
-            margin: 6px auto 2px;
+            padding-bottom: 14px;
         }
 
-        #rewardings .ogx-visual-img {
-            width: 68px;
-            height: 68px;
-            margin: 0 auto;
+        #rewardings .ogx-part-img {
+            width: 52px;
+            height: 52px;
             display: block;
         }
 
-        #rewardings .ogx-visual-res {
+        #rewardings .ogx-part-res {
             float: none;
-            margin: 18px auto 0;
             display: block;
         }
 
-        /* Le badge reprend le coin orange du jeu : un filet en biais et le nombre a droite. */
         #rewardings .ogx-badge {
             color: #d29d00;
             text-align: right;
+            white-space: nowrap;
             font-weight: 600;
             border-left: 2px solid #d29d00;
             border-bottom: 2px solid #d29d00;
             padding: 0 2px 1px 0;
             position: absolute;
             right: 0;
-            bottom: -2px;
-            left: 8px;
+            bottom: 0;
+            left: 6px;
         }
 
-        #rewardings .ogx-extra {
-            color: #8fa7bd;
-            text-align: center;
-            font-size: 10px;
-            line-height: 14px;
-            display: block;
+        #rewardings .additionalRewards .ogx-part-img {
+            width: 42px;
+            height: 42px;
         }
 
-        #rewardings .ogx-extra-line {
-            display: block;
-        }
-
-        #rewardings .additionalRewards .ogx-visual {
-            width: 76px;
-            height: 56px;
-        }
-
-        #rewardings .additionalRewards .ogx-visual-img {
-            width: 56px;
-            height: 56px;
+        #rewardings .additionalRewards .ogx-parts {
+            gap: 4px;
         }
 
         #rewardings .singleReward.ogx-chosen {

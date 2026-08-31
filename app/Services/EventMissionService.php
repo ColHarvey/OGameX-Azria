@@ -956,10 +956,7 @@ class EventMissionService
 
             'fleet_size' => $this->largestFleet($userId, $debut, $fin),
 
-            'chat' => DB::table('chat_messages')
-                ->where('sender_id', $userId)
-                ->whereBetween('created_at', [$debutDate, $finDate])
-                ->count(),
+            'chat' => $this->countMessagesSent($userId, $debutDate, $finDate),
 
             // Etat et non action : appartenir a une alliance d'au moins trois membres suffit,
             // quel que soit le jour ou le joueur l'a rejointe.
@@ -1047,6 +1044,34 @@ class EventMissionService
             ->value('total');
 
         return (int)$total;
+    }
+
+    /**
+     * Counts the messages a player sent in a window, chat and inbox alike.
+     *
+     * Le jeu a deux systemes distincts : le chat ecrit dans chat_messages, un message
+     * adresse a un joueur dans messages. La mission dit « envoyer un message » sans
+     * preciser lequel : ne compter que le premier faisait echouer un joueur qui avait
+     * pourtant fait ce qu on lui demandait.
+     *
+     * @param int $userId
+     * @param Carbon $debut
+     * @param Carbon $fin
+     * @return int
+     */
+    private function countMessagesSent(int $userId, Carbon $debut, Carbon $fin): int
+    {
+        $chat = DB::table('chat_messages')
+            ->where('sender_id', $userId)
+            ->whereBetween('created_at', [$debut, $fin])
+            ->count();
+
+        $prives = DB::table('messages')
+            ->where('sender_user_id', $userId)
+            ->whereBetween('created_at', [$debut, $fin])
+            ->count();
+
+        return $chat + $prives;
     }
 
     /**
