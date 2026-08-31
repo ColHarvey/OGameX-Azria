@@ -74,9 +74,26 @@
             margin-bottom: 12px;
         }
 
+        /* Les illustrations du jeu n existent qu en 28x28 et 40x40. Les etirer a la
+           taille du puits les rendait floues ; on les affiche a leur taille native,
+           centrees. Le dossier public/img ne contient pas les icones de taches d OGame ;
+           si elles sont ajoutees un jour, il suffit de changer le champ icon du
+           catalogue dans EventMissionService. */
         #rewardings .rewardlist-item-icon img {
-            width: 76px;
-            height: 74px;
+            width: 40px;
+            height: 40px;
+            margin: 20px 0 0 22px;
+        }
+
+        /* Coche de validation. Celle du sprite d icones ne fait que 16 px ; le theme
+           embarque une marque de 46x43 pour ses messages de succes, bien plus lisible.
+           Elle est bleutee a l origine, la rotation de teinte la met au vert du jeu. */
+        #rewardings .ogx-check {
+            background: url(/img/icons/7f424858dabeaec63cbbc43f1cc8d9.png) no-repeat;
+            filter: hue-rotate(-65deg) saturate(1.4);
+            width: 46px;
+            height: 43px;
+            display: block;
         }
 
         #rewardings .ogx-gain {
@@ -246,7 +263,7 @@
                                                             @if ($mission['done'])
                                                                 <div class="reward-claimed-text">
                                                                     <p class="ogx-gain">+{{ number_format($mission['tritium'], 0, ',', ' ') }}</p>
-                                                                    <span class="icon icon_checkmark"></span>
+                                                                    <span class="ogx-check"></span>
                                                                 </div>
                                                             @endif
 
