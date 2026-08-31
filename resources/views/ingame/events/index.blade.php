@@ -43,6 +43,32 @@
            x 104-616, y 5-39, soit 512 x 35 px, biseau compris a droite. Cette largeur
            correspond a celle de .rewardlist-item-text, ce qui place le biseau pile a
            l extremite de la ligne. */
+        /* Alignement des trois elements du cadre sur la meme largeur. La bande de titre
+           fait 512 px dans le sprite ; sans cela le corps et le bas, plus larges, la
+           debordaient de quelques pixels a droite. */
+        #rewardings .rewardlist-item {
+            width: 612px;
+        }
+
+        #rewardings .rewardlist-item-text,
+        #rewardings .rewardlist-item-bottom {
+            width: 512px;
+        }
+
+        /* Puits d icone : le sprite en contient un, releve a x 7-92, y 3-82, soit
+           86 x 80 px bordure comprise. Sans lui l image flottait sans cadre. */
+        #rewardings .rewardlist-item-icon {
+            background: url(/img/icons/e3e67150390416129bbbc8696f7b91.png) -7px -3px no-repeat;
+            width: 86px;
+            height: 80px;
+        }
+
+        #rewardings .rewardlist-item-icon img {
+            width: 74px;
+            height: 74px;
+            margin: 3px 0 0 5px;
+        }
+
         #rewardings .rewardheader {
             background-position: -104px -5px;
             width: 512px;
@@ -216,7 +242,7 @@
                                             @foreach ($groupe as $mission)
                                                 <div class="rewardlist-item {{ $mission['done'] ? 'rewarded' : '' }}">
                                                     <div class="rewardlist-item-icon">
-                                                        <img src="/img/{{ $mission['icon'] }}" width="80" height="80"
+                                                        <img src="/img/{{ $mission['icon'] }}"
                                                              alt="{{ __('t_ingame.events.mission_' . $mission['key'] . '_name') }}">
                                                     </div>
                                                     <div class="rewardlist-item-text">
