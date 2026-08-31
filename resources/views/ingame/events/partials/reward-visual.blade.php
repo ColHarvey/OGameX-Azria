@@ -1,6 +1,6 @@
-{{-- Chaque element d'une recompense porte sa propre illustration et son propre montant,
-     poses cote a cote. Une seule quantite en badge pour toute la vignette laissait croire
-     qu'elle valait pour la ligne du dessous. --}}
+{{-- Chaque element porte son illustration, son nom et sa quantite. Sans le nom, une icone
+     de metal et une de cristal se ressemblent assez pour qu'on ne sache pas ce qu'on
+     choisit. --}}
 <div class="ogx-parts">
     @foreach ($detail as $part)
         <div class="ogx-part">
@@ -9,6 +9,7 @@
             @else
                 <span class="ogx-part-res resourceIcon {{ $part['kind'] }}"></span>
             @endif
+            <span class="ogx-part-label">{{ $part['label'] }}</span>
             <span class="ogx-badge">{{ $part['amount'] }}</span>
         </div>
     @endforeach

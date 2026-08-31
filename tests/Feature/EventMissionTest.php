@@ -1054,4 +1054,71 @@ class EventMissionTest extends AccountTestCase
             'The opening instant does not match the wall clock the rest of the game uses.'
         );
     }
+
+    /**
+     * Assert the claim button appears exactly when the rank is reached, and not before.
+     */
+    public function testTheClaimButtonAppearsOnlyOnReachedRanks(): void
+    {
+        $this->openEvent();
+
+        $player = resolve(PlayerService::class);
+
+        // Sans tritium, aucun rang n'est atteint : aucun bouton, et le seuil est annonce.
+        $html = $this->get(route('events.index'))->getContent();
+        $this->assertIsString($html);
+
+        $this->assertEquals(0, substr_count($html, 'tier-button ogx-choose'), 'A claim button showed on an unreached rank.');
+        $this->assertStringContainsString(__('t_ingame.events.rank_locked'), $html);
+
+        // Avec 1 000 tritium, le rang 1 s'ouvre : ses trois choix deviennent cliquables.
+        EventMissionClaim::create([
+            'user_id' => $player->getId(),
+            'event_start' => Date::now()->subDay()->startOfDay(),
+            'mission_date' => Date::now()->startOfDay(),
+            'mission_key' => 'expedition',
+            'tritium' => 1000,
+            'claimed_at' => Date::now(),
+        ]);
+
+        $html = $this->get(route('events.index'))->getContent();
+        $this->assertIsString($html);
+
+        $this->assertEquals(3, substr_count($html, 'tier-button ogx-choose'), 'Rank 1 should offer exactly its three choices.');
+
+        // Et une fois reclame, les boutons disparaissent au profit du choix retenu.
+        resolve(EventMissionService::class)->claimRank($player, 1, 'resources');
+
+        $html = $this->get(route('events.index'))->getContent();
+        $this->assertIsString($html);
+
+        $this->assertEquals(0, substr_count($html, 'tier-button ogx-choose'), 'The rank stayed claimable after being claimed.');
+        $this->assertStringContainsString(__('t_ingame.events.your_choice'), $html);
+    }
+
+    /**
+     * Assert every reward part is named on screen, not shown as a bare icon.
+     */
+    public function testEveryRewardPartIsNamed(): void
+    {
+        $this->openEvent();
+
+        $html = $this->get(route('events.index'))->getContent();
+        $this->assertIsString($html);
+
+        foreach (['gain_metal', 'gain_crystal', 'gain_deuterium', 'gain_dark_matter'] as $cle) {
+            $this->assertStringContainsString(
+                __('t_ingame.rewards.' . $cle),
+                $html,
+                "The reward page shows an icon without naming: $cle"
+            );
+        }
+
+        // Chaque illustration doit etre accompagnee de son libelle.
+        $this->assertEquals(
+            substr_count($html, 'class="ogx-part"'),
+            substr_count($html, 'class="ogx-part-label"'),
+            'Some reward parts are shown without a name.'
+        );
+    }
 }

@@ -200,6 +200,15 @@
             display: block;
         }
 
+        #rewardings .ogx-part-label {
+            color: #cfe3f5;
+            text-align: center;
+            font-size: 10px;
+            line-height: 13px;
+            display: block;
+            margin-top: 3px;
+        }
+
         #rewardings .ogx-badge {
             color: #d29d00;
             text-align: center;
