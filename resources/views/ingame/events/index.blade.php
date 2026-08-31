@@ -74,20 +74,37 @@
             margin-bottom: 12px;
         }
 
-        /* Les illustrations du jeu n existent qu en 28x28 et 40x40. Les etirer a la
-           taille du puits les rendait floues ; on les affiche a leur taille native,
-           centrees. Le dossier public/img ne contient pas les icones de taches d OGame ;
-           si elles sont ajoutees un jour, il suffit de changer le champ icon du
-           catalogue dans EventMissionService. */
+        /* L image remplit le puits, comme sur la reference. Les sources du jeu ne font
+           que 40x40 : l agrandissement adoucit un peu le rendu, mais un cadre a moitie
+           vide s en ecartait davantage. Le theme prevoit des planches de 80px nettes
+           (.sprite.ship.small, .sprite.defense.small) mais celle des batiments,
+           /img/layout/resources/spriteset.png, est absente du depot : les employer ne
+           couvrirait que 8 missions sur 15 et melangerait deux tailles. */
         #rewardings .rewardlist-item-icon img {
-            width: 40px;
-            height: 40px;
-            margin: 20px 0 0 22px;
+            width: 76px;
+            height: 74px;
+            margin: 3px 0 0 5px;
         }
 
         /* Coche de validation. Celle du sprite d icones ne fait que 16 px ; le theme
            embarque une marque de 46x43 pour ses messages de succes, bien plus lisible.
            Elle est bleutee a l origine, la rotation de teinte la met au vert du jeu. */
+        /* Gain et coche alignes a droite et centres verticalement sur la ligne, au lieu
+           du decalage fixe de 30px du theme, prevu pour un contenu d une seule ligne. */
+        #rewardings .reward-claimed-text {
+            top: 50%;
+            right: 12px;
+            transform: translateY(-50%);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        #rewardings .reward-claimed-text > p {
+            float: none;
+            margin: 0;
+        }
+
         #rewardings .ogx-check {
             background: url(/img/icons/7f424858dabeaec63cbbc43f1cc8d9.png) no-repeat;
             filter: hue-rotate(-65deg) saturate(1.4);
