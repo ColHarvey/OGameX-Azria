@@ -43,6 +43,15 @@
            est dessine d un bloc, a la position 0 0, sur un element de 619 px qui
            enveloppe l icone et le texte. Le corps qui deborde est prolonge par le
            remplissage repetable de .rewardlist-item-wrapper. */
+        /* Le pied du cadre est dessine en position absolue et remonte de 45 px sur le
+           contenu — mesure dans l inspecteur : hauteur 50 px, bottom -20 px. Sur les
+           pages a hauteur fixe comme la Boutique cela ne se voit pas, il recouvre du
+           vide. Ici la liste se termine au bord, et la courbe de fermeture masquait la
+           derniere mission. On reserve donc la place qu il occupe. */
+        #eventscomponent #buttonz > .content {
+            padding-bottom: 45px;
+        }
+
         #rewardings .rewardheader {
             width: 619px;
             margin-bottom: 12px;
