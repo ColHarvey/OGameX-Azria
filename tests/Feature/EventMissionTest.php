@@ -1022,4 +1022,36 @@ class EventMissionTest extends AccountTestCase
             Date::setTestNow();
         }
     }
+
+    /**
+     * Assert that the opening instant is read in the application timezone.
+     *
+     * Constate en production : getOpenedAt rendait une date en UTC alors que le jeu tourne en
+     * America/Toronto. Laravel la convertissait en texte pour la requete, ou elle se trouvait
+     * comparee a des colonnes ecrites en heure locale — quatre heures d'ecart, et des actions
+     * de joueurs ignorees sans la moindre erreur visible.
+     */
+    public function testTheOpeningInstantIsReadInTheApplicationTimezone(): void
+    {
+        $this->openEvent();
+
+        $horodatage = Date::now()->timestamp;
+        resolve(SettingsService::class)->set('event_missions_opened_at', (int)$horodatage);
+
+        $ouverture = resolve(EventMissionService::class)->getOpenedAt();
+
+        $this->assertNotNull($ouverture);
+        $this->assertEquals(
+            config('app.timezone'),
+            $ouverture->timezoneName,
+            'The opening instant is not in the application timezone; date comparisons will drift.'
+        );
+
+        // Et il doit designer le meme instant, formate comme le reste du jeu.
+        $this->assertEquals(
+            Date::now()->format('Y-m-d H:i:s'),
+            $ouverture->format('Y-m-d H:i:s'),
+            'The opening instant does not match the wall clock the rest of the game uses.'
+        );
+    }
 }

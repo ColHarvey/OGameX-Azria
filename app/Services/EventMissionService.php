@@ -262,6 +262,11 @@ class EventMissionService
      * l ouverture ne doit etre credite. Les evenements ouverts avant que ce reglage
      * existe renvoient null, et retombent alors sur minuit.
      *
+     * Le fuseau est passe explicitement : sans lui createFromTimestamp rend une date en
+     * UTC, que Laravel convertit ensuite en texte pour la requete. Elle serait alors
+     * comparee a des colonnes ecrites en heure locale — quatre heures d ecart sur ce
+     * serveur, et des actions de joueurs ignorees sans aucune erreur visible.
+     *
      * @return Carbon|null
      */
     public function getOpenedAt(): Carbon|null
@@ -272,7 +277,7 @@ class EventMissionService
             return null;
         }
 
-        return Date::createFromTimestamp($horodatage);
+        return Date::createFromTimestamp($horodatage, config('app.timezone'));
     }
 
     /**
