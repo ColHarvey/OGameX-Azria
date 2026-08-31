@@ -89,6 +89,20 @@
             text-align: center;
         }
 
+        /* Avertissement de perte : discret tant que l'echeance est lointaine, franc
+           quand il ne reste que deux jours. */
+        #rewardings .ogx-loss {
+            color: #848484;
+            text-align: center;
+            margin: 4px 0 10px;
+            font-size: 11px;
+        }
+
+        #rewardings .ogx-loss.urgent {
+            color: #e74c3c;
+            font-weight: 600;
+        }
+
         #rewardings .ogx-empty {
             color: #848484;
             padding: 20px;
@@ -163,6 +177,14 @@
                                             </div>
                                         </div>
 
+                                        <p class="ogx-loss {{ $daysLeft <= 2 ? 'urgent' : '' }}">
+                                            @if ($daysLeft <= 2)
+                                                {{ __('t_ingame.events.loss_warning_urgent', ['days' => $daysLeft]) }}
+                                            @else
+                                                {{ __('t_ingame.events.loss_warning') }}
+                                            @endif
+                                        </p>
+
                                         @forelse ($groupes as $valeur => $groupe)
                                             <div class="tritiumstage">
                                                 <span class="tritiumvalue">{{ __('t_ingame.events.tritium_value', [
@@ -219,6 +241,7 @@
                                                 'threshold' => number_format($rang['threshold'], 0, ',', ' '),
                                             ]) }}</p>
                                             <p class="ogx-rank-text">{{ __('t_ingame.events.planet_warning', ['planet' => $currentPlanetName]) }}</p>
+                                            <p class="ogx-loss {{ $daysLeft <= 2 ? 'urgent' : '' }}">{{ __('t_ingame.events.loss_warning') }}</p>
 
                                             <div class="normalRewards">
                                                 @foreach ($rang['rewards'] as $rewardKey => $reward)

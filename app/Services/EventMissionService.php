@@ -37,6 +37,12 @@ use RuntimeException;
  *
  * Comme dans OGame, une mission se valide au lancement et non a l'achevement : une
  * construction mise en file compte meme si le joueur l'annule ensuite.
+ *
+ * INVARIANT : il n'existe jamais deux evenements simultanement. Toute la configuration
+ * vit dans la table settings, en un seul jeu de cles, et la date de debut sert
+ * d'identifiant logique dans les trois tables. Le jour ou deux evenements devraient
+ * coexister, il faudra une vraie table d'instances et cet identifiant devra la suivre —
+ * ne pas s'en remettre a event_start ce jour-la.
  */
 class EventMissionService
 {
@@ -65,6 +71,15 @@ class EventMissionService
      * 'tritium' suit l'echelle officielle : 100 pour une action de routine, 200 pour un
      * effort, 300 pour une action qui engage des ressources ou de la matiere noire.
      * 'target' est la quantite a atteindre dans la journee.
+     *
+     * REGLE INTANGIBLE : une cle deja partie en production ne change jamais de sens.
+     * Les tirages figes en base ne conservent que la cle et sa valeur ; c'est ce
+     * catalogue qui dit ce que la cle signifie et comment on la mesure. Lui faire dire
+     * autre chose reecrirait retroactivement des missions deja affichees, parfois deja
+     * creditees. Modifier 'tritium' ou 'target' d'une cle existante est en revanche
+     * sans danger : le tritium est fige au tirage, et la mesure ne porte que sur le jour
+     * en cours. Retirer une cle est permis — les tirages qui la portent l'ignorent — mais
+     * elle ne doit alors jamais etre reintroduite avec un autre sens.
      *
      * @var array<string, array{tritium: int, target: int, icon: string}>
      */
@@ -313,6 +328,14 @@ class EventMissionService
             return 0;
         }
 
+        // Un compte en mode vacances est gele : sa production s'arrete et il est a l'abri
+        // des attaques. Le laisser encaisser du tritium serait injuste envers les joueurs
+        // actifs — et la mission 'se connecter', acquise d'office, la lui offrirait chaque
+        // jour sans qu'il ait rien a faire.
+        if ($player->isInVacationMode()) {
+            return 0;
+        }
+
         $start = $this->getStart();
         $end = $this->getEnd();
 
@@ -335,9 +358,19 @@ class EventMissionService
                 ->pluck('mission_key')
                 ->all();
 
-            // Un jour entierement credite n'a plus rien a mesurer : sans ce raccourci, une
+            // Ne comptent que les missions encore presentes au catalogue : une cle retiree
+            // depuis le tirage ne sera jamais creditee, et sans cette precaution le jour ne
+            // serait jamais considere comme solde — chaque visite relancerait ses requetes.
+            $creditables = 0;
+            foreach ($tirage as $mission) {
+                if (isset(self::MISSIONS[$mission['key']])) {
+                    $creditables++;
+                }
+            }
+
+            // Un jour entierement solde n'a plus rien a mesurer : sans ce raccourci, une
             // simple visite relancerait toutes les requetes de tous les jours ecoules.
-            if (count($deja) === count($tirage)) {
+            if (count($deja) >= $creditables) {
                 continue;
             }
 
@@ -497,6 +530,25 @@ class EventMissionService
         return (int)EventMissionClaim::where('user_id', $player->getId())
             ->whereDate('event_start', $start)
             ->sum('tritium');
+    }
+
+    /**
+     * Returns how many days remain, today included, or 0 outside the event.
+     *
+     * Sert uniquement a prevenir le joueur : rien n'est rattrapable apres la cloture,
+     * ni le tritium non credite ni les rangs non reclames.
+     *
+     * @return int
+     */
+    public function getDaysLeft(): int
+    {
+        $end = $this->getEnd();
+
+        if ($end === null || !$this->isRunning()) {
+            return 0;
+        }
+
+        return (int)Date::now()->startOfDay()->diffInDays($end) + 1;
     }
 
     /**

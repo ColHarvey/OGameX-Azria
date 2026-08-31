@@ -41,6 +41,7 @@ class EventsController extends OGameController
             'end' => $eventService->getEnd(),
             'currentPlanetName' => $player->planets->current()->getPlanetName(),
             'staffActive' => $eventService->hasCommandingStaff($player),
+            'daysLeft' => $eventService->getDaysLeft(),
         ]);
     }
 

@@ -443,4 +443,82 @@ class EventMissionTest extends AccountTestCase
         // La date de fin, elle, reste modifiable.
         $this->assertEquals(Date::now()->addDays(9)->format('Y-m-d'), $apres->eventMissionsEnd());
     }
+
+    /**
+     * Assert that the event page really renders the theme's reward interface.
+     *
+     * L'interface repose entierement sur des classes du theme, toutes ecrites sous
+     * #rewardings. Une faute de frappe sur un de ces noms ne casse rien visiblement : elle
+     * rend simplement la page nue, ce qu'aucun autre controle ne detecte.
+     */
+    public function testEventPageRendersTheThemeMarkup(): void
+    {
+        $this->openEvent();
+
+        $response = $this->get(route('events.index'));
+        $response->assertStatus(200);
+
+        $html = $response->getContent();
+        $this->assertIsString($html);
+
+        // Le conteneur sans lequel aucune regle du theme ne s'applique.
+        $this->assertStringContainsString('id="rewardings"', $html);
+
+        foreach ([
+            'class="rewardlist"',
+            'class="rewardlist_wrapper"',
+            'class="titlebar"',
+            'class="tierlist"',
+            'tritiumstage',
+            'tritiumicon',
+            'rewardlist-item',
+            'rewardlist-item-icon',
+            'rewardlist-item-text',
+            'rewardlist-item-wrapper',
+            'rewardlist-item-bottom',
+            'class="normalRewards"',
+            'class="additionalRewards"',
+            'class="singleReward"',
+            'class="rewardName"',
+        ] as $classe) {
+            $this->assertStringContainsString($classe, $html, "Theme markup missing: $classe");
+        }
+
+        // Un onglet Missions plus un par rang.
+        $this->assertEquals(
+            EventMissionService::RANK_COUNT + 1,
+            substr_count($html, 'btn_blue ogx-tab'),
+            'The tab bar does not carry one button per rank.'
+        );
+
+        // Autant de panneaux que d'onglets.
+        $this->assertEquals(
+            EventMissionService::RANK_COUNT + 1,
+            substr_count($html, 'class="ogx-panel"'),
+            'A tab has no panel behind it.'
+        );
+
+        // L'avertissement de perte doit etre visible : c'est la seule chose qui previent
+        // le joueur qu'un rang non reclame disparait a la cloture.
+        $this->assertStringContainsString(__('t_ingame.events.loss_warning'), $html);
+    }
+
+    /**
+     * Assert that every image the page points at actually exists on disk.
+     */
+    public function testEventPageImagesAllResolve(): void
+    {
+        $this->openEvent();
+
+        $html = $this->get(route('events.index'))->getContent();
+        $this->assertIsString($html);
+
+        preg_match_all('/<img[^>]+src="(\/img\/[^"]+)"/', $html, $m);
+
+        $this->assertNotEmpty($m[1], 'The page shows no mission icon at all.');
+
+        foreach (array_unique($m[1]) as $src) {
+            $this->assertFileExists(public_path(ltrim($src, '/')), "Broken image on the event page: $src");
+        }
+    }
 }
