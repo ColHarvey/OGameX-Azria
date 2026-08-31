@@ -43,13 +43,30 @@
            est dessine d un bloc, a la position 0 0, sur un element de 619 px qui
            enveloppe l icone et le texte. Le corps qui deborde est prolonge par le
            remplissage repetable de .rewardlist-item-wrapper. */
-        /* Le pied du cadre est dessine en position absolue et remonte de 45 px sur le
-           contenu — mesure dans l inspecteur : hauteur 50 px, bottom -20 px. Sur les
-           pages a hauteur fixe comme la Boutique cela ne se voit pas, il recouvre du
-           vide. Ici la liste se termine au bord, et la courbe de fermeture masquait la
-           derniere mission. On reserve donc la place qu il occupe. */
+        /* Le theme fournit deux variantes de ce cadre. La generique utilise une image de
+           pied de 669 x 50 px dans une boite de 667 : elle deborde a droite et remonte de
+           45 px sur le contenu. La Boutique, elle, declenche par setBodyId(shop) une
+           variante ou l image fait 667 x 29 px — exactement sa boite. On reprend celle-ci,
+           faute de pouvoir ajouter une regle #events dans les feuilles construites. */
+        #eventscomponent #buttonz {
+            width: 667px;
+        }
+
         #eventscomponent #buttonz > .content {
-            padding-bottom: 45px;
+            padding-bottom: 12px;
+        }
+
+        #eventscomponent #buttonz .footer {
+            background: url(/img/icons/04a7b39dc27c29c4c2cadd3fd44ec0.gif) no-repeat;
+            width: 667px;
+            height: 29px;
+            bottom: -17px;
+        }
+
+        /* Le cadre passant de 670 a 667 px, la liste doit se resserrer de 1 px de chaque
+           cote pour que la ligne de mission de 619 px continue de tenir. */
+        #eventscomponent #rewardings .rewardlist {
+            margin: 0 14px;
         }
 
         #rewardings .rewardheader {
