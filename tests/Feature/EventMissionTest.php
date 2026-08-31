@@ -12,8 +12,10 @@ use OGame\Models\Message;
 use OGame\Services\EventMissionService;
 use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
+use OGame\Services\ShopService;
 use ReflectionClass;
 use ReflectionMethod;
+use RuntimeException;
 use Tests\AccountTestCase;
 
 /**
@@ -936,6 +938,85 @@ class EventMissionTest extends AccountTestCase
             if ($mission['key'] === 'building') {
                 $this->assertEquals(1, $mission['progress'], 'A construction started after the opening was ignored.');
             }
+        }
+    }
+
+    /**
+     * Assert that choosing the item reward really puts it in the player's inventory.
+     */
+    public function testClaimingTheItemRewardFillsTheInventory(): void
+    {
+        $this->openEvent();
+
+        $player = resolve(PlayerService::class);
+        $eventService = resolve(EventMissionService::class);
+        $shopService = resolve(ShopService::class);
+
+        // Amener le joueur au premier rang : 1 000 tritium.
+        EventMissionClaim::create([
+            'user_id' => $player->getId(),
+            'event_start' => Date::now()->subDay()->startOfDay(),
+            'mission_date' => Date::now()->startOfDay(),
+            'mission_key' => 'expedition',
+            'tritium' => 1000,
+            'claimed_at' => Date::now(),
+        ]);
+
+        $krakenBronze = '40f6c78e11be01ad3389b7dccd6ab8efa9347f3c';
+
+        $this->assertArrayNotHasKey(
+            $krakenBronze,
+            $shopService->getInventory($player->getUser()),
+            'The item was already in the inventory before the claim.'
+        );
+
+        $ranks = $eventService->getRanks($player);
+        $this->assertTrue($ranks[1]['reached'], 'Rank 1 was not reached with 1000 tritium.');
+
+        $eventService->claimRank($player, 1, 'item');
+
+        $inventaire = $shopService->getInventory($player->getUser());
+
+        $this->assertArrayHasKey($krakenBronze, $inventaire, 'The rank reward never reached the inventory.');
+        $this->assertEquals(1, $inventaire[$krakenBronze]);
+    }
+
+    /**
+     * Assert that the event closes by itself once its end date has passed.
+     *
+     * Aucune tache planifiee n'est necessaire : l'ouverture se deduit des dates a chaque
+     * appel. Le lendemain de la fin, le menu disparait, plus rien n'est credite et les rangs
+     * ne sont plus reclamables.
+     */
+    public function testEventClosesOnItsOwnAfterTheEndDate(): void
+    {
+        $this->openEvent();
+
+        $player = resolve(PlayerService::class);
+        $eventService = resolve(EventMissionService::class);
+
+        $this->assertTrue($eventService->isRunning(), 'The event was not running to begin with.');
+
+        // On avance au lendemain de la date de fin, sans rien changer d'autre.
+        $fin = $eventService->getEnd();
+        $this->assertNotNull($fin);
+        Date::setTestNow($fin->copy()->addDay()->addHours(2));
+
+        try {
+            $ferme = resolve(EventMissionService::class);
+
+            $this->assertFalse($ferme->isRunning(), 'The event is still running past its end date.');
+            $this->assertEquals(0, $ferme->creditEventDays($player), 'Missions were still credited after the end.');
+            $this->assertEquals(0, $ferme->getDaysLeft());
+
+            // Et la page bascule sur l'ecran de fermeture.
+            $this->get(route('events.index'))->assertSee(__('t_ingame.events.closed'));
+
+            // Un rang non reclame le reste : c'est la regle annoncee aux joueurs.
+            $this->expectException(RuntimeException::class);
+            $ferme->claimRank($player, 1, 'resources');
+        } finally {
+            Date::setTestNow();
         }
     }
 }

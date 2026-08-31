@@ -37,8 +37,23 @@
             justify-content: space-between;
         }
 
-        /* Une mission accomplie passe son titre au vert du theme. */
-        #rewardings .rewarded .rewardlist-item-text > h3 {
+        /* Le theme fournit l image de la bande de titre (.rewardheader) mais aucune
+           mesure : sans hauteur ni interligne, le titre flottait en texte nu au-dessus
+           du cadre au lieu de s'inscrire dedans. */
+        #rewardings .rewardheader {
+            height: 26px;
+            overflow: hidden;
+        }
+
+        #rewardings .rewardheader > h3 {
+            margin: 0 115px 0 15px;
+            font-size: 12px;
+            font-weight: 600;
+            line-height: 26px;
+            color: #cfe3f5;
+        }
+
+        #rewardings .rewarded .rewardheader > h3 {
             color: #9c0;
         }
 
@@ -200,7 +215,9 @@
                                                              alt="{{ __('t_ingame.events.mission_' . $mission['key'] . '_name') }}">
                                                     </div>
                                                     <div class="rewardlist-item-text">
-                                                        <h3>{{ __('t_ingame.events.mission_' . $mission['key'] . '_name') }}</h3>
+                                                        <div class="rewardheader">
+                                                            <h3>{{ __('t_ingame.events.mission_' . $mission['key'] . '_name') }}</h3>
+                                                        </div>
 
                                                         @if ($mission['done'])
                                                             <div class="reward-claimed-text">
