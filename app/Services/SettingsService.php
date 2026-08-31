@@ -833,4 +833,14 @@ class SettingsService
     {
         return max(1, (int)$this->get('event_rank_step', '1000'));
     }
+
+    /**
+     * Returns the unix timestamp at which the event was switched on, 0 when unknown.
+     *
+     * @return int
+     */
+    public function eventMissionsOpenedAt(): int
+    {
+        return (int)$this->get('event_missions_opened_at', 0);
+    }
 }

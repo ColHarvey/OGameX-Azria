@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Facades\DB;
 use OGame\Models\EventMissionClaim;
 use OGame\Models\EventMissionDraw;
 use OGame\Models\Message;
@@ -864,5 +865,77 @@ class EventMissionTest extends AccountTestCase
         }
 
         $this->assertEquals(300, $bonus[7][1]['dark_matter'], 'The top bonus dark matter changed.');
+    }
+
+    /**
+     * Assert that actions performed before the event opened are not credited.
+     *
+     * Signale en production : l'evenement ouvert a midi creditait des missions accomplies
+     * le matin meme, avant que les joueurs sachent qu'un evenement existait. La fenetre de
+     * mesure du premier jour part desormais de l'ouverture, pas de minuit.
+     */
+    public function testActionsBeforeTheOpeningAreNotCredited(): void
+    {
+        $this->openEvent();
+
+        $settingsService = resolve(SettingsService::class);
+        $player = resolve(PlayerService::class);
+
+        // Ouverture a 6 h : tout ce qui precede cette heure ne doit pas compter.
+        $ouverture = Date::now()->startOfDay()->addHours(6);
+        $settingsService->set('event_missions_opened_at', (int)$ouverture->timestamp);
+
+        $eventService = resolve(EventMissionService::class);
+
+        // Une construction lancee ce matin, avant l'ouverture.
+        $planete = $player->planets->current();
+        DB::table('building_queues')->insert([
+            'planet_id' => $planete->getPlanetId(),
+            'object_id' => 1,
+            'object_level_target' => 2,
+            'time_duration' => 60,
+            'time_start' => (int)Date::now()->startOfDay()->addHour()->timestamp,
+            'time_end' => (int)Date::now()->startOfDay()->addHours(2)->timestamp,
+            'building' => 0,
+            'processed' => 0,
+            'canceled' => 0,
+        ]);
+
+        $missions = $eventService->getDailyMissions($player);
+
+        $construction = null;
+        foreach ($missions as $mission) {
+            if ($mission['key'] === 'building') {
+                $construction = $mission;
+            }
+        }
+
+        $this->assertNotNull($construction, 'The building mission was not drawn.');
+        $this->assertEquals(
+            0,
+            $construction['progress'],
+            'A construction started before the event opened was counted.'
+        );
+
+        // La meme action, mais lancee apres l'ouverture, compte bien.
+        DB::table('building_queues')->insert([
+            'planet_id' => $planete->getPlanetId(),
+            'object_id' => 1,
+            'object_level_target' => 3,
+            'time_duration' => 60,
+            'time_start' => (int)$ouverture->copy()->addHour()->timestamp,
+            'time_end' => (int)$ouverture->copy()->addHours(2)->timestamp,
+            'building' => 0,
+            'processed' => 0,
+            'canceled' => 0,
+        ]);
+
+        $missions = $eventService->getDailyMissions($player);
+
+        foreach ($missions as $mission) {
+            if ($mission['key'] === 'building') {
+                $this->assertEquals(1, $mission['progress'], 'A construction started after the opening was ignored.');
+            }
+        }
     }
 }

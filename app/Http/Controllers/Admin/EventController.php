@@ -90,6 +90,10 @@ class EventController extends OGameController
         $settings->set('event_rank_step', (int)$data['rank_step']);
 
         if ($enabled && !$etaitOuvert) {
+            // L instant exact de l ouverture sert de plancher a la mesure du premier jour :
+            // ce qu un joueur a fait plus tot dans la journee ne doit pas lui etre credite.
+            $settings->set('event_missions_opened_at', (int)Date::now()->timestamp);
+
             $nombre = $this->announce($data['start'], $data['end']);
 
             return redirect()->route('admin.event.index')

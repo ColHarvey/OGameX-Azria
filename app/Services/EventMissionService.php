@@ -256,6 +256,26 @@ class EventMissionService
     }
 
     /**
+     * Returns the instant the administrator switched the event on, if it is known.
+     *
+     * Sert de plancher a la fenetre de mesure du premier jour : rien de ce qui precede
+     * l ouverture ne doit etre credite. Les evenements ouverts avant que ce reglage
+     * existe renvoient null, et retombent alors sur minuit.
+     *
+     * @return Carbon|null
+     */
+    public function getOpenedAt(): Carbon|null
+    {
+        $horodatage = (int)$this->settings->eventMissionsOpenedAt();
+
+        if ($horodatage <= 0) {
+            return null;
+        }
+
+        return Date::createFromTimestamp($horodatage);
+    }
+
+    /**
      * Returns the event start date, or null when it is not configured.
      *
      * @return Carbon|null
@@ -894,10 +914,21 @@ class EventMissionService
     private function measure(PlayerService $player, string $key, Carbon $day): int
     {
         $userId = $player->getId();
-        $debut = (int)$day->copy()->startOfDay()->timestamp;
-        $fin = (int)$day->copy()->endOfDay()->timestamp;
+        // La fenetre commence a minuit, SAUF le premier jour ou elle commence a l ouverture
+        // de l evenement. Sans ce plancher, tout ce qu un joueur a fait dans la matinee
+        // precedant l ouverture lui serait credite : il verrait des missions validees sans
+        // avoir rien fait depuis l annonce. Le max ne mord que sur le jour de l ouverture,
+        // les jours suivants commencant apres.
         $debutDate = $day->copy()->startOfDay();
+        $ouverture = $this->getOpenedAt();
+
+        if ($ouverture !== null && $ouverture->greaterThan($debutDate)) {
+            $debutDate = $ouverture->copy();
+        }
+
         $finDate = $day->copy()->endOfDay();
+        $debut = (int)$debutDate->timestamp;
+        $fin = (int)$finDate->timestamp;
 
         return match ($key) {
             // Consulter la page prouve la connexion : la mesure est toujours acquise.
