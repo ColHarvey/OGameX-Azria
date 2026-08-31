@@ -801,4 +801,68 @@ class EventMissionTest extends AccountTestCase
         $this->assertEquals(100, $eventService->getTritium($player));
         $this->assertEquals(1, EventMissionClaim::where('user_id', $player->getId())->count());
     }
+
+    /**
+     * Assert the exact reward amounts, so an accidental edit breaks the suite.
+     *
+     * Le bareme a ete calibre le 31 aout 2026 sur la production reelle du serveur : x1,
+     * mines de niveau 3 a 12, mediane a 89 metal/h. Une version precedente, calibree a vue,
+     * donnait un rang 7 valant huit jours de production au meilleur joueur et soixante-dix
+     * a un debutant. Ce test fige les montants pour qu'une modification involontaire — ou
+     * une fusion amont — ne passe pas inapercue.
+     *
+     * Le modifier volontairement demande de remesurer la production d'abord.
+     */
+    public function testRewardAmountsAreThoseCalibratedOnTheServer(): void
+    {
+        $reflexion = new ReflectionClass(EventMissionService::class);
+        $recompenses = $reflexion->getConstant('RANK_REWARDS');
+        $bonus = $reflexion->getConstant('RANK_BONUS');
+
+        $this->assertIsArray($recompenses);
+        $this->assertCount(EventMissionService::RANK_COUNT, $recompenses);
+
+        // metal, cristal, deuterium, matiere noire
+        $attendu = [
+            1 => [1500, 700, 0, 120],
+            2 => [3000, 1500, 300, 200],
+            3 => [5000, 2500, 700, 320],
+            4 => [7500, 3800, 1200, 480],
+            5 => [11000, 5500, 2000, 700],
+            6 => [15000, 7500, 3000, 1000],
+            7 => [20000, 10000, 5000, 1600],
+        ];
+
+        foreach ($attendu as $rang => [$metal, $cristal, $deuterium, $matiereNoire]) {
+            $this->assertEquals($metal, $recompenses[$rang]['resources']['metal'], "Rank $rang metal changed.");
+            $this->assertEquals($cristal, $recompenses[$rang]['resources']['crystal'], "Rank $rang crystal changed.");
+            $this->assertEquals($deuterium, $recompenses[$rang]['resources']['deuterium'], "Rank $rang deuterium changed.");
+            $this->assertEquals($matiereNoire, $recompenses[$rang]['dark_matter']['dark_matter'], "Rank $rang dark matter changed.");
+
+            // Les trois choix restent trois : en perdre un rendrait la page incoherente.
+            $this->assertCount(3, $recompenses[$rang], "Rank $rang no longer offers three choices.");
+            $this->assertNotEmpty($recompenses[$rang]['item']['items'], "Rank $rang lost its item choice.");
+        }
+
+        // Le bonus du Conseil doit rester nettement sous la recompense principale : il
+        // s'ajoute a un avantage deja acquis, les +20 % de tritium sur chaque mission.
+        $equivalent = fn (array $x): float => $x['metal'] + $x['crystal'] * 1.5 + $x['deuterium'] * 3;
+
+        foreach (array_keys($attendu) as $rang) {
+            $valeurBonus = 0.0;
+            foreach ($bonus[$rang] as $entree) {
+                $valeurBonus += $equivalent($entree);
+            }
+
+            $part = $valeurBonus / $equivalent($recompenses[$rang]['resources']);
+
+            $this->assertLessThan(
+                0.5,
+                $part,
+                "The Commanding Staff bonus of rank $rang reaches half the main reward; it should stay well below."
+            );
+        }
+
+        $this->assertEquals(300, $bonus[7][1]['dark_matter'], 'The top bonus dark matter changed.');
+    }
 }

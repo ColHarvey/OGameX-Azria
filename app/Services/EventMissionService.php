@@ -104,47 +104,52 @@ class EventMissionService
     /**
      * Recompenses proposees a chaque rang : trois choix, dont un seul est attribue.
      *
-     * Les montants sont le levier de reglage de tout l'evenement. Reperes : le pack de
-     * bienvenue donne 3 000 metal au jour 1, une expedition rapporte 150 a 200 MN, et un
-     * objet de boutique coute 250 a 1 800 MN. Les references d'objets sont celles du
-     * catalogue de ShopService.
+     * CALIBRE SUR LA PRODUCTION REELLE DU SERVEUR, le 31 aout 2026. Mesure faite sur les
+     * quatorze joueurs actifs : vitesse d'economie x1, mines de niveau 3 a 12, production
+     * mediane de 89 metal/h, meilleur joueur a 1 018. Les montants sont exprimes de sorte
+     * que le rang 7 vaille environ une journee de production pour le joueur de tete et deux
+     * pour un joueur moyen, en equivalent metal au ratio 3:2:1 du marchand.
+     *
+     * Une premiere version calibree a vue donnait un rang 7 valant huit jours de production
+     * au joueur de tete et soixante-dix a un debutant. Ne pas rehausser ces montants sans
+     * remesurer : c'est la production qui commande, pas l'intuition.
      *
      * @var array<int, array<string, array{metal: int, crystal: int, deuterium: int, dark_matter: int, items: array<int, string>}>>
      */
     private const RANK_REWARDS = [
         1 => [
-            'resources' => ['metal' => 10000, 'crystal' => 5000, 'deuterium' => 0, 'dark_matter' => 0, 'items' => []],
-            'dark_matter' => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 300, 'items' => []],
+            'resources' => ['metal' => 1500, 'crystal' => 700, 'deuterium' => 0, 'dark_matter' => 0, 'items' => []],
+            'dark_matter' => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 120, 'items' => []],
             'item' => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 0, 'items' => ['40f6c78e11be01ad3389b7dccd6ab8efa9347f3c']],
         ],
         2 => [
-            'resources' => ['metal' => 20000, 'crystal' => 10000, 'deuterium' => 2000, 'dark_matter' => 0, 'items' => []],
-            'dark_matter' => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 500, 'items' => []],
+            'resources' => ['metal' => 3000, 'crystal' => 1500, 'deuterium' => 300, 'dark_matter' => 0, 'items' => []],
+            'dark_matter' => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 200, 'items' => []],
             'item' => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 0, 'items' => ['d3d541ecc23e4daa0c698e44c32f04afd2037d84']],
         ],
         3 => [
-            'resources' => ['metal' => 35000, 'crystal' => 18000, 'deuterium' => 5000, 'dark_matter' => 0, 'items' => []],
-            'dark_matter' => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 800, 'items' => []],
+            'resources' => ['metal' => 5000, 'crystal' => 2500, 'deuterium' => 700, 'dark_matter' => 0, 'items' => []],
+            'dark_matter' => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 320, 'items' => []],
             'item' => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 0, 'items' => ['da4a2a1bb9afd410be07bc9736d87f1c8059e66d']],
         ],
         4 => [
-            'resources' => ['metal' => 55000, 'crystal' => 28000, 'deuterium' => 10000, 'dark_matter' => 0, 'items' => []],
-            'dark_matter' => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 1200, 'items' => []],
+            'resources' => ['metal' => 7500, 'crystal' => 3800, 'deuterium' => 1200, 'dark_matter' => 0, 'items' => []],
+            'dark_matter' => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 480, 'items' => []],
             'item' => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 0, 'items' => ['4a58d4978bbe24e3efb3b0248e21b3b4b1bfbd8a']],
         ],
         5 => [
-            'resources' => ['metal' => 80000, 'crystal' => 40000, 'deuterium' => 16000, 'dark_matter' => 0, 'items' => []],
-            'dark_matter' => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 1700, 'items' => []],
+            'resources' => ['metal' => 11000, 'crystal' => 5500, 'deuterium' => 2000, 'dark_matter' => 0, 'items' => []],
+            'dark_matter' => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 700, 'items' => []],
             'item' => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 0, 'items' => ['27cbcd52f16693023cb966e5026d8a1efbbfc0f9']],
         ],
         6 => [
-            'resources' => ['metal' => 120000, 'crystal' => 60000, 'deuterium' => 25000, 'dark_matter' => 0, 'items' => []],
-            'dark_matter' => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 2400, 'items' => []],
+            'resources' => ['metal' => 15000, 'crystal' => 7500, 'deuterium' => 3000, 'dark_matter' => 0, 'items' => []],
+            'dark_matter' => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 1000, 'items' => []],
             'item' => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 0, 'items' => ['d26f4dab76fdc5296e3ebec11a1e1d2558c713ea']],
         ],
         7 => [
-            'resources' => ['metal' => 200000, 'crystal' => 100000, 'deuterium' => 50000, 'dark_matter' => 0, 'items' => []],
-            'dark_matter' => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 4000, 'items' => []],
+            'resources' => ['metal' => 20000, 'crystal' => 10000, 'deuterium' => 5000, 'dark_matter' => 0, 'items' => []],
+            'dark_matter' => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 1600, 'items' => []],
             'item' => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 0, 'items' => ['929d5e15709cc51a4500de4499e19763c879f7f7', '0968999df2fe956aa4a07aea74921f860af7d97f']],
         ],
     ];
@@ -153,42 +158,45 @@ class EventMissionService
      * Recompenses supplementaires, attribuees en plus du choix principal.
      *
      * Regle reprise du jeu officiel : elles ne sont accordees que si le joueur possede le
-     * Conseil d'officiers au moment ou il reclame le rang. Elles sont volontairement
-     * modestes en face des recompenses principales : c'est un supplement, pas un second
-     * palier. Chaque entree est affichee comme une vignette distincte.
+     * Conseil d'officiers au moment ou il reclame le rang.
+     *
+     * DIMENSIONNEES A ENVIRON UN TIERS de la recompense principale, volontairement. Le
+     * Conseil beneficie deja de +20 % de tritium sur chaque mission, donc il atteint les
+     * rangs plus vite : le doter en plus d'un bonus comparable a la recompense principale
+     * doublerait un avantage deja acquis. Le bonus doit se voir, pas ecraser.
      *
      * @var array<int, array<int, array{metal: int, crystal: int, deuterium: int, dark_matter: int, items: array<int, string>}>>
      */
     private const RANK_BONUS = [
         1 => [
-            ['metal' => 5000, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 0, 'items' => []],
-            ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 100, 'items' => []],
+            ['metal' => 600, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 0, 'items' => []],
+            ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 40, 'items' => []],
         ],
         2 => [
-            ['metal' => 10000, 'crystal' => 5000, 'deuterium' => 0, 'dark_matter' => 0, 'items' => []],
-            ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 150, 'items' => []],
+            ['metal' => 1200, 'crystal' => 600, 'deuterium' => 0, 'dark_matter' => 0, 'items' => []],
+            ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 70, 'items' => []],
         ],
         3 => [
-            ['metal' => 18000, 'crystal' => 9000, 'deuterium' => 0, 'dark_matter' => 0, 'items' => []],
-            ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 250, 'items' => []],
+            ['metal' => 2000, 'crystal' => 1000, 'deuterium' => 0, 'dark_matter' => 0, 'items' => []],
+            ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 100, 'items' => []],
         ],
         4 => [
-            ['metal' => 28000, 'crystal' => 14000, 'deuterium' => 5000, 'dark_matter' => 0, 'items' => []],
-            ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 350, 'items' => []],
+            ['metal' => 3000, 'crystal' => 1500, 'deuterium' => 400, 'dark_matter' => 0, 'items' => []],
+            ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 140, 'items' => []],
         ],
         5 => [
-            ['metal' => 40000, 'crystal' => 20000, 'deuterium' => 8000, 'dark_matter' => 0, 'items' => []],
-            ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 500, 'items' => []],
+            ['metal' => 4500, 'crystal' => 2200, 'deuterium' => 700, 'dark_matter' => 0, 'items' => []],
+            ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 190, 'items' => []],
             ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 0, 'items' => ['40f6c78e11be01ad3389b7dccd6ab8efa9347f3c']],
         ],
         6 => [
-            ['metal' => 60000, 'crystal' => 30000, 'deuterium' => 12000, 'dark_matter' => 0, 'items' => []],
-            ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 800, 'items' => []],
+            ['metal' => 6000, 'crystal' => 3000, 'deuterium' => 1000, 'dark_matter' => 0, 'items' => []],
+            ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 240, 'items' => []],
             ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 0, 'items' => ['d3d541ecc23e4daa0c698e44c32f04afd2037d84']],
         ],
         7 => [
-            ['metal' => 100000, 'crystal' => 50000, 'deuterium' => 25000, 'dark_matter' => 0, 'items' => []],
-            ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 1500, 'items' => []],
+            ['metal' => 7000, 'crystal' => 3500, 'deuterium' => 1500, 'dark_matter' => 0, 'items' => []],
+            ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 300, 'items' => []],
             ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 0, 'items' => ['d26f4dab76fdc5296e3ebec11a1e1d2558c713ea']],
         ],
     ];
