@@ -10,37 +10,32 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
 
 /**
- * Une mission d'evenement reclamee par un joueur, un jour donne.
+ * Le tirage de missions d'un joueur pour un jour d'evenement, fige.
  *
  * @property int $id
  * @property int $user_id
  * @property Carbon $event_start
  * @property Carbon $mission_date
- * @property string $mission_key
- * @property int $tritium
- * @property Carbon $claimed_at
+ * @property array<int, array{key: string, tritium: int}> $missions
  * @property-read User $user
- * @method static Builder|EventMissionClaim newModelQuery()
- * @method static Builder|EventMissionClaim newQuery()
- * @method static Builder|EventMissionClaim query()
- * @method static Builder|EventMissionClaim whereId($value)
- * @method static Builder|EventMissionClaim whereUserId($value)
- * @method static Builder|EventMissionClaim whereMissionDate($value)
- * @method static Builder|EventMissionClaim whereMissionKey($value)
- * @method static Builder|EventMissionClaim whereTritium($value)
- * @method static Builder|EventMissionClaim whereClaimedAt($value)
+ * @method static Builder|EventMissionDraw newModelQuery()
+ * @method static Builder|EventMissionDraw newQuery()
+ * @method static Builder|EventMissionDraw query()
+ * @method static Builder|EventMissionDraw whereId($value)
+ * @method static Builder|EventMissionDraw whereUserId($value)
+ * @method static Builder|EventMissionDraw whereEventStart($value)
+ * @method static Builder|EventMissionDraw whereMissionDate($value)
+ * @method static Builder|EventMissionDraw whereMissions($value)
  * @mixin \Eloquent
  */
 #[Fillable([
     'user_id',
     'event_start',
     'mission_date',
-    'mission_key',
-    'tritium',
-    'claimed_at',
+    'missions',
 ])]
 #[WithoutTimestamps]
-class EventMissionClaim extends Model
+class EventMissionDraw extends Model
 {
     /**
      * The attributes that should be cast.
@@ -50,11 +45,11 @@ class EventMissionClaim extends Model
     protected $casts = [
         'event_start' => 'date',
         'mission_date' => 'date',
-        'claimed_at' => 'datetime',
+        'missions' => 'array',
     ];
 
     /**
-     * Get the user that owns the claim.
+     * Get the user that owns the draw.
      *
      * @return BelongsTo
      */

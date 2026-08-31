@@ -2,118 +2,108 @@
 
 @section('content')
 
+    @php
+        // Regroupement par valeur de tritium, comme la page officielle : un bandeau
+        // « Valeur en tritium : N » puis les missions qui la valent. Le service a deja trie
+        // les missions par valeur croissante, un simple parcours suffit donc.
+        $groupes = [];
+        foreach ($missions as $mission) {
+            $groupes[$mission['tritium']][] = $mission;
+        }
+    @endphp
+
     <style>
-        /* Page autoportante : aucune regle n'est ajoutee aux feuilles construites, qui ne
-           peuvent pas etre regenerees sur ce serveur (pas de Node dans le conteneur). Tout
-           ce qui suit est donc porte par la page elle-meme. */
-        #eventscomponent .ogx-tritium-bar {
-            background: rgba(0, 0, 0, .35);
-            border: 1px solid rgba(255, 255, 255, .12);
-            border-radius: 4px;
-            height: 18px;
-            margin: 6px 14px 14px;
-            overflow: hidden;
+        /* Le theme porte deja toute l'interface des recompenses d'OGame, mais uniquement
+           sous #rewardings : c'est la seule raison pour laquelle le conteneur ci-dessous
+           porte cet identifiant. Ce bloc ne complete que ce que le theme ne fournit pas :
+           les onglets et quelques etats. Aucune feuille construite n'est modifiee, elles
+           ne peuvent pas etre regenerees sur ce serveur. */
+        #rewardings .ogx-tab {
+            cursor: pointer;
         }
 
-        #eventscomponent .ogx-tritium-fill {
-            background: linear-gradient(to bottom, #4aa3df, #1b6ca8);
-            height: 100%;
+        #rewardings .ogx-tab.reached {
+            background: #2b5c1e;
+            border-color: #3f8a2c;
         }
 
-        #eventscomponent .ogx-tritium-label {
-            color: #cfe3f5;
-            font-weight: bold;
-            padding: 0 14px;
+        #rewardings .ogx-tab.active {
+            box-shadow: inset 0 0 0 1px #8fce00;
         }
 
-        #eventscomponent .ogx-row {
-            border-bottom: 1px solid rgba(255, 255, 255, .07);
+        #rewardings .ogx-stage-row {
             display: flex;
             align-items: center;
-            gap: 10px;
-            padding: 8px 14px;
+            justify-content: space-between;
         }
 
-        #eventscomponent .ogx-row-name {
-            flex: 1 1 auto;
+        /* Une mission accomplie passe son titre au vert du theme. */
+        #rewardings .rewarded .rewardlist-item-text > h3 {
+            color: #9c0;
         }
 
-        #eventscomponent .ogx-row-progress {
-            color: #8fa7bd;
-            flex: 0 0 90px;
-            text-align: right;
+        #rewardings .ogx-gain {
+            color: #9c0;
+            font-weight: 600;
         }
 
-        #eventscomponent .ogx-row-tritium {
-            color: #4aa3df;
-            flex: 0 0 90px;
-            font-weight: bold;
-            text-align: right;
+        #rewardings .ogx-progress {
+            color: #848484;
         }
 
-        #eventscomponent .ogx-row-action {
-            flex: 0 0 130px;
-            text-align: right;
+        /* Textes du panneau de rang. Ils reprennent la mise en forme des identifiants
+           #welcome, #rewarddescription et #commandingstaff du theme, en classes : la page
+           affiche les cinq rangs a la fois, et un identifiant ne peut pas etre repete. */
+        #rewardings .ogx-welcome {
+            text-align: center;
+            margin: 0 0 8px 2px;
+            font-weight: 600;
         }
 
-        #eventscomponent .ogx-done {
-            color: #8fce00;
+        #rewardings .ogx-rank-text {
+            color: #848484;
+            text-align: center;
+            margin: 3px 0 0 4px;
+            font-size: 11px;
+            line-height: 130%;
         }
 
-        #eventscomponent .ogx-rank {
-            border: 1px solid rgba(255, 255, 255, .1);
-            border-radius: 5px;
-            margin: 10px 14px;
-            padding: 10px;
+        #rewardings .ogx-rank-header {
+            text-align: center;
+            margin: 12px 0 0;
+            font-size: 11px;
         }
 
-        #eventscomponent .ogx-rank.locked {
-            opacity: .5;
+        #rewardings .ogx-staff-note {
+            color: #848484;
+            text-align: center;
+            margin: 14px 0 0;
+            font-size: 11px;
         }
 
-        #eventscomponent .ogx-rank h4 {
-            margin: 0 0 8px;
+        #rewardings .ogx-staff-note.active {
+            color: #9c0;
         }
 
-        #eventscomponent .ogx-choices {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-        }
-
-        #eventscomponent .ogx-choice {
-            border: 1px solid rgba(255, 255, 255, .12);
-            border-radius: 4px;
-            flex: 1 1 180px;
-            padding: 8px;
+        #rewardings .singleReward .rewardName {
             text-align: center;
         }
 
-        #eventscomponent .ogx-choice p {
-            margin: 0 0 6px;
-            min-height: 30px;
-        }
-
-        #eventscomponent .ogx-note {
-            color: #8fa7bd;
-            padding: 0 14px 10px;
-        }
-
-        #eventscomponent form.ogx-inline {
-            display: inline;
+        #rewardings .ogx-empty {
+            color: #848484;
+            padding: 20px;
+            text-align: center;
         }
     </style>
 
     <div id="eventscomponent" class="maincontent">
         <div id="content">
             <div id="inhalt">
-                <div id="planet" class="planet-header">
+                <div id="planet" style="background-image:url(/img/headers/rewards/rewards.jpg);height:250px;">
                     <div id="header_text">
                         <h2>{{ __('t_ingame.events.page_title') }}</h2>
                     </div>
                 </div>
-                <div class="c-left"></div>
-                <div class="c-right"></div>
 
                 <div id="buttonz">
                     <div class="header">
@@ -122,105 +112,183 @@
                     <div class="content">
 
                         @if (session('status'))
-                            <div class="alert alert-success" style="margin: 4px 14px 18px;">{{ session('status') }}</div>
+                            <div class="alert alert-success" style="margin: 4px 14px 12px;">{{ session('status') }}</div>
                         @endif
 
                         @if (session('error'))
-                            <div class="alert alert-danger" style="margin: 4px 14px 18px;">{{ session('error') }}</div>
+                            <div class="alert alert-danger" style="margin: 4px 14px 12px;">{{ session('error') }}</div>
                         @endif
 
-                        <p class="ogx-note">
-                            {{ __('t_ingame.events.period', [
-                                'start' => $start !== null ? $start->format('d/m/Y') : '',
-                                'end' => $end !== null ? $end->format('d/m/Y') : '',
-                            ]) }}
-                        </p>
+                        {{-- Identifiant impose par le theme : toutes les regles de cette interface
+                             sont ecrites sous #rewardings. Le module JavaScript embarque du jeu
+                             (Rewarding) vise les memes selecteurs et rechargerait la page par AJAX
+                             vers une route inexistante, mais rien ne l'instancie : « new Rewarding »
+                             est absent du bundle. Le verifier apres toute fusion amont touchant aux
+                             assets construits. --}}
+                        <div id="rewardings">
+                            <div class="rewardlist">
 
-                        <p class="ogx-tritium-label">
-                            {{ __('t_ingame.events.tritium_total', [
-                                'tritium' => number_format($tritium, 0, ',', ' '),
-                                'max' => number_format($maxTritium, 0, ',', ' '),
-                            ]) }}
-                        </p>
-
-                        <div class="ogx-tritium-bar">
-                            <div class="ogx-tritium-fill"
-                                 style="width: {{ $maxTritium > 0 ? min(100, round($tritium * 100 / $maxTritium)) : 0 }}%;"></div>
-                        </div>
-
-                        <h3>{{ __('t_ingame.events.section_missions') }}</h3>
-
-                        @foreach ($missions as $mission)
-                            <div class="ogx-row">
-                                <span class="ogx-row-name {{ $mission['done'] ? 'ogx-done' : '' }}">
-                                    {{ __('t_ingame.events.mission_' . $mission['key'], ['target' => number_format($mission['target'], 0, ',', ' ')]) }}
-                                </span>
-                                <span class="ogx-row-progress">
-                                    {{ number_format($mission['progress'], 0, ',', ' ') }} / {{ number_format($mission['target'], 0, ',', ' ') }}
-                                </span>
-                                <span class="ogx-row-tritium">+{{ number_format($mission['tritium'], 0, ',', ' ') }}</span>
-                                <span class="ogx-row-action">
-                                    @if ($mission['claimed'])
-                                        <span class="ogx-done">{{ __('t_ingame.events.claimed') }}</span>
-                                    @elseif ($mission['done'])
-                                        <form class="ogx-inline" action="{{ route('events.claim-mission') }}" method="post">
-                                            {{ csrf_field() }}
-                                            <input type="hidden" name="mission" value="{{ $mission['key'] }}"/>
-                                            <input type="submit" class="btn_blue" value="{{ __('t_ingame.events.claim') }}"/>
-                                        </form>
-                                    @else
-                                        <span style="color:#8fa7bd;">{{ __('t_ingame.events.in_progress') }}</span>
-                                    @endif
-                                </span>
-                            </div>
-                        @endforeach
-
-                        <h3>{{ __('t_ingame.events.section_ranks') }}</h3>
-
-                        <p class="ogx-note">{{ __('t_ingame.events.ranks_hint') }}</p>
-                        <p class="ogx-note">{{ __('t_ingame.events.planet_warning', ['planet' => $currentPlanetName]) }}</p>
-
-                        @foreach ($ranks as $rank)
-                            <div class="ogx-rank {{ $rank['reached'] ? '' : 'locked' }}">
-                                <h4>
-                                    {{ __('t_ingame.events.rank_title', ['rank' => $rank['rank']]) }}
-                                    &mdash;
-                                    {{ __('t_ingame.events.rank_threshold', ['tritium' => number_format($rank['threshold'], 0, ',', ' ')]) }}
-                                </h4>
-
-                                @if ($rank['claimed'])
-                                    <p class="ogx-done">
-                                        {{ __('t_ingame.events.rank_claimed', [
-                                            'reward' => $rank['rewards'][$rank['chosen']]['summary'] ?? '',
-                                        ]) }}
-                                    </p>
-                                @else
-                                    <div class="ogx-choices">
-                                        @foreach ($rank['rewards'] as $rewardKey => $reward)
-                                            <div class="ogx-choice">
-                                                <p>{{ $reward['summary'] }}</p>
-                                                @if ($rank['reached'])
-                                                    <form action="{{ route('events.claim-rank') }}" method="post">
-                                                        {{ csrf_field() }}
-                                                        <input type="hidden" name="rank" value="{{ $rank['rank'] }}"/>
-                                                        <input type="hidden" name="reward" value="{{ $rewardKey }}"/>
-                                                        <input type="submit" class="btn_blue"
-                                                               value="{{ __('t_ingame.events.choose') }}"
-                                                               onclick="return confirm('{{ __('t_ingame.events.confirm_choice') }}');"/>
-                                                    </form>
-                                                @else
-                                                    <span style="color:#8fa7bd;">{{ __('t_ingame.events.rank_locked') }}</span>
-                                                @endif
-                                            </div>
+                                <div class="titlebar">
+                                    <button type="button" class="btn_blue ogx-tab active" data-panel="tasks">
+                                        {{ __('t_ingame.events.tab_tasks') }}
+                                    </button>
+                                    <div class="tierlist">
+                                        @foreach ($ranks as $rang)
+                                            <button type="button"
+                                                    class="btn_blue ogx-tab {{ $rang['reached'] ? 'reached' : '' }}"
+                                                    data-panel="rank{{ $rang['rank'] }}">
+                                                {{ __('t_ingame.events.rank_title', ['rank' => $rang['rank']]) }}
+                                            </button>
                                         @endforeach
                                     </div>
-                                @endif
+                                </div>
+
+                                <div class="rewardlist_wrapper">
+
+                                    {{-- Onglet des missions du jour --}}
+                                    <div class="ogx-panel" data-panel="tasks">
+
+                                        <div class="ogx-stage-row">
+                                            <div class="tritiumstage">
+                                                <span class="tritiumvalue">{{ __('t_ingame.events.period', [
+                                                    'start' => $start !== null ? $start->format('d/m/Y') : '',
+                                                    'end' => $end !== null ? $end->format('d/m/Y') : '',
+                                                ]) }}</span>
+                                            </div>
+                                            <div class="tritiumstage playervalue">
+                                                <span class="tritiumvalue">{{ __('t_ingame.events.you_have', [
+                                                    'tritium' => number_format($tritium, 0, ',', ' '),
+                                                ]) }}</span>
+                                                <span class="tritiumicon"></span>
+                                            </div>
+                                        </div>
+
+                                        @forelse ($groupes as $valeur => $groupe)
+                                            <div class="tritiumstage">
+                                                <span class="tritiumvalue">{{ __('t_ingame.events.tritium_value', [
+                                                    'tritium' => number_format($valeur, 0, ',', ' '),
+                                                ]) }}</span>
+                                                <span class="tritiumicon"></span>
+                                            </div>
+
+                                            @foreach ($groupe as $mission)
+                                                <div class="rewardlist-item {{ $mission['done'] ? 'rewarded' : '' }}">
+                                                    <div class="rewardlist-item-icon">
+                                                        <img src="/img/{{ $mission['icon'] }}" width="80" height="80"
+                                                             alt="{{ __('t_ingame.events.mission_' . $mission['key'] . '_name') }}">
+                                                    </div>
+                                                    <div class="rewardlist-item-text">
+                                                        <h3>{{ __('t_ingame.events.mission_' . $mission['key'] . '_name') }}</h3>
+
+                                                        @if ($mission['done'])
+                                                            <div class="reward-claimed-text">
+                                                                <p class="ogx-gain">+{{ number_format($mission['tritium'], 0, ',', ' ') }}</p>
+                                                                <span class="icon icon_checkmark"></span>
+                                                            </div>
+                                                        @endif
+
+                                                        <div class="rewardlist-item-wrapper">
+                                                            <p>{{ __('t_ingame.events.mission_' . $mission['key'], [
+                                                                'target' => number_format($mission['target'], 0, ',', ' '),
+                                                            ]) }}</p>
+
+                                                            @if ($mission['target'] > 1)
+                                                                <p class="ogx-progress">{{ __('t_ingame.events.progress', [
+                                                                    'progress' => number_format($mission['progress'], 0, ',', ' '),
+                                                                    'target' => number_format($mission['target'], 0, ',', ' '),
+                                                                ]) }}</p>
+                                                            @endif
+                                                        </div>
+                                                        <div class="rewardlist-item-bottom"></div>
+                                                    </div>
+                                                </div>
+                                            @endforeach
+                                        @empty
+                                            <p class="ogx-empty">{{ __('t_ingame.events.no_mission') }}</p>
+                                        @endforelse
+                                    </div>
+
+                                    {{-- Un onglet par rang --}}
+                                    @foreach ($ranks as $rang)
+                                        <div class="ogx-panel" data-panel="rank{{ $rang['rank'] }}" style="display:none;">
+
+                                            <p class="ogx-welcome">{{ __('t_ingame.events.rank_welcome') }}</p>
+                                            <p class="ogx-rank-text">{{ __('t_ingame.events.rank_hint') }}</p>
+                                            <p class="ogx-rank-header">{{ __('t_ingame.events.rank_progress', [
+                                                'tritium' => number_format($tritium, 0, ',', ' '),
+                                                'threshold' => number_format($rang['threshold'], 0, ',', ' '),
+                                            ]) }}</p>
+                                            <p class="ogx-rank-text">{{ __('t_ingame.events.planet_warning', ['planet' => $currentPlanetName]) }}</p>
+
+                                            <div class="normalRewards">
+                                                @foreach ($rang['rewards'] as $rewardKey => $reward)
+                                                    <div class="singleReward">
+                                                        <span class="rewardName">{{ $reward['summary'] }}</span>
+
+                                                        @if ($rang['claimed'])
+                                                            @if ($rang['chosen'] === $rewardKey)
+                                                                <span class="ogx-gain">{{ __('t_ingame.events.your_choice') }}</span>
+                                                            @endif
+                                                        @elseif ($rang['reached'])
+                                                            <form action="{{ route('events.claim-rank') }}" method="post">
+                                                                {{ csrf_field() }}
+                                                                <input type="hidden" name="rank" value="{{ $rang['rank'] }}"/>
+                                                                <input type="hidden" name="reward" value="{{ $rewardKey }}"/>
+                                                                <input type="submit" class="btn_blue ogx-choose"
+                                                                       value="{{ __('t_ingame.events.choose') }}"/>
+                                                            </form>
+                                                        @else
+                                                            <span class="ogx-progress">{{ __('t_ingame.events.rank_locked') }}</span>
+                                                        @endif
+                                                    </div>
+                                                @endforeach
+                                            </div>
+
+                                            <p class="ogx-staff-note {{ $staffActive ? 'active' : '' }}">
+                                                {{ $staffActive
+                                                    ? __('t_ingame.events.bonus_active')
+                                                    : __('t_ingame.events.bonus_inactive') }}
+                                            </p>
+
+                                            <div class="additionalRewards">
+                                                @foreach ($rang['bonus'] as $bonus)
+                                                    <div class="singleReward">
+                                                        <span class="rewardName">{{ $bonus }}</span>
+                                                    </div>
+                                                @endforeach
+                                            </div>
+                                        </div>
+                                    @endforeach
+
+                                </div>
                             </div>
-                        @endforeach
+                        </div>
 
                     </div>
                 </div>
             </div>
         </div>
     </div>
+
+    <script type="text/javascript">
+        $(document).ready(function () {
+            // Bascule d'onglets, entierement cote client : les six panneaux sont rendus d'un
+            // coup par le serveur, changer d'onglet ne recharge rien.
+            $('#rewardings .ogx-tab').on('click', function () {
+                var panneau = $(this).data('panel');
+
+                $('#rewardings .ogx-tab').removeClass('active');
+                $(this).addClass('active');
+
+                $('#rewardings .ogx-panel').hide();
+                $('#rewardings .ogx-panel[data-panel="' + panneau + '"]').show();
+            });
+
+            // Le choix d'une recompense de rang est definitif : on le fait confirmer.
+            $('#rewardings .ogx-choose').on('click', function () {
+                return confirm(@json(__('t_ingame.events.confirm_choice')));
+            });
+        });
+    </script>
+
 @endsection

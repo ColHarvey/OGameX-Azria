@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Date;
 use Illuminate\View\View;
 use OGame\GameMessages\EventStarted;
 use OGame\Http\Controllers\OGameController;
+use OGame\Models\EventMissionDraw;
 use OGame\Models\Message;
 use OGame\Models\User;
 use OGame\Services\EventMissionService;
@@ -33,7 +34,11 @@ class EventController extends OGameController
             'start' => $settings->eventMissionsStart(),
             'end' => $settings->eventMissionsEnd(),
             'missionsPerDay' => $settings->eventMissionsPerDay(),
+            'rankStep' => $settings->eventRankStep(),
+            'rankCount' => EventMissionService::RANK_COUNT,
+            'potential' => $eventService->getPotential(),
             'running' => $eventService->isRunning(),
+            'locked' => $this->configurationEstFigee($settings),
         ]);
     }
 
@@ -51,9 +56,27 @@ class EventController extends OGameController
             'start' => 'required|date_format:Y-m-d',
             'end' => 'required|date_format:Y-m-d|after_or_equal:start',
             'missions_per_day' => 'required|integer|min:1|max:15',
+            'rank_step' => 'required|integer|min:100|max:100000',
         ]);
 
         $enabled = (bool)($data['enabled'] ?? false);
+        $figee = $this->configurationEstFigee($settings);
+
+        // Une fois que des joueurs ont recu leur tirage, les regles du jeu ne bougent
+        // plus : le tirage est fige en base, les missions sont creditees a leur valeur
+        // de l'epoque, et changer la date de debut orpheliniserait tout l'historique.
+        // Seules la date de fin et la fermeture restent ouvertes.
+        if ($figee) {
+            $data['start'] = $settings->eventMissionsStart();
+            $data['missions_per_day'] = $settings->eventMissionsPerDay();
+            $data['rank_step'] = $settings->eventRankStep();
+
+            // Raccourcir l'evenement en deca des jours deja joues effacerait du
+            // tritium acquis : la fin ne peut pas remonter avant aujourd'hui.
+            if ($data['end'] < Date::now()->format('Y-m-d')) {
+                $data['end'] = $settings->eventMissionsEnd();
+            }
+        }
 
         // L'annonce part uniquement sur la bascule arret -> marche. Enregistrer a nouveau le
         // formulaire d'un evenement deja ouvert ne doit pas renvoyer un message a tout le
@@ -64,6 +87,7 @@ class EventController extends OGameController
         $settings->set('event_missions_start', $data['start']);
         $settings->set('event_missions_end', $data['end']);
         $settings->set('event_missions_per_day', (int)$data['missions_per_day']);
+        $settings->set('event_rank_step', (int)$data['rank_step']);
 
         if ($enabled && !$etaitOuvert) {
             $nombre = $this->announce($data['start'], $data['end']);
@@ -72,8 +96,13 @@ class EventController extends OGameController
                 ->with('status', 'Evenement ouvert. Annonce envoyee a ' . $nombre . ' joueur(s).');
         }
 
-        return redirect()->route('admin.event.index')
-            ->with('status', $enabled ? 'Evenement mis a jour.' : 'Evenement ferme.');
+        $message = $enabled ? 'Evenement mis a jour.' : 'Evenement ferme.';
+
+        if ($figee && $enabled) {
+            $message .= ' Les tirages ayant commence, seule la date de fin a pu changer.';
+        }
+
+        return redirect()->route('admin.event.index')->with('status', $message);
     }
 
     /**
@@ -112,5 +141,26 @@ class EventController extends OGameController
         });
 
         return $count;
+    }
+
+    /**
+     * Returns whether the event configuration can no longer be changed.
+     *
+     * Le verrou se declenche des qu'un joueur a recu son premier tirage, et non a
+     * l'ouverture : entre les deux, l'administrateur peut encore corriger une date sans
+     * consequence.
+     *
+     * @param SettingsService $settings
+     * @return bool
+     */
+    private function configurationEstFigee(SettingsService $settings): bool
+    {
+        $debut = $settings->eventMissionsStart();
+
+        if (!$settings->eventMissionsEnabled() || $debut === '') {
+            return false;
+        }
+
+        return EventMissionDraw::whereDate('event_start', $debut)->exists();
     }
 }

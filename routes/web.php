@@ -240,7 +240,6 @@ Route::middleware(['auth', 'banned', 'globalgame', 'locale', 'firstlogin'])->gro
     Route::post('/rewards/claim', [RewardsController::class, 'claim'])->name('rewards.claim');
 
     Route::get('/events', [EventsController::class, 'index'])->name('events.index');
-    Route::post('/events/claim-mission', [EventsController::class, 'claimMission'])->name('events.claim-mission');
     Route::post('/events/claim-rank', [EventsController::class, 'claimRank'])->name('events.claim-rank');
     Route::get('/planet-move', [PlanetMoveController::class, 'index'])->name('planetMove.index');
     Route::post('/ajax/planet-move', [PlanetMoveController::class, 'move'])->name('planetMove.move');

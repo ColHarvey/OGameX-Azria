@@ -26,37 +26,22 @@ class EventsController extends OGameController
             return view('ingame.events.closed');
         }
 
+        // Le credit est une operation a part entiere, distincte de l affichage, et il
+        // porte sur tous les jours de l evenement : un joueur qui accomplit ses missions
+        // le lundi et n ouvre la page que le vendredi retrouve son tritium intact.
+        $eventService->creditEventDays($player);
+
+        $missions = $eventService->getDailyMissions($player);
+
         return view('ingame.events.index', [
-            'missions' => $eventService->getDailyMissions($player),
+            'missions' => $missions,
             'ranks' => $eventService->getRanks($player),
             'tritium' => $eventService->getTritium($player),
-            'maxTritium' => $eventService->getMaxTritium($player),
             'start' => $eventService->getStart(),
             'end' => $eventService->getEnd(),
             'currentPlanetName' => $player->planets->current()->getPlanetName(),
+            'staffActive' => $eventService->hasCommandingStaff($player),
         ]);
-    }
-
-    /**
-     * Claims one of today's missions.
-     *
-     * @param PlayerService $player
-     * @param EventMissionService $eventService
-     * @return RedirectResponse
-     */
-    public function claimMission(PlayerService $player, EventMissionService $eventService): RedirectResponse
-    {
-        $data = request()->validate([
-            'mission' => 'required|string|max:64',
-        ]);
-
-        try {
-            $eventService->claimMission($player, $data['mission']);
-        } catch (RuntimeException $e) {
-            return redirect()->route('events.index')->with('error', $e->getMessage());
-        }
-
-        return redirect()->route('events.index')->with('status', __('t_ingame.events.claim_success'));
     }
 
     /**

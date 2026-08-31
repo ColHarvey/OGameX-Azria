@@ -820,4 +820,17 @@ class SettingsService
     {
         return (int)$this->get('event_missions_per_day', '5');
     }
+
+    /**
+     * Returns the tritium step between two event ranks.
+     *
+     * Les sept rangs sont espaces regulierement : rang N demande pas x N. Avec le pas
+     * par defaut on retrouve l echelle du jeu officiel, 1 000 a 7 000.
+     *
+     * @return int
+     */
+    public function eventRankStep(): int
+    {
+        return max(1, (int)$this->get('event_rank_step', '1000'));
+    }
 }
