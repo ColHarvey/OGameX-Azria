@@ -1,10 +1,14 @@
 @php /** @var OGame\Services\PlayerService $currentPlayer */ @endphp
 <div id="adminbar">
     <style>
+        /* La barre s'adapte a son contenu. Elle etait figee a 32px : au septieme lien,
+           la liste passait a la ligne et debordait par-dessus le jeu. Une barre de menu ne
+           doit pas supposer combien d'entrees elle contiendra. */
         #adminbar {
             background: transparent url('/img/admin/admin-menu-bg.jpg') repeat-x;
             font: normal 11px Tahoma, Arial, Helvetica, sans-serif;
-            height: 32px;
+            height: auto;
+            min-height: 32px;
             left: 0;
             padding: 0;
             text-align: center;
@@ -14,10 +18,14 @@
         }
 
         #adminbar #mmoContent {
-            height: 32px;
+            height: auto;
+            min-height: 32px;
             margin: 0 auto;
             width: 990px;
             position: relative;
+            /* Contient les deux flottants : sans cela le conteneur garde une hauteur nulle
+               et la barre ne grandit pas avec sa liste. */
+            overflow: hidden;
         }
 
         #adminbar #adminLogo {
@@ -45,8 +53,8 @@
         }
 
         #adminbar ul li {
-            display: inline;
-            margin-right: 10px;
+            display: inline-block;
+            margin: 0 0 4px 10px;
         }
 
         #adminbar ul li a {
