@@ -53,8 +53,8 @@
         }
 
         #adminbar ul li {
-            display: inline-block;
-            margin: 0 0 4px 10px;
+            display: inline;
+            margin-right: 10px;
         }
 
         #adminbar ul li a {
