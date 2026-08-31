@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\DB;
 use OGame\Models\EventMissionClaim;
 use OGame\Models\EventMissionDraw;
 use OGame\Models\Message;
+use OGame\Models\User;
 use OGame\Services\EventMissionService;
 use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
@@ -1120,5 +1121,101 @@ class EventMissionTest extends AccountTestCase
             substr_count($html, 'class="ogx-part-label"'),
             'Some reward parts are shown without a name.'
         );
+    }
+
+    /**
+     * Assert the player receives exactly the amounts the page announced.
+     *
+     * L'affichage et le credit lisent le meme tableau, mais rien ne garantissait qu'ils
+     * restent d'accord : une transformation d'un cote — un arrondi, un facteur, un cumul —
+     * passerait inapercue. Ce test lit les montants tels que la page les presente, reclame,
+     * puis compare le solde de la planete a ce qui etait promis.
+     */
+    public function testTheAmountCreditedMatchesWhatThePageAnnounced(): void
+    {
+        $this->openEvent();
+
+        $player = resolve(PlayerService::class);
+        $eventService = resolve(EventMissionService::class);
+
+        $this->donnerDuTritium($player, 1000);
+
+        // Ce que la page annonce pour le choix « ressources » du rang 1.
+        $annonce = [];
+        foreach ($eventService->getRanks($player)[1]['rewards']['resources']['detail'] as $part) {
+            $annonce[$part['kind']] = (int)str_replace([' ', "\u{a0}"], '', $part['amount']);
+        }
+
+        $this->assertNotEmpty($annonce, 'The page announced no amount at all.');
+
+        $planete = $player->planets->current();
+        $avant = [
+            'metal' => $planete->metal()->get(),
+            'crystal' => $planete->crystal()->get(),
+            'deuterium' => $planete->deuterium()->get(),
+        ];
+
+        $eventService->claimRank($player, 1, 'resources');
+
+        $apres = resolve(PlayerService::class)->planets->current();
+
+        foreach ($annonce as $ressource => $montant) {
+            $recu = match ($ressource) {
+                'metal' => $apres->metal()->get() - $avant['metal'],
+                'crystal' => $apres->crystal()->get() - $avant['crystal'],
+                'deuterium' => $apres->deuterium()->get() - $avant['deuterium'],
+                default => null,
+            };
+
+            $this->assertNotNull($recu, "Unexpected resource announced: $ressource");
+            $this->assertEquals(
+                $montant,
+                $recu,
+                "The page announced $montant $ressource but the planet received $recu."
+            );
+        }
+    }
+
+    /**
+     * Assert the dark matter credited matches the announced figure, to the unit.
+     */
+    public function testTheDarkMatterCreditedMatchesWhatThePageAnnounced(): void
+    {
+        $this->openEvent();
+
+        $player = resolve(PlayerService::class);
+        $eventService = resolve(EventMissionService::class);
+
+        $this->donnerDuTritium($player, 1000);
+
+        $detail = $eventService->getRanks($player)[1]['rewards']['dark_matter']['detail'];
+        $annonce = (int)str_replace([' ', "\u{a0}"], '', $detail[0]['amount']);
+
+        $this->assertGreaterThan(0, $annonce);
+
+        $avant = (int)User::findOrFail($player->getId())->dark_matter;
+        $eventService->claimRank($player, 1, 'dark_matter');
+        $apres = (int)User::findOrFail($player->getId())->dark_matter;
+
+        $this->assertEquals(
+            $annonce,
+            $apres - $avant,
+            "The page announced $annonce dark matter but the account received " . ($apres - $avant) . '.'
+        );
+    }
+
+    /**
+     * Credits a player with enough tritium to open a rank.
+     */
+    private function donnerDuTritium(PlayerService $player, int $tritium): void
+    {
+        EventMissionClaim::create([
+            'user_id' => $player->getId(),
+            'event_start' => Date::now()->subDay()->startOfDay(),
+            'mission_date' => Date::now()->startOfDay(),
+            'mission_key' => 'expedition',
+            'tritium' => $tritium,
+            'claimed_at' => Date::now(),
+        ]);
     }
 }
