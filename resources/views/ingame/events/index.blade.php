@@ -155,32 +155,63 @@
             color: #9c0;
         }
 
-        /* Vignettes de recompense. Le theme fournit .singleReward et .rewardName ; on ajoute
-           la presentation interne : une illustration et sa quantite par element, plutot
-           qu'une phrase. .resourceIcon vient aussi du theme, 48x32 pour metal, cristal,
-           deuterium et matiere noire. */
-        #rewardings .ogx-part {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-            margin: 4px 0;
+        /* Vignette de recompense, sur le modele du jeu : une illustration unique et sa
+           quantite en badge d angle. Les elements secondaires d une recompense composee
+           passent en ligne sous l image, plutot qu en pile d icones. */
+        #rewardings .ogx-visual {
+            position: relative;
+            width: 92px;
+            height: 68px;
+            margin: 6px auto 2px;
         }
 
-        #rewardings .ogx-part .resourceIcon {
+        #rewardings .ogx-visual-img {
+            width: 68px;
+            height: 68px;
+            margin: 0 auto;
+            display: block;
+        }
+
+        #rewardings .ogx-visual-res {
             float: none;
-            flex: 0 0 48px;
+            margin: 18px auto 0;
+            display: block;
         }
 
-        #rewardings .ogx-part-img {
-            width: 42px;
-            height: 42px;
-        }
-
-        #rewardings .ogx-part-amount {
-            color: #cfe3f5;
+        /* Le badge reprend le coin orange du jeu : un filet en biais et le nombre a droite. */
+        #rewardings .ogx-badge {
+            color: #d29d00;
+            text-align: right;
             font-weight: 600;
-            white-space: nowrap;
+            border-left: 2px solid #d29d00;
+            border-bottom: 2px solid #d29d00;
+            padding: 0 2px 1px 0;
+            position: absolute;
+            right: 0;
+            bottom: -2px;
+            left: 8px;
+        }
+
+        #rewardings .ogx-extra {
+            color: #8fa7bd;
+            text-align: center;
+            font-size: 10px;
+            line-height: 14px;
+            display: block;
+        }
+
+        #rewardings .ogx-extra-line {
+            display: block;
+        }
+
+        #rewardings .additionalRewards .ogx-visual {
+            width: 76px;
+            height: 56px;
+        }
+
+        #rewardings .additionalRewards .ogx-visual-img {
+            width: 56px;
+            height: 56px;
         }
 
         #rewardings .singleReward.ogx-chosen {
@@ -384,16 +415,7 @@
                                                     <div class="singleReward {{ $rang['claimed'] && $rang['chosen'] === $rewardKey ? 'ogx-chosen' : '' }}">
                                                         <span class="rewardName">{{ __('t_ingame.events.reward_' . $rewardKey) }}</span>
 
-                                                        @foreach ($reward['detail'] as $part)
-                                                            <div class="ogx-part">
-                                                                @if ($part['image'] !== null)
-                                                                    <img src="{{ $part['image'] }}" alt="{{ $part['label'] }}" class="ogx-part-img">
-                                                                @else
-                                                                    <span class="resourceIcon {{ $part['kind'] }}"></span>
-                                                                @endif
-                                                                <span class="ogx-part-amount">{{ $part['amount'] }}</span>
-                                                            </div>
-                                                        @endforeach
+                                                        @include('ingame.events.partials.reward-visual', ['detail' => $reward['detail']])
 
                                                         @if ($rang['claimed'])
                                                             @if ($rang['chosen'] === $rewardKey)
@@ -422,16 +444,7 @@
                                             <div class="additionalRewards">
                                                 @foreach ($rang['bonus'] as $bonus)
                                                     <div class="singleReward">
-                                                        @foreach ($bonus['detail'] as $part)
-                                                            <div class="ogx-part">
-                                                                @if ($part['image'] !== null)
-                                                                    <img src="{{ $part['image'] }}" alt="{{ $part['label'] }}" class="ogx-part-img">
-                                                                @else
-                                                                    <span class="resourceIcon {{ $part['kind'] }}"></span>
-                                                                @endif
-                                                                <span class="ogx-part-amount">{{ $part['amount'] }}</span>
-                                                            </div>
-                                                        @endforeach
+                                                        @include('ingame.events.partials.reward-visual', ['detail' => $bonus['detail']])
                                                     </div>
                                                 @endforeach
                                             </div>
