@@ -83,7 +83,6 @@
         #rewardings .rewardlist-item-icon img {
             width: 76px;
             height: 74px;
-            margin: 3px 0 0 5px;
         }
 
         /* Coche de validation. Celle du sprite d icones ne fait que 16 px ; le theme
