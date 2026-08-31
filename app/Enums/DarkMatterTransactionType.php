@@ -16,4 +16,5 @@ enum DarkMatterTransactionType: string
     case HALVING = 'halving';
     case STARTER_AID = 'starter_aid';
     case SHOP_ITEM = 'shop_item';
+    case EVENT_REWARD = 'event_reward';
 }

@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use OGame\Http\Controllers\Admin\DeveloperShortcutsController;
+use OGame\Http\Controllers\Admin\EventController;
 use OGame\Http\Controllers\Admin\FleetTimingController;
 use OGame\Http\Controllers\Admin\RulesController as AdminRulesController;
 use OGame\Http\Controllers\Admin\ServerAdministrationController;
@@ -13,6 +14,7 @@ use OGame\Http\Controllers\ChangeNickController;
 use OGame\Http\Controllers\CharacterClassController;
 use OGame\Http\Controllers\ChatController;
 use OGame\Http\Controllers\DefenseController;
+use OGame\Http\Controllers\EventsController;
 use OGame\Http\Controllers\FacilitiesController;
 use OGame\Http\Controllers\FleetController;
 use OGame\Http\Controllers\FleetEventsController;
@@ -236,6 +238,10 @@ Route::middleware(['auth', 'banned', 'globalgame', 'locale', 'firstlogin'])->gro
 
     Route::get('/rewards', [RewardsController::class, 'index'])->name('rewards.index');
     Route::post('/rewards/claim', [RewardsController::class, 'claim'])->name('rewards.claim');
+
+    Route::get('/events', [EventsController::class, 'index'])->name('events.index');
+    Route::post('/events/claim-mission', [EventsController::class, 'claimMission'])->name('events.claim-mission');
+    Route::post('/events/claim-rank', [EventsController::class, 'claimRank'])->name('events.claim-rank');
     Route::get('/planet-move', [PlanetMoveController::class, 'index'])->name('planetMove.index');
     Route::post('/ajax/planet-move', [PlanetMoveController::class, 'move'])->name('planetMove.move');
     Route::get('/ajax/planet-move/cancel', [PlanetMoveController::class, 'cancel'])->name('planetMove.cancel');
@@ -276,6 +282,9 @@ Route::middleware(['auth', 'globalgame', 'locale', 'admin'])->group(function () 
     // Annonces aux joueurs
     Route::get('/admin/announcement', [\OGame\Http\Controllers\Admin\AnnouncementController::class, 'index'])->name('admin.announcement.index');
     Route::post('/admin/announcement', [\OGame\Http\Controllers\Admin\AnnouncementController::class, 'send'])->name('admin.announcement.send');
+
+    Route::get('/admin/event', [EventController::class, 'index'])->name('admin.event.index');
+    Route::post('/admin/event', [EventController::class, 'update'])->name('admin.event.update');
 
     Route::get('/admin/rules', [AdminRulesController::class, 'index'])->name('admin.rules.index');
     Route::post('/admin/rules', [AdminRulesController::class, 'update'])->name('admin.rules.update');

@@ -707,6 +707,20 @@
                             <span class="textlabel">{{ __('t_ingame.layout.menu_shop') }}</span>
                         </a>
                     </li>
+                    @if (!empty($eventRunning))
+                    <li>
+                        <span class="menu_icon">
+                            <div class="menuImage rewarding {{(Request::is('events') ? 'highlighted' : '') }}"></div>
+                        </span>
+                        <a class="menubutton {{(Request::is('events') ? 'selected' : '') }}"
+                           href="{{ route('events.index') }}"
+                           accesskey=""
+                           target="_self"
+                        >
+                            <span class="textlabel">{{ __('t_ingame.layout.menu_events') }}</span>
+                        </a>
+                    </li>
+                    @endif
                 </ul>
 
                 @if ($attackBlockActive)

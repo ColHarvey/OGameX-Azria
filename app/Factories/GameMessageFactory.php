@@ -6,8 +6,8 @@ use Illuminate\Contracts\Container\BindingResolutionException;
 use OGame\GameMessages\Abstracts\GameMessage;
 use OGame\GameMessages\AcsDefendArrivalHost;
 use OGame\GameMessages\AcsDefendArrivalSender;
-use OGame\GameMessages\AllianceApplicationReceived;
 use OGame\GameMessages\AdminAnnouncement;
+use OGame\GameMessages\AllianceApplicationReceived;
 use OGame\GameMessages\AllianceBroadcast;
 use OGame\GameMessages\BattleReport;
 use OGame\GameMessages\BuddyRemoved;
@@ -18,6 +18,7 @@ use OGame\GameMessages\ColonyEstablishFailAstrophysics;
 use OGame\GameMessages\DebrisFieldHarvest;
 use OGame\GameMessages\DefenderEspionageDetected;
 use OGame\GameMessages\EspionageReport;
+use OGame\GameMessages\EventStarted;
 use OGame\GameMessages\ExpeditionBattle;
 use OGame\GameMessages\ExpeditionBattleAliens;
 use OGame\GameMessages\ExpeditionBattlePirates;
@@ -64,6 +65,7 @@ class GameMessageFactory
      */
     private static array $gameMessageClasses = [
         'admin_announcement' => AdminAnnouncement::class,
+        'event_started' => EventStarted::class,
         'welcome_message' => WelcomeMessage::class,
         'return_of_fleet_with_resources' => ReturnOfFleetWithResources::class,
         'return_of_fleet' => ReturnOfFleet::class,

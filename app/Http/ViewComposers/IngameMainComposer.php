@@ -13,6 +13,7 @@ use OGame\Models\AllianceMember;
 use OGame\Models\User;
 use OGame\Services\BuddyService;
 use OGame\Services\ChatService;
+use OGame\Services\EventMissionService;
 use OGame\Services\FleetMissionService;
 use OGame\Services\HighscoreService;
 use OGame\Services\MessageService;
@@ -42,7 +43,7 @@ class IngameMainComposer
      * @param HighscoreService $highscoreService
      * @param BuddyService $buddyService
      */
-    public function __construct(private Request $request, private PlayerService $player, private MessageService $messageService, private SettingsService $settingsService, private FleetMissionService $fleetMissionService, private HighscoreService $highscoreService, private BuddyService $buddyService, private ChatService $chatService)
+    public function __construct(private Request $request, private PlayerService $player, private MessageService $messageService, private SettingsService $settingsService, private FleetMissionService $fleetMissionService, private HighscoreService $highscoreService, private BuddyService $buddyService, private ChatService $chatService, private EventMissionService $eventMissionService)
     {
     }
 
@@ -124,6 +125,7 @@ class IngameMainComposer
 
         $view->with([
             'underAttack' => $this->fleetMissionService->currentPlayerUnderAttack(),
+            'eventRunning' => $this->eventMissionService->isRunning(),
             'unreadMessagesCount' => $this->messageService->getUnreadMessagesCount(),
             'buddyRequestCount' => $this->buddyService->getUnreadRequestsCount((int) auth()->id()),
             'onlineBuddiesCount' => $this->getOnlineContactsCount(),

@@ -6,6 +6,11 @@ return [
         'subject' => ':subject',
         'body' => ':body',
     ],
+    'event_started' => [
+        'from' => 'Administration',
+        'subject' => 'A mission event is starting',
+        'body' => "A daily mission event is running from :start to :end inclusive.\n\nEvery day a fresh draw of missions awaits you. Completing them earns tritium, which unlocks five ranks of rewards: resources, dark matter or items.\n\nHead to the Event page to see today's missions.",
+    ],
     // ------------------------
     'welcome_message' => [
         'from' => 'OGameX',

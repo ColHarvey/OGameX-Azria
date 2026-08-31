@@ -777,4 +777,47 @@ class SettingsService
     {
         return $this->get('contact_content', '');
     }
+
+    /**
+     * Returns whether the mission event is switched on by the administrator.
+     *
+     * L'interrupteur ne suffit pas a rendre l'evenement actif : les bornes de dates sont
+     * verifiees separement par EventMissionService::isRunning().
+     *
+     * @return bool
+     */
+    public function eventMissionsEnabled(): bool
+    {
+        return $this->get('event_missions_enabled', '0') === '1';
+    }
+
+    /**
+     * Returns the mission event start date, formatted Y-m-d, or an empty string.
+     *
+     * @return string
+     */
+    public function eventMissionsStart(): string
+    {
+        return $this->get('event_missions_start', '');
+    }
+
+    /**
+     * Returns the mission event end date, formatted Y-m-d, or an empty string.
+     *
+     * @return string
+     */
+    public function eventMissionsEnd(): string
+    {
+        return $this->get('event_missions_end', '');
+    }
+
+    /**
+     * Returns how many missions are drawn for each player each day.
+     *
+     * @return int
+     */
+    public function eventMissionsPerDay(): int
+    {
+        return (int)$this->get('event_missions_per_day', '5');
+    }
 }

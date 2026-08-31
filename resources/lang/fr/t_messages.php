@@ -6,6 +6,11 @@ return [
         'subject' => ':subject',
         'body' => ':body',
     ],
+    'event_started' => [
+        'from' => 'Administration',
+        'subject' => 'Un evenement de missions commence',
+        'body' => "Un evenement de missions quotidiennes est ouvert du :start au :end inclus.\n\nChaque jour, un nouveau tirage de missions vous attend. Les accomplir rapporte du tritium, qui debloque cinq rangs de recompenses : ressources, matiere noire ou objets.\n\nRendez-vous sur la page Evenement pour consulter vos missions du jour.",
+    ],
     'welcome_message' => [
         'from' => 'OGameX Francophone',
         'subject' => 'Bienvenue sur OGameX Francophone !',

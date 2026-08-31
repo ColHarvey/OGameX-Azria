@@ -85,6 +85,7 @@
                 <li><a class="{{(Request::is('admin/fleet-timing*') ? 'active' : '') }}" href="{{ route('admin.fleettiming.index') }}">Chronologie des flottes</a></li>
                 <li><a class="{{(Request::is('admin/rules') ? 'active' : '') }}" href="{{ route('admin.rules.index') }}">Reglement et mentions legales</a></li>
                 <li><a class="{{(Request::is('admin/announcement') ? 'active' : '') }}" href="{{ route('admin.announcement.index') }}">Annonces</a></li>
+                <li><a class="{{(Request::is('admin/event') ? 'active' : '') }}" href="{{ route('admin.event.index') }}">Evenement</a></li>
                 <li><a class="{{(Request::is('admin/server-administration*') ? 'active' : '') }}" href="{{ route('admin.server-administration.index') }}">Administration du serveur</a></li>
             </ul>
         @endif
