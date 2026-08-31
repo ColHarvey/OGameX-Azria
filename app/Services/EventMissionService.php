@@ -688,7 +688,7 @@ class EventMissionService
      * Returns the five ranks with their thresholds, state and available rewards.
      *
      * @param PlayerService $player
-     * @return array<int, array{rank: int, threshold: int, reached: bool, claimed: bool, chosen: string|null, rewards: array<string, array{reward: array{metal: int, crystal: int, deuterium: int, dark_matter: int, items: array<int, string>}, summary: string}>, bonus: array<int, string>}>
+     * @return array<int, array{rank: int, threshold: int, reached: bool, claimed: bool, chosen: string|null, rewards: array<string, array{reward: array{metal: int, crystal: int, deuterium: int, dark_matter: int, items: array<int, string>}, summary: string, detail: array<int, array{kind: string, label: string, amount: string, image: string|null}>}>, bonus: array<int, array{summary: string, detail: array<int, array{kind: string, label: string, amount: string, image: string|null}>}>}>
      */
     public function getRanks(PlayerService $player): array
     {
@@ -1160,17 +1160,67 @@ class EventMissionService
      * libelle d'un objet suit le catalogue de ShopService plutot qu'une copie figee.
      *
      * @param int $rank
-     * @return array<string, array{reward: array{metal: int, crystal: int, deuterium: int, dark_matter: int, items: array<int, string>}, summary: string}>
+     * @return array<string, array{reward: array{metal: int, crystal: int, deuterium: int, dark_matter: int, items: array<int, string>}, summary: string, detail: array<int, array{kind: string, label: string, amount: string, image: string|null}>}>
      */
     private function describeRewards(int $rank): array
     {
         $rewards = [];
 
         foreach (self::RANK_REWARDS[$rank] as $rewardKey => $reward) {
-            $rewards[$rewardKey] = ['reward' => $reward, 'summary' => $this->describe($reward)];
+            $rewards[$rewardKey] = [
+                'reward' => $reward,
+                'summary' => $this->describe($reward),
+                'detail' => $this->detail($reward),
+            ];
         }
 
         return $rewards;
+    }
+
+    /**
+     * Breaks a reward into displayable parts: one icon and one amount each.
+     *
+     * La page affiche chaque recompense en vignette, avec l'illustration et la quantite,
+     * plutot qu'en une phrase. Les ressources et la matiere noire utilisent .resourceIcon du
+     * theme ; les objets, leur image de catalogue en 100 px.
+     *
+     * @param array{metal: int, crystal: int, deuterium: int, dark_matter: int, items: array<int, string>} $reward
+     * @return array<int, array{kind: string, label: string, amount: string, image: string|null}>
+     */
+    private function detail(array $reward): array
+    {
+        $parts = [];
+
+        foreach (['metal', 'crystal', 'deuterium', 'dark_matter'] as $key) {
+            if ($reward[$key] <= 0) {
+                continue;
+            }
+
+            $parts[] = [
+                'kind' => $key === 'dark_matter' ? 'darkmatter' : $key,
+                'label' => __('t_ingame.rewards.gain_' . $key),
+                'amount' => number_format($reward[$key], 0, ',', ' '),
+                'image' => null,
+            ];
+        }
+
+        foreach ($reward['items'] as $ref) {
+            $item = $this->shopService->getItemByRef($ref);
+
+            if ($item === null) {
+                continue;
+            }
+
+            $parts[] = [
+                'kind' => 'item',
+                'label' => __('t_resources.' . $item['name_key'] . '.title')
+                    . ' ' . __('t_ingame.shop.tier_' . $item['tier_key']),
+                'amount' => $item['duration'],
+                'image' => '/img/icons/' . $item['image_hash'] . '-100x.png',
+            ];
+        }
+
+        return $parts;
     }
 
     /**
@@ -1252,10 +1302,13 @@ class EventMissionService
      * Returns the readable summaries of one rank's additional rewards.
      *
      * @param int $rank
-     * @return array<int, string>
+     * @return array<int, array{summary: string, detail: array<int, array{kind: string, label: string, amount: string, image: string|null}>}>
      */
     private function describeBonus(int $rank): array
     {
-        return array_map(fn (array $bonus): string => $this->describe($bonus), self::RANK_BONUS[$rank]);
+        return array_map(
+            fn (array $bonus): array => ['summary' => $this->describe($bonus), 'detail' => $this->detail($bonus)],
+            self::RANK_BONUS[$rank]
+        );
     }
 }

@@ -155,6 +155,69 @@
             color: #9c0;
         }
 
+        /* Vignettes de recompense. Le theme fournit .singleReward et .rewardName ; on ajoute
+           la presentation interne : une illustration et sa quantite par element, plutot
+           qu'une phrase. .resourceIcon vient aussi du theme, 48x32 pour metal, cristal,
+           deuterium et matiere noire. */
+        #rewardings .ogx-part {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            margin: 4px 0;
+        }
+
+        #rewardings .ogx-part .resourceIcon {
+            float: none;
+            flex: 0 0 48px;
+        }
+
+        #rewardings .ogx-part-img {
+            width: 42px;
+            height: 42px;
+        }
+
+        #rewardings .ogx-part-amount {
+            color: #cfe3f5;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        #rewardings .singleReward.ogx-chosen {
+            border-color: #9c0;
+        }
+
+        #rewardings .ogx-amount {
+            color: #d29d00;
+            font-weight: 600;
+        }
+
+        /* Bouton vert du theme, decoupe dans le meme sprite que les onglets. */
+        #rewardings .tier-button {
+            color: #fff;
+            text-align: center;
+            text-shadow: -1px 1px 5px #246a05;
+            background: url(/img/icons/f5f81e8302aaad56c958c033677fb8.png) 0 -188px no-repeat;
+            border: 0;
+            width: 141px;
+            height: 25px;
+            margin: 6px auto 0;
+            padding: 0;
+            font-weight: 600;
+            font-size: 11px;
+            cursor: pointer;
+            display: block;
+        }
+
+        #rewardings .tier-button:hover {
+            background-position: 0 -214px;
+        }
+
+        /* Les vignettes bonus sont plus etroites : on y resserre l ecart. */
+        #rewardings .additionalRewards .ogx-part {
+            gap: 4px;
+        }
+
         #rewardings .singleReward .rewardName {
             text-align: center;
         }
@@ -311,17 +374,26 @@
 
                                             <p class="ogx-welcome">{{ __('t_ingame.events.rank_welcome') }}</p>
                                             <p class="ogx-rank-text">{{ __('t_ingame.events.rank_hint') }}</p>
-                                            <p class="ogx-rank-header">{{ __('t_ingame.events.rank_progress', [
-                                                'tritium' => number_format($tritium, 0, ',', ' '),
+                                            <p class="ogx-rank-header">{!! __('t_ingame.events.rank_progress', [
+                                                'tritium' => '<span class="ogx-amount">' . number_format($tritium, 0, ',', ' ') . '</span>',
                                                 'threshold' => number_format($rang['threshold'], 0, ',', ' '),
-                                            ]) }}</p>
-                                            <p class="ogx-rank-text">{{ __('t_ingame.events.planet_warning', ['planet' => $currentPlanetName]) }}</p>
-                                            <p class="ogx-loss {{ $daysLeft <= 2 ? 'urgent' : '' }}">{{ __('t_ingame.events.loss_warning') }}</p>
+                                            ]) !!}</p>
 
                                             <div class="normalRewards">
                                                 @foreach ($rang['rewards'] as $rewardKey => $reward)
-                                                    <div class="singleReward">
-                                                        <span class="rewardName">{{ $reward['summary'] }}</span>
+                                                    <div class="singleReward {{ $rang['claimed'] && $rang['chosen'] === $rewardKey ? 'ogx-chosen' : '' }}">
+                                                        <span class="rewardName">{{ __('t_ingame.events.reward_' . $rewardKey) }}</span>
+
+                                                        @foreach ($reward['detail'] as $part)
+                                                            <div class="ogx-part">
+                                                                @if ($part['image'] !== null)
+                                                                    <img src="{{ $part['image'] }}" alt="{{ $part['label'] }}" class="ogx-part-img">
+                                                                @else
+                                                                    <span class="resourceIcon {{ $part['kind'] }}"></span>
+                                                                @endif
+                                                                <span class="ogx-part-amount">{{ $part['amount'] }}</span>
+                                                            </div>
+                                                        @endforeach
 
                                                         @if ($rang['claimed'])
                                                             @if ($rang['chosen'] === $rewardKey)
@@ -332,8 +404,7 @@
                                                                 {{ csrf_field() }}
                                                                 <input type="hidden" name="rank" value="{{ $rang['rank'] }}"/>
                                                                 <input type="hidden" name="reward" value="{{ $rewardKey }}"/>
-                                                                <input type="submit" class="btn_blue ogx-choose"
-                                                                       value="{{ __('t_ingame.events.choose') }}"/>
+                                                                <button type="submit" class="tier-button ogx-choose">{{ __('t_ingame.events.choose') }}</button>
                                                             </form>
                                                         @else
                                                             <span class="ogx-progress">{{ __('t_ingame.events.rank_locked') }}</span>
@@ -351,10 +422,22 @@
                                             <div class="additionalRewards">
                                                 @foreach ($rang['bonus'] as $bonus)
                                                     <div class="singleReward">
-                                                        <span class="rewardName">{{ $bonus }}</span>
+                                                        @foreach ($bonus['detail'] as $part)
+                                                            <div class="ogx-part">
+                                                                @if ($part['image'] !== null)
+                                                                    <img src="{{ $part['image'] }}" alt="{{ $part['label'] }}" class="ogx-part-img">
+                                                                @else
+                                                                    <span class="resourceIcon {{ $part['kind'] }}"></span>
+                                                                @endif
+                                                                <span class="ogx-part-amount">{{ $part['amount'] }}</span>
+                                                            </div>
+                                                        @endforeach
                                                     </div>
                                                 @endforeach
                                             </div>
+
+                                            <p class="ogx-rank-text">{{ __('t_ingame.events.planet_warning', ['planet' => $currentPlanetName]) }}</p>
+                                            <p class="ogx-loss {{ $daysLeft <= 2 ? 'urgent' : '' }}">{{ __('t_ingame.events.loss_warning') }}</p>
                                         </div>
                                     @endforeach
 
