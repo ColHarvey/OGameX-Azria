@@ -883,6 +883,9 @@ class EventMissionTest extends AccountTestCase
         $settingsService = resolve(SettingsService::class);
         $player = resolve(PlayerService::class);
 
+        // Le plancher ne s applique qu au premier jour : l evenement commence aujourd hui.
+        $settingsService->set('event_missions_start', Date::now()->format('Y-m-d'));
+
         // Ouverture a 6 h : tout ce qui precede cette heure ne doit pas compter.
         $ouverture = Date::now()->startOfDay()->addHours(6);
         $settingsService->set('event_missions_opened_at', (int)$ouverture->timestamp);

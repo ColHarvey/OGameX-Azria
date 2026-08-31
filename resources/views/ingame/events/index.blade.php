@@ -186,8 +186,7 @@
         }
 
         #rewardings .ogx-part {
-            position: relative;
-            padding-bottom: 14px;
+            text-align: center;
         }
 
         #rewardings .ogx-part-img {
@@ -203,16 +202,11 @@
 
         #rewardings .ogx-badge {
             color: #d29d00;
-            text-align: right;
+            text-align: center;
             white-space: nowrap;
             font-weight: 600;
-            border-left: 2px solid #d29d00;
-            border-bottom: 2px solid #d29d00;
-            padding: 0 2px 1px 0;
-            position: absolute;
-            right: 0;
-            bottom: 0;
-            left: 6px;
+            display: block;
+            margin-top: 2px;
         }
 
         #rewardings .additionalRewards .ogx-part-img {

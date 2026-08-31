@@ -921,8 +921,12 @@ class EventMissionService
         // les jours suivants commencant apres.
         $debutDate = $day->copy()->startOfDay();
         $ouverture = $this->getOpenedAt();
+        $premierJour = $this->getStart();
 
-        if ($ouverture !== null && $ouverture->greaterThan($debutDate)) {
+        if ($ouverture !== null
+            && $premierJour !== null
+            && $day->isSameDay($premierJour)
+            && $ouverture->greaterThan($debutDate)) {
             $debutDate = $ouverture->copy();
         }
 
