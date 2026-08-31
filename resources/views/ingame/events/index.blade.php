@@ -37,55 +37,20 @@
             justify-content: space-between;
         }
 
-        /* Bande de titre. Le theme declare .rewardheader avec le sprite mais sans
-           position ni dimensions ; sans elles le titre restait du texte nu pose
-           au-dessus du cadre. La decoupe a ete relevee sur le sprite : la bande occupe
-           x 104-616, y 5-39, soit 512 x 35 px, biseau compris a droite. Cette largeur
-           correspond a celle de .rewardlist-item-text, ce qui place le biseau pile a
-           l extremite de la ligne. */
-        /* Alignement des trois elements du cadre sur la meme largeur. La bande de titre
-           fait 512 px dans le sprite ; sans cela le corps et le bas, plus larges, la
-           debordaient de quelques pixels a droite. */
-        #rewardings .rewardlist-item {
-            width: 612px;
-        }
-
-        #rewardings .rewardlist-item-text,
-        #rewardings .rewardlist-item-bottom {
-            width: 512px;
-        }
-
-        /* Puits d icone : le sprite en contient un, releve a x 7-92, y 3-82, soit
-           86 x 80 px bordure comprise. Sans lui l image flottait sans cadre. */
-        #rewardings .rewardlist-item-icon {
-            background: url(/img/icons/e3e67150390416129bbbc8696f7b91.png) -7px -3px no-repeat;
-            width: 86px;
-            height: 80px;
+        /* .rewardheader porte le cadre ENTIER — puits d icone, bande de titre et
+           biseau — en une seule image de fond, exactement comme .rewardlistimg sur la
+           page Recompenses. Le decouper en morceaux etait le mauvais modele : le sprite
+           est dessine d un bloc, a la position 0 0, sur un element de 619 px qui
+           enveloppe l icone et le texte. Le corps qui deborde est prolonge par le
+           remplissage repetable de .rewardlist-item-wrapper. */
+        #rewardings .rewardheader {
+            width: 619px;
+            margin-bottom: 12px;
         }
 
         #rewardings .rewardlist-item-icon img {
-            width: 74px;
+            width: 76px;
             height: 74px;
-            margin: 3px 0 0 5px;
-        }
-
-        #rewardings .rewardheader {
-            background-position: -104px -5px;
-            width: 512px;
-            height: 35px;
-            overflow: hidden;
-        }
-
-        #rewardings .rewardheader > h3 {
-            margin: 0 120px 0 12px;
-            font-size: 12px;
-            font-weight: 600;
-            line-height: 35px;
-            color: #cfe3f5;
-        }
-
-        #rewardings .rewarded .rewardheader > h3 {
-            color: #9c0;
         }
 
         #rewardings .ogx-gain {
@@ -241,35 +206,38 @@
 
                                             @foreach ($groupe as $mission)
                                                 <div class="rewardlist-item {{ $mission['done'] ? 'rewarded' : '' }}">
-                                                    <div class="rewardlist-item-icon">
-                                                        <img src="/img/{{ $mission['icon'] }}"
-                                                             alt="{{ __('t_ingame.events.mission_' . $mission['key'] . '_name') }}">
-                                                    </div>
-                                                    <div class="rewardlist-item-text">
-                                                        <div class="rewardheader">
-                                                            <h3>{{ __('t_ingame.events.mission_' . $mission['key'] . '_name') }}</h3>
+                                                    {{-- .rewardheader porte le cadre entier en une seule image : puits
+                                                         d'icone, bande de titre et biseau. Il enveloppe donc l'icone ET
+                                                         le texte, comme .rewardlistimg sur la page Recompenses. --}}
+                                                    <div class="rewardheader">
+                                                        <div class="rewardlist-item-icon">
+                                                            <img src="/img/{{ $mission['icon'] }}"
+                                                                 alt="{{ __('t_ingame.events.mission_' . $mission['key'] . '_name') }}">
                                                         </div>
+                                                        <div class="rewardlist-item-text">
+                                                            <h3>{{ __('t_ingame.events.mission_' . $mission['key'] . '_name') }}</h3>
 
-                                                        @if ($mission['done'])
-                                                            <div class="reward-claimed-text">
-                                                                <p class="ogx-gain">+{{ number_format($mission['tritium'], 0, ',', ' ') }}</p>
-                                                                <span class="icon icon_checkmark"></span>
-                                                            </div>
-                                                        @endif
+                                                            @if ($mission['done'])
+                                                                <div class="reward-claimed-text">
+                                                                    <p class="ogx-gain">+{{ number_format($mission['tritium'], 0, ',', ' ') }}</p>
+                                                                    <span class="icon icon_checkmark"></span>
+                                                                </div>
+                                                            @endif
 
-                                                        <div class="rewardlist-item-wrapper">
-                                                            <p>{{ __('t_ingame.events.mission_' . $mission['key'], [
-                                                                'target' => number_format($mission['target'], 0, ',', ' '),
-                                                            ]) }}</p>
-
-                                                            @if ($mission['target'] > 1)
-                                                                <p class="ogx-progress">{{ __('t_ingame.events.progress', [
-                                                                    'progress' => number_format($mission['progress'], 0, ',', ' '),
+                                                            <div class="rewardlist-item-wrapper">
+                                                                <p>{{ __('t_ingame.events.mission_' . $mission['key'], [
                                                                     'target' => number_format($mission['target'], 0, ',', ' '),
                                                                 ]) }}</p>
-                                                            @endif
+
+                                                                @if ($mission['target'] > 1)
+                                                                    <p class="ogx-progress">{{ __('t_ingame.events.progress', [
+                                                                        'progress' => number_format($mission['progress'], 0, ',', ' '),
+                                                                        'target' => number_format($mission['target'], 0, ',', ' '),
+                                                                    ]) }}</p>
+                                                                @endif
+                                                            </div>
+                                                            <div class="rewardlist-item-bottom"></div>
                                                         </div>
-                                                        <div class="rewardlist-item-bottom"></div>
                                                     </div>
                                                 </div>
                                             @endforeach
