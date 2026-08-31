@@ -4,6 +4,14 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
+/*
+ * Tous les index sont nommes explicitement, et courts.
+ *
+ * MariaDB refuse un identifiant de plus de 64 caracteres ; SQLite l'accepte. Le nom
+ * qu'engendre Laravel par defaut — table + colonnes + suffixe — atteignait ici 72
+ * caracteres et a fait echouer la migration en production alors que toute la suite de
+ * tests passait en local. Nommer les index a la main est la seule protection.
+ */
 return new class () extends Migration {
     /**
      * Run the migrations.
@@ -30,7 +38,7 @@ return new class () extends Migration {
             // et sur les objectifs du catalogue actuel, pas sur ceux qui etaient affiches.
             $table->text('missions');
 
-            $table->unique(['user_id', 'event_start', 'mission_date']);
+            $table->unique(['user_id', 'event_start', 'mission_date'], 'event_draws_unique');
         });
 
         // Missions creditees.
@@ -51,10 +59,10 @@ return new class () extends Migration {
             // fois par joueur, par evenement et par jour. La contrainte est en base et non
             // seulement dans le code, car le credit se declenche a l'affichage : deux
             // onglets ouverts en meme temps doivent en voir un seul aboutir.
-            $table->unique(['user_id', 'event_start', 'mission_date', 'mission_key']);
+            $table->unique(['user_id', 'event_start', 'mission_date', 'mission_key'], 'event_claims_unique');
 
             // Le total d'un joueur se calcule sur un evenement entier.
-            $table->index(['user_id', 'event_start']);
+            $table->index(['user_id', 'event_start'], 'event_claims_user_event');
         });
 
         // Rangs reclames. La date de debut fait partie de la cle : un nouvel evenement
@@ -69,7 +77,7 @@ return new class () extends Migration {
             $table->string('reward_key', 64);
             $table->timestamp('claimed_at');
 
-            $table->unique(['user_id', 'event_start', 'rank']);
+            $table->unique(['user_id', 'event_start', 'rank'], 'event_rank_claims_unique');
         });
     }
 
