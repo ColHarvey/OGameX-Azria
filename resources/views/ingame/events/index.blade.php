@@ -37,19 +37,24 @@
             justify-content: space-between;
         }
 
-        /* Le theme fournit l image de la bande de titre (.rewardheader) mais aucune
-           mesure : sans hauteur ni interligne, le titre flottait en texte nu au-dessus
-           du cadre au lieu de s'inscrire dedans. */
+        /* Bande de titre. Le theme declare .rewardheader avec le sprite mais sans
+           position ni dimensions ; sans elles le titre restait du texte nu pose
+           au-dessus du cadre. La decoupe a ete relevee sur le sprite : la bande occupe
+           x 104-616, y 5-39, soit 512 x 35 px, biseau compris a droite. Cette largeur
+           correspond a celle de .rewardlist-item-text, ce qui place le biseau pile a
+           l extremite de la ligne. */
         #rewardings .rewardheader {
-            height: 26px;
+            background-position: -104px -5px;
+            width: 512px;
+            height: 35px;
             overflow: hidden;
         }
 
         #rewardings .rewardheader > h3 {
-            margin: 0 115px 0 15px;
+            margin: 0 120px 0 12px;
             font-size: 12px;
             font-weight: 600;
-            line-height: 26px;
+            line-height: 35px;
             color: #cfe3f5;
         }
 
