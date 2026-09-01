@@ -7,11 +7,14 @@ use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Date;
 use OGame\Factories\PlanetServiceFactory;
+use OGame\Models\NpcBaseSnapshot;
 use OGame\Models\NpcObservation;
 use OGame\Services\Npc\NpcBaseService;
+use OGame\Services\Npc\NpcColonisationService;
 use OGame\Services\Npc\NpcGrowthService;
 use OGame\Services\Npc\NpcPopulationService;
 use OGame\Services\Npc\NpcRaidService;
+use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
 use Throwable;
@@ -26,6 +29,7 @@ class NpcTick extends Command
         private readonly NpcBaseService $bases,
         private readonly NpcGrowthService $growth,
         private readonly NpcRaidService $raids,
+        private readonly NpcColonisationService $colonisation,
         private readonly PlanetServiceFactory $planetServiceFactory
     ) {
         parent::__construct();
@@ -60,6 +64,7 @@ class NpcTick extends Command
         ));
 
         $this->growBases();
+        $this->swarm($simulation);
         $this->replaceMissingBases($simulation);
         $this->decideRaids($simulation);
         $this->purgeOldObservations();
@@ -94,10 +99,14 @@ class NpcTick extends Command
                 continue;
             }
 
+            $maturity = $this->growth->maturityOf($planet);
+
+            $this->recordSnapshot($planet, $maturity, $result);
+
             $lines[] = sprintf(
                 '    %-24s %3d%%  %-14s %s',
                 $planet->getPlanetName(),
-                $this->growth->maturityOf($planet),
+                $maturity,
                 $result['action'],
                 $result['detail']
             );
@@ -112,6 +121,82 @@ class NpcTick extends Command
         foreach ($lines as $line) {
             $this->line($line);
         }
+    }
+
+    /**
+     * Send out the colony ships of every base that has earned one.
+     *
+     * L'essaimage est la seule facon dont la menace grandit toute seule : sans lui, le
+     * nombre de bases est fixe et le serveur finit par les depasser definitivement.
+     */
+    private function swarm(bool $simulation): void
+    {
+        $departs = $this->colonisation->swarm($simulation);
+
+        foreach ($departs as $depart) {
+            $this->line(sprintf(
+                '  essaimage  %s envoie un vaisseau de colonisation en %s%s',
+                $depart['base'],
+                $depart['target'],
+                $simulation ? ' — SIMULATION' : ''
+            ));
+        }
+    }
+
+    /**
+     * Record what this base looks like right now, at most once an hour.
+     *
+     * « Est-ce que les bases evoluent bien » ne se repond pas en regardant une base : il faut
+     * comparer deux instants. Le tick affichait deja sa ligne de croissance, mais sur la
+     * sortie standard d'une commande planifiee que personne ne lit.
+     *
+     * Une trace par heure et non par tick : le tick tourne au quart d'heure, ce qui ferait
+     * quatre fois plus de lignes sans rien apprendre de plus — une base ne change pas
+     * d'allure en quinze minutes, ses batiments se comptent en heures.
+     *
+     * Les ressources sont enregistrees avec le reste, et ce n'est pas accessoire : une base
+     * qui repete « rien d'abordable » n'est pas arretee par une regle mais par ses caisses
+     * vides, et seul le stock permet de faire la difference.
+     *
+     * @param array{action: string, detail: string} $result
+     */
+    private function recordSnapshot(PlanetService $planet, int $maturity, array $result): void
+    {
+        $planetId = $planet->getPlanetId();
+        $now = Date::now();
+
+        $dernier = NpcBaseSnapshot::query()
+            ->where('planet_id', $planetId)
+            ->orderByDesc('observed_at')
+            ->value('observed_at');
+
+        if ($dernier !== null && Date::parse((string)$dernier)->greaterThan($now->copy()->subHour())) {
+            return;
+        }
+
+        $owner = $planet->getPlayer();
+
+        if ($owner === null) {
+            return;
+        }
+
+        $resources = $planet->getResources();
+
+        NpcBaseSnapshot::create([
+            'user_id' => $owner->getId(),
+            'planet_id' => $planetId,
+            'score' => (int)$planet->getPlanetScore(),
+            'maturity' => $maturity,
+            'buildings' => $planet->getBuildingCount(),
+            'ships' => (int)$planet->getShipUnits()->getAmount(),
+            'defences' => (int)$planet->getDefenseUnits()->getAmount(),
+            'metal' => $resources->metal->getRounded(),
+            'crystal' => $resources->crystal->getRounded(),
+            'deuterium' => $resources->deuterium->getRounded(),
+            'action' => $result['action'],
+            'detail' => $result['detail'],
+            'observed_at' => $now,
+        ]);
     }
 
     /**
@@ -259,7 +344,10 @@ class NpcTick extends Command
      */
     private function purgeOldObservations(): void
     {
-        NpcObservation::where('observed_at', '<', Date::now()->subDays(30))->delete();
+        $limite = Date::now()->subDays(30);
+
+        NpcObservation::where('observed_at', '<', $limite)->delete();
+        NpcBaseSnapshot::where('observed_at', '<', $limite)->delete();
     }
 
     /**

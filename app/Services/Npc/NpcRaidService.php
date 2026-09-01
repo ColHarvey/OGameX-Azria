@@ -84,10 +84,16 @@ class NpcRaidService
      */
     private const array RAID_SHIPS = [
         'small_cargo',
+        'large_cargo',
         'light_fighter',
         'heavy_fighter',
         'cruiser',
-        'large_cargo',
+        'battle_ship',
+        'battlecruiser',
+        'bomber',
+        'destroyer',
+        'reaper',
+        'deathstar',
     ];
 
     public function __construct(

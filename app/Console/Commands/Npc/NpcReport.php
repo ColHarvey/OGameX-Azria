@@ -8,6 +8,7 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use OGame\Models\NpcBaseSnapshot;
 use OGame\Models\User;
 use OGame\Services\Npc\NpcBaseService;
 use OGame\Services\Npc\NpcPopulationService;
@@ -69,7 +70,7 @@ class NpcReport extends Command
         $this->reportRaids($since, $total);
         $this->reportRefusals($since, $total);
         $this->reportThreat();
-        $this->reportBases();
+        $this->reportBases($since);
         $this->reportNewcomers();
 
         $this->line('');
@@ -249,7 +250,7 @@ class NpcReport extends Command
     /**
      * Report what happened to the bases themselves.
      */
-    private function reportBases(): void
+    private function reportBases(Carbon $since): void
     {
         $detruites = DB::table('planets')
             ->join('users', 'users.id', '=', 'planets.user_id')
@@ -280,7 +281,7 @@ class NpcReport extends Command
             ->join('users', 'users.id', '=', 'planets.user_id')
             ->where('users.is_npc', true)
             ->where('planets.destroyed', 0)
-            ->select('users.username', 'planets.galaxy', 'planets.system', 'planets.planet', 'users.created_at')
+            ->select('planets.id', 'users.username', 'planets.galaxy', 'planets.system', 'planets.planet', 'users.created_at')
             ->get();
 
         if ($bases->isEmpty()) {
@@ -294,15 +295,43 @@ class NpcReport extends Command
                 ? (int)Date::parse((string)$base->created_at)->diffInDays(Date::now())
                 : 0;
 
+            // Le nom, les coordonnees et l'age ne disent pas si la base grandit. Un score de
+            // douze est bon signe s'il en valait quatre au debut de la periode, et mauvais
+            // s'il en valait douze : c'est la comparaison qui informe, pas la valeur.
+            $debut = NpcBaseSnapshot::query()
+                ->where('planet_id', (int)$base->id)
+                ->where('observed_at', '>=', $since)
+                ->orderBy('observed_at')
+                ->first();
+
+            $fin = NpcBaseSnapshot::query()
+                ->where('planet_id', (int)$base->id)
+                ->orderByDesc('observed_at')
+                ->first();
+
+            $progression = $debut !== null && $fin !== null
+                ? sprintf(
+                    'score %d -> %d, maturite %d%% -> %d%%',
+                    $debut->score,
+                    $fin->score,
+                    $debut->maturity,
+                    $fin->maturity
+                )
+                : 'pas encore de releve';
+
             $this->line(sprintf(
-                '    %-24s %d:%d:%d   %d jour(s)',
+                '    %-24s %d:%d:%d   %d jour(s)   %s',
                 $base->username,
                 $base->galaxy,
                 $base->system,
                 $base->planet,
-                $age
+                $age,
+                $progression
             ));
         }
+
+        $this->line('');
+        $this->line('    Detail par base, caisses comprises : ogamex:npc:bases');
     }
 
     /**
