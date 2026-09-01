@@ -285,6 +285,58 @@ class NpcFactionTest extends AccountTestCase
     }
 
     /**
+     * Assert that a base never lands on a coordinate a player already holds.
+     *
+     * La recherche de position verifie deja la case, mais elle ne couvre pas tout : une
+     * position imposee ne passe pas par elle, et entre sa verification et l'ecriture il
+     * s'ecoule la creation d'un compte, pendant laquelle un joueur peut coloniser.
+     *
+     * Ce que ce test prouve n'est pas seulement le refus — createPlanetAtPosition refusait
+     * deja, en levant une exception — mais qu'il ne reste rien derriere lui. L'ancienne
+     * version ecrivait le compte pirate avant de decouvrir la collision, et laissait donc
+     * un orphelin en base tout en faisant tomber le tick entier.
+     */
+    public function testABaseNeverLandsOnAPlanetAPlayerAlreadyHolds(): void
+    {
+        $occupee = $this->planetService->getPlanetCoordinates();
+
+        $comptesAvant = (int)DB::table('users')->where('is_npc', true)->count();
+        $planetesAvant = (int)DB::table('planets')->count();
+
+        $base = resolve(NpcBaseService::class)->createBase(NpcBaseService::TYPE_PIRATE, $occupee);
+
+        $this->assertNull($base, 'A base was created on a coordinate a player already holds.');
+
+        $this->assertSame(
+            $comptesAvant,
+            (int)DB::table('users')->where('is_npc', true)->count(),
+            'A refused birth still left a pirate account behind.'
+        );
+
+        $this->assertSame(
+            $planetesAvant,
+            (int)DB::table('planets')->count(),
+            'A refused birth still touched the planets table.'
+        );
+
+        // Et la planete visee appartient toujours a son proprietaire d'origine.
+        $proprietaire = DB::table('planets')
+            ->where('galaxy', $occupee->galaxy)
+            ->where('system', $occupee->system)
+            ->where('planet', $occupee->position)
+            ->value('user_id');
+
+        $joueur = $this->planetService->getPlayer();
+        $this->assertNotNull($joueur, 'The test planet lost its owner.');
+
+        $this->assertSame(
+            $joueur->getId(),
+            (int)$proprietaire,
+            'The player lost their planet to a pirate base.'
+        );
+    }
+
+    /**
      * Assert that the destruction path refuses anything that is not a NPC planet.
      *
      * abandonPlanet() refuse de liberer la derniere planete d'un compte, garde-fou destine

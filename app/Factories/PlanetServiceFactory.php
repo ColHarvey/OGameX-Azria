@@ -460,8 +460,16 @@ class PlanetServiceFactory
     /**
      * Check if a planet exists at the given coordinate.
      *
+     * La reponse interroge la base et peut donc changer d'un appel a l'autre, sans que rien
+     * dans le code appelant ait bouge : une colonisation suffit. Sans cette annonce, un
+     * analyseur statique retient la premiere reponse et declare morte toute verification
+     * ulterieure — or c'est precisement de cette seconde verification que depend le refus de
+     * poser une base sur la planete d'un joueur.
+     *
      * @param Coordinate $coordinate
      * @return bool
+     *
+     * @phpstan-impure
      */
     public function planetExistsAtCoordinate(Coordinate $coordinate): bool
     {

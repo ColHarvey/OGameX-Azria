@@ -4,6 +4,7 @@ namespace OGame\Services\Npc;
 
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use OGame\Factories\PlanetServiceFactory;
@@ -112,6 +113,44 @@ class NpcBaseService
             return null;
         }
 
+        // Derniere verification, et elle n'est pas redondante avec celle de la recherche.
+        //
+        // Elle couvre deux cas que l'autre laisse passer. Une position imposee — la commande
+        // de peuplement, un test, une reprise a la main — n'est jamais passee par la
+        // recherche et n'a donc jamais ete verifiee du tout. Et entre le moment ou la
+        // recherche declare une case libre et celui ou on l'occupe, il s'ecoule la creation
+        // d'un compte : un joueur peut coloniser la case pendant ce temps.
+        //
+        // La planete d'un joueur ne risquait pas d'etre ecrasee — createPlanetAtPosition
+        // refuse une case prise — mais elle refusait en levant une exception, apres que le
+        // compte pirate a deja ete ecrit. Une naissance malchanceuse laissait donc un compte
+        // orphelin derriere elle et faisait tomber le tick entier, privant toutes les autres
+        // bases de leur croissance.
+        if ($this->planetServiceFactory->planetExistsAtCoordinate($coordinate)) {
+            return null;
+        }
+
+        try {
+            // La transaction est ce qui garantit qu'une course perdue ne laisse rien : sans
+            // elle, le compte et sa fiche technique survivraient a l'echec de la planete.
+            return DB::transaction(fn (): PlanetService => $this->createBaseAt($type, $coordinate));
+        } catch (RuntimeException $exception) {
+            // Discriminant honnete : apres l'annulation, la case n'est occupee que si un
+            // joueur l'a effectivement prise. Toute autre panne doit remonter — la taire
+            // transformerait un defaut en base manquante inexplicable.
+            if ($this->planetServiceFactory->planetExistsAtCoordinate($coordinate)) {
+                return null;
+            }
+
+            throw $exception;
+        }
+    }
+
+    /**
+     * Write one base and everything it needs, inside the caller's transaction.
+     */
+    private function createBaseAt(string $type, Coordinate $coordinate): PlanetService
+    {
         $name = $this->pickName();
 
         $user = new User();

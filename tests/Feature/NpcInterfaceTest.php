@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -232,26 +233,101 @@ class NpcInterfaceTest extends AccountTestCase
      * Assert that a faction whose average sits outside a page is not shown on that page.
      *
      * Sans ce controle la ligne se repeterait sur chacune des pages du classement.
+     *
+     * Le barème est pose par le test lui-meme, et c'est la seule facon honnete de proceder.
+     * La premiere version se contentait de verifier que la premiere page finissait au-dessus
+     * de zero : elle passait ou echouait selon les tests joues avant elle, puisque la base de
+     * test est partagee et que plusieurs suites remettent les classements a zero. Un test qui
+     * affirme une condition sur l'etat ambiant ne prouve rien — il faut l'etablir.
      */
     public function testAFactionOutsideThePageRangeIsNotShownOnIt(): void
     {
-        // Base neuve, score nul : elle se situe sous le dernier joueur de la premiere page.
-        resolve(NpcBaseService::class)->createBase();
-        Cache::flush();
+        $touches = $this->giveHumanPlayersAScoreLadder();
 
-        $highscore = resolve(HighscoreService::class);
-        $highscore->setHighscoreType(0);
-        $rows = $highscore->getHighscorePlayers(100, 1);
+        try {
+            // Base neuve, score nul : elle se situe sous le dernier joueur de la page.
+            resolve(NpcBaseService::class)->createBase();
+            Cache::flush();
 
-        $lowest = (int)($rows[count($rows) - 1]['points'] ?? 0);
-        $this->assertGreaterThan(0, $lowest, 'The first page was expected to end above zero.');
+            $highscore = resolve(HighscoreService::class);
+            $highscore->setHighscoreType(0);
+            $rows = $highscore->getHighscorePlayers(100, 1);
 
-        foreach ($rows as $row) {
-            $this->assertFalse(
-                $row['is_faction'] ?? false,
-                'A faction scoring below the whole page was still listed on it.'
+            $lowest = (int)($rows[count($rows) - 1]['points'] ?? 0);
+            $this->assertGreaterThan(0, $lowest, 'The score ladder this test lays down did not take effect.');
+
+            foreach ($rows as $row) {
+                $this->assertFalse(
+                    $row['is_faction'] ?? false,
+                    'A faction scoring below the whole page was still listed on it.'
+                );
+            }
+        } finally {
+            // On rend la base telle qu'on l'a trouvee, rangs compris. Laisser des rangs en
+            // escalier au-dessus de scores remis a zero est exactement le genre d'heritage
+            // qui fait echouer un autre test bien plus tard, sans rapport apparent — la base
+            // de test est partagee entre toutes les suites.
+            DB::table('highscores')->whereIn('player_id', $touches)->update(['general' => 0]);
+            Artisan::call('ogamex:scheduler:generate-highscore-ranks');
+            Cache::flush();
+        }
+    }
+
+    /**
+     * Give enough human players a descending score for the first page to end above zero.
+     *
+     * @return array<int, int> Les joueurs touches, a remettre a zero ensuite.
+     */
+    private function giveHumanPlayersAScoreLadder(): array
+    {
+        // Des joueurs reellement classables, et non les premiers venus : la page du classement
+        // exige une fiche technique et saute les comptes sans planete. Un barème pose sur des
+        // comptes vides serait ecarte a l'affichage, et la page finirait malgre tout sur des
+        // joueurs a zero.
+        $ids = DB::table('users')
+            ->join('users_tech', 'users_tech.user_id', '=', 'users.id')
+            ->join('planets', 'planets.user_id', '=', 'users.id')
+            ->where('users.is_npc', false)
+            ->where('users.username', '!=', 'Legor')
+            ->distinct()
+            ->orderBy('users.id')
+            ->limit(120)
+            ->pluck('users.id')
+            ->all();
+
+        $this->assertGreaterThanOrEqual(
+            101,
+            count($ids),
+            'The test universe holds too few players for a full highscore page.'
+        );
+
+        $touches = [];
+
+        foreach (array_values($ids) as $rang => $id) {
+            $id = (int)$id;
+            $touches[] = $id;
+
+            DB::table('highscores')->updateOrInsert(
+                ['player_id' => $id],
+                [
+                    'general' => 10000 - $rang * 10,
+                    'economy' => 0,
+                    'research' => 0,
+                    'military' => 0,
+                    'created_at' => Date::now(),
+                    'updated_at' => Date::now(),
+                ]
             );
         }
+
+        // La page du classement est triee par general_rank et ne retient que les lignes dont
+        // les quatre rangs sont poses : ecrire les points ne suffit pas, il faut faire
+        // recalculer les rangs. On emprunte la commande de production plutot que d'ecrire les
+        // rangs a la main — c'est elle qui decide, entre autres, que les PNJ portent le rang 0.
+        Artisan::call('ogamex:scheduler:generate-highscore-ranks');
+        Cache::flush();
+
+        return $touches;
     }
 
     /**
