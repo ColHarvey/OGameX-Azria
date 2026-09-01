@@ -10,6 +10,7 @@ use OGame\Factories\PlanetServiceFactory;
 use OGame\Models\NpcBaseSnapshot;
 use OGame\Models\NpcObservation;
 use OGame\Services\Npc\NpcBaseService;
+use OGame\Services\Npc\NpcColonisationService;
 use OGame\Services\Npc\NpcGrowthService;
 use OGame\Services\Npc\NpcPopulationService;
 use OGame\Services\Npc\NpcRaidService;
@@ -28,6 +29,7 @@ class NpcTick extends Command
         private readonly NpcBaseService $bases,
         private readonly NpcGrowthService $growth,
         private readonly NpcRaidService $raids,
+        private readonly NpcColonisationService $colonisation,
         private readonly PlanetServiceFactory $planetServiceFactory
     ) {
         parent::__construct();
@@ -62,6 +64,7 @@ class NpcTick extends Command
         ));
 
         $this->growBases();
+        $this->swarm($simulation);
         $this->replaceMissingBases($simulation);
         $this->decideRaids($simulation);
         $this->purgeOldObservations();
@@ -117,6 +120,26 @@ class NpcTick extends Command
 
         foreach ($lines as $line) {
             $this->line($line);
+        }
+    }
+
+    /**
+     * Send out the colony ships of every base that has earned one.
+     *
+     * L'essaimage est la seule facon dont la menace grandit toute seule : sans lui, le
+     * nombre de bases est fixe et le serveur finit par les depasser definitivement.
+     */
+    private function swarm(bool $simulation): void
+    {
+        $departs = $this->colonisation->swarm($simulation);
+
+        foreach ($departs as $depart) {
+            $this->line(sprintf(
+                '  essaimage  %s envoie un vaisseau de colonisation en %s%s',
+                $depart['base'],
+                $depart['target'],
+                $simulation ? ' — SIMULATION' : ''
+            ));
         }
     }
 

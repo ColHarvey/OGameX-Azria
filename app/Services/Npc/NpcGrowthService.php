@@ -38,6 +38,115 @@ class NpcGrowthService
     public const string ACTION_RESEARCH = 'recherche';
     public const string ACTION_UNITS = 'chantier';
 
+    /**
+     * Les batiments d'infrastructure, dans l'ordre ou une base les monte.
+     *
+     * Les mines n'y figurent pas : elles suivent des regles d'ecart, plus haut, parce qu'elles
+     * n'ont pas de palier final — une base pousse son economie tant que son plafond de
+     * maturite le lui permet.
+     *
+     * @var array<int, array{0: string, 1: int}>
+     */
+    private const array PLAN_BUILDINGS = [
+        ['research_lab', 3],
+        ['shipyard', 4],
+        ['research_lab', 6],
+        ['shipyard', 6],
+        ['robot_factory', 8],
+        ['research_lab', 10],
+        ['shipyard', 9],
+        ['robot_factory', 10],
+        ['shipyard', 12],
+        ['research_lab', 12],
+    ];
+
+    /**
+     * Les recherches, dans l'ordre ou une base les mene.
+     *
+     * L'ordre est celui des unites a debloquer, et chaque palier est la pour une raison
+     * precise, notee en regard. Les prerequis ne sont pas recopies : le jeu les verifie
+     * lui-meme, et les recopier ici creerait une seconde source de verite qui finirait par
+     * diverger de la premiere.
+     *
+     * @var array<int, array{0: string, 1: int}>
+     */
+    private const array PLAN_RESEARCH = [
+        ['energy_technology', 2],       // racine de tout, et laser 3
+        ['combustion_drive', 2],        // chasseur leger, petit transporteur
+        ['armor_technology', 2],        // chasseur lourd
+        ['impulse_drive', 3],           // chasseur lourd, vaisseau de colonisation
+        ['espionage_technology', 4],    // sonde, et prerequis d'astrophysique
+        ['astrophysics', 1],            // ouvre la colonisation
+        ['laser_technology', 5],        // laser leger, prerequis d'ion
+        ['energy_technology', 4],
+        ['shielding_technology', 2],    // recycleur
+        ['impulse_drive', 4],           // croiseur
+        ['ion_technology', 2],          // croiseur
+        ['combustion_drive', 6],        // grand transporteur, recycleur
+        ['weapon_technology', 3],       // canon de Gauss
+        ['laser_technology', 6],        // laser lourd
+        ['energy_technology', 6],       // canon de Gauss
+        ['shielding_technology', 5],    // prerequis d'hyperespace
+        ['hyperspace_technology', 3],   // prerequis de propulsion hyperespace
+        ['hyperspace_drive', 4],        // vaisseau de bataille
+        ['astrophysics', 4],            // deuxieme puis troisieme colonie
+        ['ion_technology', 4],          // canon ionique
+        ['weapon_technology', 8],       // faucheur
+        ['shielding_technology', 6],    // faucheur, grand dome
+        ['impulse_drive', 6],           // faucheur, bombardier
+        ['laser_technology', 12],       // croiseur de bataille
+        ['hyperspace_technology', 5],   // croiseur de bataille, traqueur
+        ['hyperspace_drive', 6],        // traqueur
+        ['ion_technology', 5],          // prerequis de plasma
+        ['energy_technology', 8],       // prerequis de plasma
+        ['plasma_technology', 7],       // bombardier, tourelle a plasma
+        ['astrophysics', 8],            // colonies suivantes
+        ['computer_technology', 8],
+        ['hyperspace_technology', 6],
+        ['hyperspace_drive', 7],
+        ['graviton_technology', 1],     // etoile de la mort
+    ];
+
+    /**
+     * Les unites, dans l'ordre ou une base les fabrique, avec sa cible et sa cadence.
+     *
+     * Defenses d'abord tant qu'elles sont maigres — une base sans defense se fait ramasser
+     * avant d'avoir eu le temps d'exister — puis les soutes, sans lesquelles un raid ne
+     * rapporte rien, le butin etant borne par le fret des survivants. Le reste vient ensuite,
+     * du plus modeste au plus lourd.
+     *
+     * Un palier dont les prerequis manquent est saute, pas attendu : le plan de recherche les
+     * apportera, et en attendant le chantier tourne sur ce qu'il sait deja faire.
+     *
+     * @var array<int, array{0: string, 1: int, 2: int}>
+     */
+    private const array PLAN_UNITS = [
+        ['rocket_launcher', 20, 5],
+        ['small_cargo', 10, 2],
+        ['light_laser', 10, 2],
+        ['solar_satellite', 8, 2],
+        ['light_fighter', 20, 3],
+        ['espionage_probe', 6, 2],
+        ['colony_ship', 1, 1],
+        ['heavy_fighter', 12, 2],
+        ['large_cargo', 8, 1],
+        ['heavy_laser', 8, 2],
+        ['recycler', 3, 1],
+        ['crawler', 10, 2],
+        ['cruiser', 10, 2],
+        ['ion_cannon', 6, 2],
+        ['gauss_cannon', 4, 1],
+        ['battle_ship', 8, 1],
+        ['large_shield_dome', 1, 1],
+        ['pathfinder', 3, 1],
+        ['battlecruiser', 6, 1],
+        ['bomber', 4, 1],
+        ['plasma_turret', 4, 1],
+        ['destroyer', 4, 1],
+        ['reaper', 3, 1],
+        ['deathstar', 1, 1],
+    ];
+
     public function __construct(
         private SettingsService $settings,
         private NpcPopulationService $population,
@@ -248,19 +357,12 @@ class NpcGrowthService
             return 'crystal_store';
         }
 
-        // Le laboratoire avant le chantier, et ce n'est pas un detail d'ordre : sans lui la
-        // base n'a aucune recherche, et sans recherche elle ne peut construire que des
-        // lanceurs de missiles. Le cargo reclame la combustion 2, le chasseur la combustion
-        // 1, le laser la technologie laser 3 — une base sans laboratoire reste donc a jamais
-        // sans un seul vaisseau, donc sans raid possible.
-        if ($metal >= 5 && $planet->getObjectLevel('research_lab') < 3) {
-            return 'research_lab';
-        }
-
-        // Le chantier n'arrive qu'une fois l'economie lancee : une base ne peut pas defendre
-        // ce qu'elle n'a pas encore.
-        if ($metal >= 8 && $shipyard < 6) {
-            return 'shipyard';
+        // Les batiments d'infrastructure suivent leur plan : laboratoire, chantier, usines.
+        // Le premier palier non atteint gagne.
+        foreach (self::PLAN_BUILDINGS as [$machineName, $target]) {
+            if ($planet->getObjectLevel($machineName) < $target) {
+                return $machineName;
+            }
         }
 
         // Rien n'est en retard : on pousse l'economie d'un cran, et les regles d'ecart
@@ -276,18 +378,12 @@ class NpcGrowthService
     }
 
     /**
-     * Choose what this base should research next, or null when it needs nothing.
+     * Choose what this base should research next, or null when its plan is complete.
      *
-     * L'ordre suit ce que le chantier reclame, et rien d'autre. Une base ne fait pas de
-     * recherche pour le plaisir : chaque niveau vise a debloquer une unite precise.
-     *
-     *   energie 1     -> combustion 1  -> chasseur leger
-     *                    combustion 2  -> petit transporteur, sans lequel un raid ne
-     *                                     rapporte rien, le butin etant borne par le fret
-     *   energie 2     -> laser 3       -> laser leger
-     *
-     * Au-dela, la combustion continue de monter : elle accelere les flottes, donc raccourcit
-     * les raids, sans rien debloquer de nouveau.
+     * Le plan est parcouru dans l'ordre et le premier palier non atteint gagne. Les prerequis
+     * ne sont pas recopies ici : c'est le jeu qui les verifie, dans enqueueResearch(). Ecrire
+     * un ordre suffit donc, et cet ordre est celui des unites a debloquer — une base ne
+     * cherche jamais pour le plaisir.
      */
     private function nextResearch(PlanetService $planet, PlayerService $player): string|null
     {
@@ -295,35 +391,23 @@ class NpcGrowthService
             return null;
         }
 
-        $energie = $player->getResearchLevel('energy_technology');
-        $combustion = $player->getResearchLevel('combustion_drive');
-        $laser = $player->getResearchLevel('laser_technology');
-
-        if ($energie < 1) {
-            return 'energy_technology';
-        }
-
-        if ($combustion < 2) {
-            return 'combustion_drive';
-        }
-
-        if ($energie < 2) {
-            return 'energy_technology';
-        }
-
-        if ($laser < 3) {
-            return 'laser_technology';
-        }
-
-        if ($combustion < 6) {
-            return 'combustion_drive';
+        foreach (self::PLAN_RESEARCH as [$machineName, $target]) {
+            if ($player->getResearchLevel($machineName) < $target) {
+                return $machineName;
+            }
         }
 
         return null;
     }
 
     /**
-     * Choose what this base should build in its shipyard.
+     * Choose what this base should build in its shipyard, or null when its plan is complete.
+     *
+     * Meme principe que pour la recherche : un ordre, pas un arbre. Un palier dont les
+     * prerequis manquent encore est saute plutot que d'arreter la base — le plan de recherche
+     * les apportera, et en attendant le chantier continue de tourner sur ce qu'il sait faire.
+     * C'est aussi ce qui permet a une base de fabriquer, a terme, chaque vaisseau du jeu sans
+     * qu'aucune regle particuliere ne soit ecrite pour lui.
      *
      * @return array{machine_name: string, amount: int}|null
      */
@@ -333,23 +417,19 @@ class NpcGrowthService
             return null;
         }
 
-        // Les defenses passent en premier tant qu'elles sont maigres : une base sans defense
-        // se fait ramasser avant d'avoir eu le temps d'exister.
-        if ($planet->getObjectAmount('rocket_launcher') < 20) {
-            return ['machine_name' => 'rocket_launcher', 'amount' => 5];
+        foreach (self::PLAN_UNITS as [$machineName, $target, $batch]) {
+            if ($planet->getObjectAmount($machineName) >= $target) {
+                continue;
+            }
+
+            if (!ObjectService::objectRequirementsMet($machineName, $planet)) {
+                continue;
+            }
+
+            return ['machine_name' => $machineName, 'amount' => $batch];
         }
 
-        // Les pirates ont besoin de soutes : sans cargos, un raid ne rapporte rien et la
-        // regle du butin limite par le fret le rend inoffensif.
-        if ($planet->getObjectAmount('small_cargo') < 10) {
-            return ['machine_name' => 'small_cargo', 'amount' => 2];
-        }
-
-        if ($planet->getObjectAmount('light_laser') < 10) {
-            return ['machine_name' => 'light_laser', 'amount' => 2];
-        }
-
-        return ['machine_name' => 'light_fighter', 'amount' => 3];
+        return null;
     }
 
     /**
