@@ -20191,12 +20191,29 @@ var Formatter = {
       "minutes": Math.floor(seconds % Formatter.timeUnits.hour / Formatter.timeUnits.minute),
       "seconds": seconds % Formatter.timeUnits.minute
     };
+    var order = Object.keys(time);
+    var firstSegment = -1;
+    var lastSegment = -1;
+
+    for (var i = 0; i < order.length; i++) {
+      if (time[order[i]] > 0) {
+        if (firstSegment === -1) {
+          firstSegment = i;
+        }
+        lastSegment = i;
+      }
+    }
+
     var formattedTime = [];
 
-    for (var segment in time) {
-      if (time[segment] > 0 && (options.segments == -1 || formattedTime.length < options.segments)) {
-        formattedTime.push(time[segment] + options.units[segment]);
+    for (var j = firstSegment; j >= 0 && j <= lastSegment; j++) {
+      if (options.segments != -1 && formattedTime.length >= options.segments) {
+        break;
       }
+
+      var segmentValue = time[order[j]];
+      var rendered = j === firstSegment || segmentValue >= 10 ? segmentValue : "0" + segmentValue;
+      formattedTime.push(rendered + options.units[order[j]]);
     }
 
     return formattedTime.join(options.delimiter);
