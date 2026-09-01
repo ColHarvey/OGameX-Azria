@@ -367,7 +367,7 @@ REMARQUE : La force totale de tous les participants par rapport à la force tot
         'from' => 'Message système',
         'subject' => 'Réparation terminée',
         'body' => 'Votre demande de réparation sur la planète :planet a été complétée.
-:ship_count les vaisseaux ont été remis en service.',
+:ship_count vaisseau(x) remis en service.',
     ],
 
     /*
