@@ -12,9 +12,8 @@ use Tests\UnitTestCase;
  * consequences : la regle du projet — aucun texte affiche en dur — etait violee, et sept
  * tests amont qui verifient la chaine anglaise echouaient en permanence.
  *
- * Ces echecs etaient devenus « connus », c'est-a-dire tolores : un echec permanent finit par
- * ne plus rien signaler du tout, et masque celui qui compte. Ce fichier verifie que la
- * correction tient dans les deux langues, ce qu'un test amont seul ne peut pas faire.
+ * Ces echecs etaient devenus « connus », c'est-a-dire toleres : un echec permanent finit par
+ * ne plus rien signaler du tout, et masque celui qui compte.
  */
 class ForkTranslationsTest extends UnitTestCase
 {
@@ -56,7 +55,7 @@ class ForkTranslationsTest extends UnitTestCase
 
         foreach ($trouves[1] as $argument) {
             $this->assertDoesNotMatchRegularExpression(
-                '/^[\'"].*(déjà|deja|Vous n\\\'avez|Membre introuvable|caractères|caracteres)/u',
+                '/^[\'"].*(déjà|deja|Vous n\\\\\'avez|Membre introuvable|caractères|caracteres)/u',
                 trim($argument),
                 'An exception message is hardcoded in French again instead of using a translation key: ' . trim($argument)
             );
@@ -64,23 +63,126 @@ class ForkTranslationsTest extends UnitTestCase
     }
 
     /**
-     * Assert that the administration menu is translated rather than hardcoded.
+     * Assert that every translatable slot of the admin views goes through a translation call.
+     *
+     * La premiere version de ce test cherchait des lettres accentuees. C'etait insuffisant :
+     * « Recherche », « Ajouter » ou « Annuler » seraient passes sans etre vus, et un libelle
+     * anglais recode en dur ne l'aurait jamais ete. On verifie donc **structurellement** que
+     * les zones destinees a l'oeil passent par `@lang()` ou `__()`.
+     *
+     * La regle : dans une zone traduisible, une fois retires les appels de traduction et
+     * toutes les expressions Blade, il ne doit plus rester de mot. Ce qui subsiste est ecrit
+     * en dur, quelle que soit sa langue et qu'il porte ou non des accents.
      */
-    public function testTheAdministrationMenuIsTranslated(): void
+    public function testTheAdminViewsTranslateEveryVisibleString(): void
     {
-        $menu = file_get_contents(resource_path('views/ingame/layouts/admin-menu.blade.php'));
-        $this->assertIsString($menu);
+        $vues = [
+            'views/ingame/admin/server-administration.blade.php',
+            'views/ingame/layouts/admin-menu.blade.php',
+        ];
 
-        foreach (['Server admin', 'Server settings', 'Developer shortcuts', 'Server Administration'] as $cle) {
-            $this->assertStringContainsString(
-                "@lang('" . $cle . "')",
-                $menu,
-                "The administration menu no longer translates \"{$cle}\", so upstream tests that assert the English label fail again."
-            );
+        foreach ($vues as $vue) {
+            $source = file_get_contents(resource_path($vue));
+            $this->assertIsString($source);
+
+            foreach ($this->zonesTraduisibles($source) as $zone) {
+                $this->assertDoesNotMatchRegularExpression(
+                    '/\p{L}{2,}/u',
+                    $zone['texte'],
+                    "A visible string in {$vue} is hardcoded instead of going through @lang() or __(): "
+                    . '[' . $zone['type'] . '] ' . $zone['texte']
+                );
+            }
+        }
+    }
+
+    /**
+     * Assert that the administration labels resolve in both languages.
+     *
+     * Le controle structurel ci-dessus verifie qu'une cle est employee ; il ne dit rien de sa
+     * valeur. Sans ce test, une vue entierement passee en cles pourrait s'afficher en anglais
+     * en jeu, faute de traduction francaise.
+     */
+    public function testTheAdministrationLabelsResolveInBothLanguages(): void
+    {
+        $cas = [
+            'Server admin' => 'Administration',
+            'Server settings' => 'Paramètres',
+            'Developer shortcuts' => 'Raccourcis',
+            'Recover to Homeworld' => 'Renvoyer à la planète mère',
+            'Username' => 'Pseudo',
+            'Shared IP Groups' => "Groupes d'IP partagées",
+        ];
+
+        foreach ($cas as $cle => $francais) {
+            $this->assertSame($cle, trans($cle, [], 'en'), "The English label for \"{$cle}\" changed, so upstream tests that assert it would fail.");
+            $this->assertSame($francais, trans($cle, [], 'fr'), "The French label for \"{$cle}\" is missing, so the panel shows English to a French administrator.");
+        }
+    }
+
+    /**
+     * Extract the slots of a Blade template that a reader actually sees.
+     *
+     * Sont exclus : les scripts, les styles, les blocs `@php`, les commentaires Blade, et les
+     * attributs techniques — classe, identifiant, type, style, lien. L'attribut `value` n'est
+     * retenu que sur un bouton, ou il porte le libelle lu ; ailleurs c'est une donnee envoyee
+     * au serveur (« permanent », « shared_ip »), pas du texte.
+     *
+     * @param string $source
+     * @return list<array{type: string, texte: string}>
+     */
+    private function zonesTraduisibles(string $source): array
+    {
+        $s = (string) preg_replace('#<script\b[^>]*>.*?</script>#is', ' ', $source);
+        $s = (string) preg_replace('#<style\b[^>]*>.*?</style>#is', ' ', $s);
+        $s = (string) preg_replace('/@php\b.*?@endphp/s', ' ', $s);
+        $s = (string) preg_replace('/\{\{--.*?--\}\}/s', ' ', $s);
+
+        // Directives Blade, parentheses imbriquees comprises : @if($u->hasRole('admin')).
+        // Les appels de traduction disparaissent avec elles, et c'est exactement le point :
+        // ce qui reste ensuite n'est pas traduit.
+        $s = (string) preg_replace('/@[a-zA-Z]+\s*(\((?:[^()]++|(?1))*\))?/', ' ', $s);
+        $s = (string) preg_replace('/\b__\s*(\((?:[^()]++|(?1))*\))/', ' ', $s);
+
+        // Les interpolations sont masquees plutot que supprimees : « -> » et « => » portent
+        // un « > » qui couperait le decoupage des balises en plein milieu d'une expression.
+        $s = (string) preg_replace('/\{\{.*?\}\}|\{!!.*?!!\}/s', ' ', $s);
+
+        $zones = [];
+
+        if (preg_match_all('/(title|placeholder|alt)="([^"]*)"/', $s, $m, PREG_SET_ORDER)) {
+            foreach ($m as $x) {
+                $zones[] = ['type' => $x[1], 'texte' => $this->nettoyer($x[2])];
+            }
         }
 
-        // Et la valeur francaise doit exister, sinon le menu s'afficherait en anglais en jeu.
-        $this->assertSame('Administration', trans('Server admin', [], 'fr'));
-        $this->assertSame('Paramètres', trans('Server settings', [], 'fr'));
+        if (preg_match_all('/<(?:input|button)\b[^>]*\btype="(?:submit|button)"[^>]*>/i', $s, $m)) {
+            foreach ($m[0] as $balise) {
+                if (preg_match('/\bvalue="([^"]*)"/', $balise, $v)) {
+                    $zones[] = ['type' => 'value', 'texte' => $this->nettoyer($v[1])];
+                }
+            }
+        }
+
+        if (preg_match_all('/>([^<>]+)</', $s, $m)) {
+            foreach ($m[1] as $t) {
+                $zones[] = ['type' => 'texte', 'texte' => $this->nettoyer($t)];
+            }
+        }
+
+        return $zones;
+    }
+
+    /**
+     * Strip HTML entities and collapse whitespace.
+     *
+     * @param string $texte
+     * @return string
+     */
+    private function nettoyer(string $texte): string
+    {
+        $t = (string) preg_replace('/&[a-zA-Z#0-9]+;/', ' ', $texte);
+
+        return trim((string) preg_replace('/\s+/', ' ', $t));
     }
 }
