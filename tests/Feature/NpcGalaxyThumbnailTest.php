@@ -136,6 +136,18 @@ class NpcGalaxyThumbnailTest extends AccountTestCase
                 $contenu,
                 "The pirate thumbnail class is missing from {$feuille}, so the galaxy cell would render empty."
             );
+
+            // Presente ne veut pas dire appliquee, et la difference a coute une mise en
+            // ligne. Le sprite des planetes est pose par une regle a un identifiant et trois
+            // classes ; une regle pirate a deux classes perd la cascade en silence, et la
+            // case affiche un fragment de planete a la place de l'ecusson. Ni PHPStan, ni un
+            // test de rendu, ni la lecture de la feuille ne voient cela — seule la
+            // comparaison des specificites le voit.
+            $this->assertStringContainsString(
+                '#galaxyContent .ctContentRow .cellPlanet .microplanet.npc_pirate',
+                $contenu,
+                "The pirate rule in {$feuille} is less specific than the planet sprite rule, so the sprite wins and the badge never shows."
+            );
         }
     }
 
