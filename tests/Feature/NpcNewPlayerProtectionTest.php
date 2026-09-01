@@ -44,6 +44,9 @@ class NpcNewPlayerProtectionTest extends AccountTestCase
         $this->settings = resolve(SettingsService::class);
         $this->settings->set('npc_enabled', '1');
         $this->settings->set('npc_median_ratio', '0.80');
+        // Plancher neutralise : ce scenario isole le comportement de la mediane, et le
+        // plancher le masquerait sur une population aussi modeste.
+        $this->settings->set('npc_min_score_fixed', '0');
         $this->settings->set('npc_new_player_days', '14');
         $this->settings->set('npc_spotted_days', '7');
         // Un seul joueur actif suffit a declencher la mediane : le scenario porte
@@ -154,6 +157,50 @@ class NpcNewPlayerProtectionTest extends AccountTestCase
             NpcPopulationService::STATE_TARGETED,
             $population->stateOf($this->playerFor('D')),
             'The strongest player stopped being targetable as the server grew.'
+        );
+    }
+
+    /**
+     * Assert that a young server full of beginners does not open the gate to everyone.
+     *
+     * Reproduit la situation mesuree sur le serveur reel le 31 aout 2026, trois jours apres
+     * son ouverture : treize joueurs actifs, dont sept encore a zero point faute d'avoir
+     * commence a produire. La mediane valait zero, et le seuil aussi.
+     *
+     * Le seuil fixe est un plancher, pas un repli : en dessous, on n'est pas un joueur que
+     * les factions regardent, quelle que soit la forme de la population.
+     */
+    public function testAServerFullOfBeginnersKeepsItsFloor(): void
+    {
+        $population = resolve(NpcPopulationService::class);
+
+        // Les debutants ne sont pas rares : ils sont majoritaires, comme au lancement.
+        for ($i = 1; $i <= 4; $i++) {
+            $this->cast['debutant' . $i] = $this->makePlayer(0, 60);
+        }
+
+        $this->settings->set('npc_min_score_fixed', '25');
+
+        $this->assertEquals(0, $population->medianScore(), 'The median was expected to sit at zero here.');
+
+        $this->assertEquals(
+            25,
+            $population->threshold(),
+            'A server where most players score zero dropped its threshold to zero, exposing everyone.'
+        );
+
+        // Et la consequence qui compte : les debutants restent hors de portee, les joueurs
+        // etablis non.
+        $this->assertEquals(
+            NpcPopulationService::STATE_PROTECTED,
+            $population->stateOf($this->playerFor('B')),
+            'A player below the floor was exposed.'
+        );
+
+        $this->assertEquals(
+            NpcPopulationService::STATE_TARGETED,
+            $population->stateOf($this->playerFor('C')),
+            'An established player above the floor was not targetable.'
         );
     }
 

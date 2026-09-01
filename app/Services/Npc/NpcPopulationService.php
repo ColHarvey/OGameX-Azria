@@ -121,11 +121,24 @@ class NpcPopulationService
      */
     public function threshold(): int
     {
+        $plancher = $this->settings->npcMinScoreFixed();
+
         if ($this->activePlayerCount() < $this->settings->npcMinActivePlayers()) {
-            return $this->settings->npcMinScoreFixed();
+            return $plancher;
         }
 
-        return (int)round($this->medianScore() * $this->settings->npcMedianRatio());
+        // Le seuil fixe n'est pas une valeur de repli, c'est un plancher.
+        //
+        // Mesure faite le 31 aout 2026 sur le serveur reel, trois jours apres son ouverture :
+        // treize joueurs actifs, dont sept encore a zero point faute d'avoir commence a
+        // produire. La mediane valait donc zero, et le seuil aussi — la garde principale
+        // grande ouverte, sur un serveur ou elle protege precisement ceux qui viennent
+        // d'arriver. Seule la protection des quatorze jours tenait encore.
+        //
+        // La mediane reste la bonne mesure de l'echelle du serveur ; elle a simplement
+        // besoin d'un sol. En dessous du seuil fixe, on n'est pas un joueur que les
+        // factions regardent, quelle que soit la forme de la population.
+        return max($plancher, (int)round($this->medianScore() * $this->settings->npcMedianRatio()));
     }
 
     /**
