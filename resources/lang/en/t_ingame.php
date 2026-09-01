@@ -247,6 +247,7 @@ return [
         'api_data'                 => 'This data can be entered into a compatible combat simulator:',
         'tactical_retreat'         => 'Tactical retreat',
         'tactical_retreat_tooltip' => 'Show Deuterium usage per tactical retreat',
+        'tactical_retreat_cost' => 'Tactical retreat cost',
         'continue'                 => 'Continue',
         'back'                     => 'Back',
 
@@ -299,6 +300,7 @@ return [
         'err_union_max_fleets'     => 'A maximum of 16 fleets can attack.',
         'err_union_max_players'    => 'A maximum of 5 players can attack.',
         'err_union_too_slow'        => 'You are too slow to join this fleet.',
+        'err_acs_requires_union' => 'An ACS attack is only possible within a fleet union.',
         'err_union_target_mismatch' => 'Your fleet must target the same location as the fleet union.',
         'union_name'               => 'Union name',
         'buddy_list'               => 'Buddy list',

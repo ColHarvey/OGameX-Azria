@@ -853,7 +853,7 @@
                         </div>
                         <div class="fleft tooltip" title="{{ __('t_ingame.fleet.tactical_retreat_tooltip') }}">
                         <span>
-                            {{ __('t_ingame.fleet.deuterium_consumption') }}:
+                            {{ __('t_ingame.fleet.tactical_retreat_cost') }}:
                         </span>
                             {{ $tacticalRetreatDeuteriumCost ?? 0 }}
                         </div>
@@ -876,11 +876,24 @@
                         <ul>
                             <li><span class="title">{{ __('t_ingame.fleet.mission_label') }}:</span> <span
                                         class="missionName">{{ __('t_ingame.fleet.no_selection') }}</span></li>
-                            <li><span class="title">{{ __('t_ingame.fleet.target_label') }}:</span> <span class="targetName">[{{ $planet->getPlanetCoordinates()->asString() }}] <figure
-                                            class="planetIcon {{ $planet->isPlanet() ? 'planet' : 'moon' }} tooltip js_hideTipOnMobile"
-                                            title="{{ $planet->isPlanet() ? __('t_ingame.fleet.planet') : __('t_ingame.fleet.moon') }}"></figure>{{ $planet->getPlanetName() }}</span></li>
+                            @php
+                                // Cette barre est reecrite par le JavaScript, mais seulement une fois
+                                // l'appel check-target revenu — c'est-a-dire a l'etape 2. Au premier
+                                // rendu elle annoncait donc la planete et le pseudo du joueur lui-meme,
+                                // meme quand on arrivait de la galaxie pour attaquer quelqu'un.
+                                $cibleDepuisGalaxie = !empty($galaxy) && !empty($system) && !empty($position);
+                                $cibleCoords = $cibleDepuisGalaxie
+                                    ? $galaxy . ':' . $system . ':' . $position
+                                    : $planet->getPlanetCoordinates()->asString();
+                                $cibleEstLune = $cibleDepuisGalaxie
+                                    ? (int) ($type ?? 1) === 3
+                                    : $planet->isMoon();
+                            @endphp
+                            <li><span class="title">{{ __('t_ingame.fleet.target_label') }}:</span> <span class="targetName">[{{ $cibleCoords }}] <figure
+                                            class="planetIcon {{ $cibleEstLune ? 'moon' : 'planet' }} tooltip js_hideTipOnMobile"
+                                            title="{{ $cibleEstLune ? __('t_ingame.fleet.moon') : __('t_ingame.fleet.planet') }}"></figure>{{ $targetPlanetName ?? $planet->getPlanetName() }}</span></li>
                             <li><span class="title">{{ __('t_ingame.fleet.player_name_label') }}:</span> <span
-                                        class="targetPlayerName">{{ $player->getUsername() }}</span></li>
+                                        class="targetPlayerName">{{ $targetPlayerName ?? $player->getUsername() }}</span></li>
                         </ul>
                     </div>
                     <div id="buttonz">
@@ -1001,11 +1014,23 @@
                     <ul>
                         <li><span class="title">{{ __('t_ingame.fleet.mission_label') }}:</span> <span
                                     class="missionName">{{ __('t_ingame.fleet.no_selection') }}</span></li>
-                        <li><span class="title">{{ __('t_ingame.fleet.target_label') }}:</span> <span class="targetName">[{{ $planet->getPlanetCoordinates()->asString() }}] <figure
-                                        class="planetIcon {{ $planet->isPlanet() ? 'planet' : 'moon' }} tooltip js_hideTipOnMobile" title="{{ $planet->isPlanet() ? __('t_ingame.fleet.planet') : __('t_ingame.fleet.moon') }}"></figure>{{ $planet->getPlanetName() }}</span>
+                        @php
+                            // Meme correction que la barre de l'etape 1 : sans elle, ouvrir la
+                            // page depuis la galaxie annonce sa propre planete comme cible tant
+                            // que l'appel check-target n'a pas repondu.
+                            $cibleDepuisGalaxie2 = !empty($galaxy) && !empty($system) && !empty($position);
+                            $cibleCoords2 = $cibleDepuisGalaxie2
+                                ? $galaxy . ':' . $system . ':' . $position
+                                : $planet->getPlanetCoordinates()->asString();
+                            $cibleEstLune2 = $cibleDepuisGalaxie2
+                                ? (int) ($type ?? 1) === 3
+                                : $planet->isMoon();
+                        @endphp
+                        <li><span class="title">{{ __('t_ingame.fleet.target_label') }}:</span> <span class="targetName">[{{ $cibleCoords2 }}] <figure
+                                        class="planetIcon {{ $cibleEstLune2 ? 'moon' : 'planet' }} tooltip js_hideTipOnMobile" title="{{ $cibleEstLune2 ? __('t_ingame.fleet.moon') : __('t_ingame.fleet.planet') }}"></figure>{{ $targetPlanetName ?? $planet->getPlanetName() }}</span>
                         </li>
                         <li><span class="title">{{ __('t_ingame.fleet.player_name_label') }}:</span> <span
-                                    class="targetPlayerName">{{ $player->getUsername() }}</span></li>
+                                    class="targetPlayerName">{{ $targetPlayerName ?? $player->getUsername() }}</span></li>
                     </ul>
                 </div>
                 <div id="buttonz" class="sortable ui-sortable">
@@ -1059,7 +1084,7 @@
                                         <div class="coords">{{ __('t_ingame.fleet.distance') }}</div>
                                     </td>
                                     <td id="target" class="border5px">
-                                        <div class="planetname" id="targetPlanetName">{{ $planet->getPlanetName() }}</div>
+                                        <div class="planetname" id="targetPlanetName">{{ $targetPlanetName ?? $planet->getPlanetName() }}</div>
                                         <div class="target">
                                             <a class="planet{{ $planet->isPlanet() ? '_selected' : '' }}" href="" id="pbutton">
                                                 <span class="textlabel">{{ __('t_ingame.fleet.planet') }}</span>

@@ -3,14 +3,18 @@
 namespace Tests\Feature\FleetDispatch;
 
 use Illuminate\Contracts\Container\BindingResolutionException;
+use Illuminate\Support\Facades\DB;
 use OGame\Enums\CharacterClass;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\BattleReport;
+use OGame\Models\Enums\PlanetType;
 use OGame\Models\Message;
 use OGame\Models\Resources;
+use OGame\Models\User;
 use OGame\Services\DebrisFieldService;
 use OGame\Services\FleetMissionService;
 use OGame\Services\ObjectService;
+use OGame\Services\PlanetService;
 use OGame\Services\SettingsService;
 use Tests\FleetDispatchTestCase;
 
@@ -38,6 +42,70 @@ class ReaperDebrisCollectionTest extends FleetDispatchTestCase
         $settingsService = resolve(SettingsService::class);
         $settingsService->set('debris_field_from_ships', 30);
         $settingsService->set('debris_field_from_defense', 0); // Defenses don't create debris by default
+    }
+
+    /**
+     * Create a dedicated defender nearby and attack it.
+     *
+     * `getNearbyForeignPlanet()` tire sa cible au hasard parmi les planetes etrangeres situees
+     * a moins de 15 systemes, et l'univers de test n'en contient pas toujours une : sur une base
+     * fraiche, la premiere execution echouait sur « Failed to find a nearby foreign planet ».
+     * C'etait la vraie cause de l'instabilite — pas l'issue du combat.
+     *
+     * Un defenseur cree pour l'occasion rend la cible, ses coordonnees et son proprietaire
+     * connus d'avance. C'est le meme procede que les tests d'attaque groupee.
+     *
+     * @param UnitCollection $units
+     * @return PlanetService
+     */
+    private function attaquerUnDefenseurDedie(UnitCollection $units): PlanetService
+    {
+        $defenseur = User::factory()->create();
+        $planete = $this->createPlanetAtSafeCoordinate($defenseur->id, 13, 15, 1);
+
+        $this->dispatchFleet(
+            $planete->getPlanetCoordinates(),
+            $units,
+            new Resources(0, 0, 0, 0),
+            PlanetType::Planet
+        );
+
+        return $planete;
+    }
+
+    /**
+     * Make the battle outcome certain rather than leaving it to the drawn opponent.
+     *
+     * `getNearbyForeignPlanet()` choisit sa cible avec `inRandomOrder()` : le defenseur change
+     * a chaque execution, et avec lui ses niveaux d'arme, de bouclier et de blindage. Dix
+     * Faucheurs aux technologies par defaut contre cinq Croiseurs d'un joueur avance perdaient
+     * parfois, et la collecte de debris exige des Faucheurs survivants — le test echouait donc
+     * au hasard, deux fois sur quatre a la mesure.
+     *
+     * On met le defenseur au niveau zero et l'attaquant a un niveau confortable : l'ecart
+     * devient assez large pour que l'issue ne depende plus du tirage. C'est le combat lui-meme
+     * qui reste teste, pas la chance.
+     *
+     * @param int $defenderId
+     * @return void
+     */
+    private function figerLIssueDuCombat(int $defenderId): void
+    {
+        DB::table('users_tech')->where('user_id', $defenderId)->update([
+            'weapon_technology' => 0,
+            'shielding_technology' => 0,
+            'armor_technology' => 0,
+        ]);
+
+        DB::table('users_tech')->where('user_id', $this->currentUserId)->update([
+            'weapon_technology' => 12,
+            'shielding_technology' => 12,
+            'armor_technology' => 12,
+        ]);
+
+        // Les deux joueurs sont relus : le service garde en cache la version chargee avant
+        // ces ecritures, et le combat repartirait des anciens niveaux.
+        $this->reloadApplication();
     }
 
     /**
@@ -79,7 +147,7 @@ class ReaperDebrisCollectionTest extends FleetDispatchTestCase
         // Launch attack mission to foreign planet
         $units = new UnitCollection();
         $units->addUnit(ObjectService::getShipObjectByMachineName('reaper'), 10);
-        $foreignPlanet = $this->sendMissionToOtherPlayerPlanet($units, new Resources(0, 0, 0, 0));
+        $foreignPlanet = $this->attaquerUnDefenseurDedie($units);
 
         // Disable tactical retreat so defender ships stay and create debris.
         $foreignPlayer = $foreignPlanet->getPlayer();
@@ -88,6 +156,11 @@ class ReaperDebrisCollectionTest extends FleetDispatchTestCase
         }
         $foreignPlayer->getUser()->tactical_retreat_ratio = 0;
         $foreignPlayer->getUser()->save();
+
+        // Issue du combat rendue certaine : sans cela la cible est tiree au hasard parmi les
+        // planetes voisines, avec les technologies de son proprietaire, et les Faucheurs
+        // mouraient parfois — or la collecte de debris exige des survivants.
+        $this->figerLIssueDuCombat($foreignPlayer->getId());
 
         // Refresh the application: the fleet event requests during dispatch cached a
         // PlayerService for the defender with the pre-write retreat ratio, and battle
@@ -208,7 +281,7 @@ class ReaperDebrisCollectionTest extends FleetDispatchTestCase
         // Launch attack mission to foreign planet
         $units = new UnitCollection();
         $units->addUnit(ObjectService::getShipObjectByMachineName('reaper'), 10);
-        $foreignPlanet = $this->sendMissionToOtherPlayerPlanet($units, new Resources(0, 0, 0, 0));
+        $foreignPlanet = $this->attaquerUnDefenseurDedie($units);
 
         // Disable tactical retreat so defender ships stay and create debris.
         $foreignPlayer = $foreignPlanet->getPlayer();
@@ -217,6 +290,11 @@ class ReaperDebrisCollectionTest extends FleetDispatchTestCase
         }
         $foreignPlayer->getUser()->tactical_retreat_ratio = 0;
         $foreignPlayer->getUser()->save();
+
+        // Issue du combat rendue certaine : sans cela la cible est tiree au hasard parmi les
+        // planetes voisines, avec les technologies de son proprietaire, et les Faucheurs
+        // mouraient parfois — or la collecte de debris exige des survivants.
+        $this->figerLIssueDuCombat($foreignPlayer->getId());
 
         // Refresh the application: the fleet event requests during dispatch cached a
         // PlayerService for the defender with the pre-write retreat ratio, and battle
@@ -298,7 +376,7 @@ class ReaperDebrisCollectionTest extends FleetDispatchTestCase
         // Launch attack mission to foreign planet
         $units = new UnitCollection();
         $units->addUnit(ObjectService::getShipObjectByMachineName('light_fighter'), 200);
-        $foreignPlanet = $this->sendMissionToOtherPlayerPlanet($units, new Resources(0, 0, 0, 0));
+        $foreignPlanet = $this->attaquerUnDefenseurDedie($units);
 
         // Disable tactical retreat so defender ships stay in combat.
         $foreignPlayer = $foreignPlanet->getPlayer();
@@ -307,6 +385,11 @@ class ReaperDebrisCollectionTest extends FleetDispatchTestCase
         }
         $foreignPlayer->getUser()->tactical_retreat_ratio = 0;
         $foreignPlayer->getUser()->save();
+
+        // Issue du combat rendue certaine : sans cela la cible est tiree au hasard parmi les
+        // planetes voisines, avec les technologies de son proprietaire, et les Faucheurs
+        // mouraient parfois — or la collecte de debris exige des survivants.
+        $this->figerLIssueDuCombat($foreignPlayer->getId());
 
         // Refresh the application: the fleet event requests during dispatch cached a
         // PlayerService for the defender with the pre-write retreat ratio, and battle

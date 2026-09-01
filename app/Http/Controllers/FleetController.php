@@ -95,9 +95,20 @@ class FleetController extends OGameController
             $tacticalRetreatRatio = 5;
         }
 
+        // Resolution de la cible pour le premier rendu.
+        //
+        // Sans elle, la barre d'etat annonce la planete et le pseudo du joueur lui-meme tant
+        // que l'appel check-target de l'etape 2 n'a pas repondu : arriver depuis la galaxie
+        // pour attaquer affichait « [ses propres coordonnees] SaPropreePlanete ».
+        $cible = $this->resoudreCible($request, $settings, $player);
+
         return view('ingame.fleet.index')->with([
             'player' => $player,
             'planet' => $planet,
+            'targetPlanetName' => $cible['name'],
+            'targetPlayerName' => $cible['playerName'],
+            'targetPlayerId' => $cible['playerId'],
+            'targetIsSelf' => $cible['isSelf'],
             'units' => $units,
             'objects' => ObjectService::getShipObjects(),
             'shipAmount' => $planet->getFlightShipAmount(),
@@ -604,6 +615,18 @@ class FleetController extends OGameController
                     return $this->validationErrorResponse(__('t_ingame.fleet.err_union_too_slow'));
                 }
             }
+        }
+
+        // L'attaque groupee n'existe que dans une union.
+        //
+        // check-target ne propose le type 2 que lorsqu'une union valide est selectionnee et
+        // que la flotte peut arriver a temps. Poste directement sans union, il etait accepte :
+        // on obtenait une mission etiquetee « attaque groupee » que rien ne regroupait. Le
+        // blocage d'attaque du serveur, lui, restait bien applique — le type 2 resout la meme
+        // classe que l'attaque simple — donc ce n'etait pas un contournement, mais l'interface
+        // et l'envoi ne disaient pas la meme chose.
+        if ($mission_type === 2 && $union === null) {
+            return $this->validationErrorResponse(__('t_ingame.fleet.err_acs_requires_union'));
         }
 
         try {
@@ -1246,6 +1269,64 @@ class FleetController extends OGameController
      * @param int $maxGalaxies
      * @return string|null Error message if invalid, null if valid
      */
+    /**
+     * Resolve the target shown on the first dispatch step.
+     *
+     * Le nom d'une planete etrangere n'est pas revele : la galaxie ne le montre pas non plus,
+     * et l'afficher ici ouvrirait un moyen de sonder l'univers sans envoyer de sonde. On rend
+     * donc le libelle generique — « Planete », « Lune », « Champ de debris » — exactement comme
+     * le fait le JavaScript une fois check-target passe. Seules ses propres planetes sont
+     * nommees.
+     *
+     * @param Request $request
+     * @param SettingsService $settings
+     * @param PlayerService $player
+     * @return array{name: string|null, playerName: string|null, playerId: int|null, isSelf: bool}
+     */
+    private function resoudreCible(Request $request, SettingsService $settings, PlayerService $player): array
+    {
+        $vide = ['name' => null, 'playerName' => null, 'playerId' => null, 'isSelf' => false];
+
+        $galaxy = (int)$request->get('galaxy');
+        $system = (int)$request->get('system');
+        $position = (int)$request->get('position');
+
+        if ($galaxy === 0 || $system === 0 || $position === 0) {
+            return $vide;
+        }
+
+        if ($this->validateCoordinates($galaxy, $system, $position, $settings->numberOfGalaxies()) !== null) {
+            return $vide;
+        }
+
+        $type = PlanetType::tryFrom((int)$request->get('type')) ?? PlanetType::Planet;
+
+        $etiquette = match ($type) {
+            PlanetType::Moon => __('t_ingame.fleet.moon'),
+            PlanetType::DebrisField => __('t_ingame.fleet.debris_field_lower'),
+            default => __('t_ingame.fleet.planet'),
+        };
+
+        $planetServiceFactory = resolve(PlanetServiceFactory::class);
+        $cible = $planetServiceFactory->makeForCoordinate(new Coordinate($galaxy, $system, $position), true, $type);
+
+        if ($cible === null) {
+            // Coordonnee vide : c'est l'espace, et le dire est exact.
+            return ['name' => __('t_ingame.fleet.deep_space'), 'playerName' => __('t_ingame.fleet.deep_space'), 'playerId' => null, 'isSelf' => false];
+        }
+
+        $proprietaire = $cible->getPlayer();
+        $estSoi = $proprietaire !== null && $proprietaire->getId() === $player->getId();
+
+        return [
+            // Ses propres planetes portent leur nom ; celles des autres restent generiques.
+            'name' => $estSoi ? $cible->getPlanetName() : $etiquette,
+            'playerName' => $proprietaire?->getUsername(false) ?? __('t_ingame.fleet.deep_space'),
+            'playerId' => $proprietaire?->getId(),
+            'isSelf' => $estSoi,
+        ];
+    }
+
     private function validateCoordinates(int $galaxy, int $system, int $position, int $maxGalaxies): string|null
     {
         if ($galaxy < UniverseConstants::MIN_GALAXY || $galaxy > $maxGalaxies) {
