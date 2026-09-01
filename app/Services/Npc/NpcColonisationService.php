@@ -52,6 +52,15 @@ class NpcColonisationService
      */
     private const int PLACEMENT_ATTEMPTS = 25;
 
+    /**
+     * En dessous de ce nombre de cases libres, la base cherche ailleurs.
+     *
+     * Deux et non zero : il faut qu'il reste de quoi poser le chantier ou le terraformeur si
+     * l'un des deux manquait encore. Une base qui attend d'etre a zero pour reagir est une
+     * base qui ne reagit plus.
+     */
+    private const int FIELDS_LEFT_TO_STAY = 2;
+
     public function __construct(
         private SettingsService $settings,
         private NpcBaseService $bases,
@@ -126,7 +135,22 @@ class NpcColonisationService
             return false;
         }
 
-        return $this->hasSatAtItsCeiling($base);
+        // Deux raisons de partir, et la seconde est une tactique, pas une recompense.
+        //
+        // Une base qui a rempli ses cases ne peut plus rien construire : le terraformeur ne
+        // repousse la limite que d'un cran, et une fois celui-ci au bout, la seule facon de
+        // continuer a grandir est d'aller ailleurs. C'est exactement ce que fait un joueur.
+        // Sans cette porte, une base saturee resterait a se regarder construire en boucle des
+        // vaisseaux, ses caisses debordant sans emploi.
+        return $this->hasRunOutOfFields($base) || $this->hasSatAtItsCeiling($base);
+    }
+
+    /**
+     * Get whether this base has filled its planet and can only grow elsewhere.
+     */
+    private function hasRunOutOfFields(PlanetService $base): bool
+    {
+        return ($base->getPlanetFieldMax() - $base->getBuildingCount()) <= self::FIELDS_LEFT_TO_STAY;
     }
 
     /**
