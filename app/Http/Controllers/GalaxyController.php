@@ -352,10 +352,15 @@ class GalaxyController extends OGameController
             }
 
             // Moon destruction (only if planet is a moon).
+            //
+            // Le type est 9, pas 10 : GameMissionFactory associe 9 a MoonDestructionMission
+            // et 10 a MissileMission. L'entree portait le libelle « Destruction de la Lune »
+            // et envoyait vers une attaque de missiles, ce qui rendait la destruction de lune
+            // inaccessible depuis l'interface alors qu'elle etait entierement implementee.
             if ($planet->isMoon()) {
                 $availableMissions[] = [
-                    'missionType' => 10,
-                    'link' => route('fleet.index', ['galaxy' => $galaxy, 'system' => $system, 'position' => $position, 'type' => $planet->getPlanetType()->value, 'mission' => 10]),
+                    'missionType' => 9,
+                    'link' => route('fleet.index', ['galaxy' => $galaxy, 'system' => $system, 'position' => $position, 'type' => $planet->getPlanetType()->value, 'mission' => 9]),
                     'name' => __('t_ingame.fleet.mission_destroy_moon'),
                 ];
             }

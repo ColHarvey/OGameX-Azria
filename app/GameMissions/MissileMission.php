@@ -74,6 +74,18 @@ class MissileMission extends GameMission
             return $ownPlanetCheck;
         }
 
+        // Les deux protections que cette mission etait seule a ne pas appliquer, alors
+        // qu'elle vise la planete d'un autre joueur exactement comme une attaque. Les neuf
+        // autres missions les portent depuis toujours ; leur absence ici laissait frapper
+        // un joueur parti en conge, et la planete de Legor.
+        if ($vacationCheck = $this->checkTargetVacationMode($targetPlanet)) {
+            return $vacationCheck;
+        }
+
+        if ($adminCheck = $this->checkAdminProtection($targetPlanet, __('This planet belongs to an administrator and cannot be attacked.'))) {
+            return $adminCheck;
+        }
+
         // Check if target is within missile range
         $attackerPlayer = $planet->getPlayer();
         if ($attackerPlayer === null) {
