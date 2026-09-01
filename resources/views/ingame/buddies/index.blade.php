@@ -230,7 +230,7 @@
 
                         } else {
                             if (e.keyCode === 13) {
-                                fadeBox("{{ __('t_buddies.error.search_too_short') }}", true);
+                                fadeBox(@json(__('t_buddies.error.search_too_short')), true);
                             }
                         }
                     }
@@ -309,10 +309,10 @@
                         }
 
                         errorBoxDecision(
-                            "{{ __('t_buddies.common.caution') }}",
-                            "{{ __('t_buddies.action.report_message') }}",
-                            "{{ __('t_buddies.common.yes') }}",
-                            "{{ __('t_buddies.common.no') }}",
+                            @json(__('t_buddies.common.caution')),
+                            @json(__('t_buddies.action.report_message')),
+                            @json(__('t_buddies.common.yes')),
+                            @json(__('t_buddies.common.no')),
                             sendReport
                         );
 

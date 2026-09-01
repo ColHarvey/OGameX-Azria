@@ -205,7 +205,7 @@
 
                 } else {
                     if (e.keyCode === 13) {
-                        fadeBox("{{ __('t_ingame.messages.too_few_chars') }}", true);
+                        fadeBox(@json(__('t_ingame.messages.too_few_chars')), true);
                     }
                 }
             }
@@ -269,10 +269,10 @@
                 }
 
                 errorBoxDecision(
-                    "{{ __('t_ingame.shared.caution') }}",
-                    "{{ __('t_ingame.messages.report_to_operator') }}",
-                    "{{ __('t_ingame.shared.yes') }}",
-                    "{{ __('t_ingame.shared.no') }}",
+                    @json(__('t_ingame.shared.caution')),
+                    @json(__('t_ingame.messages.report_to_operator')),
+                    @json(__('t_ingame.shared.yes')),
+                    @json(__('t_ingame.shared.no')),
                     sendReport
                 );
 
@@ -299,41 +299,41 @@
         <script language="javascript">
             // passing variables to javascript
             var localizedBBCode = {
-                "bold":                "{{ __('t_ingame.messages.bbcode_bold') }}",
-                "italic":              "{{ __('t_ingame.messages.bbcode_italic') }}",
-                "underline":           "{{ __('t_ingame.messages.bbcode_underline') }}",
-                "stroke":              "{{ __('t_ingame.messages.bbcode_stroke') }}",
-                "sub":                 "{{ __('t_ingame.messages.bbcode_sub') }}",
-                "sup":                 "{{ __('t_ingame.messages.bbcode_sup') }}",
-                "fontColor":           "{{ __('t_ingame.messages.bbcode_font_color') }}",
-                "fontSize":            "{{ __('t_ingame.messages.bbcode_font_size') }}",
-                "backgroundColor":     "{{ __('t_ingame.messages.bbcode_bg_color') }}",
-                "backgroundImage":     "{{ __('t_ingame.messages.bbcode_bg_image') }}",
-                "tooltip":             "{{ __('t_ingame.messages.bbcode_tooltip') }}",
-                "alignLeft":           "{{ __('t_ingame.messages.bbcode_align_left') }}",
-                "alignCenter":         "{{ __('t_ingame.messages.bbcode_align_center') }}",
-                "alignRight":          "{{ __('t_ingame.messages.bbcode_align_right') }}",
-                "alignJustify":        "{{ __('t_ingame.messages.bbcode_align_justify') }}",
-                "block":               "{{ __('t_ingame.messages.bbcode_block') }}",
-                "code":                "{{ __('t_ingame.messages.bbcode_code') }}",
-                "spoiler":             "{{ __('t_ingame.messages.bbcode_spoiler') }}",
-                "moreopts":            "{{ __('t_ingame.messages.bbcode_moreopts') }}",
-                "list":                "{{ __('t_ingame.messages.bbcode_list') }}",
-                "hr":                  "{{ __('t_ingame.messages.bbcode_hr') }}",
-                "picture":             "{{ __('t_ingame.messages.bbcode_picture') }}",
-                "link":                "{{ __('t_ingame.messages.bbcode_link') }}",
-                "email":               "{{ __('t_ingame.messages.bbcode_email') }}",
-                "player":              "{{ __('t_ingame.messages.bbcode_player') }}",
-                "item":                "{{ __('t_ingame.messages.bbcode_item') }}",
-                "coordinates":         "{{ __('t_ingame.messages.bbcode_coordinates') }}",
-                "preview":             "{{ __('t_ingame.messages.bbcode_preview') }}",
-                "textPlaceHolder":     "{{ __('t_ingame.messages.bbcode_text_ph') }}",
-                "playerPlaceHolder":   "{{ __('t_ingame.messages.bbcode_player_ph') }}",
-                "itemPlaceHolder":     "{{ __('t_ingame.messages.bbcode_item_ph') }}",
-                "coordinatePlaceHolder":"{{ __('t_ingame.messages.bbcode_coord_ph') }}",
-                "charsLeft":           "{{ __('t_ingame.messages.bbcode_chars_left') }}",
-                "colorPicker":         {"ok": "{{ __('t_ingame.messages.bbcode_ok') }}", "cancel": "{{ __('t_ingame.messages.bbcode_cancel') }}", "rgbR": "R", "rgbG": "G", "rgbB": "B"},
-                "backgroundImagePicker":{"ok": "{{ __('t_ingame.messages.bbcode_ok') }}", "repeatX": "{{ __('t_ingame.messages.bbcode_repeat_x') }}", "repeatY": "{{ __('t_ingame.messages.bbcode_repeat_y') }}"}
+                "bold":                @json(__('t_ingame.messages.bbcode_bold')),
+                "italic":              @json(__('t_ingame.messages.bbcode_italic')),
+                "underline":           @json(__('t_ingame.messages.bbcode_underline')),
+                "stroke":              @json(__('t_ingame.messages.bbcode_stroke')),
+                "sub":                 @json(__('t_ingame.messages.bbcode_sub')),
+                "sup":                 @json(__('t_ingame.messages.bbcode_sup')),
+                "fontColor":           @json(__('t_ingame.messages.bbcode_font_color')),
+                "fontSize":            @json(__('t_ingame.messages.bbcode_font_size')),
+                "backgroundColor":     @json(__('t_ingame.messages.bbcode_bg_color')),
+                "backgroundImage":     @json(__('t_ingame.messages.bbcode_bg_image')),
+                "tooltip":             @json(__('t_ingame.messages.bbcode_tooltip')),
+                "alignLeft":           @json(__('t_ingame.messages.bbcode_align_left')),
+                "alignCenter":         @json(__('t_ingame.messages.bbcode_align_center')),
+                "alignRight":          @json(__('t_ingame.messages.bbcode_align_right')),
+                "alignJustify":        @json(__('t_ingame.messages.bbcode_align_justify')),
+                "block":               @json(__('t_ingame.messages.bbcode_block')),
+                "code":                @json(__('t_ingame.messages.bbcode_code')),
+                "spoiler":             @json(__('t_ingame.messages.bbcode_spoiler')),
+                "moreopts":            @json(__('t_ingame.messages.bbcode_moreopts')),
+                "list":                @json(__('t_ingame.messages.bbcode_list')),
+                "hr":                  @json(__('t_ingame.messages.bbcode_hr')),
+                "picture":             @json(__('t_ingame.messages.bbcode_picture')),
+                "link":                @json(__('t_ingame.messages.bbcode_link')),
+                "email":               @json(__('t_ingame.messages.bbcode_email')),
+                "player":              @json(__('t_ingame.messages.bbcode_player')),
+                "item":                @json(__('t_ingame.messages.bbcode_item')),
+                "coordinates":         @json(__('t_ingame.messages.bbcode_coordinates')),
+                "preview":             @json(__('t_ingame.messages.bbcode_preview')),
+                "textPlaceHolder":     @json(__('t_ingame.messages.bbcode_text_ph')),
+                "playerPlaceHolder":   @json(__('t_ingame.messages.bbcode_player_ph')),
+                "itemPlaceHolder":     @json(__('t_ingame.messages.bbcode_item_ph')),
+                "coordinatePlaceHolder":@json(__('t_ingame.messages.bbcode_coord_ph')),
+                "charsLeft":           @json(__('t_ingame.messages.bbcode_chars_left')),
+                "colorPicker":         {"ok": @json(__('t_ingame.messages.bbcode_ok')), "cancel": @json(__('t_ingame.messages.bbcode_cancel')), "rgbR": "R", "rgbG": "G", "rgbB": "B"},
+                "backgroundImagePicker":{"ok": @json(__('t_ingame.messages.bbcode_ok')), "repeatX": @json(__('t_ingame.messages.bbcode_repeat_x')), "repeatY": @json(__('t_ingame.messages.bbcode_repeat_y'))}
             };
             var itemNames = {
                 "1aa36213cb676fd5baad5edc2bee4fbe117a778b": "Researchers",
@@ -451,11 +451,11 @@
                 "859d82d316b83848f7365d21949b3e1e63c7841f": "Metal Package"
             };
             var loca = {
-                "LOCA_SETTINGS_NEWSFEED":    "{{ __('t_ingame.messages.news_feed') }}",
-                "LOCA_ALL_AJAXLOAD":         "{{ __('t_ingame.messages.loading') }}",
-                "LOCA_GALAXY_ERROR_OCCURED": "{{ __('t_ingame.messages.error_occurred') }}",
-                "LOCA_MSG_ADD_FAV":          "{{ __('t_ingame.messages.mark_favourite') }}",
-                "LOCA_MSG_DELETE_FAV":       "{{ __('t_ingame.messages.remove_favourite') }}"
+                "LOCA_SETTINGS_NEWSFEED":    @json(__('t_ingame.messages.news_feed')),
+                "LOCA_ALL_AJAXLOAD":         @json(__('t_ingame.messages.loading')),
+                "LOCA_GALAXY_ERROR_OCCURED": @json(__('t_ingame.messages.error_occurred')),
+                "LOCA_MSG_ADD_FAV":          @json(__('t_ingame.messages.mark_favourite')),
+                "LOCA_MSG_DELETE_FAV":       @json(__('t_ingame.messages.remove_favourite'))
             };
 
             (function ($) {

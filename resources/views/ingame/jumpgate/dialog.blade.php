@@ -142,10 +142,10 @@
 
 <script type="text/javascript">
     var jumpgateTranslation = {
-        "validTargetNeeded": "{{ __('t_ingame.jumpgate.valid_target') }}",
-        "noShipsWereSelected": "{{ __('t_ingame.jumpgate.no_ships') }}",
-        "jumpSuccess": "{{ __('t_ingame.jumpgate.jump_success') }}",
-        "jumpError": "{{ __('t_ingame.jumpgate.jump_error') }}"
+        "validTargetNeeded": @json(__('t_ingame.jumpgate.valid_target')),
+        "noShipsWereSelected": @json(__('t_ingame.jumpgate.no_ships')),
+        "jumpSuccess": @json(__('t_ingame.jumpgate.jump_success')),
+        "jumpError": @json(__('t_ingame.jumpgate.jump_error'))
     };
 
     @php

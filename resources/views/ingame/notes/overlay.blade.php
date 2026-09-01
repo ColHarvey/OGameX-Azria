@@ -53,7 +53,7 @@
     </form>
 </div>
 <script type="text/javascript">
-    var locaNotes = {"changesNotSaved":"{{ __('t_ingame.notes.unsaved_warning') }}","questionSaveChanges":"{{ __('t_ingame.notes.save_question') }}"};
+    var locaNotes = {"changesNotSaved":@json(__('t_ingame.notes.unsaved_warning')),"questionSaveChanges":@json(__('t_ingame.notes.save_question'))};
     initNotes();
     @if (isset($success) && !empty($success))
     $(document).ready(function () {

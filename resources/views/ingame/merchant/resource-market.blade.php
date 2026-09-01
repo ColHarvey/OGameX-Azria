@@ -324,7 +324,7 @@
 
                             // Update the trade link in the planet div
                             if ($('#slot01').length === 0) {
-                                var headerTradeLink = '<div id="slot01" class="slot"><a href="' + tradeUrl + '" class="overlay tooltipHTML js_hideTipOnMobile" data-overlay-class="traderlayer" data-tooltip-title="{{ __('t_merchant.trade_tooltip') }}">{{ __('t_merchant.trade') }}</a></div>';
+                                var headerTradeLink = '<div id="slot01" class="slot"><a href="' + tradeUrl + '" class="overlay tooltipHTML js_hideTipOnMobile" data-overlay-class="traderlayer" data-tooltip-title=@json(__('t_merchant.trade_tooltip'))>{{ __('t_merchant.trade') }}</a></div>';
                                 $('#planet').append(headerTradeLink);
                             } else {
                                 // Update existing trade link

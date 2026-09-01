@@ -40,12 +40,12 @@
 
         @if($planet_move)
         var planetMoveLoca = {
-            "askTitle": "{{ __('t_ingame.planet_move.resettle_title') }}",
-            "askCancel": "{{ __('t_ingame.planet_move.cancel_confirm') }}",
-            "yes": "{{ __('t_ingame.shared.yes') }}",
-            "no": "{{ __('t_ingame.shared.no') }}",
-            "success": "{{ __('t_ingame.planet_move.cancel_success') }}",
-            "error": "{{ __('t_ingame.shared.error') }}"
+            "askTitle": @json(__('t_ingame.planet_move.resettle_title')),
+            "askCancel": @json(__('t_ingame.planet_move.cancel_confirm')),
+            "yes": @json(__('t_ingame.shared.yes')),
+            "no": @json(__('t_ingame.shared.no')),
+            "success": @json(__('t_ingame.planet_move.cancel_success')),
+            "error": @json(__('t_ingame.shared.error'))
         };
         var planetMoveCooldown = {{ $planet_move_countdown }};
         new SimpleCountdownTimer('#moveCountdown', {{ $planet_move_countdown }}, '{{ route('overview.index') }}');
@@ -59,7 +59,7 @@
         function cancelProduction(id, listid, question) {
             cancelProduction_id = id;
             production_listid = listid;
-            errorBoxDecision("{{ __('t_ingame.shared.caution') }}", "" + question + "", "{{ __('t_ingame.shared.yes') }}", "{{ __('t_ingame.shared.no') }}", cancelProductionStart);
+            errorBoxDecision(@json(__('t_ingame.shared.caution')), "" + question + "", @json(__('t_ingame.shared.yes')), @json(__('t_ingame.shared.no')), cancelProductionStart);
         }
 
         function cancelProductionStart() {
@@ -69,7 +69,7 @@
         function cancelResearch(id, listid, question) {
             cancelProduction_id = id;
             production_listid = listid;
-            errorBoxDecision("{{ __('t_ingame.shared.caution') }}", "" + question + "", "{{ __('t_ingame.shared.yes') }}", "{{ __('t_ingame.shared.no') }}", cancelResearchStart);
+            errorBoxDecision(@json(__('t_ingame.shared.caution')), "" + question + "", @json(__('t_ingame.shared.yes')), @json(__('t_ingame.shared.no')), cancelResearchStart);
         }
 
         function cancelResearchStart() {

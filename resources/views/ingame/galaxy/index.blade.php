@@ -626,7 +626,7 @@
                 // Refresh button inside title
                 modal_html += '<a class="refreshPhalanxLink tooltip js_hideTipOnMobile fleft" ';
                 modal_html += 'href="javascript:void(0)" onclick="refreshPhalanxContent(' + data.target.galaxy + ',' + data.target.system + ',' + data.target.position + ')" ';
-                modal_html += 'data-tooltip-title="{{ __('t_ingame.galaxy.refresh') }}">';
+                modal_html += 'data-tooltip-title=@json(__('t_ingame.galaxy.refresh'))>';
                 modal_html += '<span class="icon icon_reload"></span>';
                 modal_html += '</a>';
 

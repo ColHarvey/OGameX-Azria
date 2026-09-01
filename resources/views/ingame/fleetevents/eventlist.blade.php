@@ -22,13 +22,13 @@
     var timeDelta = 1713793145000 - (new Date()).getTime();
     var LocalizationStrings = window.LocalizationStrings || {};
     LocalizationStrings.timeunits = {"short": {
-        "year": "{{ __('t_ingame.layout.timeunit_year') }}",
-        "month": "{{ __('t_ingame.layout.timeunit_month') }}",
-        "week": "{{ __('t_ingame.layout.timeunit_week') }}",
-        "day": "{{ __('t_ingame.layout.timeunit_day') }}",
-        "hour": "{{ __('t_ingame.layout.timeunit_hour') }}",
-        "minute": "{{ __('t_ingame.layout.timeunit_minute') }}",
-        "second": "{{ __('t_ingame.layout.timeunit_second') }}"
+        "year": @json(__('t_ingame.layout.timeunit_year')),
+        "month": @json(__('t_ingame.layout.timeunit_month')),
+        "week": @json(__('t_ingame.layout.timeunit_week')),
+        "day": @json(__('t_ingame.layout.timeunit_day')),
+        "hour": @json(__('t_ingame.layout.timeunit_hour')),
+        "minute": @json(__('t_ingame.layout.timeunit_minute')),
+        "second": @json(__('t_ingame.layout.timeunit_second'))
     }};
     $("a.icon_link.recallFleet").click(function (e) {
         e.preventDefault();

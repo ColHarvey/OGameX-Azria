@@ -314,10 +314,10 @@
             e.preventDefault();
 
             errorBoxDecision(
-                "{{ __('t_ingame.shared.caution') }}",
-                "{{ __('t_ingame.alliance.confirm_leave') }}",
-                "{{ __('t_ingame.shared.yes') }}",
-                "{{ __('t_ingame.shared.no') }}",
+                @json(__('t_ingame.shared.caution')),
+                @json(__('t_ingame.alliance.confirm_leave')),
+                @json(__('t_ingame.shared.yes')),
+                @json(__('t_ingame.shared.no')),
                 function() {
                     alliance.loadingIndicator.show();
                     $.ajax({
