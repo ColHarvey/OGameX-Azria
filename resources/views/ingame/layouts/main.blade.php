@@ -81,6 +81,7 @@
             window.LocalizationStrings = {
                 timeunits: {
                     short: {
+                        week: '{{ __('t_ingame.layout.timeunit_week') }}',
                         day: '{{ __('t_ingame.layout.timeunit_day') }}',
                         hour: '{{ __('t_ingame.layout.timeunit_hour') }}',
                         minute: '{{ __('t_ingame.layout.timeunit_minute') }}',
