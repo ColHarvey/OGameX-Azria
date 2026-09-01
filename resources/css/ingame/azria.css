@@ -1,0 +1,29 @@
+/*
+ * Surcharges propres au fork Azria.
+ *
+ * Cette feuille est importee en dernier par ingame.css : ses regles gagnent donc a
+ * specificite egale sur toutes les feuilles historiques.
+ */
+
+/*
+ * La page doit inclure la hauteur de son contenu flottant.
+ *
+ * La mise en page est historiquement construite en flottants, sur deux niveaux :
+ *   - #inhalt flotte dans #contentWrapper ;
+ *   - #contentWrapper, #links et #rechts flottent dans #box.
+ *
+ * Un conteneur dont tous les enfants flottent a une hauteur calculee de zero. Quand la vue
+ * generale s'allonge — une file de construction active, par exemple — le contenu deborde de
+ * la hauteur declaree de la page, le navigateur ne voit rien a faire defiler, et le panneau
+ * du bas devient inatteignable.
+ *
+ * Le correctif retablit les hauteurs reelles ; la page s'allonge alors d'elle-meme et la
+ * barre de defilement apparait. Surtout pas de hauteur fixe, d'overflow: hidden ni de
+ * position: fixed : ce sont des pansements qui coupent le contenu au lieu de le montrer.
+ */
+#contentWrapper::after,
+#box::after {
+    content: "";
+    display: table;
+    clear: both;
+}
