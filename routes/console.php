@@ -1,5 +1,6 @@
 <?php
 
+use OGame\Console\Commands\Npc\NpcTick;
 use OGame\Console\Commands\Scheduler\CleanupDestroyedPlanets;
 use OGame\Console\Commands\Scheduler\CleanupWreckFields;
 use OGame\Console\Commands\Scheduler\DarkMatterRegenerateCommand;
@@ -40,3 +41,8 @@ Schedule::command(CleanupDestroyedPlanets::class)->dailyAt('03:00')->withoutOver
 
 // Process Dark Matter regeneration every 5 minutes
 Schedule::command(DarkMatterRegenerateCommand::class)->everyFiveMinutes()->withoutOverlapping();
+
+// Factions hostiles : croissance des bases, releve des bases detruites, decision de raid.
+// Sans effet tant que npc_enabled est a non, et n envoie aucune flotte tant que
+// npc_simulation est a oui.
+Schedule::command(NpcTick::class)->everyFifteenMinutes()->withoutOverlapping();

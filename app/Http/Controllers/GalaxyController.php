@@ -186,7 +186,11 @@ class GalaxyController extends OGameController
                 'activity' => $isDestroyed ? null : $this->getPlanetActivityStatus($planet),
                 'availableMissions' => $availableMissions,
                 'fleet' => [],
-                'imageInformation' => $planet->getPlanetBiomeType() . '_' . $planet->getPlanetImageType(),
+                // Une base hostile n'est pas une planete comme les autres : elle porte sa
+                // propre vignette, pour qu'on la reconnaisse dans la liste sans avoir a lire
+                // le nom. Le reste du systeme — pastille de statut, couleur — continue de
+                // jouer par-dessus.
+                'imageInformation' => $this->galaxyImageFor($planet),
                 'isDestroyed' => $isDestroyed,
                 'planetId' => $planet->getPlanetId(),
                 'planetName' => $isDestroyed ? __('t_galaxy.planet.destroyed') : $planet->getPlanetName(),
@@ -423,8 +427,10 @@ class GalaxyController extends OGameController
         // Check if buddy request can be sent:
         // - Must be foreign planet (not own)
         // - Target player must not be admin (can't send requests to admins)
+        // - Target must not belong to a hostile faction
         $canBuddyRequest = $planet->getPlayer()?->getId() !== $this->playerService->getId()
-            && !$planet->getPlayer()?->isAdmin();
+            && !$planet->getPlayer()?->isAdmin()
+            && !$planet->getPlayer()?->getUser()->is_npc;
 
         // Check if missile attack is possible:
         // - Must be foreign planet (not own)
@@ -478,6 +484,13 @@ class GalaxyController extends OGameController
 
         // Check if target player is admin (cannot send buddy requests or ignore admins)
         $isTargetAdmin = $player->isAdmin();
+
+        // Une base de faction hostile n'est pas un joueur. Lui proposer une amitie, un
+        // message prive ou un rang au classement individuel donnerait exactement
+        // l'impression qu'on cherche a eviter : qu'il y a quelqu'un derriere. Le rang n'a
+        // de toute facon aucun sens ici, puisque les PNJ portent le rang 0 et ne comptent
+        // que dans la ligne de faction du classement.
+        $isNpc = $player->getUser()->is_npc;
 
         // Get player's highscore rank
         /** @var Highscore|null $highscore */
@@ -541,14 +554,14 @@ class GalaxyController extends OGameController
                     'available' => false,
                 ],
                 'buddies' => [
-                    'available' => $isForeignPlayer && !$isTargetAdmin,
+                    'available' => $isForeignPlayer && !$isTargetAdmin && !$isNpc,
                     'playerId' => $player->getId(),
                     'link' => 'javascript:void(0);',
                     'title' => __('t_buddies.ui.buddy_request_to_player'),
                     'playerName' => $player->getUsername(),
                 ],
                 'ignore' => [
-                    'available' => $isForeignPlayer && !$isTargetAdmin,
+                    'available' => $isForeignPlayer && !$isTargetAdmin && !$isNpc,
                     'playerId' => $player->getId(),
                     'link' => 'javascript:void(0);',
                     'title' => __('t_buddies.ui.ignore_player_title'),
@@ -562,13 +575,13 @@ class GalaxyController extends OGameController
                     'playerName' => $player->getUsername(),
                 ],
                 'highscore' => [
-                    'available' => $playerRank !== null,
+                    'available' => $playerRank !== null && !$isNpc,
                     'rank' => $playerRank,
                     'title' => __('t_ingame.galaxy.ranking'),
                     'link' => route('highscore.index', ['category' => 1, 'page' => $highscorePage]),
                 ],
                 'message' => [
-                    'available' => $isForeignPlayer && !$isTargetAdmin,
+                    'available' => $isForeignPlayer && !$isTargetAdmin && !$isNpc,
                     'disabledChatBar' => false,
                     'title' => __('t_ingame.highscore.write_message'),
                     'link' => 'javascript:void(0);',
@@ -578,6 +591,10 @@ class GalaxyController extends OGameController
             'playerId' => $player->getId(),
             'playerName' => $player->getUsername(),
             'isAdmin' => $player->isAdmin(),
+            // Factions hostiles. Rien n'est cache au joueur : un systeme de PNJ qui avance
+            // masque produit de la frustration, parce qu'on subit sans comprendre et qu'on
+            // finit par conclure que le jeu est injuste.
+            'isPirate' => $player->getUser()->is_npc,
             'isInactive' => $player->isInactive(),
             'isLongInactive' => $player->isLongInactive(),
             'isNewbie' => $player->isNewbie($this->playerService),
@@ -1109,5 +1126,23 @@ class GalaxyController extends OGameController
 
         // Same galaxy, different system
         return abs($from->system - $to->system);
+    }
+
+    /**
+     * Get the galaxy thumbnail class for a planet.
+     *
+     * Les planetes humaines reprennent le biome et la variante d'image du jeu. Les bases des
+     * factions hostiles ont la leur, pour qu'un joueur qui parcourt un systeme reconnaisse
+     * une base a la vignette, avant meme d'en lire le nom.
+     */
+    private function galaxyImageFor(PlanetService $planet): string
+    {
+        $owner = $planet->getPlayer();
+
+        if ($owner !== null && $owner->getUser()->is_npc) {
+            return 'npc_pirate';
+        }
+
+        return $planet->getPlanetBiomeType() . '_' . $planet->getPlanetImageType();
     }
 }

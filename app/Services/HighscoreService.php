@@ -4,6 +4,7 @@ namespace OGame\Services;
 
 use Cache;
 use Exception;
+use Illuminate\Support\Facades\DB;
 use OGame\Enums\HighscoreTypeEnum;
 use OGame\Facades\AppUtil;
 use OGame\Factories\PlayerServiceFactory;
@@ -377,8 +378,115 @@ class HighscoreService
                     'total_ships' => $totalShips,
                 ];
             }
-            return $parsedHighscores;
+            return $this->insertFactionRows($parsedHighscores);
         });
+    }
+
+    /**
+     * Slot the hostile faction rows into a page of the player highscore.
+     *
+     * Les comptes PNJ individuels restent hors classement, au rang 0 : ce n'etait pas une
+     * question d'affichage mais de calcul, puisque la mediane des joueurs actifs produit le
+     * seuil a partir duquel les factions s'interessent a un joueur, et que les y laisser
+     * entrer creerait une boucle. Ces deux lignes-ci sont donc purement affichees : elles
+     * n'existent pas dans la table highscores, ne portent aucun rang, et n'entrent dans
+     * aucun calcul.
+     *
+     * La moyenne plutot que le total, et pas seulement parce que c'est plus lisible : un
+     * total croitrait avec le nombre de bases, donc avec la population du serveur, et la
+     * faction paraitrait deux fois plus forte le jour ou l'on passe de cinq a dix bases
+     * alors que chaque base serait identique. La moyenne mesure ce a quoi ressemble une
+     * base typique — elle monte quand elles se developpent, elle chute quand un joueur en
+     * abat une et qu'une neuve renait minuscule.
+     *
+     * @param array<int, array<string, mixed>> $rows
+     * @return array<int, array<string, mixed>>
+     */
+    private function insertFactionRows(array $rows): array
+    {
+        if (!$this->settingsService->npcHighscoreRows() || $this->highscoreType !== HighscoreTypeEnum::general) {
+            return $rows;
+        }
+
+        // Une seule faction existe a ce jour. La boucle est conservee telle quelle : le jour
+        // ou une seconde arrivera, elle s'ajoutera ici et nulle part ailleurs.
+        $factions = [
+            'pirate' => 'status_abbr_pirate',
+        ];
+
+        foreach ($factions as $type => $colourClass) {
+            $stats = DB::table('highscores')
+                ->join('users', 'users.id', '=', 'highscores.player_id')
+                ->where('users.is_npc', true)
+                ->where('users.npc_type', $type)
+                ->selectRaw('COUNT(*) AS bases, AVG(highscores.general) AS moyenne')
+                ->first();
+
+            $bases = (int)($stats->bases ?? 0);
+
+            if ($bases === 0 && $this->settingsService->npcHighscoreHideEmpty()) {
+                continue;
+            }
+
+            // Une moyenne sur zero element n'a pas de sens : on affiche zero, jamais une
+            // division impossible.
+            $average = $bases > 0 ? (int)round((float)($stats->moyenne ?? 0)) : 0;
+
+            $rows = $this->placeFactionRow($rows, [
+                'id' => 0,
+                'name' => __('t_ingame.highscore.faction_' . $type),
+                'points' => $average,
+                'points_formatted' => AppUtil::formatNumber($average),
+                'planet_coords' => null,
+                // Pas de rang : les joueurs humains gardent les leurs, contigus et
+                // inchanges. La faction montre ou elle se situe sans occuper une place.
+                'rank' => null,
+                'is_admin' => false,
+                'is_faction' => true,
+                'faction_type' => $type,
+                'faction_bases' => $bases,
+                'colour_class' => $colourClass,
+                'alliance_tag' => null,
+                'alliance_id' => null,
+                'total_ships' => null,
+            ]);
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Put a faction row at its score position, but only on the page it belongs to.
+     *
+     * Sans ce controle la ligne se repeterait sur chacune des pages du classement.
+     *
+     * @param array<int, array<string, mixed>> $rows
+     * @param array<string, mixed> $factionRow
+     * @return array<int, array<string, mixed>>
+     */
+    private function placeFactionRow(array $rows, array $factionRow): array
+    {
+        if ($rows === []) {
+            return $rows;
+        }
+
+        $score = (int)$factionRow['points'];
+        $highest = (int)($rows[0]['points'] ?? 0);
+        $lowest = (int)($rows[count($rows) - 1]['points'] ?? 0);
+
+        if ($score > $highest || $score < $lowest) {
+            return $rows;
+        }
+
+        foreach ($rows as $index => $row) {
+            if ($score >= (int)$row['points']) {
+                array_splice($rows, $index, 0, [$factionRow]);
+
+                return $rows;
+            }
+        }
+
+        return $rows;
     }
 
     /**

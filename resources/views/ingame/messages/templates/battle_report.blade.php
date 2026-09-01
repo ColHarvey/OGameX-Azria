@@ -24,3 +24,24 @@
 @endif
         </div>
     </div>
+
+{{--
+    Recit d'un raid de faction hostile.
+
+    Le bloc n'apparait que si la cle npc_motive est presente dans le rapport, ce qui n'est
+    le cas que pour les combats declenches par une faction hostile. Aucun affrontement
+    entre joueurs ne l'affiche.
+
+    Il arrive apres les chiffres, et volontairement : rien n'annonce un raid avant qu'il
+    n'ait lieu, l'explication vient une fois que tout est joue.
+--}}
+@if (!empty($npc_narrative))
+    <div class="combatInfo">
+        <div class="basicInfo">
+            <span class="msg_ctn msg_ctn3">{{ $npc_narrative }}</span>
+@if (!empty($npc_crew))
+            <span class="msg_ctn msg_ctn3">{{ __('t_messages.npc_raid.origin', ['crew' => $npc_crew]) }}</span>
+@endif
+        </div>
+    </div>
+@endif

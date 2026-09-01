@@ -67406,6 +67406,12 @@ function getPlayerName(galaxyContentObject, systemData) {
 
 function getPlayerColorClass(player) {
   switch (true) {
+    // Factions hostiles en tete de liste : la priorite du switch garantit qu une base
+    // pirate n est jamais coloree par autre chose. L or n est utilise par aucune autre
+    // classe de statut, donc la couleur seule suffit a la distinguer.
+    case player.isPirate:
+      return "status_abbr_pirate";
+
     case player.isAdmin:
       return "status_abbr_admin";
 
@@ -67442,6 +67448,11 @@ function getPlayerAbbreviations(player) {
 
   if (player.isAdmin) {
     returnStatus.push(`<span class="status_abbr_admin tooltip js_hideTipOnMobile" title="${loca.LOCA_GALAXY_LEGEND_ADMIN}">${loca.LOCA_GALAXY_PLAYER_STATUS_A}</span>`);
+  } else if (player.isPirate) {
+    // Une base de faction hostile porte son propre statut et lui seul. Sans cette
+    // branche elle heritait de la chaine humaine et sortait etiquetee (n), debutante,
+    // parce que son score est bas : le contraire exact de ce qu il faut lire.
+    returnStatus.push(`<span class="status_abbr_pirate tooltip js_hideTipOnMobile" title="${loca.LOCA_GALAXY_LEGEND_PIRATE}">${loca.LOCA_GALAXY_PLAYER_STATUS_P}</span>`);
   } else {
     if (player.isBanned) {
       returnStatus.push(`<span class="status_abbr_banned tooltip js_hideTipOnMobile" title="${loca.LOCA_GALAXY_LEGEND_BANNED}">${loca.LOCA_GALAXY_PLAYER_STATUS_G}</span>`);
@@ -68087,6 +68098,22 @@ function getActions(galaxyContentObject, systemData) {
   }
 
   const discoverLink = getDiscoveryLinkIcon(galaxyContentObject);
+
+  // Sur une ligne de faction, le message et la demande d ami n existent pas. Leurs
+  // emplacements vides passent donc en fin de ligne, exactement comme le fait
+  // getEmptySlotActions pour les cases libres : les icones restent groupees et
+  // tombent dans la meme colonne que celles des lignes voisines, tandis que la
+  // cellule garde la largeur qu elle a partout ailleurs.
+  if (player.isPirate) {
+    return `
+        ${discoverLink}
+        ${espionageLink}
+        ${missileLink}
+        ${messageLink}
+        ${buddyLink}
+        `;
+  }
+
   return `
         ${discoverLink}
         ${espionageLink}

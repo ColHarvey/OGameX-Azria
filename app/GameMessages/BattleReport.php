@@ -415,10 +415,28 @@ class BattleReport extends GameMessage
         // This is used to show only the relevant wreckage section to each player.
         $viewerIsAttacker = (int)$this->message->user_id === (int)($battleReportModel->attacker['player_id'] ?? 0);
 
+        // Recit d'un raid de faction hostile. La cle n'existe que pour ces combats-la, donc
+        // le gabarit reste muet pour tout affrontement entre joueurs. Elle n'est montree
+        // qu'au defenseur : c'est a lui que la faction s'adresse, et l'attaquant d'un
+        // combat entre joueurs n'a rien a y lire.
+        $npcNarrative = null;
+        $npcCrew = null;
+
+        if (!$viewerIsAttacker && isset($battleReportModel->general['npc_motive'])) {
+            // La variante a ete figee a la creation du rapport : le texte est donc le meme
+            // a chaque relecture.
+            $motive = (string)$battleReportModel->general['npc_motive'];
+            $variation = (int)($battleReportModel->general['npc_variation'] ?? 1);
+            $npcNarrative = __('t_messages.npc_raid.' . $motive . '.' . $variation);
+            $npcCrew = (string)($battleReportModel->general['npc_crew'] ?? '');
+        }
+
         return [
             'subject' => $this->getSubject(),
             'from' => $this->getFrom(),
             'viewer_is_attacker' => $viewerIsAttacker,
+            'npc_narrative' => $npcNarrative,
+            'npc_crew' => $npcCrew,
             'report_datetime' => $this->getDateFormatted(),
             'attacker_name' => $attacker_name,
             'attacker_planet_name' => $attacker_planet_name,

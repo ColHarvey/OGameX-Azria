@@ -843,4 +843,271 @@ class SettingsService
     {
         return (int)$this->get('event_missions_opened_at', 0);
     }
+
+    // ------------------------------------------------------------------
+    // Factions hostiles. Une seule existe a ce jour : les pirates.
+    //
+    // Regle appliquee sans exception : aucune valeur d'equilibrage qui depend de la
+    // progression du serveur n'est ecrite dans le code. Le code porte les regles, les
+    // donnees du serveur portent l'echelle, ces reglages portent les commandes.
+    // ------------------------------------------------------------------
+
+    /**
+     * Returns whether the hostile faction system is switched on at all.
+     */
+    public function npcEnabled(): bool
+    {
+        return $this->get('npc_enabled', '0') === '1';
+    }
+
+    /**
+     * Returns whether raids are only decided and logged, never actually sent.
+     *
+     * La simulation ne gele que l'envoi des flottes : les bases continuent de grandir,
+     * sans quoi la semaine d'observation porterait sur un monde fige et ne dirait rien
+     * de ce qui se passera reellement.
+     */
+    public function npcSimulation(): bool
+    {
+        return $this->get('npc_simulation', '1') === '1';
+    }
+
+    /**
+     * Returns the active human population below which the fixed threshold is used.
+     *
+     * En dessous de cet effectif la mediane saute par a-coups des que deux joueurs se
+     * croisent : ce n'est pas de la volatilite mais un probleme d'echantillon, et
+     * l'amortir ne ferait que retarder le moment ou on s'en apercoit.
+     */
+    public function npcMinActivePlayers(): int
+    {
+        return max(1, (int)$this->get('npc_min_active_players', '8'));
+    }
+
+    /**
+     * Returns the eligibility threshold used while the server is too small for a median.
+     */
+    public function npcMinScoreFixed(): int
+    {
+        return max(0, (int)$this->get('npc_min_score_fixed', '25'));
+    }
+
+    /**
+     * Returns the share of the active human median that forms the eligibility threshold.
+     */
+    public function npcMedianRatio(): float
+    {
+        return max(0.01, (float)$this->get('npc_median_ratio', '0.80'));
+    }
+
+    /**
+     * Returns how many days a freshly registered account is untouchable.
+     */
+    public function npcNewPlayerDays(): int
+    {
+        return max(0, (int)$this->get('npc_new_player_days', '14'));
+    }
+
+    /**
+     * Returns how many days a newly eligible player is only spied on, never raided.
+     */
+    public function npcSpottedDays(): int
+    {
+        return max(0, (int)$this->get('npc_spotted_days', '7'));
+    }
+
+    /**
+     * Returns the floor on the number of pirate bases.
+     */
+    public function npcBaseCountMin(): int
+    {
+        return max(0, (int)$this->get('npc_base_count_min', '5'));
+    }
+
+    /**
+     * Returns the ceiling on the number of pirate bases, swarming included.
+     */
+    public function npcBaseCountMax(): int
+    {
+        return max(0, (int)$this->get('npc_base_count_max', '20'));
+    }
+
+    /**
+     * Returns how many active human players justify one more base.
+     */
+    public function npcPlayersPerBase(): int
+    {
+        return max(1, (int)$this->get('npc_players_per_base', '5'));
+    }
+
+    /**
+     * Returns whether bases develop themselves over time.
+     */
+    public function npcGrowthEnabled(): bool
+    {
+        return $this->get('npc_growth_enabled', '1') === '1';
+    }
+
+    /**
+     * Returns the maturity ceiling, expressed in multiples of the active human median.
+     *
+     * Sans plafond une base laissee tranquille six mois devient intouchable et le contenu
+     * se transforme en decor. Le plafond suit la progression du serveur, donc les bases
+     * restent eternellement a portee sans jamais devenir triviales.
+     */
+    public function npcMaturityRatio(): float
+    {
+        return max(0.1, (float)$this->get('npc_maturity_ratio', '1.30'));
+    }
+
+    /**
+     * Returns whether a long-matured base may found a second one.
+     */
+    public function npcSwarmEnabled(): bool
+    {
+        return $this->get('npc_swarm_enabled', '0') === '1';
+    }
+
+    /**
+     * Returns how many days a base must sit at its ceiling before it may swarm.
+     */
+    public function npcSwarmDelayDays(): int
+    {
+        return max(1, (int)$this->get('npc_swarm_delay_days', '7'));
+    }
+
+    /**
+     * Returns the shortest delay before a destroyed base is replaced elsewhere.
+     */
+    public function npcRespawnMinHours(): int
+    {
+        return max(0, (int)$this->get('npc_respawn_min_hours', '24'));
+    }
+
+    /**
+     * Returns the longest delay before a destroyed base is replaced elsewhere.
+     */
+    public function npcRespawnMaxHours(): int
+    {
+        return max($this->npcRespawnMinHours(), (int)$this->get('npc_respawn_max_hours', '72'));
+    }
+
+    /**
+     * Returns the minimum distance in systems between a new base and any human planet.
+     */
+    public function npcSeedMinDistance(): int
+    {
+        return max(0, (int)$this->get('npc_seed_min_distance', '15'));
+    }
+
+    /**
+     * Returns the distance in systems beyond which a base would serve nobody.
+     */
+    public function npcSeedMaxDistance(): int
+    {
+        return max($this->npcSeedMinDistance() + 1, (int)$this->get('npc_seed_max_distance', '120'));
+    }
+
+    /**
+     * Returns the absolute threat ceiling.
+     */
+    public function npcThreatMax(): int
+    {
+        return max(1, (int)$this->get('npc_threat_max', '100'));
+    }
+
+    /**
+     * Returns how many hours pass before one threat point is forgotten.
+     */
+    public function npcThreatDecayHours(): int
+    {
+        return max(1, (int)$this->get('npc_threat_decay_hours', '3'));
+    }
+
+    /**
+     * Returns the threat multiplier applied when the base sits in the player's system.
+     */
+    public function npcProximitySystem(): float
+    {
+        return max(1.0, (float)$this->get('npc_proximity_system', '2.0'));
+    }
+
+    /**
+     * Returns the threat multiplier applied when the base sits in the player's galaxy.
+     */
+    public function npcProximityGalaxy(): float
+    {
+        return max(1.0, (float)$this->get('npc_proximity_galaxy', '1.5'));
+    }
+
+    /**
+     * Returns the minimum delay in hours between two raids against the same player.
+     */
+    public function npcRaidCooldownHours(): int
+    {
+        return max(1, (int)$this->get('npc_raid_cooldown_hours', '12'));
+    }
+
+    /**
+     * Returns how many raids a single player may suffer within a day.
+     */
+    public function npcMaxRaids24h(): int
+    {
+        return max(1, (int)$this->get('npc_max_raids_24h', '2'));
+    }
+
+    /**
+     * Returns the exponent that makes raid power grow slower than the player.
+     *
+     * La relation doit rester sous-lineaire, sinon doubler sa flotte double le raid et
+     * grossir ne protege jamais : le joueur comprend vite que sa flotte ne lui sert a
+     * rien contre les pirates, et l'incitation devient de rester faible.
+     */
+    public function npcPowerExponent(): float
+    {
+        return min(1.0, max(0.1, (float)$this->get('npc_power_exponent', '0.70')));
+    }
+
+    /**
+     * Returns the largest multiple of the player's own military power a raid may reach.
+     */
+    public function npcPowerCeiling(): float
+    {
+        return max(0.1, (float)$this->get('npc_power_ceiling', '1.20'));
+    }
+
+    /**
+     * Returns whether a battle against a NPC may create a moon for that NPC.
+     */
+    public function npcMoonEnabled(): bool
+    {
+        return $this->get('npc_moon_enabled', '1') === '1';
+    }
+
+    /**
+     * Returns whether faction rows are shown in the player highscore.
+     */
+    public function npcHighscoreRows(): bool
+    {
+        return $this->get('npc_highscore_rows', '1') === '1';
+    }
+
+    /**
+     * Returns whether a faction without a single base is hidden from the highscore.
+     */
+    public function npcHighscoreHideEmpty(): bool
+    {
+        return $this->get('npc_highscore_hide_empty', '1') === '1';
+    }
+
+    /**
+     * Returns the unix timestamp of the last base creation, 0 when none.
+     *
+     * Sert de minuterie de reapparition sans table supplementaire : le tick ne recree une
+     * base que si le delai tire au sort depuis cette date est ecoule.
+     */
+    public function npcLastSpawnAt(): int
+    {
+        return (int)$this->get('npc_last_spawn_at', 0);
+    }
 }

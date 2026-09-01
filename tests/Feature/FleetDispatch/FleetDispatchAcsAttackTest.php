@@ -4,6 +4,7 @@ namespace Tests\Feature\FleetDispatch;
 
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use OGame\Enums\CharacterClass;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\GameMissions\AttackMission;
@@ -93,7 +94,12 @@ class FleetDispatchAcsAttackTest extends FleetDispatchTestCase
 
             // Disable FK checks for the duration of the cleanup so we do not need to
             // enumerate every table that references users or planets. Re-enabled below.
-            DB::statement('SET FOREIGN_KEY_CHECKS=0');
+            //
+            // Passer par le schema plutot que par du SQL en dur : 'SET FOREIGN_KEY_CHECKS'
+            // n'existe que sur MySQL et MariaDB, et faisait echouer toute cette classe de
+            // tests sur le SQLite utilise en local. Laravel emet ici la bonne instruction
+            // pour le pilote en cours.
+            Schema::disableForeignKeyConstraints();
 
             try {
                 // --- Buddy requests ---
@@ -133,7 +139,7 @@ class FleetDispatchAcsAttackTest extends FleetDispatchTestCase
                 // --- Users ---
                 DB::table('users')->whereIn('id', $createdUserIds)->delete();
             } finally {
-                DB::statement('SET FOREIGN_KEY_CHECKS=1');
+                Schema::enableForeignKeyConstraints();
             }
 
             self::$allCreatedBuddyUserIds = [];
@@ -551,6 +557,102 @@ class FleetDispatchAcsAttackTest extends FleetDispatchTestCase
         $attackerStartUnits = $battleReport->attacker['units'] ?? [];
         $totalAttackerUnits = array_sum($attackerStartUnits);
         $this->assertGreaterThanOrEqual(35, $totalAttackerUnits, 'Both fleets should participate in battle (at least 20 + 15 light fighters)');
+    }
+
+    /**
+     * Test that every union member receives the battle report, not only the initiator.
+     *
+     * Non-regression : le rapport n'etait envoye qu'a l'initiateur et au defenseur. Les
+     * autres membres de l'union voyaient leur flotte revenir sans jamais savoir ce qui
+     * s'etait passe, alors qu'ils avaient engage des vaisseaux et subi des pertes.
+     */
+    public function testAcsAttackBattleReportReachesEveryParticipant(): void
+    {
+        $this->basicSetup();
+        $this->createTargetPlayer();
+        $this->createAllyPlayer();
+
+        $this->targetPlanet()->addUnit('rocket_launcher', 5);
+
+        // Flotte de l'initiateur.
+        $unitCollection = new UnitCollection();
+        $unitCollection->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 20);
+        $this->dispatchFleet($this->targetPlanet()->getPlanetCoordinates(), $unitCollection, new Resources(0, 0, 0, 0), PlanetType::Planet);
+
+        $fleetMissionService = resolve(FleetMissionService::class);
+        $initiatorMission = $fleetMissionService->getActiveFleetMissionsForCurrentPlayer()->first();
+        if ($initiatorMission === null) {
+            $this->fail('No initiator mission found.');
+        }
+
+        $this->post('/ajax/fleet/union/create', [
+            'fleetID' => $initiatorMission->id,
+            'groupname' => 'ReportUnion',
+            'unionUsers' => $this->allyUser()->username,
+            '_token' => csrf_token(),
+        ]);
+        $initiatorMission->refresh();
+
+        // Flotte de l'allie, qui rejoint l'union.
+        $allyFleet = new UnitCollection();
+        $allyFleet->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 15);
+
+        $allyFleetMissionService = resolve(FleetMissionService::class, ['player' => $this->allyPlanet()->getPlayer()]);
+        $allyMission = $allyFleetMissionService->createNewFromPlanet(
+            $this->allyPlanet(),
+            $this->targetPlanet()->getPlanetCoordinates(),
+            PlanetType::Planet,
+            1,
+            $allyFleet,
+            new Resources(0, 0, 0, 0),
+            10,
+            0
+        );
+
+        $union = FleetUnion::find($initiatorMission->union_id);
+        if ($union === null) {
+            $this->fail('Union not found.');
+        }
+        resolve(FleetUnionService::class)->joinUnion($union, $allyMission);
+        $allyMission->refresh();
+
+        $arrivalTime = max($initiatorMission->time_arrival, $allyMission->time_arrival);
+        $this->travelTo(Date::createFromTimestamp($arrivalTime + 10));
+        $this->reloadApplication();
+        $this->get('/overview');
+
+        $battleReport = BattleReport::orderBy('id', 'desc')->first();
+        $this->assertNotNull($battleReport, 'No battle report was created for the ACS attack.');
+
+        $destinataires = DB::table('messages')
+            ->where('battle_report_id', $battleReport->id)
+            ->pluck('user_id')
+            ->all();
+
+        $this->assertContains(
+            $this->currentUserId,
+            $destinataires,
+            'The union initiator did not receive the battle report.'
+        );
+
+        $this->assertContains(
+            $this->allyUser()->id,
+            $destinataires,
+            'A union member who committed a fleet did not receive the battle report.'
+        );
+
+        $this->assertContains(
+            $this->targetUser()->id,
+            $destinataires,
+            'The defender did not receive the battle report.'
+        );
+
+        // Un joueur engage une seule flotte : il ne doit recevoir qu'un seul exemplaire.
+        $this->assertCount(
+            count(array_unique($destinataires)),
+            $destinataires,
+            'The same player received the battle report more than once.'
+        );
     }
 
     /**

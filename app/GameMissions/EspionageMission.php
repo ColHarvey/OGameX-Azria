@@ -22,6 +22,7 @@ use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
 use OGame\Services\CounterEspionageService;
 use OGame\Services\DebrisFieldService;
+use OGame\Services\Npc\NpcThreatService;
 use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
 use RuntimeException;
@@ -211,6 +212,17 @@ class EspionageMission extends GameMission
             $originPlayer,
             $reportId,
         );
+
+        // Observer un repaire de pirates n'est pas cense etre invisible. Le gain est faible
+        // et s'oublie en quelques heures, mais il existe : sans lui, sonder les cinq bases
+        // du serveur avant de choisir sa cible ne couterait strictement rien.
+        if ($targetPlayer->getUser()->is_npc && !$originPlayer->getUser()->is_npc) {
+            resolve(NpcThreatService::class)->add(
+                $originPlayer,
+                'espionage',
+                $target_planet->getPlanetCoordinates()
+            );
+        }
 
         // Mark the arrival mission as processed
         $mission->processed = 1;

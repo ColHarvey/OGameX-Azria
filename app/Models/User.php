@@ -43,6 +43,8 @@ use Spatie\Permission\Traits\HasRoles;
  * @property int $dark_matter
  * @property int $tactical_retreat_ratio
  * @property Carbon|null $dark_matter_last_regen
+ * @property bool $is_npc
+ * @property string|null $npc_type
  * @property bool $vacation_mode
  * @property Carbon|null $vacation_mode_activated_at
  * @property Carbon|null $vacation_mode_until
@@ -139,6 +141,7 @@ class User extends Authenticatable
      * @var array<string, string>
      */
     protected $casts = [
+        'is_npc' => 'boolean',
         'vacation_mode' => 'boolean',
         'vacation_mode_activated_at' => 'datetime',
         'vacation_mode_until' => 'datetime',

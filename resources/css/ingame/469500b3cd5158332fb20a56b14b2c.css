@@ -5077,7 +5077,7 @@ div#line .content-box-s { margin-left:3px; display:inline;}
 .status_abbr_ally_own{color: green !important;}
 .status_abbr_ally_war{color: red !important;}
 .status_abbr_buddy{color: #226ebf !important;}
-.status_abbr_admin{color: #f48406 !important;}
+.status_abbr_admin{color: #f48406 !important;}.status_abbr_pirate{color: #FFD700 !important;}#galaxyContent .ctContentRow .cellPlanet .microplanet.npc_pirate,.planetTooltip.microplanet.npc_pirate,.microplanet.npc_pirate{background-image:url("/img/planets/npc/pirate_base.png");background-position:center;background-repeat:no-repeat;background-size:38px 33px;}.npcthreat{margin-top:5px;}.npcthreat .content{padding-bottom:6px;}.npcthreat .npcthreat_line{padding-top:3px;}.npcthreat .bar_container{float:none;width:186px;margin:3px 0;}.npcthreat .npcthreat_band{font-weight:bold;padding:1px 0 3px;}.npcthreat p{margin:4px 0;line-height:13px;}.npcthreat p.undermark{background:none;border:0;cursor:default;text-shadow:none;color:#9c0;}
 
 .honorRank {
     background: transparent url("/img/icons/0d31df283f135198103ab7a2cc11ca.png") no-repeat center;

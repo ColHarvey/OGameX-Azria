@@ -363,4 +363,66 @@ REMARQUE : La force totale de tous les participants par rapport à la force tot
         'body' => 'Votre demande de réparation sur la planète :planet a été complétée.
 :ship_count les navires ont été remis en service.',
     ],
+
+    /*
+     * Recits des raids de factions hostiles, affiches au bas du rapport de combat.
+     *
+     * Sept motifs, cinq variantes chacun : le meme joueur ne lira jamais deux fois le meme
+     * texte pour la meme raison. Le motif est choisi par le systeme a partir de ce que le
+     * joueur a reellement fait — le jeu sait toujours pourquoi une flotte est venue.
+     *
+     * REGLE INTANGIBLE : une cle deja en production ne change jamais de sens.
+     */
+    'npc_raid' => [
+        'origin' => 'Origine du signal : :crew.',
+        'first_contact' => [
+            '1' => 'Votre nom circulait depuis quelques jours sur des fréquences que personne ne surveille. Il ne circule plus : il est désormais inscrit quelque part.',
+            '2' => 'Ils ne cherchaient pas votre monde en particulier. Ils cherchaient un monde qui en valait la peine, et le vôtre a fini par en valoir une.',
+            '3' => 'Une première visite, faite sans hâte et sans colère. On mesure ce qu\'il y a à prendre avant de décider s\'il faudra revenir.',
+            '4' => 'Un monde qui prospère finit toujours par être remarqué. Le vôtre vient de l\'être.',
+            '5' => 'Ils sont venus voir. Ce qu\'ils ont vu leur a paru intéressant.',
+        ],
+        'reconnaissance' => [
+            '1' => 'Vous aviez envoyé des sondes. Ils ont considéré que la curiosité se rendait, et qu\'elle se rendait avec des vaisseaux.',
+            '2' => 'On ne regarde pas impunément chez ces gens-là. Ils ont regardé à leur tour, en plus appuyé.',
+            '3' => 'Vos sondes n\'étaient pas passées inaperçues. La réponse a mis quelques jours, elle n\'a pas mis de gants.',
+            '4' => 'Ils savaient que vous les observiez. Ils tenaient à ce que vous sachiez qu\'ils le savaient.',
+            '5' => 'Une visite en retour, pour équilibrer les comptes de la curiosité.',
+        ],
+        'reprisal' => [
+            '1' => 'Une bande a perdu des vaisseaux au-dessus de votre monde et n\'a pas l\'intention d\'en rester là.',
+            '2' => 'Ce que vous avez brûlé leur a coûté. Ils sont venus le reprendre ailleurs, chez vous.',
+            '3' => 'Ils comptent leurs pertes avec soin. Votre nom figurait en face du dernier total.',
+            '4' => 'On ne détruit pas une flotte sans que quelqu\'un, quelque part, décide de la remplacer à vos frais.',
+            '5' => 'La colère est froide, méthodique, et elle a mis exactement le temps qu\'il fallait pour arriver.',
+        ],
+        'vendetta' => [
+            '1' => 'Vous avez rasé une de leurs bases. Ce n\'est plus une affaire de butin : c\'est une affaire de principe.',
+            '2' => 'Une base est tombée par votre main. Ils ont retenu la date, les coordonnées, et votre nom.',
+            '3' => 'Il ne restait rien de leur monde quand vous êtes reparti. Ils entendent que la réciproque soit envisageable.',
+            '4' => 'Ce qui a commencé comme un pillage est devenu une guerre le jour où vous avez détruit leur base.',
+            '5' => 'Ils ne viennent plus pour vos ressources. Ils viennent pour vous.',
+        ],
+        'neighbourhood' => [
+            '1' => 'Vous êtes devenu trop grand, et vous l\'êtes devenu trop près de chez eux.',
+            '2' => 'Un voisin puissant est un problème qu\'on règle avant qu\'il ne devienne insoluble.',
+            '3' => 'Ils vous voient tous les jours. C\'est exactement ce qui pose problème.',
+            '4' => 'Ce n\'est pas ce que vous avez fait. C\'est où vous vivez, et ce que vous y êtes devenu.',
+            '5' => 'La distance protège de bien des choses. Vous n\'aviez pas cette chance.',
+        ],
+        'plunder' => [
+            '1' => 'Ni colère ni message : vos entrepôts étaient pleins et mal gardés, cela leur a suffi.',
+            '2' => 'Une opération sans passion. On prend ce qui se prend, on repart avant que ça ne coûte.',
+            '3' => 'Ils avaient besoin de métal. Vous en aviez. Le reste n\'a demandé aucune réflexion.',
+            '4' => 'Le calcul était simple et il vous était défavorable.',
+            '5' => 'Rien de personnel dans cette visite. C\'est peut-être le plus vexant.',
+        ],
+        'scavenger' => [
+            '1' => 'Vous avez récolté les débris de leurs morts. Ils ont trouvé le procédé déplaisant.',
+            '2' => 'Profiter d\'une bataille qu\'on n\'a pas livrée se paie, tôt ou tard.',
+            '3' => 'Ce que vous avez ramassé au-dessus de leur champ de bataille ne vous appartenait pas.',
+            '4' => 'Ils tolèrent qu\'on les combatte. Ils tolèrent moins qu\'on fouille leurs épaves.',
+            '5' => 'Le mépris était perceptible jusque dans la façon dont la flotte est arrivée.',
+        ],
+    ],
 ];

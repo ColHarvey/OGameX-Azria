@@ -436,6 +436,8 @@ return [
         'legend'                       => 'Legend',
         'status_admin_abbr'            => 'A',
         'legend_admin'                 => 'Administrator',
+        'status_pirate_abbr'           => 'p',
+        'legend_pirate'                => 'Pirate base (AI)',
         'status_strong_abbr'           => 's',
         'legend_strong'                => 'stronger player',
         'status_noob_abbr'             => 'n',
@@ -1334,6 +1336,8 @@ return [
         'member'                => 'Member',
         'average_points'        => 'Average points',
         'no_alliances_found'    => 'No alliances found',
+        'faction_bases'          => '{0} no base|{1} :count base|[2,*] :count bases',
+        'faction_pirate'         => 'Pirates',
         'write_message'         => 'Write message',
         'buddy_request'         => 'Buddy request',
         'buddy_request_to'      => 'Buddy request to',
@@ -1988,5 +1992,32 @@ Improved fleet escape rate',
                 '75% loot from inactive players',
             ],
         ],
+    ],
+
+    /*
+     * Hostile factions, player side.
+     *
+     * The system must be playable on purpose, not merely suffered: the player sees their
+     * gauge, its real ceiling, what pushed it up and when it will fall back.
+     */
+    'npc' => [
+        'threat_title'            => 'Provocation level',
+        'threat_level'            => 'Level',
+        'threat_accumulated'      => 'You have piled up :accumulated points of rancour, but your distance from their bases brings only :effective to bear on you. Moving closer, or growing, would wake the rest.',
+        'threat_multiplier'       => 'proximity multiplier x:factor',
+        'threat_capped'           => 'Your exposure caps this gauge at :ceiling. The factions are watching you; they will not mount a punitive expedition for you at this distance.',
+        'threat_nearest'          => 'Nearest base',
+        'threat_next_decay'       => 'Next decay',
+        'state_protected'         => 'You are out of the factions\' reach: too new, too modest, or away. Nothing can touch you.',
+        'band_ignored'            => 'Ignored',
+        'band_ignored_desc'       => 'Nobody is interested in you. That is comfortable, and it is reversible.',
+        'band_recon'              => 'Reconnaissance',
+        'band_recon_desc'         => 'You are being watched. Probes may arrive; they cost nothing but the certainty of having been noticed.',
+        'band_raid_light'         => 'Raiding party',
+        'band_raid_light_desc'    => 'Small raids are possible. They come for your resources, not for your fleet.',
+        'band_raid_military'      => 'Military raid',
+        'band_raid_military_desc' => 'They now send warships. A fleet left in dock is a fleet offered.',
+        'band_retaliation'        => 'Retaliation',
+        'band_retaliation_desc'   => 'You have their full attention. They will send the heaviest force they can muster against you.',
     ],
 ];

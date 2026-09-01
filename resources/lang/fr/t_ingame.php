@@ -318,6 +318,8 @@ return [
         'legend' => 'Légende',
         'status_admin_abbr' => 'A',
         'legend_admin' => 'Administrateur',
+        'status_pirate_abbr' => 'p',
+        'legend_pirate' => 'Base pirate (IA)',
         'status_strong_abbr' => 's',
         'legend_strong' => 'joueur plus fort',
         'status_noob_abbr' => 'n',
@@ -1042,6 +1044,8 @@ return [
         'member' => 'Membre',
         'average_points' => 'Points moyens',
         'no_alliances_found' => 'Aucune alliance trouvée',
+        'faction_bases' => '{0} aucune base|{1} :count base|[2,*] :count bases',
+        'faction_pirate' => 'Pirates',
         'write_message' => 'Écrire un message',
         'buddy_request' => 'Demande d\'ami',
         'buddy_request_to' => 'Demande d\'ami à',
@@ -1649,5 +1653,32 @@ Taux d\'évasion de la flotte amélioré',
                 '75 % de butin sur les joueurs inactifs',
             ],
         ],
+    ],
+
+    /*
+     * Factions hostiles, cote joueur.
+     *
+     * Le systeme doit pouvoir etre joue deliberement, pas seulement subi : le joueur voit
+     * sa jauge, son plafond reel, ce qui l'a fait monter et quand elle redescendra.
+     */
+    'npc' => [
+        'threat_title' => 'Taux de provocation',
+        'threat_level' => 'Niveau',
+        'threat_accumulated' => 'Vous avez accumulé :accumulated points de rancune, mais votre éloignement des bases n\'en fait peser que :effective sur vous. Vous rapprocher, ou grandir, réveillerait le reste.',
+        'threat_multiplier' => 'multiplicateur de proximité ×:factor',
+        'threat_capped' => 'Votre exposition limite cette jauge à :ceiling. Les factions vous surveillent, elles ne monteront pas d\'expédition punitive pour vous à cette distance.',
+        'threat_nearest' => 'Base la plus proche',
+        'threat_next_decay' => 'Prochaine décroissance',
+        'state_protected' => 'Vous êtes hors de portée des factions : trop récent, trop modeste, ou absent. Rien ne peut vous atteindre.',
+        'band_ignored' => 'Ignoré',
+        'band_ignored_desc' => 'Personne ne s\'intéresse à vous. C\'est confortable, et c\'est réversible.',
+        'band_recon' => 'Reconnaissance',
+        'band_recon_desc' => 'On vous observe. Des sondes peuvent arriver ; elles ne coûtent rien d\'autre que la certitude d\'avoir été remarqué.',
+        'band_raid_light' => 'Coup de main',
+        'band_raid_light_desc' => 'De petits raids sont possibles. Ils viennent pour vos ressources, pas pour votre flotte.',
+        'band_raid_military' => 'Raid militaire',
+        'band_raid_military_desc' => 'Ils envoient désormais des vaisseaux de combat. Une flotte laissée à quai est une flotte offerte.',
+        'band_retaliation' => 'Représailles',
+        'band_retaliation_desc' => 'Vous avez leur attention pleine et entière. Ils enverront ce qu\'ils peuvent aligner de plus lourd contre vous.',
     ],
 ];
