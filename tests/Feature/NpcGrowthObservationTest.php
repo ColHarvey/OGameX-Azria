@@ -6,8 +6,11 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use OGame\Factories\PlanetServiceFactory;
 use OGame\Models\NpcBaseSnapshot;
+use OGame\Models\Resources;
 use OGame\Services\Npc\NpcBaseService;
+use OGame\Services\Npc\NpcGrowthService;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
 
@@ -38,6 +41,12 @@ class NpcGrowthObservationTest extends AccountTestCase
         $this->settings->set('npc_enabled', '1');
         $this->settings->set('npc_simulation', '1');
         $this->settings->set('npc_seed_min_distance', '0');
+
+        // Le plafond de maturite est pose explicitement : une suite voisine qui l'aurait
+        // laisse bas ferait naitre les bases deja « au plafond », et ces tests mesureraient
+        // alors le plafond au lieu de la croissance.
+        $this->settings->set('npc_min_score_fixed', '25');
+        $this->settings->set('npc_maturity_ratio', '1.30');
 
         DB::table('npc_base_snapshots')->delete();
         $this->isolatePopulation();
@@ -201,6 +210,62 @@ class NpcGrowthObservationTest extends AccountTestCase
         // Et les caisses, qui distinguent une base qui attend son tour d'une base bloquee.
         $this->assertStringContainsString('caisses', $sortie);
         $this->assertStringNotContainsString('Aucun releve sur la periode', $sortie);
+    }
+
+    /**
+     * Assert that the command says what a base is doing now, not an hour ago.
+     *
+     * Le releve est horaire ; la question « que fait-elle » ne l'est pas. Lire la derniere
+     * trace a fait croire, sur le serveur reel, que cinq bases etaient bloquees alors qu'elles
+     * venaient toutes de lancer un chantier : la ligne affichee datait d'avant le deploiement
+     * qui les avait debloquees. Les files du jeu, elles, disent l'instant present.
+     */
+    public function testTheCommandShowsWhatIsHappeningNow(): void
+    {
+        $base = resolve(NpcBaseService::class)->createBase();
+        $this->assertNotNull($base, 'No pirate base could be created.');
+
+        // Une trace ancienne et trompeuse, du genre de celle qui a induit en erreur.
+        NpcBaseSnapshot::create([
+            'user_id' => $base->getPlayer()?->getId(),
+            'planet_id' => $base->getPlanetId(),
+            'score' => 4,
+            'maturity' => 12,
+            'buildings' => 12,
+            'ships' => 0,
+            'defences' => 0,
+            'metal' => 0,
+            'crystal' => 0,
+            'deuterium' => 0,
+            'action' => 'rien',
+            'detail' => 'rien d abordable',
+            'observed_at' => Date::now()->subMinutes(50),
+        ]);
+
+        $planet = resolve(PlanetServiceFactory::class)->make($base->getPlanetId(), true);
+        $this->assertNotNull($planet);
+        $planet->addResources(new Resources(50000, 50000, 50000, 0));
+
+        $planet = resolve(PlanetServiceFactory::class)->make($base->getPlanetId(), true);
+        $this->assertNotNull($planet);
+
+        $resultat = resolve(NpcGrowthService::class)->grow($planet);
+        $this->assertSame(NpcGrowthService::ACTION_BUILDING, $resultat['action']);
+
+        Artisan::call('ogamex:npc:bases');
+        $sortie = Artisan::output();
+
+        $this->assertStringContainsString(
+            'fini dans',
+            $sortie,
+            'The command showed no countdown, so it is still reading the hourly trace instead of the live queues.'
+        );
+
+        $this->assertStringNotContainsString(
+            'rien d abordable',
+            $sortie,
+            'The command repeated a stale decision while the base was actually building.'
+        );
     }
 
     /**

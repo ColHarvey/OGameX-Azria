@@ -73,6 +73,15 @@ class NpcNewPlayerProtectionTest extends AccountTestCase
         $this->settings->set('npc_enabled', '0');
         $this->settings->set('npc_min_active_players', '8');
 
+        // Le plancher est neutralise pour ce scenario ; le laisser a zero ferait tomber le
+        // plafond de maturite a un point pour toutes les suites suivantes, et leurs bases
+        // naitraient deja « au plafond ». La base de test est partagee : ce qu'on change ici,
+        // on le rend.
+        $this->settings->set('npc_min_score_fixed', '25');
+        $this->settings->set('npc_median_ratio', '0.80');
+        $this->settings->set('npc_new_player_days', '14');
+        $this->settings->set('npc_spotted_days', '7');
+
         parent::tearDown();
     }
 

@@ -7,11 +7,13 @@ use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Facades\DB;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\Models\NpcBaseSnapshot;
 use OGame\Services\Npc\NpcBaseService;
 use OGame\Services\Npc\NpcGrowthService;
 use OGame\Services\Npc\NpcPopulationService;
+use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
 use OGame\Services\SettingsService;
 
@@ -188,19 +190,24 @@ class NpcBases extends Command
         $this->line('');
 
         foreach ($planetes as $planete) {
-            $dernier = NpcBaseSnapshot::query()
-                ->where('planet_id', $planete->getPlanetId())
-                ->orderByDesc('observed_at')
-                ->first();
-
             $ressources = $planete->getResources();
+            $encours = $this->workInProgress($planete);
 
-            $etat = $dernier !== null
-                ? trim($dernier->action . ' ' . $dernier->detail)
-                : 'aucun releve encore';
-
-            if ($this->growth->isAtCeiling($planete)) {
+            if ($encours !== []) {
+                $etat = implode(' + ', $encours);
+            } elseif ($this->growth->isAtCeiling($planete)) {
                 $etat = 'au plafond de maturite, en attente que le serveur grandisse';
+            } else {
+                // Aucune file ouverte : on retombe sur la derniere decision consignee, en
+                // disant clairement qu'elle date.
+                $dernier = NpcBaseSnapshot::query()
+                    ->where('planet_id', $planete->getPlanetId())
+                    ->orderByDesc('observed_at')
+                    ->first();
+
+                $etat = $dernier !== null
+                    ? 'rien en cours — au dernier releve : ' . trim($dernier->action . ' ' . $dernier->detail)
+                    : 'rien en cours, aucun releve encore';
             }
 
             $this->line(sprintf(
@@ -217,5 +224,72 @@ class NpcBases extends Command
                 number_format($ressources->deuterium->getRounded(), 0, ',', ' ')
             ));
         }
+    }
+
+    /**
+     * Read what the base has on the fire right now, straight from the game's own queues.
+     *
+     * Lire le dernier releve horaire ne repondait pas a la question posee. Une base qui vient
+     * de lancer une mine affichait encore la decision d'il y a cinquante minutes, et apres un
+     * deploiement elle affichait celle d'avant le correctif — au point de faire croire a un
+     * blocage alors que les trois files tournaient. Les files, elles, disent l'instant present.
+     *
+     * @return array<int, string>
+     */
+    private function workInProgress(PlanetService $planete): array
+    {
+        $encours = [];
+        $maintenant = (int)Date::now()->timestamp;
+
+        $tables = [
+            'building_queues' => 'batiment',
+            'research_queues' => 'recherche',
+            'unit_queues' => 'chantier',
+        ];
+
+        foreach ($tables as $table => $libelle) {
+            $ligne = DB::table($table)
+                ->where('planet_id', $planete->getPlanetId())
+                ->where('processed', 0)
+                ->orderBy('time_end')
+                ->first();
+
+            if ($ligne === null) {
+                continue;
+            }
+
+            $objet = ObjectService::getObjectById((int)$ligne->object_id);
+            $reste = max(0, (int)$ligne->time_end - $maintenant);
+
+            $encours[] = sprintf(
+                '%s %s%s (%s)',
+                $libelle,
+                $objet->machine_name,
+                isset($ligne->object_amount) ? ' x' . (int)$ligne->object_amount : '',
+                $reste > 0 ? 'fini dans ' . $this->duree($reste) : 'termine, sera encaisse au prochain tick'
+            );
+        }
+
+        return $encours;
+    }
+
+    /**
+     * Render a number of seconds the way a player reads a countdown.
+     */
+    private function duree(int $secondes): string
+    {
+        if ($secondes < 60) {
+            return $secondes . ' s';
+        }
+
+        if ($secondes < 3600) {
+            return intdiv($secondes, 60) . ' min';
+        }
+
+        if ($secondes < 86400) {
+            return intdiv($secondes, 3600) . ' h ' . intdiv($secondes % 3600, 60) . ' min';
+        }
+
+        return intdiv($secondes, 86400) . ' j ' . intdiv($secondes % 86400, 3600) . ' h';
     }
 }
