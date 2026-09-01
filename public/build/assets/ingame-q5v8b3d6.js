@@ -51019,7 +51019,7 @@ function formatTimeWrapper(timestamp, maxDigits, showUnits, delimiter, zerofill,
       started = true;
     }
 
-    if (!started || maxDigits <= 0) {
+    if (!started) {
       continue;
     }
 
@@ -51034,7 +51034,6 @@ function formatTimeWrapper(timestamp, maxDigits, showUnits, delimiter, zerofill,
     }
 
     timeString += nv + (showUnits ? LocalizationStrings.timeunits['short'][k] : '');
-    maxDigits--;
 
     if (k === lastUnit) {
       break;
