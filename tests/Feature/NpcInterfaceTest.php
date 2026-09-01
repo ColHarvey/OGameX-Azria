@@ -79,7 +79,7 @@ class NpcInterfaceTest extends AccountTestCase
      */
     public function testTheThreatPanelRendersWithTheGameTheme(): void
     {
-        $response = $this->get('/fleet');
+        $response = $this->get('/overview');
         $response->assertStatus(200);
 
         $response->assertSee('content-box-s', false);
@@ -98,7 +98,7 @@ class NpcInterfaceTest extends AccountTestCase
     {
         $this->settings->set('npc_enabled', '0');
 
-        $response = $this->get('/fleet');
+        $response = $this->get('/overview');
         $response->assertStatus(200);
         $response->assertDontSee(__('t_ingame.npc.threat_title'), false);
     }
@@ -115,7 +115,7 @@ class NpcInterfaceTest extends AccountTestCase
             $threat->add($player, 'base_destroyed');
         }
 
-        $response = $this->get('/fleet');
+        $response = $this->get('/overview');
         $response->assertStatus(200);
         $response->assertSee(__('t_ingame.npc.band_' . $threat->bandOf($player)), false);
     }
@@ -136,6 +136,57 @@ class NpcInterfaceTest extends AccountTestCase
         // La legende annonce la faction.
         $response->assertSee(__('t_ingame.galaxy.legend_pirate'), false);
         $response->assertSee('status_abbr_pirate', false);
+
+        // Sans ces deux cles, la branche pirate du JS afficherait « undefined » a la
+        // place de l'abreviation, ce qu'aucun autre test ne verrait.
+        $response->assertSee('LOCA_GALAXY_PLAYER_STATUS_P', false);
+        $response->assertSee('LOCA_GALAXY_LEGEND_PIRATE', false);
+    }
+
+    /**
+     * Assert that a pirate base is never offered the courtesies owed to a player.
+     *
+     * Une base n'est pas quelqu'un. Lui proposer une demande d'ami, un message prive ou
+     * un rang au classement individuel donne au joueur l'impression exactement inverse de
+     * celle qu'on veut : qu'il y a une personne derriere. Le rang, en prime, n'a aucun
+     * sens pour un compte que le calcul des rangs met volontairement a zero.
+     */
+    public function testAPirateBaseIsNotOfferedThePlayerCourtesies(): void
+    {
+        $base = resolve(NpcBaseService::class)->createBase();
+        $this->assertNotNull($base, 'No pirate base could be created.');
+
+        $coordinate = $base->getPlanetCoordinates();
+
+        $response = $this->post('/ajax/galaxy', [
+            'galaxy' => $coordinate->galaxy,
+            'system' => $coordinate->system,
+        ]);
+        $response->assertStatus(200);
+
+        $row = null;
+        foreach ($response->json('system.galaxyContent') ?? [] as $candidate) {
+            if ((int)($candidate['position'] ?? 0) === $coordinate->position) {
+                $row = $candidate;
+                break;
+            }
+        }
+
+        $this->assertNotNull($row, 'The pirate base was not present in the galaxy payload.');
+
+        $actions = $row['player']['actions'] ?? null;
+        $this->assertNotNull($actions, 'The pirate row carried no player actions to check.');
+
+        foreach (['buddies', 'ignore', 'message', 'highscore'] as $courtesy) {
+            $this->assertFalse(
+                $actions[$courtesy]['available'] ?? true,
+                'A pirate base was offered the ' . $courtesy . ' action, which only a player should get.'
+            );
+        }
+
+        // Et le drapeau dont depend l'abreviation : sans lui la base ressort etiquetee
+        // (n), debutante, parce que son score est bas.
+        $this->assertTrue($row['player']['isPirate'] ?? false, 'The pirate row was not flagged as a faction base.');
     }
 
     /**

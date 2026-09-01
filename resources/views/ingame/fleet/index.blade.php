@@ -1466,6 +1466,4 @@
         </div>
     </div>
 
-    @include("ingame.fleet.partials.npc-threat")
-
 @endsection

@@ -383,5 +383,7 @@
                 </div>
             </div>
         </div>
+
+        @include("ingame.overview.partials.npc-threat")
     </div>
 @endsection

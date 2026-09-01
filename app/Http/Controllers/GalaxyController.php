@@ -427,8 +427,10 @@ class GalaxyController extends OGameController
         // Check if buddy request can be sent:
         // - Must be foreign planet (not own)
         // - Target player must not be admin (can't send requests to admins)
+        // - Target must not belong to a hostile faction
         $canBuddyRequest = $planet->getPlayer()?->getId() !== $this->playerService->getId()
-            && !$planet->getPlayer()?->isAdmin();
+            && !$planet->getPlayer()?->isAdmin()
+            && !$planet->getPlayer()?->getUser()->is_npc;
 
         // Check if missile attack is possible:
         // - Must be foreign planet (not own)
@@ -482,6 +484,13 @@ class GalaxyController extends OGameController
 
         // Check if target player is admin (cannot send buddy requests or ignore admins)
         $isTargetAdmin = $player->isAdmin();
+
+        // Une base de faction hostile n'est pas un joueur. Lui proposer une amitie, un
+        // message prive ou un rang au classement individuel donnerait exactement
+        // l'impression qu'on cherche a eviter : qu'il y a quelqu'un derriere. Le rang n'a
+        // de toute facon aucun sens ici, puisque les PNJ portent le rang 0 et ne comptent
+        // que dans la ligne de faction du classement.
+        $isNpc = $player->getUser()->is_npc;
 
         // Get player's highscore rank
         /** @var Highscore|null $highscore */
@@ -545,14 +554,14 @@ class GalaxyController extends OGameController
                     'available' => false,
                 ],
                 'buddies' => [
-                    'available' => $isForeignPlayer && !$isTargetAdmin,
+                    'available' => $isForeignPlayer && !$isTargetAdmin && !$isNpc,
                     'playerId' => $player->getId(),
                     'link' => 'javascript:void(0);',
                     'title' => __('t_buddies.ui.buddy_request_to_player'),
                     'playerName' => $player->getUsername(),
                 ],
                 'ignore' => [
-                    'available' => $isForeignPlayer && !$isTargetAdmin,
+                    'available' => $isForeignPlayer && !$isTargetAdmin && !$isNpc,
                     'playerId' => $player->getId(),
                     'link' => 'javascript:void(0);',
                     'title' => __('t_buddies.ui.ignore_player_title'),
@@ -566,13 +575,13 @@ class GalaxyController extends OGameController
                     'playerName' => $player->getUsername(),
                 ],
                 'highscore' => [
-                    'available' => $playerRank !== null,
+                    'available' => $playerRank !== null && !$isNpc,
                     'rank' => $playerRank,
                     'title' => __('t_ingame.galaxy.ranking'),
                     'link' => route('highscore.index', ['category' => 1, 'page' => $highscorePage]),
                 ],
                 'message' => [
-                    'available' => $isForeignPlayer && !$isTargetAdmin,
+                    'available' => $isForeignPlayer && !$isTargetAdmin && !$isNpc,
                     'disabledChatBar' => false,
                     'title' => __('t_ingame.highscore.write_message'),
                     'link' => 'javascript:void(0);',

@@ -102,10 +102,28 @@ class NpcGalaxyThumbnailTest extends AccountTestCase
      */
     public function testTheStylesheetKnowsTheseClasses(): void
     {
+        // L'asset construit est renomme a chaque modification, pour contourner le cache
+        // des navigateurs. Figer son nom ici ferait tomber ce test a chaque report de
+        // CSS — pour une raison sans rapport avec ce qu il verifie. On lit donc le
+        // manifeste, qui est de toute facon la source de verite servie au joueur.
+        $manifeste = json_decode((string)file_get_contents(public_path('build/manifest.json')), true);
+        $this->assertIsArray($manifeste, 'The build manifest could not be read.');
+
+        $construit = null;
+        foreach ($manifeste as $entree) {
+            $fichier = $entree['file'] ?? '';
+            if (is_string($fichier) && str_starts_with($fichier, 'assets/ingame-') && str_ends_with($fichier, '.css')) {
+                $construit = public_path('build/' . $fichier);
+                break;
+            }
+        }
+
+        $this->assertNotNull($construit, 'The manifest declares no built ingame stylesheet.');
+
         $feuilles = [
             resource_path('css/ingame/469500b3cd5158332fb20a56b14b2c.css'),
             resource_path('css/ingame/990d5d349ed6e981658ff4e2e3444c.css'),
-            public_path('build/assets/ingame-Tq4m8Wz1.css'),
+            $construit,
         ];
 
         foreach ($feuilles as $feuille) {

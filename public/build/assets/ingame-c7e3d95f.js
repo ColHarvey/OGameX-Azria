@@ -67407,8 +67407,8 @@ function getPlayerName(galaxyContentObject, systemData) {
 function getPlayerColorClass(player) {
   switch (true) {
     // Factions hostiles en tete de liste : la priorite du switch garantit qu une base
-    // pirate ou alien n est jamais coloree par autre chose. Or pour les pirates,
-    // magenta pour les aliens — deux teintes qu aucune autre classe de statut n utilise.
+    // pirate n est jamais coloree par autre chose. L or n est utilise par aucune autre
+    // classe de statut, donc la couleur seule suffit a la distinguer.
     case player.isPirate:
       return "status_abbr_pirate";
 
@@ -67448,6 +67448,11 @@ function getPlayerAbbreviations(player) {
 
   if (player.isAdmin) {
     returnStatus.push(`<span class="status_abbr_admin tooltip js_hideTipOnMobile" title="${loca.LOCA_GALAXY_LEGEND_ADMIN}">${loca.LOCA_GALAXY_PLAYER_STATUS_A}</span>`);
+  } else if (player.isPirate) {
+    // Une base de faction hostile porte son propre statut et lui seul. Sans cette
+    // branche elle heritait de la chaine humaine et sortait etiquetee (n), debutante,
+    // parce que son score est bas : le contraire exact de ce qu il faut lire.
+    returnStatus.push(`<span class="status_abbr_pirate tooltip js_hideTipOnMobile" title="${loca.LOCA_GALAXY_LEGEND_PIRATE}">${loca.LOCA_GALAXY_PLAYER_STATUS_P}</span>`);
   } else {
     if (player.isBanned) {
       returnStatus.push(`<span class="status_abbr_banned tooltip js_hideTipOnMobile" title="${loca.LOCA_GALAXY_LEGEND_BANNED}">${loca.LOCA_GALAXY_PLAYER_STATUS_G}</span>`);

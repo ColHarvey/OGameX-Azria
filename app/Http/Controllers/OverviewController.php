@@ -11,6 +11,7 @@ use OGame\Models\Highscore;
 use OGame\Services\BuildingQueueService;
 use OGame\Services\FleetMissionService;
 use OGame\Services\HighscoreService;
+use OGame\Services\Npc\NpcThreatPanelService;
 use OGame\Services\PlanetMoveService;
 use OGame\Services\PlayerService;
 use OGame\Services\ResearchQueueService;
@@ -106,6 +107,11 @@ class OverviewController extends OGameController
             : 0;
 
         return view('ingame.overview.index')->with([
+            // Rien n'est cache au joueur : il doit pouvoir relier sa jauge a ce qu'il a
+            // fait et savoir quand elle redescendra. La vue generale est la seule page
+            // qu'il ouvre a chaque visite, donc la seule ou l'information le touche
+            // avant de lui servir.
+            'npcThreat' => resolve(NpcThreatPanelService::class)->forPlayer($player),
             'header_filename' => $planet->isMoon() ? 'moon/' . $planet->getPlanetImageType() : $planet->getPlanetBiomeType(),
             'planet_name' => $planet->getPlanetName(),
             'planet_diameter' => $planet->getPlanetDiameter(),
