@@ -86,7 +86,7 @@ return [
     'universe_characteristics' => [
         'fleet_speed' => 'Vitesse de la flotte : plus la valeur est élevée, moins il vous reste de temps pour réagir à une attaque.',
         'economy_speed' => 'Vitesse économique : plus la valeur est élevée, plus les constructions et les recherches seront achevées et les ressources collectées rapidement.',
-        'debris_ships' => 'Certains des navires détruits au combat entreront dans le champ de débris.',
+        'debris_ships' => 'Certains des vaisseaux détruits au combat entreront dans le champ de débris.',
         'debris_defence' => 'Certaines des structures défensives détruites au combat entreront dans le champ de débris.',
         'dark_matter_gift' => 'Vous recevrez Dark Matter en récompense pour avoir confirmé votre adresse e-mail.',
         'aks_on' => 'Système de combat de l\'Alliance activé',
