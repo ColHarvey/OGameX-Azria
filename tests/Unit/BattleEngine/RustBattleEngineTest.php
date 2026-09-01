@@ -19,6 +19,10 @@ class RustBattleEngineTest extends BattleEngineTestAbstract
      */
     protected function createBattleEngine(UnitCollection $attackerFleet): BattleEngine
     {
+        // Ici plutot que dans setUp() : seul un test qui construit vraiment le moteur Rust
+        // doit etre ignore quand la bibliotheque est absente.
+        $this->skipWhenTheRustLibraryIsUnavailable();
+
         // Create defenders array with planet's stationary forces
         $defenders = [\OGame\GameMissions\BattleEngine\Models\DefenderFleet::fromPlanet($this->planetService)];
 

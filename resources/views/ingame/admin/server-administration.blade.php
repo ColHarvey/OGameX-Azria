@@ -480,7 +480,7 @@
                                                             <form action="{{ route('admin.server-administration.stuck-missions.recover-homeworld') }}" method="post" style="display: inline-block; margin: 0;">
                                                                 {{ csrf_field() }}
                                                                 <input type="hidden" name="mission_id" value="{{ $mission['id'] }}">
-                                                                <input type="submit" class="btn_blue" value="Renvoyer a la planete mere" style="font-size: 10px; padding: 2px 6px;">
+                                                                <input type="submit" class="btn_blue" value="@lang('Recover to Homeworld')" style="font-size: 10px; padding: 2px 6px;">
                                                             </form>
                                                         @endif
                                                     </div>

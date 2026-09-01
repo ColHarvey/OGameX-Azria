@@ -77,7 +77,7 @@
             @if(!empty($isImpersonating))
                 {{ __('Masquerading as user') }}
             @else
-                Administration
+                @lang('Server admin')
             @endif
         </div>
         @if(!empty($isImpersonating) && !empty($impersonateLeaveUrl))
@@ -90,13 +90,13 @@
             </ul>
         @else
             <ul>
-                <li><a class="{{(Request::is('admin/developer-shortcuts') ? 'active' : '') }}" href="{{ route('admin.developershortcuts.index') }}">Raccourcis</a></li>
-                <li><a class="{{(Request::is('admin/server-settings') ? 'active' : '') }}" href="{{ route('admin.serversettings.index') }}">Parametres</a></li>
-                <li><a class="{{(Request::is('admin/fleet-timing*') ? 'active' : '') }}" href="{{ route('admin.fleettiming.index') }}">Flottes</a></li>
-                <li><a class="{{(Request::is('admin/rules') ? 'active' : '') }}" href="{{ route('admin.rules.index') }}">Reglement</a></li>
-                <li><a class="{{(Request::is('admin/announcement') ? 'active' : '') }}" href="{{ route('admin.announcement.index') }}">Annonces</a></li>
-                <li><a class="{{(Request::is('admin/event') ? 'active' : '') }}" href="{{ route('admin.event.index') }}">Evenement</a></li>
-                <li><a class="{{(Request::is('admin/server-administration*') ? 'active' : '') }}" href="{{ route('admin.server-administration.index') }}">Serveur</a></li>
+                <li><a class="{{(Request::is('admin/developer-shortcuts') ? 'active' : '') }}" href="{{ route('admin.developershortcuts.index') }}">@lang('Developer shortcuts')</a></li>
+                <li><a class="{{(Request::is('admin/server-settings') ? 'active' : '') }}" href="{{ route('admin.serversettings.index') }}">@lang('Server settings')</a></li>
+                <li><a class="{{(Request::is('admin/fleet-timing*') ? 'active' : '') }}" href="{{ route('admin.fleettiming.index') }}">@lang('Fleet Timing')</a></li>
+                <li><a class="{{(Request::is('admin/rules') ? 'active' : '') }}" href="{{ route('admin.rules.index') }}">@lang('Rules & Legal')</a></li>
+                <li><a class="{{(Request::is('admin/announcement') ? 'active' : '') }}" href="{{ route('admin.announcement.index') }}">@lang('Annonces')</a></li>
+                <li><a class="{{(Request::is('admin/event') ? 'active' : '') }}" href="{{ route('admin.event.index') }}">@lang('Event')</a></li>
+                <li><a class="{{(Request::is('admin/server-administration*') ? 'active' : '') }}" href="{{ route('admin.server-administration.index') }}">@lang('Server Administration')</a></li>
             </ul>
         @endif
     </div>

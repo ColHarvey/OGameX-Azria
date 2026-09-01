@@ -946,6 +946,26 @@ return [
         'msg_error'                     => 'An error occurred',
         'rank_founder_default'  => 'Founder',
         'rank_newcomer_default' => 'Newcomer',
+
+        // Messages d'exception d'AllianceService. Valeurs anglaises reprises de l'amont
+        // (avant le commit 618b8083) : plusieurs tests amont verifient ces chaines.
+        'err_already_in_alliance' => 'User is already in an alliance',
+        'err_wait_days' => 'You must wait :days more day(s) before you can create or join an alliance.',
+        'err_tag_length' => 'Alliance tag must be between 3 and 8 characters',
+        'err_name_length' => 'Alliance name must be between 3 and 30 characters',
+        'err_tag_taken' => 'Alliance tag is already taken',
+        'err_not_accepting' => 'Alliance is not accepting applications',
+        'err_pending_application' => 'You already have a pending application to this alliance',
+        'err_no_permission_accept' => 'You do not have permission to accept applications',
+        'err_applicant_in_alliance' => 'Applicant is already in an alliance',
+        'err_no_permission_reject' => 'You do not have permission to reject applications',
+        'err_no_permission_kick' => 'You do not have permission to kick members',
+        'err_member_not_found' => 'Member not found in alliance',
+        'err_cannot_kick_founder' => 'Cannot kick the alliance founder',
+        'err_not_in_alliance' => 'User is not in an alliance',
+        'err_founder_cannot_leave' => 'Founder cannot leave alliance. You must disband the alliance or transfer ownership.',
+        'err_no_permission_create_ranks' => 'You do not have permission to create ranks',
+        'err_no_permission_assign_ranks' => 'You do not have permission to assign ranks',
     ],
 
     // -------------------------------------------------------------------

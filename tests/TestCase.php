@@ -128,6 +128,38 @@ abstract class TestCase extends BaseTestCase
     }
 
     /**
+     * Skip the test when the Rust battle engine cannot possibly run here.
+     *
+     * Les classes de test propres au moteur Rust instancient RustBattleEngine directement :
+     * elles contournent le reglage bascule par usePhpBattleEngineWhenRustIsUnavailable() et
+     * levaient « Class FFI not found » — 30 erreurs sur un poste sans FFI ni bibliotheque
+     * compilee, ce qui rendait le bilan de la suite illisible.
+     *
+     * Une erreur dit « quelque chose est casse » ; un test ignore dit « cet environnement ne
+     * peut pas repondre ». Ici c'est la seconde phrase qui est vraie : la bibliotheque est
+     * compilee au demarrage du conteneur Docker et n'est pas versionnee.
+     *
+     * La garde reste conditionnelle : la ou la bibliotheque existe — integration continue,
+     * serveur — ces tests s'executent normalement.
+     *
+     * Le chemin est calcule sans base_path() : la garde s'execute avant parent::setUp(), donc
+     * avant que l'application ne soit disponible.
+     *
+     * @param string $library
+     * @return void
+     */
+    protected function skipWhenTheRustLibraryIsUnavailable(string $library = 'libbattle_engine_ffi.so'): void
+    {
+        if (!extension_loaded('FFI')) {
+            $this->markTestSkipped('The FFI extension is not enabled, so the Rust battle engine cannot be loaded here.');
+        }
+
+        if (!file_exists(dirname(__DIR__) . '/storage/rust-libs/' . $library)) {
+            $this->markTestSkipped('The compiled Rust library ' . $library . ' is absent; it is built when the Docker container starts and is not versioned.');
+        }
+    }
+
+    /**
      * Fall back to the PHP battle engine when the Rust library is not available.
      *
      * La bibliotheque Rust est compilee au demarrage du conteneur Docker et n'est pas versionnee.

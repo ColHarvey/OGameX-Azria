@@ -12,6 +12,9 @@ class RustFfiTest extends UnitTestCase
      */
     public function testRustFfiInterface(): void
     {
+        // Ce test-ci charge une autre bibliotheque que le moteur de combat.
+        $this->skipWhenTheRustLibraryIsUnavailable('libtest_ffi.so');
+
         // Path to your .so file
         $libPath = base_path('storage/rust-libs/libtest_ffi.so');
 
