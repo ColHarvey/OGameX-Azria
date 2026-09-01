@@ -119,6 +119,66 @@ class NpcIntegrationTest extends AccountTestCase
     }
 
     /**
+     * Assert that a base builds what it can afford instead of idling on what it cannot.
+     *
+     * Reproduit l'etat mesure sur le serveur reel le 1er septembre 2026 : cinq bases
+     * immobiles depuis leur naissance, caisses a 925 metal, 678 cristal et 41 deuterium,
+     * bloquees sur une usine de robots qui en reclame 200 — avec trois batiments abordables
+     * sous la main dont pas un n'a ete monte. Un joueur monte ses mines en attendant que le
+     * deuterium rentre ; une base doit faire pareil.
+     */
+    public function testABaseBuildsWhatItCanAffordInsteadOfIdling(): void
+    {
+        $base = resolve(NpcBaseService::class)->createBase();
+        $this->assertNotNull($base);
+
+        $planetId = $base->getPlanetId();
+        $factory = resolve(PlanetServiceFactory::class);
+
+        // Energie confortable : sans cela le solaire passerait devant et masquerait le cas.
+        $base->setObjectLevel(ObjectService::getObjectByMachineName('solar_plant')->id, 10, false);
+        $base->save();
+        $base->updateResourceProductionStats();
+
+        $planet = $factory->make($planetId, true);
+        $this->assertNotNull($planet);
+        $planet->deductResources(new Resources(
+            $planet->metal()->get(),
+            $planet->crystal()->get(),
+            $planet->deuterium()->get(),
+            0
+        ));
+
+        $planet = $factory->make($planetId, true);
+        $this->assertNotNull($planet);
+        $planet->addResources(new Resources(925, 678, 41, 0));
+
+        $planet = $factory->make($planetId, true);
+        $this->assertNotNull($planet);
+
+        // L'usine de robots est bien le premier choix, et elle est bien hors de prix.
+        $this->assertLessThan(4, $planet->getObjectLevel('robot_factory'));
+        $this->assertFalse(
+            $planet->hasResources(ObjectService::getObjectPrice('robot_factory', $planet)),
+            'The scenario no longer reproduces: the robot factory has become affordable.'
+        );
+
+        $resultat = $this->growth->grow($planet);
+
+        $this->assertSame(
+            NpcGrowthService::ACTION_BUILDING,
+            $resultat['action'],
+            'The base stood idle because its first choice was too dear, instead of building something cheaper.'
+        );
+
+        $this->assertSame(
+            1,
+            DB::table('building_queues')->where('planet_id', $planetId)->count(),
+            'Nothing actually reached the building queue.'
+        );
+    }
+
+    /**
      * Assert that a base whose planet is full leaves to keep growing.
      *
      * Une planete a un nombre de cases fini. Le terraformeur ne repousse la limite que d'un

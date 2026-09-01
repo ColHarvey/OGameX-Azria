@@ -220,10 +220,18 @@ class NpcGrowthService
         $occupe = false;
 
         if (!$this->isBuildingBusy($planet)) {
-            $building = $this->nextBuilding($planet);
-
-            if ($this->enqueueBuilding($planet, $building)) {
-                $faits[] = ['action' => self::ACTION_BUILDING, 'detail' => $building];
+            // On descend la liste jusqu'a trouver ce que la base peut reellement payer.
+            //
+            // S'arreter au premier choix la laissait les bras ballants des qu'il etait hors
+            // de prix. Mesure sur le serveur reel : cinq bases immobiles depuis leur naissance,
+            // bloquees sur une usine de robots a 200 de deuterium alors qu'elles n'en avaient
+            // que 41 — et trois batiments a leur portee dont pas un n'a ete monte. Un joueur
+            // dans cette situation monte ses mines en attendant que le deuterium rentre.
+            foreach ($this->buildingCandidates($planet) as $building) {
+                if ($this->enqueueBuilding($planet, $building)) {
+                    $faits[] = ['action' => self::ACTION_BUILDING, 'detail' => $building];
+                    break;
+                }
             }
         } else {
             $occupe = true;
@@ -320,14 +328,24 @@ class NpcGrowthService
     }
 
     /**
-     * Choose the next building this base should raise.
+     * List what this base should raise, most wanted first.
      *
      * Les regles sont volontairement lisibles et deterministes : on ne cherche pas une IA
      * qui reflechisse, mais une IA qui prenne de bonnes decisions avec des regles simples.
-     * L'ordre des tests est l'ordre des priorites, et le premier qui s'applique gagne.
+     * L'ordre de la liste est l'ordre des priorites.
+     *
+     * C'est bien une liste et non un choix unique, et la difference se mesure : rendre le
+     * seul premier candidat laissait la base immobile des qu'il etait hors de prix. Cinq
+     * bases du serveur reel sont restees ainsi sans rien construire depuis leur naissance,
+     * bloquees sur une usine de robots a 200 de deuterium quand elles n'en avaient que 41,
+     * avec trois batiments abordables sous la main. L'appelant descend donc la liste
+     * jusqu'a ce qu'un candidat passe.
+     *
+     * @return array<int, string>
      */
-    private function nextBuilding(PlanetService $planet): string
+    private function buildingCandidates(PlanetService $planet): array
     {
+        $candidats = [];
         $metal = $planet->getObjectLevel('metal_mine');
         $crystal = $planet->getObjectLevel('crystal_mine');
         $deuterium = $planet->getObjectLevel('deuterium_synthesizer');
@@ -350,39 +368,39 @@ class NpcGrowthService
         $marge = 40 * $metal;
 
         if ($planet->energy()->get() < $marge) {
-            return $planet->getObjectLevel('fusion_plant') > 0 ? 'fusion_plant' : 'solar_plant';
+            $candidats[] = $planet->getObjectLevel('fusion_plant') > 0 ? 'fusion_plant' : 'solar_plant';
         }
 
         // Une usine de robots tot rend tout le reste plus rapide.
         if ($robot < 4) {
-            return 'robot_factory';
+            $candidats[] = 'robot_factory';
         }
 
         // Les trois mines gardent un ecart constant : c'est le profil d'un joueur qui sait
         // ce qu'il fait, et il produit une base credible a l'espionnage.
         if ($metal < $crystal + 2) {
-            return 'metal_mine';
+            $candidats[] = 'metal_mine';
         }
 
         if ($crystal < $deuterium + 2) {
-            return 'crystal_mine';
+            $candidats[] = 'crystal_mine';
         }
 
         if ($deuterium < $metal - 4) {
-            return 'deuterium_synthesizer';
+            $candidats[] = 'deuterium_synthesizer';
         }
 
         if ($solar < $metal) {
-            return 'solar_plant';
+            $candidats[] = 'solar_plant';
         }
 
         // Le stockage suit, sinon la production plafonne et le butin cesse de croitre.
         if ($planet->getObjectLevel('metal_store') < intdiv($metal, 3)) {
-            return 'metal_store';
+            $candidats[] = 'metal_store';
         }
 
         if ($planet->getObjectLevel('crystal_store') < intdiv($crystal, 3)) {
-            return 'crystal_store';
+            $candidats[] = 'crystal_store';
         }
 
         // Les batiments d'infrastructure suivent leur plan : laboratoire, chantier, usines.
@@ -403,19 +421,27 @@ class NpcGrowthService
                 continue;
             }
 
-            return $machineName;
+            $candidats[] = $machineName;
         }
 
-        // Rien n'est en retard : on pousse l'economie d'un cran, et les regles d'ecart
-        // ci-dessus rattraperont le reste au passage suivant.
+        // Et en dernier recours, l'economie d'un cran.
         //
         // Cette ligne n'est pas un defaut de conception, c'est ce qui empeche l'echelle de se
-        // figer. Toutes les regles precedentes comparent les mines entre elles : elles
-        // maintiennent un ecart mais ne font monter personne. Le trio (metal 5, cristal 3,
-        // deuterium 1) les rend toutes fausses a la fois — mesure faite sur le moteur reel —
-        // et la base s'arretait la, definitivement, sans jamais atteindre le metal 8 qu'exige
-        // le chantier. Donc sans chantier, sans defense et sans le moindre vaisseau.
-        return 'metal_mine';
+        // figer. Toutes les regles d'ecart comparent les mines entre elles : elles maintiennent
+        // un rapport mais ne font monter personne. Le trio (metal 5, cristal 3, deuterium 1)
+        // les rend toutes fausses a la fois — mesure faite sur le moteur reel — et la base
+        // s'arretait la, definitivement, sans jamais atteindre le metal 8 qu'exige le chantier.
+        // Donc sans chantier, sans defense et sans le moindre vaisseau.
+        //
+        // Les trois mines et le solaire ferment la marche : elles sont bon marche, elles ne
+        // consomment pas de deuterium, et une base qui economise pour un batiment cher a
+        // toujours interet a les monter en attendant plutot qu'a ne rien faire.
+        $candidats[] = 'metal_mine';
+        $candidats[] = 'crystal_mine';
+        $candidats[] = 'solar_plant';
+        $candidats[] = 'deuterium_synthesizer';
+
+        return array_values(array_unique($candidats));
     }
 
     /**
