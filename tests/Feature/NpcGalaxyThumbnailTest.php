@@ -102,28 +102,10 @@ class NpcGalaxyThumbnailTest extends AccountTestCase
      */
     public function testTheStylesheetKnowsTheseClasses(): void
     {
-        // L'asset construit est renomme a chaque modification, pour contourner le cache
-        // des navigateurs. Figer son nom ici ferait tomber ce test a chaque report de
-        // CSS — pour une raison sans rapport avec ce qu il verifie. On lit donc le
-        // manifeste, qui est de toute facon la source de verite servie au joueur.
-        $manifeste = json_decode((string)file_get_contents(public_path('build/manifest.json')), true);
-        $this->assertIsArray($manifeste, 'The build manifest could not be read.');
-
-        $construit = null;
-        foreach ($manifeste as $entree) {
-            $fichier = $entree['file'] ?? '';
-            if (is_string($fichier) && str_starts_with($fichier, 'assets/ingame-') && str_ends_with($fichier, '.css')) {
-                $construit = public_path('build/' . $fichier);
-                break;
-            }
-        }
-
-        $this->assertNotNull($construit, 'The manifest declares no built ingame stylesheet.');
-
         $feuilles = [
             resource_path('css/ingame/469500b3cd5158332fb20a56b14b2c.css'),
             resource_path('css/ingame/990d5d349ed6e981658ff4e2e3444c.css'),
-            $construit,
+            $this->builtAsset('.css'),
         ];
 
         foreach ($feuilles as $feuille) {
@@ -149,6 +131,69 @@ class NpcGalaxyThumbnailTest extends AccountTestCase
                 "The pirate rule in {$feuille} is less specific than the planet sprite rule, so the sprite wins and the badge never shows."
             );
         }
+    }
+
+    /**
+     * Assert that the built script carries the faction behaviour, not just the source.
+     *
+     * C'est l'erreur la plus probable de ce depot, et la seule que rien d'autre n'attrape.
+     * `npm run build` est impossible ici — le conteneur part de php:8.5-fpm et n'a pas Node —
+     * donc l'asset construit est commite tel quel et c'est lui qui est servi. Modifier la
+     * source sans reporter dans le construit ne casse aucun test, ne fait broncher ni PHPStan
+     * ni Pint, et ne se voit qu'en jeu.
+     */
+    public function testTheBuiltScriptCarriesTheFactionBehaviour(): void
+    {
+        $construit = $this->builtAsset('.js');
+        $this->assertFileExists($construit);
+
+        $contenu = (string)file_get_contents($construit);
+
+        // Sans cette branche, une base heritait de la chaine des statuts humains et sortait
+        // etiquetee (n) — debutante — parce que son score est bas.
+        $this->assertStringContainsString(
+            'else if (player.isPirate)',
+            $contenu,
+            'The built script has no pirate branch, so a base would be labelled as a beginner player.'
+        );
+
+        // Et sans ces deux-la, les emplacements laisses par le message et la demande d'ami
+        // reservent encore leurs seize pixels, ce qui se lit comme si les icones y etaient.
+        $this->assertStringContainsString(
+            'messageLink = player.isPirate ? "" :',
+            $contenu,
+            'The built script still reserves the message slot on a faction row.'
+        );
+
+        $this->assertStringContainsString(
+            'buddyLink = player.isPirate ? "" :',
+            $contenu,
+            'The built script still reserves the buddy slot on a faction row.'
+        );
+    }
+
+    /**
+     * Get the built asset the manifest actually serves for a given extension.
+     *
+     * Les assets construits sont renommes a chaque modification, pour contourner le cache des
+     * navigateurs. Figer un nom dans un test le ferait tomber a chaque report — pour une
+     * raison sans rapport avec ce qu'il verifie. On lit donc le manifeste, qui est de toute
+     * facon la source de verite de ce qui est servi au joueur.
+     */
+    private function builtAsset(string $extension): string
+    {
+        $manifeste = json_decode((string)file_get_contents(public_path('build/manifest.json')), true);
+        $this->assertIsArray($manifeste, 'The build manifest could not be read.');
+
+        foreach ($manifeste as $entree) {
+            $fichier = is_array($entree) ? ($entree['file'] ?? '') : '';
+
+            if (is_string($fichier) && str_starts_with($fichier, 'assets/ingame-') && str_ends_with($fichier, $extension)) {
+                return public_path('build/' . $fichier);
+            }
+        }
+
+        $this->fail('The manifest declares no built ingame ' . $extension . ' asset.');
     }
 
     /**

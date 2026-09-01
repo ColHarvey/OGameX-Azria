@@ -35672,7 +35672,9 @@ function getActions(galaxyContentObject, systemData) {
                 </a>
             `;
   } else {
-    messageLink = `<div class="emptyAction"></div>`;
+    // Une base de faction ne reserve pas la place d une icone qu elle n aura jamais :
+    // le trou se lisait comme si le message et la demande d ami etaient encore la.
+    messageLink = player.isPirate ? "" : `<div class="emptyAction"></div>`;
   }
 
   let buddyLink = "";
@@ -35689,7 +35691,7 @@ function getActions(galaxyContentObject, systemData) {
                 <span class="icon icon_user"></span>
             </a>`;
   } else {
-    buddyLink = `<div class="emptyAction"></div>`;
+    buddyLink = player.isPirate ? "" : `<div class="emptyAction"></div>`;
   }
 
   let missileLink = "";
