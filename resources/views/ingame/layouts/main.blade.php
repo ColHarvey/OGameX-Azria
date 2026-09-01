@@ -81,10 +81,10 @@
             window.LocalizationStrings = {
                 timeunits: {
                     short: {
-                        day: 'd',
-                        hour: 'h',
-                        minute: 'm',
-                        second: 's'
+                        day: '{{ __('t_ingame.layout.timeunit_day') }}',
+                        hour: '{{ __('t_ingame.layout.timeunit_hour') }}',
+                        minute: '{{ __('t_ingame.layout.timeunit_minute') }}',
+                        second: '{{ __('t_ingame.layout.timeunit_second') }}'
                     },
                     long: {
                         day: 'day',
@@ -856,7 +856,7 @@
                 localTS = localTime.getTime();
                 var startServerTime = localTime.getTime() - (0) - localTime.getTimezoneOffset() * 60 * 1000;
                 var LocalizationStrings = {!! json_encode([
-                    'timeunits'            => ['short' => ['year' => 'y', 'month' => 'm', 'week' => 'w', 'day' => 'd', 'hour' => 'h', 'minute' => 'm', 'second' => 's']],
+                    'timeunits'            => ['short' => ['year' => __('t_ingame.layout.timeunit_year'), 'month' => __('t_ingame.layout.timeunit_month'), 'week' => __('t_ingame.layout.timeunit_week'), 'day' => __('t_ingame.layout.timeunit_day'), 'hour' => __('t_ingame.layout.timeunit_hour'), 'minute' => __('t_ingame.layout.timeunit_minute'), 'second' => __('t_ingame.layout.timeunit_second')]],
                     'status'               => ['ready' => __('t_ingame.layout.js_time_done')],
                     'decimalPoint'         => '.',
                     'thousandSeperator'    => ',',

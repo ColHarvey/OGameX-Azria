@@ -1262,6 +1262,13 @@ return [
 
         // JS — LocalizationStrings
         'js_time_done'              => 'done',
+        'timeunit_year' => 'y',
+        'timeunit_month' => 'mo',
+        'timeunit_week' => 'w',
+        'timeunit_day' => 'd',
+        'timeunit_hour' => 'h',
+        'timeunit_minute' => 'm',
+        'timeunit_second' => 's',
         'js_question'               => 'Question',
         'js_ok'                     => 'Ok',
         'js_outlaw_warning'         => 'You are about to attack a stronger player. If you do this, your attack defenses will be shut down for 7 days and all players will be able to attack you without punishment. Are you sure you want to continue?',

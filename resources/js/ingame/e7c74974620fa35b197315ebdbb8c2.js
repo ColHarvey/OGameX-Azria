@@ -18629,31 +18629,54 @@ function formatTimeWrapper(timestamp, maxDigits, showUnits, delimiter, zerofill,
     second: 1
   };
   let timeString = "";
+  let values = {};
+  let firstUnit = null;
+  let lastUnit = null;
+  let remaining = timestamp;
 
-  for (let k in timeUnits) {
-    let nv = Math.floor(timestamp / timeUnits[k]);
+  for (let probe in timeUnits) {
+    values[probe] = Math.floor(remaining / timeUnits[probe]);
+    remaining = remaining - values[probe] * timeUnits[probe];
 
-    if (maxDigits > 0 && (nv > 0 || zerofill && timeString !== "")) {
-      timestamp = timestamp - nv * timeUnits[k];
-
-      if (timeString !== "") {
-        timeString += delimiter;
-
-        if (nv < 10 && nv > 0 && zerofill) {
-          nv = "0" + nv;
-        }
-
-        if (nv === 0) {
-          nv = "00";
-        }
+    if (values[probe] > 0) {
+      if (firstUnit === null) {
+        firstUnit = probe;
       }
 
-      timeString += nv + (showUnits ? LocalizationStrings.timeunits['short'][k] : '');
-      maxDigits--;
+      lastUnit = probe;
     }
   }
 
-  if (timestamp > 0) {
+  let started = false;
+
+  for (let k in timeUnits) {
+    if (k === firstUnit) {
+      started = true;
+    }
+
+    if (!started || maxDigits <= 0) {
+      continue;
+    }
+
+    let nv = values[k];
+
+    if (timeString !== "") {
+      timeString += delimiter;
+
+      if (nv < 10) {
+        nv = "0" + nv;
+      }
+    }
+
+    timeString += nv + (showUnits ? LocalizationStrings.timeunits['short'][k] : '');
+    maxDigits--;
+
+    if (k === lastUnit) {
+      break;
+    }
+  }
+
+  if (remaining > 0) {
     timeString = approx + timeString;
   }
 
@@ -20166,13 +20189,13 @@ var Formatter = {
       "segments": -1,
       "delimiter": " ",
       "units": {
-        "weeks": " sem",
-        "days": " j",
-        "hours": " h",
-        "minutes": " min",
-        "seconds": " s"
+        "weeks": "w",
+        "days": "d",
+        "hours": "h",
+        "minutes": "m",
+        "seconds": "s"
       },
-      "now": "maintenant"
+      "now": "now"
     };
     options = Object.assign(defaults, options);
 
@@ -20191,31 +20214,13 @@ var Formatter = {
       "minutes": Math.floor(seconds % Formatter.timeUnits.hour / Formatter.timeUnits.minute),
       "seconds": seconds % Formatter.timeUnits.minute
     };
-    var order = Object.keys(time);
-    var firstSegment = -1;
-    var lastSegment = -1;
-
-    for (var i = 0; i < order.length; i++) {
-      if (time[order[i]] > 0) {
-        if (firstSegment === -1) {
-          firstSegment = i;
-        }
-        lastSegment = i;
-      }
-    }
-
     var formattedTime = [];
 
-    for (var j = firstSegment; j >= 0 && j <= lastSegment; j++) {
-      if (options.segments != -1 && formattedTime.length >= options.segments) {
-        break;
+    for (var segment in time) {
+      if (time[segment] > 0 && (options.segments == -1 || formattedTime.length < options.segments)) {
+        formattedTime.push(time[segment] + options.units[segment]);
       }
-
-      var segmentValue = time[order[j]];
-      var rendered = j === firstSegment || segmentValue >= 10 ? segmentValue : "0" + segmentValue;
-      formattedTime.push(rendered + options.units[order[j]]);
     }
-
     return formattedTime.join(options.delimiter);
   },
 
