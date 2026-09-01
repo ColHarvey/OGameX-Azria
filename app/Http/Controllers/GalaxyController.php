@@ -186,7 +186,11 @@ class GalaxyController extends OGameController
                 'activity' => $isDestroyed ? null : $this->getPlanetActivityStatus($planet),
                 'availableMissions' => $availableMissions,
                 'fleet' => [],
-                'imageInformation' => $planet->getPlanetBiomeType() . '_' . $planet->getPlanetImageType(),
+                // Une base hostile n'est pas une planete comme les autres : elle porte sa
+                // propre vignette, pour qu'on la reconnaisse dans la liste sans avoir a lire
+                // le nom. Le reste du systeme — pastille de statut, couleur — continue de
+                // jouer par-dessus.
+                'imageInformation' => $this->galaxyImageFor($planet),
                 'isDestroyed' => $isDestroyed,
                 'planetId' => $planet->getPlanetId(),
                 'planetName' => $isDestroyed ? __('t_galaxy.planet.destroyed') : $planet->getPlanetName(),
@@ -578,6 +582,10 @@ class GalaxyController extends OGameController
             'playerId' => $player->getId(),
             'playerName' => $player->getUsername(),
             'isAdmin' => $player->isAdmin(),
+            // Factions hostiles. Rien n'est cache au joueur : un systeme de PNJ qui avance
+            // masque produit de la frustration, parce qu'on subit sans comprendre et qu'on
+            // finit par conclure que le jeu est injuste.
+            'isPirate' => $player->getUser()->is_npc,
             'isInactive' => $player->isInactive(),
             'isLongInactive' => $player->isLongInactive(),
             'isNewbie' => $player->isNewbie($this->playerService),
@@ -1109,5 +1117,23 @@ class GalaxyController extends OGameController
 
         // Same galaxy, different system
         return abs($from->system - $to->system);
+    }
+
+    /**
+     * Get the galaxy thumbnail class for a planet.
+     *
+     * Les planetes humaines reprennent le biome et la variante d'image du jeu. Les bases des
+     * factions hostiles ont la leur, pour qu'un joueur qui parcourt un systeme reconnaisse
+     * une base a la vignette, avant meme d'en lire le nom.
+     */
+    private function galaxyImageFor(PlanetService $planet): string
+    {
+        $owner = $planet->getPlayer();
+
+        if ($owner !== null && $owner->getUser()->is_npc) {
+            return 'npc_pirate';
+        }
+
+        return $planet->getPlanetBiomeType() . '_' . $planet->getPlanetImageType();
     }
 }

@@ -71,6 +71,21 @@ class GenerateHighscoreRanks extends Command
             }
         }
 
+        // Comptes pilotes par le serveur : rang 0, comme Legor.
+        //
+        // Ce n'est pas une question d'affichage mais de calcul. La mediane des joueurs
+        // humains actifs produit le seuil a partir duquel les pirates s'interessent a un
+        // joueur ; y laisser entrer les pirates eux-memes creerait une boucle ou leur
+        // seuil se calculerait a partir d'eux. Les factions apparaissent au classement
+        // sous forme de deux lignes agregees, calculees a l'affichage.
+        foreach (User::where('is_npc', true)->get() as $npcUser) {
+            $npcHighscore = Highscore::where('player_id', $npcUser->id)->first();
+            if ($npcHighscore) {
+                $npcHighscore->{$type->name.'_rank'} = 0;
+                $npcHighscore->save();
+            }
+        }
+
         // Set admin users' ranks to 0 if admins are excluded from highscore
         if (!$adminVisible) {
             $adminUsers = User::whereHas('roles', function ($query) {
@@ -95,6 +110,7 @@ class GenerateHighscoreRanks extends Command
         $query = Highscore::query()
             ->join('users', 'highscores.player_id', '=', 'users.id')
             ->where('users.username', '!=', 'Legor')
+            ->where('users.is_npc', false)
             ->select('highscores.*')
             ->orderByDesc($type->name)
             ->oldest('users.created_at');

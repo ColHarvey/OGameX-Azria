@@ -523,6 +523,9 @@
                     <dt class="abbreviation status_abbr_admin">{{ __('t_ingame.galaxy.status_admin_abbr') }}</dt>
                     <dd class="description">{{ __('t_ingame.galaxy.legend_admin') }}</dd>
 
+                    <dt class="abbreviation status_abbr_pirate">{{ __('t_ingame.galaxy.status_pirate_abbr') }}</dt>
+                    <dd class="description">{{ __('t_ingame.galaxy.legend_pirate') }}</dd>
+
                     <dt class="abbreviation status_abbr_strong">{{ __('t_ingame.galaxy.status_strong_abbr') }}</dt>
                     <dd class="description">{{ __('t_ingame.galaxy.legend_strong') }}</dd>
 

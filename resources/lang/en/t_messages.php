@@ -498,4 +498,63 @@ NOTE: The total strength of all participants compared to the total strength of d
         'body' => 'Your repair request on planet :planet has been completed.
 :ship_count ships have been put back into service.',
     ],
+
+    /*
+     * Hostile faction raid narratives, shown at the bottom of the battle report.
+     *
+     * Seven motives, five variations each: the same player never reads the same text twice
+     * for the same reason. The motive is chosen from what the player actually did.
+     */
+    "npc_raid" => [
+        "origin" => "Signal origin: :crew.",
+        "first_contact" => [
+            "1" => "Your name had been drifting across frequencies nobody monitors. It is no longer drifting: it has been written down.",
+            "2" => "They were not looking for your world in particular. They were looking for a world worth the trouble, and yours became one.",
+            "3" => "A first visit, made without haste and without anger. One measures what there is to take before deciding whether to come back.",
+            "4" => "A world that prospers is eventually noticed. Yours just was.",
+            "5" => "They came to look. What they saw struck them as interesting.",
+        ],
+        "reconnaissance" => [
+            "1" => "You sent probes. They decided curiosity should be returned, and returned with ships.",
+            "2" => "One does not look in on these people for free. They looked back, rather more firmly.",
+            "3" => "Your probes had not gone unnoticed. The answer took a few days; it did not take any care.",
+            "4" => "They knew you were watching them. They wanted you to know that they knew.",
+            "5" => "A visit in return, to settle the accounts of curiosity.",
+        ],
+        "reprisal" => [
+            "1" => "A crew lost ships above your world and has no intention of leaving it at that.",
+            "2" => "What you burned cost them. They came to take it back elsewhere, from you.",
+            "3" => "They count their losses carefully. Your name stood against the latest total.",
+            "4" => "One does not destroy a fleet without someone, somewhere, deciding to replace it at your expense.",
+            "5" => "The anger is cold and methodical, and it took exactly as long as it needed to arrive.",
+        ],
+        "vendetta" => [
+            "1" => "You levelled one of their bases. This is no longer about plunder: it is a matter of principle.",
+            "2" => "A base fell by your hand. They noted the date, the coordinates, and your name.",
+            "3" => "Nothing was left of their world when you departed. They intend the reverse to be conceivable.",
+            "4" => "What began as raiding became a war the day you destroyed their base.",
+            "5" => "They no longer come for your resources. They come for you.",
+        ],
+        "neighbourhood" => [
+            "1" => "You have grown too large, and you have grown too close to them.",
+            "2" => "A powerful neighbour is a problem one settles before it becomes unsolvable.",
+            "3" => "They see you every day. That is precisely the problem.",
+            "4" => "It is not what you did. It is where you live, and what you have become there.",
+            "5" => "Distance protects against a great many things. You did not have that luxury.",
+        ],
+        "plunder" => [
+            "1" => "No anger, no message: your storehouses were full and poorly guarded, and that was enough.",
+            "2" => "An operation without passion. Take what can be taken, leave before it costs anything.",
+            "3" => "They needed metal. You had some. The rest required no thought at all.",
+            "4" => "The arithmetic was simple, and it did not favour you.",
+            "5" => "Nothing personal in this visit. That may be the most galling part.",
+        ],
+        "scavenger" => [
+            "1" => "You harvested the debris of their dead. They found the practice distasteful.",
+            "2" => "Profiting from a battle one did not fight is paid for, sooner or later.",
+            "3" => "What you scooped up above their battlefield was not yours.",
+            "4" => "They tolerate being fought. They tolerate having their wrecks picked over rather less.",
+            "5" => "The contempt was audible in the very way the fleet arrived.",
+        ],
+    ],
 ];

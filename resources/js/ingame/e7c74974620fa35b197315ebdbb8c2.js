@@ -35041,6 +35041,12 @@ function getPlayerName(galaxyContentObject, systemData) {
 
 function getPlayerColorClass(player) {
   switch (true) {
+    // Factions hostiles en tete de liste : la priorite du switch garantit qu une base
+    // pirate ou alien n est jamais coloree par autre chose. Or pour les pirates,
+    // magenta pour les aliens — deux teintes qu aucune autre classe de statut n utilise.
+    case player.isPirate:
+      return "status_abbr_pirate";
+
     case player.isAdmin:
       return "status_abbr_admin";
 

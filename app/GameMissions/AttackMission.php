@@ -20,8 +20,11 @@ use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
+use OGame\Models\User;
 use OGame\Services\CharacterClassService;
 use OGame\Services\DebrisFieldService;
+use OGame\Services\Npc\NpcDestructionService;
+use OGame\Services\Npc\NpcThreatService;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
@@ -31,6 +34,15 @@ use Throwable;
 
 class AttackMission extends GameMission
 {
+    /**
+     * Nombre de variantes de texte par motif de raid.
+     *
+     * Doit correspondre au nombre de cles presentes sous t_messages.npc_raid.<motif> dans
+     * chaque fichier de langue. Augmenter ce nombre sans ajouter les traductions afficherait
+     * une cle brute au joueur.
+     */
+    private const int NPC_MOTIVE_VARIATIONS = 5;
+
     protected static string $name = 'Attack';
     protected static int $typeId = 1;
     protected static bool $hasReturnMission = true;
@@ -108,6 +120,31 @@ class AttackMission extends GameMission
             throw new RuntimeException('Attack mission target planet has no owner.');
         }
 
+        // Troisieme verrou du mode vacances, et le seul de ce projet qui corrige un
+        // comportement existant au lieu d'en emprunter un.
+        //
+        // canActivateVacationMode() ne regarde que les flottes sortantes du joueur : rien
+        // ne l'empeche donc de partir en conge alors qu'une flotte hostile est deja en
+        // route, et processArrival() ne recontrolait pas. La sequence « le raid part, le
+        // joueur part en conge, le raid arrive » aboutissait au combat.
+        //
+        // La correction est volontairement bornee aux PNJ : le combat entre joueurs est un
+        // comportement de jeu qui se discute, pas un defaut a corriger au passage. Face a
+        // une faction, en revanche, la promesse « en conge, on ne risque rien » doit tenir
+        // precisement quand le joueur en a le plus besoin.
+        if ($defenderPlayer->isInVacationMode() && $this->isNpcAttack($mission)) {
+            $mission->processed = 1;
+            $mission->save();
+
+            $this->startReturn(
+                $mission,
+                $this->fleetMissionService->getResources($mission),
+                $this->fleetMissionService->getFleetUnits($mission)
+            );
+
+            return;
+        }
+
         // Trigger defender planet update to make sure the battle uses up-to-date info.
         $defenderPlanet->update();
 
@@ -140,7 +177,11 @@ class AttackMission extends GameMission
         if ($mission->planet_id_from === null) {
             throw new RuntimeException('Attack mission has no origin planet.');
         }
-        $battleResult->attackerPlanetId = $mission->planet_id_from;
+        // Retenu dans une variable locale : la planete d'origine est utilisee plus bas, apres
+        // des appels qui prennent la mission en parametre, et la garantie de non-nullite
+        // obtenue ci-dessus ne survit pas a ces appels.
+        $originPlanetId = $mission->planet_id_from;
+        $battleResult->attackerPlanetId = $originPlanetId;
 
         // Deduct loot from the target planet.
         $defenderPlanet->deductResources($battleResult->loot);
@@ -452,6 +493,13 @@ class AttackMission extends GameMission
         // engage plusieurs flottes n'est prevenu qu'une seule fois.
         $reportId = $this->createBattleReport($attackerPlayer, $defenderPlanet, $battleResult, $collectedDebris, $attackerCollectedDebris, $defenderCollectedDebris);
 
+        // Le recit d'un raid de faction se depose ici, dans le rapport, et jamais avant
+        // l'attaque : un raid pirate doit rester indiscernable d'une attaque humaine tant
+        // qu'il n'a pas eu lieu. L'explication arrive une fois que tout est joue, la ou le
+        // joueur va de toute facon analyser ce qui vient de se passer, et un recit qui
+        // n'influence plus aucune decision ne desequilibre rien.
+        $this->attachNpcMotive($reportId, $mission, $defenderPlayer);
+
         if ($attackerDestroyedFirstRound) {
             // La force d'attaque a ete aneantie avant d'avoir pu transmettre quoi que ce soit :
             // ses proprietaires apprennent seulement la perte de contact, sans le detail des
@@ -517,6 +565,10 @@ class AttackMission extends GameMission
             ]);
         }
 
+        // Consequences d'un combat contre une faction hostile : la rancune que les
+        // attaquants viennent de s'attirer, et la chute eventuelle de la base.
+        $this->applyNpcAftermath($mission, $defenderPlanet, $defenderPlayer, $attackerFleets, $battleResult);
+
         // Mark the arrival mission as processed and create return mission
         // Single-attacker battles: use original return processing
         // Multi-attacker battles (ACS): each fleet is handled individually above
@@ -551,7 +603,7 @@ class AttackMission extends GameMission
                 // Calculate attacker's lost units (start - result = lost)
                 $attackerUnitsLost = clone $battleResult->attackerUnitsStart;
                 $attackerUnitsLost->subtractCollection($battleResult->attackerUnitsResult);
-                $originPlanet = $this->planetServiceFactory->makeForPlayer($attackerPlayer, $mission->planet_id_from);
+                $originPlanet = $this->planetServiceFactory->makeForPlayer($attackerPlayer, $originPlanetId);
 
                 // Calculate wreck field data if conditions are met
                 $attackerWreckFieldData = $this->calculateAttackerWreckField($attackerUnitsLost, $battleResult->attackerUnitsStart, $originPlanet);
@@ -817,6 +869,111 @@ class AttackMission extends GameMission
         $report->save();
 
         return $report->id;
+    }
+
+    /**
+     * Record in the battle report why a hostile faction came, when one did.
+     *
+     * La colonne general du rapport est un tableau JSON libre, et AttackMission la relit
+     * deja pour y ajouter le champ d'epave : deposer le motif suit ce precedent et ne
+     * demande aucune migration. La cle n'est ecrite que pour un raid de faction, donc le
+     * gabarit reste muet pour tous les combats entre joueurs.
+     */
+    private function attachNpcMotive(int $reportId, FleetMission $mission, PlayerService $defenderPlayer): void
+    {
+        if (!$this->isNpcAttack($mission)) {
+            return;
+        }
+
+        $attacker = User::find($mission->user_id);
+
+        if ($attacker === null) {
+            return;
+        }
+
+        $report = BattleReport::find($reportId);
+
+        if ($report === null) {
+            return;
+        }
+
+        // Le motif est lu a l'arrivee et non au depart. Il ne peut avoir change entre-temps
+        // que si le joueur a de nouveau provoque la faction pendant le vol — auquel cas le
+        // motif recent est le plus juste des deux.
+        $motive = resolve(NpcThreatService::class)->lastMotiveOf($defenderPlayer);
+
+        $general = $report->general ?? [];
+        $general['npc_motive'] = $motive ?? 'first_contact';
+        $general['npc_faction'] = $attacker->npc_type;
+        $general['npc_crew'] = $attacker->username;
+        // La variante est tiree une seule fois, ici, et conservee avec le rapport. La tirer
+        // a l'affichage donnerait un texte different a chaque ouverture du meme rapport, et
+        // un joueur qui relit un combat verrait son histoire changer sous ses yeux.
+        $general['npc_variation'] = random_int(1, self::NPC_MOTIVE_VARIATIONS);
+        $report->general = $general;
+        $report->save();
+    }
+
+    /**
+     * Get whether this attack was launched by a server-driven faction.
+     */
+    private function isNpcAttack(FleetMission $mission): bool
+    {
+        $attacker = User::find($mission->user_id);
+
+        return $attacker !== null && $attacker->is_npc;
+    }
+
+    /**
+     * Apply what a battle against a hostile faction changes beyond the battle itself.
+     *
+     * Deux consequences, et une seule condition commune : que le defenseur soit une base
+     * pilotee par le serveur. Un combat entre joueurs ne passe jamais par ici.
+     *
+     * @param array<int, AttackerFleet> $attackerFleets
+     */
+    private function applyNpcAftermath(
+        FleetMission $mission,
+        PlanetService $defenderPlanet,
+        PlayerService $defenderPlayer,
+        array $attackerFleets,
+        BattleResult $battleResult
+    ): void {
+        if (!$defenderPlayer->getUser()->is_npc) {
+            return;
+        }
+
+        // Une faction qui en attaque une autre ne s'attire aucune rancune : la menace est
+        // une notion propre aux joueurs humains.
+        if ($this->isNpcAttack($mission)) {
+            return;
+        }
+
+        $destruction = resolve(NpcDestructionService::class);
+
+        $fleetWiped = $battleResult->defenderUnitsResult->getAmount() === 0;
+        $attackerSurvived = $battleResult->attackerUnitsResult->getAmount() > 0;
+
+        // La regle de destruction d'une base, ses conditions et ses consequences vivent
+        // entierement dans NpcDestructionService — y compris la raison pour laquelle les
+        // ruines d'une base vaincue ne se reparent pas. Ne pas la dupliquer ici.
+        $baseDestroyed = $destruction->isDefeatedInBattle($battleResult);
+
+        $reason = match (true) {
+            $baseDestroyed => 'base_destroyed',
+            $fleetWiped => 'fleet_wiped',
+            $attackerSurvived => 'attack_won',
+            default => 'attack_lost',
+        };
+
+        $threatService = resolve(NpcThreatService::class);
+        $coordinate = $defenderPlanet->getPlanetCoordinates();
+
+        foreach ($this->collectAttackingPlayers($attackerFleets) as $participant) {
+            $threatService->add($participant, $reason, $coordinate);
+        }
+
+        $destruction->settleBattle($defenderPlanet, $battleResult);
     }
 
     /**

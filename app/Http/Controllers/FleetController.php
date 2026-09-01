@@ -26,6 +26,7 @@ use OGame\Services\CoordinateDistanceCalculator;
 use OGame\Services\FleetMissionService;
 use OGame\Services\FleetUnionService;
 use OGame\Services\MessageService;
+use OGame\Services\Npc\NpcThreatPanelService;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
@@ -98,6 +99,9 @@ class FleetController extends OGameController
         return view('ingame.fleet.index')->with([
             'player' => $player,
             'planet' => $planet,
+            // Rien n'est cache au joueur : il doit pouvoir relier sa jauge a ce qu'il a fait
+            // et savoir quand elle redescendra.
+            'npcThreat' => resolve(NpcThreatPanelService::class)->forPlayer($player),
             'units' => $units,
             'objects' => ObjectService::getShipObjects(),
             'shipAmount' => $planet->getFlightShipAmount(),

@@ -65,7 +65,9 @@
             </thead>
             <tbody>
             @foreach ($highscorePlayers as $highscorePlayer)
-                <tr class="{{ $highscorePlayer['id'] == $player->getId()  ? 'myrank' : ($highscorePlayer['rank'] % 2 == 0  ? 'alt' : '') }}" id="position{{ $highscorePlayer['id'] }}">
+                {{-- Une ligne de faction n'a ni identifiant de compte ni rang : son
+                     identifiant DOM reprend donc son type, pour rester unique. --}}
+                <tr class="{{ ($highscorePlayer['is_faction'] ?? false) ? '' : ($highscorePlayer['id'] == $player->getId() ? 'myrank' : ($highscorePlayer['rank'] % 2 == 0 ? 'alt' : '')) }}" id="position{{ ($highscorePlayer['is_faction'] ?? false) ? $highscorePlayer['faction_type'] : $highscorePlayer['id'] }}">
                     <td class="position">
                         {{ $highscorePlayer['rank'] }}
                     </td>
@@ -97,11 +99,21 @@
                                         </span>
                                     @endif
 
+                                    @if ($highscorePlayer['is_faction'] ?? false)
+                                        {{-- Une faction n'est pas un compte : ni lien de galaxie, ni fiche joueur.
+                                             Sa couleur est celle qui la designe deja en galaxie, pour qu'on la
+                                             reconnaisse d'un coup d'oeil comme une intelligence artificielle. --}}
+                                        <span class="playername {{ $highscorePlayer['colour_class'] }}">
+                                            {{ $highscorePlayer['name'] }}
+                                        </span>
+                                        <span class="ally-tag">({{ trans_choice('t_ingame.highscore.faction_bases', $highscorePlayer['faction_bases'], ['count' => $highscorePlayer['faction_bases']]) }})</span>
+                                    @else
                                     <a href="{{ route('galaxy.index', ['galaxy' => $highscorePlayer['planet_coords']->galaxy, 'system' => $highscorePlayer['planet_coords']->system, 'position' => $highscorePlayer['planet_coords']->position]) }}" class="dark_highlight_tablet">
                                         <span class="playername{{ ($highscorePlayer['is_admin'] ?? false) ? ' status_abbr_admin' : '' }}">
                                             {{ $highscorePlayer['name'] }}
                                         </span>
                                     </a>
+                                    @endif
                                 </div>
                                 <div class="honorScore">
                                     (<span class="undermark tooltip js_hideTipOnMobile" title="{{ __('t_ingame.highscore.honour_points') }}">0</span>)
@@ -112,8 +124,10 @@
 
                     <td class="sendmsg">
                         <div class="sendmsg_content">
+                            @unless ($highscorePlayer['is_faction'] ?? false)
                             <a href="javascript:void(0)" class="sendMail js_openChat tooltip" data-playerid="{{ $highscorePlayer['id'] }}" title="{{ __('t_ingame.highscore.write_message') }}"><span class="icon icon_chat"></span></a>
-                            @if($highscorePlayer['id'] != $player->getId() && !($highscorePlayer['is_admin'] ?? false))
+                            @endunless
+                            @if(!($highscorePlayer['is_faction'] ?? false) && $highscorePlayer['id'] != $player->getId() && !($highscorePlayer['is_admin'] ?? false))
                                 <a class="tooltip js_hideTipOnMobile icon sendBuddyRequest" title="{{ __('t_ingame.highscore.buddy_request') }}" data-playerid="{{ $highscorePlayer['id'] }}" data-playername="{{ $highscorePlayer['name'] }}" href="javascript:void(0);">
                                     <span class="icon icon_user"></span>
                                 </a>
