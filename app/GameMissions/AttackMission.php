@@ -7,7 +7,9 @@ use OGame\Enums\FleetSpeedType;
 use OGame\GameMessages\DebrisFieldHarvest;
 use OGame\GameMessages\FleetLostContact;
 use OGame\GameMissions\Abstracts\GameMission;
+use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
+use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
 use OGame\GameMissions\BattleEngine\PhpBattleEngine;
 use OGame\GameMissions\BattleEngine\RustBattleEngine;
 use OGame\GameMissions\BattleEngine\Services\LootService;
@@ -444,25 +446,31 @@ class AttackMission extends GameMission
             }
         }
 
-        // TODO: In multi-attacker ACS battles, send battle report to all participating players,
-        // not just the initiator. Currently only the initiator and defender receive it.
-        if ($attackerDestroyedFirstRound) {
-            // Send simplified "fleet lost contact" message to attacker (no fleet or tech info)
-            $coordinates = '[coordinates]' . $defenderPlanet->getPlanetCoordinates()->asString() . '[/coordinates]';
-            $this->messageService->sendSystemMessageToPlayer($attackerPlayer, FleetLostContact::class, [
-                'coordinates' => $coordinates,
-            ]);
+        // Chaque participant recoit l'issue du combat : tout proprietaire d'une flotte
+        // attaquante (union ACS comprise) et tout proprietaire d'une flotte en defense
+        // (le maitre de la planete, plus les allies venus en ACS Defend). Un joueur ayant
+        // engage plusieurs flottes n'est prevenu qu'une seule fois.
+        $reportId = $this->createBattleReport($attackerPlayer, $defenderPlanet, $battleResult, $collectedDebris, $attackerCollectedDebris, $defenderCollectedDebris);
 
-            // Send full battle report to defender
-            $reportId = $this->createBattleReport($attackerPlayer, $defenderPlanet, $battleResult, $collectedDebris, $attackerCollectedDebris, $defenderCollectedDebris);
-            $this->messageService->sendBattleReportMessageToPlayer($defenderPlayer, $reportId);
+        if ($attackerDestroyedFirstRound) {
+            // La force d'attaque a ete aneantie avant d'avoir pu transmettre quoi que ce soit :
+            // ses proprietaires apprennent seulement la perte de contact, sans le detail des
+            // flottes ni des technologies adverses.
+            $coordinates = '[coordinates]' . $defenderPlanet->getPlanetCoordinates()->asString() . '[/coordinates]';
+
+            foreach ($this->collectAttackingPlayers($attackerFleets) as $participant) {
+                $this->messageService->sendSystemMessageToPlayer($participant, FleetLostContact::class, [
+                    'coordinates' => $coordinates,
+                ]);
+            }
         } else {
-            // Normal behavior: send battle report to both attacker and defender
-            $reportId = $this->createBattleReport($attackerPlayer, $defenderPlanet, $battleResult, $collectedDebris, $attackerCollectedDebris, $defenderCollectedDebris);
-            // Send to attacker.
-            $this->messageService->sendBattleReportMessageToPlayer($attackerPlayer, $reportId);
-            // Send to defender.
-            $this->messageService->sendBattleReportMessageToPlayer($defenderPlayer, $reportId);
+            foreach ($this->collectAttackingPlayers($attackerFleets) as $participant) {
+                $this->messageService->sendBattleReportMessageToPlayer($participant, $reportId);
+            }
+        }
+
+        foreach ($this->collectDefendingPlayers($defenders, $defenderPlayer) as $participant) {
+            $this->messageService->sendBattleReportMessageToPlayer($participant, $reportId);
         }
 
         // Send Reaper auto-collection message to attacker if debris was collected
@@ -809,5 +817,47 @@ class AttackMission extends GameMission
         $report->save();
 
         return $report->id;
+    }
+
+    /**
+     * Get every distinct player who committed an attacking fleet to this battle.
+     *
+     * Une union ACS peut compter plusieurs flottes appartenant au meme joueur : le
+     * dedoublonnage se fait sur l'identifiant du proprietaire, afin que personne ne
+     * recoive deux fois le meme rapport.
+     *
+     * @param array<int, AttackerFleet> $attackerFleets
+     * @return array<int, PlayerService>
+     */
+    private function collectAttackingPlayers(array $attackerFleets): array
+    {
+        $players = [];
+
+        foreach ($attackerFleets as $fleet) {
+            $players[$fleet->ownerId] = $fleet->player;
+        }
+
+        return array_values($players);
+    }
+
+    /**
+     * Get every distinct player who took part in the defense of the target planet.
+     *
+     * Le maitre de la planete est ajoute en premier et de facon inconditionnelle : il est
+     * defenseur meme sans une seule unite en orbite, et il doit recevoir le rapport quoi
+     * qu'il arrive. Les flottes venues en ACS Defend s'y ajoutent ensuite.
+     *
+     * @param array<int, DefenderFleet> $defenderFleets
+     * @return array<int, PlayerService>
+     */
+    private function collectDefendingPlayers(array $defenderFleets, PlayerService $planetOwner): array
+    {
+        $players = [$planetOwner->getId() => $planetOwner];
+
+        foreach ($defenderFleets as $fleet) {
+            $players[$fleet->ownerId] = $fleet->player;
+        }
+
+        return array_values($players);
     }
 }

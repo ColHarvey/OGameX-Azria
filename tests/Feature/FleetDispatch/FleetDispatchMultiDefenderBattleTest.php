@@ -286,6 +286,105 @@ class FleetDispatchMultiDefenderBattleTest extends FleetDispatchTestCase
     }
 
     /**
+     * Test that every participant of the battle receives the battle report.
+     *
+     * Non-regression : le rapport n'allait qu'a l'attaquant initiateur et au maitre de la
+     * planete. Un allie venu en ACS Defend engageait ses vaisseaux, subissait ses pertes,
+     * et n'apprenait jamais ce qui leur etait arrive.
+     */
+    public function testBattleReportReachesEveryParticipant(): void
+    {
+        $this->basicSetup();
+        $this->createBuddyPlayer();
+
+        $this->buddyPlanet()->addUnit('rocket_launcher', 10);
+
+        $acsDefender = $this->createAcsDefender();
+        $acsDefender['planet']->addUnit('light_fighter', 20);
+        $acsDefender['planet']->addResources(new Resources(0, 0, 1000000, 0));
+
+        // L'allie part defendre la planete de l'ami, avec deux heures de stationnement.
+        $acsDefendFleet = new UnitCollection();
+        $acsDefendFleet->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 20);
+
+        $fleetMissionService = resolve(FleetMissionService::class, ['player' => $acsDefender['planet']->getPlayer()]);
+        $acsDefendMission = $fleetMissionService->createNewFromPlanet(
+            $acsDefender['planet'],
+            $this->buddyPlanet()->getPlanetCoordinates(),
+            PlanetType::Planet,
+            5,
+            $acsDefendFleet,
+            new Resources(0, 0, 0, 0),
+            10,
+            2
+        );
+
+        $physicalArrivalTime = $acsDefendMission->time_arrival - $acsDefendMission->time_holding;
+        $this->travelTo(Date::createFromTimestamp($physicalArrivalTime + 10));
+        $this->reloadApplication();
+
+        // Le joueur courant attaque pendant que la flotte alliee stationne encore.
+        $attackFleet = new UnitCollection();
+        $attackFleet->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 50);
+        $this->dispatchFleet(
+            $this->buddyPlanet()->getPlanetCoordinates(),
+            $attackFleet,
+            new Resources(0, 0, 0, 0),
+            PlanetType::Planet
+        );
+
+        $attackerFleetMissionService = resolve(FleetMissionService::class, ['player' => $this->planetService->getPlayer()]);
+        $attackMission = $attackerFleetMissionService->getActiveFleetMissionsForCurrentPlayer()->first();
+        if ($attackMission === null) {
+            $this->fail('No active attack mission found.');
+        }
+
+        $this->travelTo(Date::createFromTimestamp($attackMission->time_arrival + 10));
+        $this->reloadApplication();
+        $this->get('/overview');
+
+        $battleReport = BattleReport::orderBy('id', 'desc')->first();
+        $this->assertNotNull($battleReport, 'Battle report should be created.');
+
+        // Le rapport doit bien etre celui de ce combat, et non celui d'un test precedent.
+        $this->assertEquals(
+            $this->buddyUser()->id,
+            $battleReport->planet_user_id,
+            'The most recent battle report does not belong to this battle.'
+        );
+
+        $destinataires = DB::table('messages')
+            ->where('battle_report_id', $battleReport->id)
+            ->pluck('user_id')
+            ->all();
+
+        $this->assertContains(
+            $this->currentUserId,
+            $destinataires,
+            'The attacker did not receive the battle report.'
+        );
+
+        $this->assertContains(
+            $this->buddyUser()->id,
+            $destinataires,
+            'The owner of the defended planet did not receive the battle report.'
+        );
+
+        $this->assertContains(
+            $acsDefender['user']->id,
+            $destinataires,
+            'The ACS Defend ally did not receive the battle report of the fight they joined.'
+        );
+
+        // Chacun n'a engage qu'une flotte : personne ne doit recevoir deux exemplaires.
+        $this->assertCount(
+            count(array_unique($destinataires)),
+            $destinataires,
+            'The same player received the battle report more than once.'
+        );
+    }
+
+    /**
      * Test that a completely destroyed ACS defend fleet does not return.
      */
     public function testDestroyedAcsDefendFleetDoesNotReturn(): void
