@@ -50,14 +50,29 @@ class NpcGrowthService
     private const array PLAN_BUILDINGS = [
         ['research_lab', 3],
         ['shipyard', 4],
+        ['deuterium_store', 3],
         ['research_lab', 6],
         ['shipyard', 6],
+        ['fusion_plant', 4],
         ['robot_factory', 8],
         ['research_lab', 10],
         ['shipyard', 9],
         ['robot_factory', 10],
+        ['nano_factory', 2],
+
+        // Le terraformeur passe avant le reste des agrandissements, et ce n'est pas une
+        // question de gout. Une planete a un nombre de cases fini — 208 sur celle qui a servi
+        // a la mesure — et une base bien developpee en occupait deja 165 avec ses mines encore
+        // en pleine croissance. Une base qui les epuise se bloque **en silence** :
+        // BuildingQueueService leve une exception que enqueueBuilding avale, et la base repete
+        // « rien d abordable » pour toujours alors que ses caisses debordent. Pire, le
+        // terraformeur occupe lui-meme une case : arriver trop tard, c'est ne plus pouvoir le
+        // construire du tout.
+        ['terraformer', 6],
+
         ['shipyard', 12],
         ['research_lab', 12],
+        ['nano_factory', 5],
     ];
 
     /**
@@ -101,7 +116,8 @@ class NpcGrowthService
         ['energy_technology', 8],       // prerequis de plasma
         ['plasma_technology', 7],       // bombardier, tourelle a plasma
         ['astrophysics', 8],            // colonies suivantes
-        ['computer_technology', 8],
+        ['computer_technology', 10],    // usine de nanites, qui accelere tout le reste
+        ['energy_technology', 12],      // terraformeur, sans lequel les cases s'epuisent
         ['hyperspace_technology', 6],
         ['hyperspace_drive', 7],
         ['graviton_technology', 1],     // etoile de la mort
@@ -320,9 +336,21 @@ class NpcGrowthService
         $shipyard = $planet->getObjectLevel('shipyard');
 
         // L'energie d'abord : sans elle les mines tournent au ralenti et tout le reste est
-        // vain.
-        if ($planet->energy()->get() < 0) {
-            return 'solar_plant';
+        // vain. Mais un excedent nul ne suffit pas — il faut une marge, comme un joueur en
+        // garde une.
+        //
+        // Certains batiments consomment de l'energie d'un seul coup : le terraformeur en
+        // reclame mille. Une base a marge nulle ne peut donc plus les construire, et rien ne
+        // le dit : le plan propose le terraformeur, hasResources() le refuse sur l'energie, et
+        // la base passe a autre chose indefiniment. Mesure : marge de 637 pour un besoin de
+        // 1 000, et un terraformeur jamais bati alors que les caisses depassaient le milliard.
+        //
+        // La marge suit la taille de la base plutot qu'un chiffre fixe, qui serait ecrasant au
+        // debut et ridicule a la fin.
+        $marge = 40 * $metal;
+
+        if ($planet->energy()->get() < $marge) {
+            return $planet->getObjectLevel('fusion_plant') > 0 ? 'fusion_plant' : 'solar_plant';
         }
 
         // Une usine de robots tot rend tout le reste plus rapide.
@@ -358,11 +386,24 @@ class NpcGrowthService
         }
 
         // Les batiments d'infrastructure suivent leur plan : laboratoire, chantier, usines.
-        // Le premier palier non atteint gagne.
+        // Le premier palier non atteint et constructible gagne.
+        //
+        // Le saut des paliers bloques n'est pas un raffinement : sans lui, un palier dont
+        // les prerequis manquent encore — l'usine de nanites, qui reclame la technologie
+        // informatique 10 — arrete la construction entiere. La base ne monte plus une seule
+        // mine en attendant, et le plan de recherche qui doit la debloquer n'avance pas non
+        // plus faute de laboratoire. Mesure : une base bloquee ainsi plafonne a 1 146 points
+        // la ou elle en atteint 392 967 quand elle saute.
         foreach (self::PLAN_BUILDINGS as [$machineName, $target]) {
-            if ($planet->getObjectLevel($machineName) < $target) {
-                return $machineName;
+            if ($planet->getObjectLevel($machineName) >= $target) {
+                continue;
             }
+
+            if (!ObjectService::objectRequirementsMet($machineName, $planet)) {
+                continue;
+            }
+
+            return $machineName;
         }
 
         // Rien n'est en retard : on pousse l'economie d'un cran, et les regles d'ecart
@@ -391,10 +432,19 @@ class NpcGrowthService
             return null;
         }
 
+        // Meme regle que pour les batiments et les unites : un palier dont les prerequis
+        // manquent est saute, jamais attendu. Un plan qui bloque sur sa premiere marche
+        // impossible fige tout ce qui vient apres.
         foreach (self::PLAN_RESEARCH as [$machineName, $target]) {
-            if ($player->getResearchLevel($machineName) < $target) {
-                return $machineName;
+            if ($player->getResearchLevel($machineName) >= $target) {
+                continue;
             }
+
+            if (!ObjectService::objectRequirementsMet($machineName, $planet)) {
+                continue;
+            }
+
+            return $machineName;
         }
 
         return null;
