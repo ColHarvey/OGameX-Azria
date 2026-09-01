@@ -11,7 +11,7 @@
             @lang('load...')
         </span>
     </td>
-    <td class="arrivalTime">{{ date('H:i:s', $fleet_event_row->mission_time_arrival) }} @lang('Clock')</td>
+    <td class="arrivalTime">{{ date('H:i:s', $fleet_event_row->mission_time_arrival) }} {{ __('t_ingame.layout.eventbox_clock') }}</td>
     <td class="missionFleet">
         <img src="/img/fleet/{{ $fleet_event_row->mission_type }}.gif" class="tooltip"
              alt="" data-tooltip-title="@lang('Attack')"/>

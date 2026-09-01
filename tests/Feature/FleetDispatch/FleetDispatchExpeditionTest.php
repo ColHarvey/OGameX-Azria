@@ -237,7 +237,7 @@ class FleetDispatchExpeditionTest extends FleetDispatchTestCase
 
         // We should see the mission name and the return mission name in the event list.
         $response->assertSee($this->missionName);
-        $response->assertSee($this->missionName .  ' (R)');
+        $response->assertSee($this->missionName . ' — ' . __('t_ingame.layout.eventbox_return'));
 
         // Assert that we see two arrival missions (initial arrival and time_holding) and one return mission
         $content = (string)$response->getContent();

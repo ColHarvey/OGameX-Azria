@@ -52531,13 +52531,13 @@ var Formatter = {
       "segments": -1,
       "delimiter": " ",
       "units": {
-        "weeks": "w",
-        "days": "d",
-        "hours": "h",
-        "minutes": "m",
-        "seconds": "s"
+        "weeks": " sem",
+        "days": " j",
+        "hours": " h",
+        "minutes": " min",
+        "seconds": " s"
       },
-      "now": "now"
+      "now": "maintenant"
     };
     options = Object.assign(defaults, options);
 

@@ -339,7 +339,7 @@ class FleetDispatchDeployTest extends FleetDispatchTestCase
 
         // If the mission does not have a return mission, we should only see the parent mission.
         $response->assertSee($this->missionName);
-        $response->assertDontSee($this->missionName .  ' (R)');
+        $response->assertDontSee($this->missionName . ' — ' . __('t_ingame.layout.eventbox_return'));
         // Assert that we see only parent row in the event list.
         $response->assertSee('data-return-flight="false"', false);
         $response->assertDontSee('data-return-flight="true"', false);
@@ -393,7 +393,7 @@ class FleetDispatchDeployTest extends FleetDispatchTestCase
         $response = $this->get('/ajax/fleet/eventbox/fetch');
         $response->assertStatus(200);
         $response->assertJsonFragment(['friendly' => 1]);
-        $response->assertJsonFragment(['eventText' => $this->missionName . ' (R)']);
+        $response->assertJsonFragment(['eventText' => $this->missionName . ' — ' . __('t_ingame.layout.eventbox_return')]);
 
         $fleetMissionService = resolve(FleetMissionService::class, ['player' => $this->planetService->getPlayer()]);
         $fleetMission = $fleetMissionService->getActiveFleetMissionsForCurrentPlayer()->first();
@@ -475,6 +475,6 @@ class FleetDispatchDeployTest extends FleetDispatchTestCase
         $response = $this->get('/ajax/fleet/eventbox/fetch');
         $response->assertStatus(200);
         $response->assertJsonFragment(['friendly' => 1]);
-        $response->assertJsonFragment(['eventText' => $this->missionName . ' (R)']);
+        $response->assertJsonFragment(['eventText' => $this->missionName . ' — ' . __('t_ingame.layout.eventbox_return')]);
     }
 }

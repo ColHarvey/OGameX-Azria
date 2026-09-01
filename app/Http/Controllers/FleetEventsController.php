@@ -91,7 +91,9 @@ class FleetEventsController extends OGameController
         }
 
         if ($nextMission !== null) {
-            $typeNextMission = $fleetMissionService->missionTypeToLabel($nextMission->mission_type) . ($nextMission->parent_id ? ' (R)' : '');
+            // « (R) » ne dit rien a un joueur : on ecrit le mot, traduit.
+            $typeNextMission = $fleetMissionService->missionTypeToLabel($nextMission->mission_type)
+                . ($nextMission->parent_id ? ' — ' . __('t_ingame.layout.eventbox_return') : '');
             $timeNextMission = $nextEventTime - $currentTime;
             $eventType = $this->determineFriendly($nextMission, $player);
 

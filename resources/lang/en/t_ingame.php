@@ -271,7 +271,7 @@ return [
         // Mission names
         'mission_expedition'       => 'Expedition',
         'mission_colonise'         => 'Colonisation',
-        'mission_recycle'          => 'Recycle Debris Field',
+        'mission_recycle'          => 'Harvest',
         'mission_transport'        => 'Transport',
         'mission_deploy'           => 'Deployment',
         'mission_espionage'        => 'Espionage',
@@ -1292,6 +1292,10 @@ return [
         'eventbox_own'              => 'own',
         'eventbox_friendly'         => 'friendly',
         'eventbox_hostile'          => 'hostile',
+        'eventbox_events'           => 'Events',
+        'eventbox_clock'            => 'Clock',
+        'eventbox_own_fleet'        => 'Own fleet',
+        'eventbox_return'           => 'return',
 
         // JS — planetMoveLoca
         'planet_move_ask_title'     => 'Resettle Planet',

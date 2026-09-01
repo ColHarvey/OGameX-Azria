@@ -227,13 +227,41 @@ class FleetMissionService
      * @param int $missionType
      * @return string
      */
+    /**
+     * Les libelles traduits, par type de mission.
+     *
+     * getName() rend le nom anglais ecrit dans la classe : le panneau d'evenements de flotte
+     * affichait donc « ACS Defend » a un joueur francais. Les cles existent deja, ce sont
+     * celles des boutons de la page Flotte — on les reutilise plutot que d'en creer un second
+     * jeu qui finirait par diverger.
+     *
+     * @var array<int, string>
+     */
+    private const array MISSION_LABEL_KEYS = [
+        1 => 't_ingame.fleet.mission_attack',
+        2 => 't_ingame.fleet.mission_attack',
+        3 => 't_ingame.fleet.mission_transport',
+        4 => 't_ingame.fleet.mission_deploy',
+        5 => 't_ingame.fleet.mission_acs_defend',
+        6 => 't_ingame.fleet.mission_espionage',
+        7 => 't_ingame.fleet.mission_colonise',
+        8 => 't_ingame.fleet.mission_recycle',
+        9 => 't_ingame.fleet.mission_destroy_moon',
+        10 => 't_ingame.galaxy.missile_attack',
+        15 => 't_ingame.fleet.mission_expedition',
+    ];
+
     public function missionTypeToLabel(int $missionType): string
     {
-        // ACS Attack (type 2) uses the same class as Attack (type 1) and displays as "Attack"
-        if ($missionType === 2) {
-            return 'Attack';
+        // L'attaque ACS (type 2) partage la classe de l'attaque simple et s'affiche comme
+        // une attaque dans le panneau d'evenements.
+        $cle = self::MISSION_LABEL_KEYS[$missionType] ?? null;
+
+        if ($cle !== null) {
+            return __($cle);
         }
 
+        // Type inconnu : on retombe sur le nom anglais de la classe plutot que sur rien.
         return GameMissionFactory::getMissionById($missionType, [])->getName();
     }
 

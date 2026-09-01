@@ -480,7 +480,7 @@ class FleetDispatchColoniseTest extends FleetDispatchTestCase
         $response = $this->get('/ajax/fleet/eventbox/fetch');
         $response->assertStatus(200);
         $response->assertJsonFragment(['friendly' => 1]);
-        $response->assertJsonFragment(['eventText' => $this->missionName . ' (R)']);
+        $response->assertJsonFragment(['eventText' => $this->missionName . ' — ' . __('t_ingame.layout.eventbox_return')]);
 
         $fleetMissionService = resolve(FleetMissionService::class, ['player' => $this->planetService->getPlayer()]);
         $fleetMission = $fleetMissionService->getActiveFleetMissionsForCurrentPlayer()->first();

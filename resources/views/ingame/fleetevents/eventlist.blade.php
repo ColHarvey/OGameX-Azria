@@ -2,7 +2,7 @@
     <div id="eventHeader">
         <a class="close_details eventToggle" href="javascript:toggleEvents();">
         </a>
-        <h2>Events</h2>
+        <h2>{{ __('t_ingame.layout.eventbox_events') }}</h2>
     </div>
     <table id="eventContent">
         <tbody>

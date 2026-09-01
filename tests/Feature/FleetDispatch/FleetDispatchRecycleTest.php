@@ -335,7 +335,7 @@ class FleetDispatchRecycleTest extends FleetDispatchTestCase
 
         // If the mission has a return mission, we should see both in the event list.
         $response->assertSee($this->missionName);
-        $response->assertSee($this->missionName .  ' (R)');
+        $response->assertSee($this->missionName . ' — ' . __('t_ingame.layout.eventbox_return'));
         // Assert that we see both rows in the event list.
         $response->assertSee('data-return-flight="false"', false);
         $response->assertSee('data-return-flight="true"', false);
@@ -525,7 +525,7 @@ class FleetDispatchRecycleTest extends FleetDispatchTestCase
         $response = $this->get('/ajax/fleet/eventbox/fetch');
         $response->assertStatus(200);
         $response->assertJsonFragment(['friendly' => 1]);
-        $response->assertJsonFragment(['eventText' => $this->missionName . ' (R)']);
+        $response->assertJsonFragment(['eventText' => $this->missionName . ' — ' . __('t_ingame.layout.eventbox_return')]);
 
         $fleetMissionService = resolve(FleetMissionService::class, ['player' => $this->planetService->getPlayer()]);
 
@@ -606,7 +606,7 @@ class FleetDispatchRecycleTest extends FleetDispatchTestCase
         $response = $this->get('/ajax/fleet/eventbox/fetch');
         $response->assertStatus(200);
         $response->assertJsonFragment(['friendly' => 1]);
-        $response->assertJsonFragment(['eventText' => $this->missionName . ' (R)']);
+        $response->assertJsonFragment(['eventText' => $this->missionName . ' — ' . __('t_ingame.layout.eventbox_return')]);
     }
 
     /**
