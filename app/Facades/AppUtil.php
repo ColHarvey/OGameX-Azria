@@ -96,34 +96,92 @@ class AppUtil extends Facade
      */
     public static function formatTimeDuration(int|float $seconds): string
     {
-        $weeks = floor($seconds / 604800); // 60*60*24*7
-        $days = floor(($seconds % 604800) / 86400); // Remaining seconds divided by number of seconds in a day
-        $hours = floor(($seconds % 86400) / 3600); // Remaining seconds divided by number of seconds in an hour
-        $minutes = floor(($seconds / 60) % 60);
-        $seconds = $seconds % 60;
+        // Cast explicite : $seconds arrive parfois en float, et l'operateur modulo le
+        // convertissait implicitement, ce que PHP 8.5 signale par un Deprecated a chaque appel.
+        $restant = max(0, (int)$seconds);
 
-        $formatted_string = '';
-        if ($weeks > 0) {
-            $formatted_string .= $weeks . 'w ';
+        $unites = [
+            'week' => 604800,
+            'day' => 86400,
+            'hour' => 3600,
+            'minute' => 60,
+            'second' => 1,
+        ];
+
+        // Meme regle que le compte a rebours JavaScript (formatTimeWrapper) : du premier au
+        // dernier segment non nul, sans jamais rien tronquer. L'ancienne version jetait les
+        // secondes des qu'une minute etait presente — 2 h 00 min 05 s s'affichait « 2h », et
+        // 46 min 49 s s'affichait « 46m ». Une duree annoncee trop courte est un defaut de
+        // justesse, pas de presentation.
+        $valeurs = [];
+        $premiere = null;
+        $derniere = null;
+
+        foreach ($unites as $nom => $taille) {
+            $valeurs[$nom] = intdiv($restant, $taille);
+            $restant -= $valeurs[$nom] * $taille;
+
+            if ($valeurs[$nom] > 0) {
+                if ($premiere === null) {
+                    $premiere = $nom;
+                }
+
+                $derniere = $nom;
+            }
         }
 
-        if ($days > 0) {
-            $formatted_string .= $days . 'd ';
+        if ($premiere === null) {
+            return '0' . self::timeUnitLabel('second');
         }
 
-        if ($hours > 0) {
-            $formatted_string .= $hours . 'h ';
+        $texte = '';
+        $commence = false;
+
+        foreach ($unites as $nom => $taille) {
+            if ($nom === $premiere) {
+                $commence = true;
+            }
+
+            if (!$commence) {
+                continue;
+            }
+
+            $valeur = (string)$valeurs[$nom];
+
+            // Tout ce qui suit le premier segment est cadre sur deux chiffres, sans quoi
+            // « 2 h 3 min » se lirait deux heures trois.
+            if ($texte !== '') {
+                $texte .= ' ';
+
+                if ($valeurs[$nom] < 10) {
+                    $valeur = '0' . $valeur;
+                }
+            }
+
+            $texte .= $valeur . self::timeUnitLabel($nom);
+
+            if ($nom === $derniere) {
+                break;
+            }
         }
 
-        if ($minutes > 0) {
-            $formatted_string .= $minutes . 'm ';
-        }
+        return $texte;
+    }
 
-        if (empty($formatted_string)) {
-            $formatted_string .= $seconds . 's';
-        }
-
-        return trim($formatted_string);
+    /**
+     * Get the translated short label of a time unit.
+     *
+     * Les memes cles alimentent le compte a rebours JavaScript, via
+     * LocalizationStrings.timeunits.short : une seule source pour les deux formateurs.
+     * Les valeurs francaises portent une espace insecable, qui empeche un retour a la ligne
+     * entre le nombre et son unite.
+     *
+     * @param string $unit
+     * @return string
+     */
+    private static function timeUnitLabel(string $unit): string
+    {
+        return (string)__('t_ingame.layout.timeunit_' . $unit);
     }
 
     /**
