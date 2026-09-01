@@ -3,10 +3,13 @@
 namespace OGame\Services\Npc;
 
 use Exception;
+use OGame\Factories\PlayerServiceFactory;
 use OGame\Models\Resources;
 use OGame\Services\BuildingQueueService;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
+use OGame\Services\PlayerService;
+use OGame\Services\ResearchQueueService;
 use OGame\Services\SettingsService;
 use OGame\Services\UnitQueueService;
 
@@ -32,12 +35,15 @@ class NpcGrowthService
     public const string ACTION_BUSY = 'file en cours';
     public const string ACTION_CAPPED = 'plafond atteint';
     public const string ACTION_BUILDING = 'batiment';
+    public const string ACTION_RESEARCH = 'recherche';
     public const string ACTION_UNITS = 'chantier';
 
     public function __construct(
         private SettingsService $settings,
         private NpcPopulationService $population,
         private BuildingQueueService $buildingQueue,
+        private PlayerServiceFactory $playerServiceFactory,
+        private ResearchQueueService $researchQueue,
         private UnitQueueService $unitQueue
     ) {
     }
@@ -49,32 +55,84 @@ class NpcGrowthService
      */
     public function grow(PlanetService $planet): array
     {
-        // Rattrape la production, les batiments termines et les vaisseaux livres. Sans cet
-        // appel la base resterait figee entre deux visites de joueur.
+        // Rattrape la production, les batiments termines, les recherches abouties et les
+        // vaisseaux livres. Sans cet appel la base resterait figee entre deux visites de
+        // joueur.
         $planet->update();
 
         if (!$this->settings->npcGrowthEnabled()) {
             return ['action' => self::ACTION_NOTHING, 'detail' => 'croissance desactivee'];
         }
 
-        if ($this->isBusy($planet)) {
-            return ['action' => self::ACTION_BUSY, 'detail' => ''];
-        }
-
         if ($this->isAtCeiling($planet)) {
             return ['action' => self::ACTION_CAPPED, 'detail' => $this->maturityOf($planet) . '%'];
         }
 
-        $building = $this->nextBuilding($planet);
+        // Le joueur est reconstruit depuis la base, et ce n est pas une precaution
+        // gratuite. ResearchQueueService::start() ne travaille pas sur la planete qu on
+        // lui passe : il va rechercher la sienne dans la collection du joueur. Une copie
+        // perimee — chargee avant que le laboratoire n existe — lui fait conclure que les
+        // prerequis manquent, et il annule silencieusement chaque recherche. Le defaut ne
+        // laissait aucune trace : la ligne du journal annoncait « recherche », et le
+        // niveau ne montait jamais.
+        $ownerId = $planet->getPlayer()?->getId();
+        $player = $ownerId !== null ? $this->playerServiceFactory->make($ownerId, true) : null;
 
-        if ($building !== null && $this->enqueueBuilding($planet, $building)) {
-            return ['action' => self::ACTION_BUILDING, 'detail' => $building];
+        // Les recherches abouties ne sont encaissees par personne sur un compte pilote par
+        // le serveur : aucune requete ne passe jamais par ce joueur. Sans cet appel, une
+        // technologie terminee resterait indefiniment dans la file sans etre accordee.
+        $player?->updateResearchQueue();
+
+        // Trois files distinctes, et toutes les trois sont servies dans le meme passage.
+        //
+        // C'est ainsi qu'un joueur procede : il lance une mine, une recherche et une commande
+        // au chantier dans la meme session, parce que rien dans le jeu ne l'oblige a choisir.
+        // Rendre la main des la premiere file remplie paraissait plus sage et ne l'etait pas :
+        // le plan de construction proposant toujours quelque chose, la base montait des mines
+        // a l'infini et n'atteignait jamais le chantier. Elle n'a jamais fabrique une seule
+        // unite tant que cette boucle rendait la main.
+        $faits = [];
+        $occupe = false;
+
+        if (!$this->isBuildingBusy($planet)) {
+            $building = $this->nextBuilding($planet);
+
+            if ($this->enqueueBuilding($planet, $building)) {
+                $faits[] = ['action' => self::ACTION_BUILDING, 'detail' => $building];
+            }
+        } else {
+            $occupe = true;
         }
 
-        $unit = $this->nextUnit($planet);
+        if ($player !== null && !$player->isResearching()) {
+            $research = $this->nextResearch($planet, $player);
 
-        if ($unit !== null && $this->enqueueUnits($planet, $unit['machine_name'], $unit['amount'])) {
-            return ['action' => self::ACTION_UNITS, 'detail' => $unit['amount'] . ' x ' . $unit['machine_name']];
+            if ($research !== null && $this->enqueueResearch($planet, $player, $research)) {
+                $faits[] = ['action' => self::ACTION_RESEARCH, 'detail' => $research];
+            }
+        } elseif ($player !== null) {
+            $occupe = true;
+        }
+
+        if ($player !== null && !$player->isBuildingShipsOrDefense()) {
+            $unit = $this->nextUnit($planet);
+
+            if ($unit !== null && $this->enqueueUnits($planet, $unit['machine_name'], $unit['amount'])) {
+                $faits[] = ['action' => self::ACTION_UNITS, 'detail' => $unit['amount'] . ' x ' . $unit['machine_name']];
+            }
+        } elseif ($player !== null) {
+            $occupe = true;
+        }
+
+        if ($faits !== []) {
+            return [
+                'action' => $faits[0]['action'],
+                'detail' => implode(' + ', array_column($faits, 'detail')),
+            ];
+        }
+
+        if ($occupe) {
+            return ['action' => self::ACTION_BUSY, 'detail' => ''];
         }
 
         return ['action' => self::ACTION_NOTHING, 'detail' => 'rien d abordable'];
@@ -124,28 +182,26 @@ class NpcGrowthService
     }
 
     /**
-     * Get whether the base already has work in progress.
+     * Get whether the building queue is already occupied.
+     *
+     * Le chantier et le laboratoire ont leurs propres files : ils sont interroges ailleurs.
+     * Les confondre ici revenait a interdire a une base de monter une mine pendant qu'elle
+     * fabriquait un chasseur, ce qu'aucun joueur ne subit.
      */
-    private function isBusy(PlanetService $planet): bool
+    private function isBuildingBusy(PlanetService $planet): bool
     {
-        $player = $planet->getPlayer();
-
-        if ($player !== null && $player->isBuildingShipsOrDefense()) {
-            return true;
-        }
-
         return $this->buildingQueue->retrieveQueue($planet)->isQueueFull()
             || count($this->buildingQueue->retrieveQueueItems($planet)) > 0;
     }
 
     /**
-     * Choose the next building this base should raise, or null when it should build units.
+     * Choose the next building this base should raise.
      *
      * Les regles sont volontairement lisibles et deterministes : on ne cherche pas une IA
      * qui reflechisse, mais une IA qui prenne de bonnes decisions avec des regles simples.
      * L'ordre des tests est l'ordre des priorites, et le premier qui s'applique gagne.
      */
-    private function nextBuilding(PlanetService $planet): string|null
+    private function nextBuilding(PlanetService $planet): string
     {
         $metal = $planet->getObjectLevel('metal_mine');
         $crystal = $planet->getObjectLevel('crystal_mine');
@@ -192,10 +248,75 @@ class NpcGrowthService
             return 'crystal_store';
         }
 
+        // Le laboratoire avant le chantier, et ce n'est pas un detail d'ordre : sans lui la
+        // base n'a aucune recherche, et sans recherche elle ne peut construire que des
+        // lanceurs de missiles. Le cargo reclame la combustion 2, le chasseur la combustion
+        // 1, le laser la technologie laser 3 — une base sans laboratoire reste donc a jamais
+        // sans un seul vaisseau, donc sans raid possible.
+        if ($metal >= 5 && $planet->getObjectLevel('research_lab') < 3) {
+            return 'research_lab';
+        }
+
         // Le chantier n'arrive qu'une fois l'economie lancee : une base ne peut pas defendre
         // ce qu'elle n'a pas encore.
         if ($metal >= 8 && $shipyard < 6) {
             return 'shipyard';
+        }
+
+        // Rien n'est en retard : on pousse l'economie d'un cran, et les regles d'ecart
+        // ci-dessus rattraperont le reste au passage suivant.
+        //
+        // Cette ligne n'est pas un defaut de conception, c'est ce qui empeche l'echelle de se
+        // figer. Toutes les regles precedentes comparent les mines entre elles : elles
+        // maintiennent un ecart mais ne font monter personne. Le trio (metal 5, cristal 3,
+        // deuterium 1) les rend toutes fausses a la fois — mesure faite sur le moteur reel —
+        // et la base s'arretait la, definitivement, sans jamais atteindre le metal 8 qu'exige
+        // le chantier. Donc sans chantier, sans defense et sans le moindre vaisseau.
+        return 'metal_mine';
+    }
+
+    /**
+     * Choose what this base should research next, or null when it needs nothing.
+     *
+     * L'ordre suit ce que le chantier reclame, et rien d'autre. Une base ne fait pas de
+     * recherche pour le plaisir : chaque niveau vise a debloquer une unite precise.
+     *
+     *   energie 1     -> combustion 1  -> chasseur leger
+     *                    combustion 2  -> petit transporteur, sans lequel un raid ne
+     *                                     rapporte rien, le butin etant borne par le fret
+     *   energie 2     -> laser 3       -> laser leger
+     *
+     * Au-dela, la combustion continue de monter : elle accelere les flottes, donc raccourcit
+     * les raids, sans rien debloquer de nouveau.
+     */
+    private function nextResearch(PlanetService $planet, PlayerService $player): string|null
+    {
+        if ($planet->getObjectLevel('research_lab') < 1) {
+            return null;
+        }
+
+        $energie = $player->getResearchLevel('energy_technology');
+        $combustion = $player->getResearchLevel('combustion_drive');
+        $laser = $player->getResearchLevel('laser_technology');
+
+        if ($energie < 1) {
+            return 'energy_technology';
+        }
+
+        if ($combustion < 2) {
+            return 'combustion_drive';
+        }
+
+        if ($energie < 2) {
+            return 'energy_technology';
+        }
+
+        if ($laser < 3) {
+            return 'laser_technology';
+        }
+
+        if ($combustion < 6) {
+            return 'combustion_drive';
         }
 
         return null;
@@ -252,6 +373,39 @@ class NpcGrowthService
         } catch (Exception) {
             // Champs epuises, file pleine, prerequis tombes entre-temps : la base attendra le
             // prochain passage. Rien de ceci ne merite d'interrompre le tick des autres bases.
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Put one research level in the queue when the base can pay for it.
+     *
+     * Le service du jeu est emprunte tel quel : c'est lui qui verifie les prerequis avec la
+     * file, calcule la duree depuis le niveau du laboratoire, et deduit les ressources au
+     * demarrage. Une base met donc exactement le meme temps qu'un joueur a chercher la meme
+     * technologie.
+     */
+    private function enqueueResearch(PlanetService $planet, PlayerService $player, string $machineName): bool
+    {
+        if (!ObjectService::objectRequirementsMet($machineName, $planet)) {
+            return false;
+        }
+
+        $price = ObjectService::getObjectPrice($machineName, $planet);
+
+        if (!$this->canSpend($planet, $price)) {
+            return false;
+        }
+
+        try {
+            $object = ObjectService::getObjectByMachineName($machineName);
+            $this->researchQueue->add($player, $planet, $object->id);
+        } catch (Exception) {
+            // Laboratoire en cours d'agrandissement, file pleine, prerequis tombes
+            // entre-temps : la base attendra le prochain passage. Rien de ceci ne merite
+            // d'interrompre le tick des autres bases.
             return false;
         }
 
