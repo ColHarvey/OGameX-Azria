@@ -68037,9 +68037,7 @@ function getActions(galaxyContentObject, systemData) {
                 </a>
             `;
   } else {
-    // Une base de faction ne reserve pas la place d une icone qu elle n aura jamais :
-    // le trou se lisait comme si le message et la demande d ami etaient encore la.
-    messageLink = player.isPirate ? "" : `<div class="emptyAction"></div>`;
+    messageLink = `<div class="emptyAction"></div>`;
   }
 
   let buddyLink = "";
@@ -68056,7 +68054,7 @@ function getActions(galaxyContentObject, systemData) {
                 <span class="icon icon_user"></span>
             </a>`;
   } else {
-    buddyLink = player.isPirate ? "" : `<div class="emptyAction"></div>`;
+    buddyLink = `<div class="emptyAction"></div>`;
   }
 
   let missileLink = "";
@@ -68100,6 +68098,22 @@ function getActions(galaxyContentObject, systemData) {
   }
 
   const discoverLink = getDiscoveryLinkIcon(galaxyContentObject);
+
+  // Sur une ligne de faction, le message et la demande d ami n existent pas. Leurs
+  // emplacements vides passent donc en fin de ligne, exactement comme le fait
+  // getEmptySlotActions pour les cases libres : les icones restent groupees et
+  // tombent dans la meme colonne que celles des lignes voisines, tandis que la
+  // cellule garde la largeur qu elle a partout ailleurs.
+  if (player.isPirate) {
+    return `
+        ${discoverLink}
+        ${espionageLink}
+        ${missileLink}
+        ${messageLink}
+        ${buddyLink}
+        `;
+  }
+
   return `
         ${discoverLink}
         ${espionageLink}

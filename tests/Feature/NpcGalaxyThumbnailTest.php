@@ -157,18 +157,14 @@ class NpcGalaxyThumbnailTest extends AccountTestCase
             'The built script has no pirate branch, so a base would be labelled as a beginner player.'
         );
 
-        // Et sans ces deux-la, les emplacements laisses par le message et la demande d'ami
-        // reservent encore leurs seize pixels, ce qui se lit comme si les icones y etaient.
-        $this->assertStringContainsString(
-            'messageLink = player.isPirate ? "" :',
+        // Et sans l'ordre particulier des actions, les emplacements laisses par le message et
+        // la demande d'ami restent au milieu de la ligne : ils gardent leurs seize pixels et
+        // separent l'oeil du missile, ce qui se lit comme si les icones retirees y etaient
+        // toujours. L'espionnage doit donc preceder immediatement le missile.
+        $this->assertMatchesRegularExpression(
+            '/\$\{espionageLink\}\s*\$\{missileLink\}/',
             $contenu,
-            'The built script still reserves the message slot on a faction row.'
-        );
-
-        $this->assertStringContainsString(
-            'buddyLink = player.isPirate ? "" :',
-            $contenu,
-            'The built script still reserves the buddy slot on a faction row.'
+            'The built script leaves the blank message and buddy slots between the visible icons of a faction row.'
         );
     }
 
