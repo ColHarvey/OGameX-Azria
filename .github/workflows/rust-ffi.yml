@@ -1,0 +1,75 @@
+name: Moteur Rust et couture FFI
+
+# Pourquoi ce workflow existe
+#
+# Le moteur Rust est obligatoire en production : le conteneur compile
+# `libbattle_engine_ffi.so` a son demarrage, et `RustBattleEngine` la charge par FFI. Aucun repli
+# vers PHP n'est admis.
+#
+# Le poste de developpement est sous Windows et ne possede ni Rust, ni Docker, ni WSL. Meme avec
+# Rust installe, Windows produirait un `.dll`, pas le `.so` que la couture attend. La chaine ne peut
+# donc etre eprouvee que sur Linux.
+#
+# Ce workflow est cet environnement. Il ne deploie rien : il compile, il execute les essais qui sont
+# ignores partout ailleurs, et il dit si le moteur obligatoire est utilisable.
+
+on:
+  push:
+    branches:
+      - combats-persistants
+      - 'wip/**'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  moteur-rust:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Recuperer le depot
+        uses: actions/checkout@v4
+
+      - name: Installer la chaine Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Compiler la bibliotheque
+        run: |
+          cargo build --manifest-path=rust/Cargo.toml --release
+          mkdir -p storage/rust-libs
+          cp rust/target/release/libbattle_engine_ffi.so storage/rust-libs/
+          if [ -f rust/target/release/libtest_ffi.so ]; then
+            cp rust/target/release/libtest_ffi.so storage/rust-libs/
+          fi
+          ls -la storage/rust-libs/
+
+      - name: Installer PHP avec FFI
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: ffi, sqlite3, pdo_sqlite, bcmath, gd, zip, intl
+          ini-values: ffi.enable=1, memory_limit=2G
+
+      - name: Installer les dependances
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Preparer l environnement
+        run: |
+          cp .env.example .env
+          php artisan key:generate --force
+          touch database/database.sqlite
+
+      # Le point du workflow : ces essais sont **ignores** partout ailleurs faute de bibliotheque.
+      # Ici ils doivent tourner. Zero ignore attendu.
+      - name: Executer les essais du moteur Rust
+        run: php scripts/suite.php --filter Rust
+
+      - name: Executer la suite complete
+        run: php scripts/suite.php
+
+      - name: Verifier qu aucun essai Rust n a ete ignore
+        run: |
+          php scripts/suite.php --filter Rust --display-skipped 2>&1 | tee /tmp/rust.txt
+          if grep -qi "skipped" /tmp/rust.txt; then
+            echo "Des essais Rust ont ete ignores : la bibliotheque n a pas ete chargee."
+            exit 1
+          fi
