@@ -243,16 +243,116 @@ class LootMonotonicityTest extends UnitTestCase
     }
 
     /**
+     * Les deux regles de departage, chacune rendue observable separement.
+     *
+     * ## Pourquoi la fixture precedente ne suffisait pas
+     *
+     * Elle fait courir trois flottes identiques : les restes y sont a egalite et l'initiateur est
+     * aussi le premier par identifiant. Retirer la priorite de l'initiateur ou inverser l'ordre
+     * des restes n'y change donc rien, et la mesure l'a confirme — les deux mutations survivaient.
+     *
+     * ## Le montage qui les separe
+     *
+     * Deux, trois et six petits transporteurs, soit dix, quinze et trente mille de fret, et un
+     * butin de cent deux par ressource. Les planchers valent 18, 27 et 55 ; il reste deux unites a
+     * placer.
+     *
+     * Deux inversions y sont montees expres : **l'initiateur a le plus petit reste des trois**, et
+     * **le plus grand reste appartient a la plus petite flotte**. Sans la seconde, ignorer les
+     * restes reviendrait a classer par capacite decroissante et donnerait le meme resultat que la
+     * regle en vigueur — la mesure l'a confirme, cette mutation-la survivait.
+     *
+     * Les quatre regles concevables donnent ici quatre resultats differents :
+     * - initiateur d'abord, puis plus grand reste : 19, 28, 55 — c'est la regle en vigueur ;
+     * - sans priorite de l'initiateur : 18, 28, 56 ;
+     * - par plus petit reste : 19, 27, 56 ;
+     * - restes ignores, donc par capacite decroissante : 19, 27, 56.
+     */
+    public function testTheInitiatorPriorityAndTheRemainderOrderAreEachObservable(): void
+    {
+        $flottes = [101 => 2, 102 => 3, 103 => 6];
+
+        $this->finalLootFor(new Resources(102, 102, 102, 0), $flottes, $flottes);
+
+        $this->assertSame(
+            [
+                101 => [19, 19, 19],
+                102 => [28, 28, 28],
+                103 => [55, 55, 55],
+            ],
+            $this->dernieresParts,
+            'The tie-breaking rules changed: the initiator no longer comes first, or the largest '
+            . 'remainder no longer wins. If the change is intended, update this fixture and say why.'
+        );
+    }
+
+    /**
+     * La repartition a une echelle ou le produit butin x fret sort de la plage exacte.
+     *
+     * ## Ce que la mesure a etabli, et qui contredit l'intuition
+     *
+     * Un flottant represente chaque entier jusqu'a `2^53`, soit neuf mille milliards de
+     * millions. Trois flottes de quatre mille grands transporteurs portent trois cents millions
+     * de fret ; le produit qui servait a calculer une part depassait donc largement cette plage.
+     *
+     * **Et pourtant le calcul flottant y donnait deja le bon quotient.** Un million deux cent
+     * mille tirages, a des echelles allant jusqu'a deux cents milliards de fret total, n'ont pas
+     * produit un seul ecart — parce que le butin est **deja plafonne par le fret total** avant
+     * d'arriver ici : le quotient reste petit devant la precision disponible.
+     *
+     * Le passage en arithmetique exacte ne corrige donc aucun defaut observable aujourd'hui. Il
+     * supprime la **dependance** a ce plafonnement : le jour ou la reservation calculera une
+     * borne avant la bataille, sans ce plafond, la version flottante se tromperait en silence.
+     *
+     * Cette fixture fige la repartition a cette echelle pour que ce changement de socle reste
+     * verifiable.
+     */
+    public function testTheAllocationBeyondTheExactFloatRange(): void
+    {
+        $tailles = [101 => 6_000, 102 => 6_000, 103 => 6_000];
+
+        $this->finalLootFor(
+            new Resources(120_000_007, 90_000_013, 60_000_011, 0),
+            $tailles,
+            [101 => 6_000, 102 => 5_999, 103 => 1],
+            'large_cargo'
+        );
+
+        // Ces planchers ont ete etablis independamment, a precision arbitraire, et non releves
+        // sur la sortie du moteur. Le butin depasse d une unite la somme des planchers sur chacune
+        // des trois ressources ; elle revient a l initiateur, qui a aussi le plus grand reste.
+        $this->assertSame(
+            [
+                101 => [60_000_004, 45_000_007, 30_000_006],
+                102 => [59_990_003, 44_992_506, 29_995_005],
+                103 => [10_000, 7_500, 5_000],
+            ],
+            $this->dernieresParts,
+            'The allocation at this scale changed. If the change is intended, update this fixture and say why.'
+        );
+
+        // Rien n est cree ni perdu : la somme des parts vaut exactement le butin.
+        foreach ([0 => 120_000_007, 1 => 90_000_013, 2 => 60_000_011] as $ressource => $butin) {
+            $this->assertSame(
+                $butin,
+                array_sum(array_column($this->dernieresParts, $ressource)),
+                'Units were created or lost while allocating at this scale.'
+            );
+        }
+    }
+
+    /**
      * Le butin final pour cette configuration de survivants.
      *
      * @param Resources $butinTheorique
      * @param array<int, int> $tailles Nombre de petits transporteurs par flotte, avant la bataille.
      * @param array<int, int> $survivants Nombre restant apres la bataille.
+     * @param string $vaisseau Le type de transporteur qui compose les flottes.
      * @return Resources
      */
-    private function finalLootFor(Resources $butinTheorique, array $tailles, array $survivants): Resources
+    private function finalLootFor(Resources $butinTheorique, array $tailles, array $survivants, string $vaisseau = 'small_cargo'): Resources
     {
-        $petitTransporteur = ObjectService::getUnitObjectByMachineName('small_cargo');
+        $petitTransporteur = ObjectService::getUnitObjectByMachineName($vaisseau);
 
         $flottes = [];
         $resultats = [];

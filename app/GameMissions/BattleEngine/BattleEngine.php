@@ -3,6 +3,7 @@
 namespace OGame\GameMissions\BattleEngine;
 
 use InvalidArgumentException;
+use OGame\Combat\Support\ExactRatio;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleetResult;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
@@ -535,17 +536,29 @@ abstract class BattleEngine
                 return;
             }
 
-            $exactShares = [];
-            $baseShares = [];
+            // Les parts sont calculees en entiers exacts : le quotient et le reste sortent du meme
+            // calcul, sans qu'aucun produit trop grand ne soit forme.
+            //
+            // La division flottante qui se trouvait ici ecrivait d'abord
+            // `$remainingAmount * $capacite`, un produit qui bascule en flottant des les milliers de
+            // milliards, puis comparait les parts fractionnaires avec `!==`. Deux flottes ayant droit
+            // exactement a la meme fraction pouvaient alors etre departagees par le dernier bit d'un
+            // flottant, et l'ordre d'attribution des unites restantes cessait d'etre reproductible.
+            //
+            // La regle ne change pas : a denominateur commun, le reste classe dans le meme ordre que
+            // la partie fractionnaire qu'il remplace.
+            $divisions = [];
             $allocatedThisPass = 0;
 
             foreach ($eligibleFleetIds as $fleetMissionId) {
-                $exactShare = ($remainingAmount * $survivingCapacityByFleet[$fleetMissionId]) / $totalWeight;
-                $baseShare = (int) floor($exactShare);
-                $assignedShare = min($baseShare, $remainingLootCapacityByFleet[$fleetMissionId]);
+                $division = ExactRatio::multiplyDivideWithRemainder(
+                    $remainingAmount,
+                    $survivingCapacityByFleet[$fleetMissionId],
+                    $totalWeight
+                );
+                $assignedShare = min($division->quotient, $remainingLootCapacityByFleet[$fleetMissionId]);
 
-                $exactShares[$fleetMissionId] = $exactShare;
-                $baseShares[$fleetMissionId] = $baseShare;
+                $divisions[$fleetMissionId] = $division;
 
                 if ($assignedShare > 0) {
                     $this->addLootShareToFleet($result, $fleetMissionId, $resourceName, $assignedShare);
@@ -560,18 +573,20 @@ abstract class BattleEngine
             }
 
             $rankedFleetIds = $eligibleFleetIds;
-            usort($rankedFleetIds, function (int $left, int $right) use ($exactShares, $baseShares, $survivingCapacityByFleet, $initiatorFleetMissionId): int {
+            usort($rankedFleetIds, function (int $left, int $right) use ($divisions, $survivingCapacityByFleet, $initiatorFleetMissionId): int {
                 $leftIsInitiator = $left === $initiatorFleetMissionId;
                 $rightIsInitiator = $right === $initiatorFleetMissionId;
                 if ($leftIsInitiator !== $rightIsInitiator) {
                     return $rightIsInitiator <=> $leftIsInitiator;
                 }
 
-                $leftRemainder = $exactShares[$left] - $baseShares[$left];
-                $rightRemainder = $exactShares[$right] - $baseShares[$right];
-
-                if ($leftRemainder !== $rightRemainder) {
-                    return $rightRemainder <=> $leftRemainder;
+                // Un reste n'a de sens que rapporte a son denominateur. Ceux d'une meme passe le
+                // partagent par construction, mais la condition est verifiee plutot que supposee :
+                // comparer des restes de denominateurs differents reviendrait a comparer des
+                // fractions par leurs seuls numerateurs.
+                if ($divisions[$left]->isComparableWith($divisions[$right])
+                    && $divisions[$left]->remainder !== $divisions[$right]->remainder) {
+                    return $divisions[$right]->remainder <=> $divisions[$left]->remainder;
                 }
 
                 if ($survivingCapacityByFleet[$left] !== $survivingCapacityByFleet[$right]) {
