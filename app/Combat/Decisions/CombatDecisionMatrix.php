@@ -69,7 +69,8 @@ final class CombatDecisionMatrix
      *                               exige meme quand la case ne renvoie personne : le calculer sous
      *                               verrou avant de decider evite qu'une destination change entre la
      *                               decision et son application.
-     * @return ArrivalDecision
+     * @param ArrivingAssets $assets Ce que la flotte transporte, et qu'une annulation ferait disparaitre.
+     * @return ArrivalVerdict
      */
     public function verdictOf(
         CombatSituation $situation,

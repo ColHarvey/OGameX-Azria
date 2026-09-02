@@ -547,7 +547,7 @@ class FrozenMoonDestructionPlanTest extends UnitTestCase
      */
     private function aSecondRule(): MoonDestructionRule
     {
-        return new class implements MoonDestructionRule {
+        return new class () implements MoonDestructionRule {
             public function version(): string
             {
                 return 'moon_destruction_odds_v2';
@@ -566,6 +566,11 @@ class FrozenMoonDestructionPlanTest extends UnitTestCase
             public function succeeds(int $roll, float $chance): bool
             {
                 return MoonDestructionOdds::succeeds($roll, $chance);
+            }
+
+            public function thresholdFor(float $chance): int
+            {
+                return MoonDestructionOdds::thresholdFor($chance);
             }
         };
     }

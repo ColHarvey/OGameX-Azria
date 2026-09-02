@@ -3,6 +3,7 @@
 namespace OGame\Combat\Causality;
 
 use InvalidArgumentException;
+use OGame\Combat\Support\EffectOrderKey;
 
 /**
  * Les deux barrieres du ralliement.
@@ -56,7 +57,11 @@ final readonly class CausalWindow
      */
     public function admitsEffect(EffectOrderKey $effect): bool
     {
-        return $effect->isStrictlyBefore($this->closesAt);
+        // **La fermeture est une barriere, pas un evenement.** Elle porte le rang zero, ce qui la
+        // place avant tout evenement reel de la meme seconde : un effet prevu pile a la fermeture
+        // lui est donc posterieur, et exclu. C'est la convention deja retenue partout ailleurs, et
+        // la reprendre evite d'en ecrire une seconde qui finirait par en differer.
+        return $effect->isBefore(EffectOrderKey::barrierAt($this->closesAt));
     }
 
     /**

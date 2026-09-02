@@ -494,7 +494,7 @@ class CombatDecisionMatrixTest extends UnitTestCase
                             $reference,
                             $empreinte,
                             'The actor kind changed the base matrix without a written rule: '
-                            . $mission->value . ' / ' . $etape->value . ' / ' . ($etat?->value ?? 'aucun combat')
+                            . $mission->value . ' / ' . $etape->value . ' / ' . ($etat->value ?? 'aucun combat')
                         );
                     }
                 }
@@ -1050,7 +1050,7 @@ class CombatDecisionMatrixTest extends UnitTestCase
             return $decision->reason()->value;
         }
 
-        return (string)($decision->requirement()?->value ?? $decision->invariant()?->value);
+        return (string)($decision->requirement()->value ?? $decision->invariant()?->value);
     }
 
     /**

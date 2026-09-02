@@ -3,6 +3,7 @@
 namespace OGame\Combat\Causality;
 
 use InvalidArgumentException;
+use OGame\Combat\Support\EffectOrderKey;
 
 /**
  * La propriete exclusive d'une partition, jusqu'a une cle d'effet donnee.

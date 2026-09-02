@@ -5,6 +5,7 @@ namespace OGame\Combat\Causality;
 use InvalidArgumentException;
 use OGame\Combat\Enums\SnapshotContribution;
 use OGame\Combat\Enums\TargetScope;
+use OGame\Combat\Support\EffectOrderKey;
 
 /**
  * Un fait deja relu sous verrou, tel que le reconciliateur le recoit.

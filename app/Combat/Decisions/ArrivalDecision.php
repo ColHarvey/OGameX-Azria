@@ -4,11 +4,11 @@ namespace OGame\Combat\Decisions;
 
 use InvalidArgumentException;
 use OGame\Combat\Enums\CombatMissionAction;
+use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\DecisionRequirement;
 use OGame\Combat\Enums\InvariantCode;
 use OGame\Combat\Enums\OpenCellCategory;
 use OGame\Combat\Exceptions\NonFinalCombatReason;
-use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Support\ReturnPlan;
 
 /**
@@ -218,13 +218,13 @@ final readonly class ArrivalDecision implements CombatDecision
     }
 
     /**
-     * Cette situation ne releve pas de la matrice des corps celestes.
+     * La flotte n'a nulle part ou se poser, et porte des actifs a preserver.
      *
-     * Elle couvre deux cas : une cible qui n'est pas un corps celeste, et une situation qui ne peut
-     * pas se produire. Dans une enumeration elles se rangent ; sur un chemin vivant,
-     * CombatSituation::ensureItCanOccur() leve avant qu'on en arrive la.
+     * **Distincte de `cancelWithoutImpact()`**, et la distinction n'est pas cosmetique : annuler
+     * une flotte de joueur chargee ferait disparaitre ses vaisseaux et sa cargaison. Le cas ne
+     * devrait pas se produire — la planete mere garantit normalement une destination —, et c'est
+     * justement pourquoi il compte : s'il survient, c'est une corruption ou un etat administratif.
      *
-     * @param InvariantCode $code
      * @return self
      */
     public static function requiresAssetRecovery(): self
@@ -243,6 +243,10 @@ final readonly class ArrivalDecision implements CombatDecision
 
     /**
      * Cette situation ne releve pas de la matrice des corps celestes.
+     *
+     * Elle couvre deux cas : une cible qui n'est pas un corps celeste, et une situation qui ne peut
+     * pas se produire. Dans une enumeration elles se rangent ; sur un chemin vivant,
+     * `CombatSituation::ensureItCanOccur()` leve avant qu'on en arrive la.
      *
      * @param InvariantCode $code
      * @return self

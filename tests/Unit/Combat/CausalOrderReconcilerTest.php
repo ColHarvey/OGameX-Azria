@@ -9,11 +9,10 @@ use OGame\Combat\Causality\CausalAdmission;
 use OGame\Combat\Causality\CausalEvent;
 use OGame\Combat\Causality\CausalEventSliceClaim;
 use OGame\Combat\Causality\CausalEventSource;
+use OGame\Combat\Causality\CausallyReconciledSnapshot;
 use OGame\Combat\Causality\CausalOrderReconciler;
 use OGame\Combat\Causality\CausalWindow;
-use OGame\Combat\Causality\CausallyReconciledSnapshot;
 use OGame\Combat\Causality\DecisionOrder;
-use OGame\Combat\Causality\EffectOrderKey;
 use OGame\Combat\Causality\OpeningProvenance;
 use OGame\Combat\Causality\PartitionBarrier;
 use OGame\Combat\Causality\ProtectedOpeningState;
@@ -25,6 +24,7 @@ use OGame\Combat\Enums\TargetScope;
 use OGame\Combat\Exceptions\ContradictoryCausalEvent;
 use OGame\Combat\Exceptions\ContradictoryOpeningProvenance;
 use OGame\Combat\Exceptions\IncompleteEventSlice;
+use OGame\Combat\Support\EffectOrderKey;
 use Tests\UnitTestCase;
 
 /**
@@ -125,14 +125,18 @@ class CausalOrderReconcilerTest extends UnitTestCase
     /**
      * A effet simultane, le rang par genre decide, et il decide quelque chose de reel.
      *
-     * ## Ce que chaque rang produit en jeu
+     * ## Le classement est celui qui existait deja
      *
-     * - **recherche avant chantier** : une unite construite a la meme seconde qu'une recherche
-     *   achevee se bat avec la technologie nouvelle ;
-     * - **chantier avant missile** : une defense achevee a la meme seconde qu'un impact **peut etre
-     *   touchee** par ce missile ;
-     * - **missile avant arrivee** : une livraison arrivee a la meme seconde qu'un impact ne subit pas
-     *   ce missile.
+     * `CombatEventType::rank()` etait ecrit avant ce chantier : arrivee, missile, chantier. J'avais
+     * d'abord ecrit l'ordre **inverse** dans une seconde cle d'effet, en raisonnant qu'une defense
+     * achevee devait pouvoir etre touchee par un missile de la meme seconde. Cette seconde cle a ete
+     * supprimee : deux classements concurrents pour un meme enum finissent par diverger.
+     *
+     * L'essai fige donc l'ordre **en vigueur**. Si l'autre est preferable, c'est une decision de jeu
+     * a prendre separement, et elle changera `rank()` — pas une seconde table.
+     *
+     * `ResearchCompletion` a ete ajoute **apres** les trois autres, en rang 4 : additif, il ne
+     * reordonne aucun couple existant.
      */
     public function testAtEqualEffectTimeTheRankDecidesSomethingReal(): void
     {
@@ -144,10 +148,10 @@ class CausalOrderReconcilerTest extends UnitTestCase
         ]);
 
         $this->assertSame(
-            ['ouverture', 'recherche', 'chantier', 'missile', 'arrivee'],
+            ['ouverture', 'arrivee', 'missile', 'chantier', 'recherche'],
             array_map(static fn (ReconciledEvent $e): string => $e->event->identity, $etat->reconciled),
-            'The simultaneous ranking changed: what a missile can hit, and with which technology a new '
-            . 'unit fights, depend on it.'
+            'The simultaneous ranking changed. It is the one CombatEventType::rank() already carried, '
+            . 'and changing it is a game decision, not a refactor.'
         );
     }
 
@@ -624,7 +628,7 @@ class CausalOrderReconcilerTest extends UnitTestCase
         return new PartitionBarrier(
             42,
             self::TARGET_BODY,
-            new EffectOrderKey(1_000_000, CombatEventType::FleetArrival, 1_000_000)
+            EffectOrderKey::forEvent(1_000_000, CombatEventType::FleetArrival, 1_000_000)
         );
     }
 
@@ -687,7 +691,7 @@ class CausalOrderReconcilerTest extends UnitTestCase
             $identity,
             'fleet_arrival_v1',
             new DecisionOrder($decidedAt, $identifier),
-            new EffectOrderKey($effectAt, $type, $identifier),
+            EffectOrderKey::forEvent($effectAt, $type, $identifier),
             $targetBodyId,
             $scope,
             $contributions ?? [SnapshotContribution::DeliveredCargo],

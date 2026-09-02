@@ -96,7 +96,7 @@ final readonly class CombatSituation
         return $this->mission->value
             . ' / ' . $this->leg->value
             . ' / ' . $this->actor->value
-            . ' / ' . ($this->targetState?->value ?? 'aucun combat');
+            . ' / ' . ($this->targetState->value ?? 'aucun combat');
     }
 
     /**

@@ -8,8 +8,9 @@ namespace OGame\Combat\Admission;
  * ## Chaque camp propose, le coordinateur dispose
  *
  * Les deux selecteurs sont separes — politiques differentes, budgets differents — mais **la
- * fermeture est commune**. Chacun rend ses admissions, ses exclusions, et la derniere arrivee de ses
- * candidates admises ; c'est `RallyWindowCoordinator` qui en tire une echeance unique.
+ * fermeture est commune**. Chacun rend ses admissions, ses exclusions, et les arrivees de ses
+ * candidates admises ; c'est `CombatRallyWindow::closesAt()` — la regle qui existait deja — qui en
+ * tire une echeance unique.
  *
  * ## Seules les admises prolongent
  *

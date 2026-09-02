@@ -52,6 +52,6 @@ final readonly class GroupAdmission
      */
     public function describe(): string
     {
-        return $this->group->groupIdentity . ' | ' . ($this->refusal?->value ?? 'admis');
+        return $this->group->groupIdentity . ' | ' . ($this->refusal->value ?? 'admis');
     }
 }

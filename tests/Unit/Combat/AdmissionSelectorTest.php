@@ -10,11 +10,11 @@ use OGame\Combat\Admission\CandidateMission;
 use OGame\Combat\Admission\DefensiveAdmissionSelector;
 use OGame\Combat\Admission\FoundingGroup;
 use OGame\Combat\Admission\GroupAdmission;
-use OGame\Combat\Admission\RallyWindowCoordinator;
 use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\FlightLeg;
+use OGame\Combat\Support\CombatRallyWindow;
 use Tests\UnitTestCase;
 
 /**
@@ -442,8 +442,6 @@ class AdmissionSelectorTest extends UnitTestCase
      */
     public function testTheClosingComesFromBothSidesAtOnce(): void
     {
-        $coordinateur = new RallyWindowCoordinator();
-
         $attaque = $this->selectAttack(
             [AttackCandidateGroup::ofASingleFleet($this->aCandidate(missionId: 1, userId: 21, arrivesAt: self::OPENING + 10))],
             $this->aFoundingGroup()
@@ -453,10 +451,13 @@ class AdmissionSelectorTest extends UnitTestCase
             $this->aCandidate(missionId: 2, userId: 41, arrivesAt: self::OPENING + 30, mission: CombatMissionKind::AcsDefend),
         ]);
 
-        // La derniere admise des deux camps, plus un tick.
+        // La derniere admise des deux camps, plus un pas de temps. **C'est la regle qui existait
+        // deja** : j'avais ecrit un second coordinateur avant de m'apercevoir que
+        // `CombatRallyWindow::closesAt()` faisait exactement cela, en mieux — il ecarte les arrivees
+        // qui ne tiendraient pas sous le plafond au lieu de les rogner.
         $this->assertSame(
             self::OPENING + 31,
-            $coordinateur->closingInstant(self::OPENING, $attaque, $defense)
+            CombatRallyWindow::closesAt(self::OPENING, $this->admittedArrivalsOf($attaque, $defense))
         );
 
         // Aucune candidate admise nulle part : fermeture et ouverture coincident.
@@ -465,7 +466,7 @@ class AdmissionSelectorTest extends UnitTestCase
 
         $this->assertSame(
             self::OPENING,
-            $coordinateur->closingInstant(self::OPENING, $vide, $videDefense)
+            CombatRallyWindow::closesAt(self::OPENING, $this->admittedArrivalsOf($vide, $videDefense))
         );
     }
 
@@ -485,9 +486,18 @@ class AdmissionSelectorTest extends UnitTestCase
 
         $videDefense = (new DefensiveAdmissionSelector())->select(7, self::TARGET_BODY, self::OPENING, []);
 
+        // A 59 secondes, l'arrivee tient **exactement** sous le plafond : 59 + un pas de temps = 60.
+        // La fenetre se ferme donc au plafond, et pas une seconde plus tard.
         $this->assertSame(
             self::OPENING + AttackAdmissionSelector::MAX_WINDOW_SECONDS,
-            (new RallyWindowCoordinator())->closingInstant(self::OPENING, $tardive, $videDefense)
+            CombatRallyWindow::closesAt(self::OPENING, $this->admittedArrivalsOf($tardive, $videDefense))
+        );
+
+        // Une seconde de plus, et elle ne tient plus : `closesAt()` l'ecarte au lieu de la rogner,
+        // et la fenetre se ferme a l'instant meme de son ouverture.
+        $this->assertSame(
+            self::OPENING,
+            CombatRallyWindow::closesAt(self::OPENING, [self::OPENING + AttackAdmissionSelector::MAX_WINDOW_SECONDS])
         );
     }
 
@@ -539,6 +549,24 @@ class AdmissionSelectorTest extends UnitTestCase
     {
         $this->assertSame(16, AdmissionBudget::canonical()->maxFleets);
         $this->assertSame(5, AdmissionBudget::canonical()->maxPlayers);
+    }
+
+    /**
+     * Les arrivees des candidates admises des deux camps.
+     *
+     * @return array<int, int>
+     */
+    private function admittedArrivalsOf(AdmissionVerdict $attack, AdmissionVerdict $defence): array
+    {
+        $arrivees = [];
+
+        foreach ([$attack, $defence] as $verdict) {
+            foreach ($verdict->admitted() as $groupe) {
+                $arrivees[] = $groupe->scheduledArrivalAt();
+            }
+        }
+
+        return $arrivees;
     }
 
     /**
