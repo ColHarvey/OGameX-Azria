@@ -81,6 +81,15 @@ enum SnapshotContribution: string
     case TargetDefences = 'target_defences';
 
     /**
+     * Les caracteristiques de combat figees : armes, boucliers, protection.
+     *
+     * Une recherche ne depose rien sur le corps celeste et change pourtant ce que le moteur
+     * calcule. La traiter comme « lue vivante a la fermeture » ferait dependre le resultat de
+     * l'instant ou le worker s'est reveille.
+     */
+    case CombatTechnology = 'combat_technology';
+
+    /**
      * Si cette contribution est une flotte qui se battra.
      *
      * Seules celles-la peuvent retenir la fenetre de ralliement ouverte : des ressources livrees

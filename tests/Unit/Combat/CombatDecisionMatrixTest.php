@@ -724,7 +724,7 @@ class CombatDecisionMatrixTest extends UnitTestCase
         foreach (CombatSituation::all() as $situation) {
             $verdict = $this->verdictOf($situation);
 
-            if ($situation->targetState !== CombatState::Rallying || !$verdict->landsOnTheBody()) {
+            if ($situation->targetState !== CombatState::Rallying || !$verdict->mayTouchTheSnapshot()) {
                 continue;
             }
 
@@ -737,12 +737,25 @@ class CombatDecisionMatrixTest extends UnitTestCase
             $this->assertSame(
                 SnapshotObligation::RequiresCausalDecision,
                 $verdict->snapshot,
-                'A fleet landed during the rally without the causal decision being demanded: '
+                'An effect entered the rally window without the causal decision being demanded: '
                 . $situation->describe()
             );
         }
 
         $this->assertGreaterThan(0, $posees, 'No landing cell was examined: this test would prove nothing.');
+
+        // **Un missile ne pose aucune flotte et modifie pourtant la photographie.** Il doit donc
+        // exiger la decision causale au meme titre qu'une livraison. Limiter l'obligation aux
+        // mouvements qui atterrissent le laisserait entrer sans qu'on ait rien demande.
+        $missile = $this->verdictOf(new CombatSituation(
+            CombatMissionKind::Missile,
+            FlightLeg::Outbound,
+            ActorKind::Player,
+            CombatState::Rallying
+        ));
+
+        $this->assertFalse($missile->landsOnTheBody(), 'A missile is not supposed to land a fleet.');
+        $this->assertSame(SnapshotObligation::RequiresCausalDecision, $missile->snapshot);
 
         // Tous les retours en font partie, et c'etait le cas incertain : leur mouvement est
         // `AllowNormally`, qui ne dit rien de la photographie.
@@ -782,21 +795,27 @@ class CombatDecisionMatrixTest extends UnitTestCase
      * Sans ce controle, une flotte renvoyee pourrait se voir attacher une contribution, et le
      * reconciliateur chercherait des vaisseaux la ou il n'y en a aucun.
      */
-    public function testAnArrivalThatDoesNotLandCarriesNoSnapshotObligation(): void
+    public function testAnArrivalThatTouchesNothingCarriesNoSnapshotObligation(): void
     {
+        $examinees = 0;
+
         foreach (CombatSituation::all() as $situation) {
             $verdict = $this->verdictOf($situation);
 
-            if ($verdict->landsOnTheBody()) {
+            if ($verdict->mayTouchTheSnapshot()) {
                 continue;
             }
+
+            $examinees++;
 
             $this->assertSame(
                 SnapshotObligation::NotConcerned,
                 $verdict->snapshot,
-                'A fleet that never lands was given a snapshot obligation: ' . $situation->describe()
+                'A departure was given a snapshot obligation: ' . $situation->describe()
             );
         }
+
+        $this->assertGreaterThan(0, $examinees, 'No departure was examined: this test would prove nothing.');
     }
 
     /**

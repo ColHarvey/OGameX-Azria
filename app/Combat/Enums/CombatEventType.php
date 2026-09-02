@@ -37,6 +37,15 @@ enum CombatEventType: string
     case QueueCompletion = 'queue_completion';
 
     /**
+     * L'achevement d'une recherche qui change les caracteristiques de combat.
+     *
+     * Elle ne pose aucune flotte et modifie pourtant la photographie : armes, boucliers,
+     * protection. Engagee avant l'ouverture et terminee avant la fermeture, elle compte ; commencee
+     * apres l'ouverture, elle ne modifie pas ce combat.
+     */
+    case ResearchCompletion = 'research_completion';
+
+    /**
      * Le rang de cette sorte dans le departage.
      *
      * Toujours strictement positif : zero appartient aux barrieres.

@@ -164,7 +164,9 @@ final class CombatDecisionMatrix
             return SnapshotObligation::NotConcerned;
         }
 
-        if (!ArrivalVerdict::decisionLands($movement)) {
+        // **La question n'est pas « depose-t-elle des vaisseaux ».** Un missile modifie des defenses
+        // sans poser de flotte ; une admission encore a prononcer fera entrer une flotte entiere.
+        if (!ArrivalVerdict::decisionMayTouchTheSnapshot($movement)) {
             return SnapshotObligation::NotConcerned;
         }
 

@@ -37,11 +37,11 @@ final readonly class ArrivalVerdict
         public ArrivalDecision $movement,
         public SnapshotObligation $snapshot,
     ) {
-        if ($snapshot !== SnapshotObligation::NotConcerned && !$this->landsOnTheBody()) {
+        if ($snapshot !== SnapshotObligation::NotConcerned && !$this->mayTouchTheSnapshot()) {
             throw new LogicException(
-                'Une arrivee qui ne se pose pas n a rien a faire dans une photographie : lui attacher une '
-                . 'obligation « ' . $snapshot->value . ' » ferait chercher une contribution la ou il n y a '
-                . 'aucune flotte.'
+                'Une arrivee qui repart n a rien a faire dans une photographie : lui attacher une '
+                . 'obligation « ' . $snapshot->value . ' » ferait chercher un effet la ou il n y en a '
+                . 'aucun.'
             );
         }
     }
@@ -67,6 +67,46 @@ final readonly class ArrivalVerdict
      */
     public static function decisionLands(ArrivalDecision $movement): bool
     {
+        return self::classify($movement, landingOnly: true);
+    }
+
+    /**
+     * Si cette arrivee peut modifier la photographie, de quelque facon que ce soit.
+     *
+     * ## Pourquoi la question n'est pas « depose-t-elle des vaisseaux »
+     *
+     * Un missile modifie des defenses, un chantier acheve ajoute des unites, une recherche change
+     * des caracteristiques de combat. Aucun ne pose de flotte, et tous les trois modifient la
+     * photographie. Limiter l'obligation aux mouvements qui atterrissent les laisserait entrer
+     * sans qu'aucune decision causale ne soit demandee.
+     *
+     * Seul un depart n'y touche pas : la flotte repart, ou disparait.
+     */
+    public function mayTouchTheSnapshot(): bool
+    {
+        return self::decisionMayTouchTheSnapshot($this->movement);
+    }
+
+    /**
+     * Si une decision peut modifier la photographie.
+     *
+     * @param ArrivalDecision $movement
+     * @return bool
+     */
+    public static function decisionMayTouchTheSnapshot(ArrivalDecision $movement): bool
+    {
+        return self::classify($movement, landingOnly: false);
+    }
+
+    /**
+     * Le classement d'une action, selon qu'on demande l'atterrissage ou l'effet.
+     *
+     * @param ArrivalDecision $movement
+     * @param bool $landingOnly
+     * @return bool
+     */
+    private static function classify(ArrivalDecision $movement, bool $landingOnly): bool
+    {
         $decision = $movement->continuation() ?? $movement;
 
         if (!$decision->isResolved()) {
@@ -79,14 +119,19 @@ final readonly class ArrivalVerdict
             CombatMissionAction::JoinDefence,
             CombatMissionAction::LandOutsideSnapshot => true,
 
-            CombatMissionAction::ReturnToOrigin,
-            CombatMissionAction::CancelWithoutImpact,
+            // Ceux-la ne posent aucune flotte, et modifient pourtant ce que le moteur verra : un
+            // impact de missile, une admission encore a prononcer, un effet dont l'ordre reste a
+            // trancher.
             CombatMissionAction::DeferImpact,
-            CombatMissionAction::DeferUntilResolved,
-            CombatMissionAction::RefuseLaunch,
             CombatMissionAction::SelectByAttackAdmission,
             CombatMissionAction::SelectByDefenceAdmission,
-            CombatMissionAction::SelectByEventOrder,
+            CombatMissionAction::SelectByEventOrder => !$landingOnly,
+
+            // Un depart, lui, ne touche a rien.
+            CombatMissionAction::ReturnToOrigin,
+            CombatMissionAction::CancelWithoutImpact,
+            CombatMissionAction::DeferUntilResolved,
+            CombatMissionAction::RefuseLaunch,
             CombatMissionAction::OutsideMatrixDomain => false,
         };
     }
