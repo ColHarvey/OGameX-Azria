@@ -21,6 +21,9 @@ on:
   pull_request:
     paths:
       - 'database/migrations/**'
+      - '.github/workflows/migrations-mariadb.yml'
+  # Lancement manuel : indispensable, parce qu'un filtre sur les chemins ne rattrape pas des
+  # migrations poussees avant que ce workflow n'existe.
   workflow_dispatch:
 
 jobs:
@@ -143,10 +146,20 @@ jobs:
             "SELECT NON_UNIQUE FROM information_schema.STATISTICS WHERE TABLE_SCHEMA='ogamex_essai' AND TABLE_NAME='combat_participants' AND INDEX_NAME='combat_part_unique_idx' LIMIT 1;" \
             "0"
 
-          verifier "la cle du combat est un bigint des deux cotes" \
-            "SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='ogamex_essai' AND TABLE_NAME='combat_participants' AND COLUMN_NAME='combat_instance_id';" \
-            "bigint(20) unsigned"
+          # Les cinq colonnes qui designent une cle primaire en bigint. Quatre d'entre elles
+          # etaient des `int` : SQLite ne faisait aucune difference, mais MariaDB aurait refuse
+          # d'y attacher une cle etrangere le jour ou on en ajouterait une.
+          verifier_bigint() {
+            verifier "$1.$2 tient sur un bigint" \
+              "SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='ogamex_essai' AND TABLE_NAME='$1' AND COLUMN_NAME='$2';" \
+              "bigint(20) unsigned"
+          }
 
-          verifier "la mission designee tient sur un bigint" \
-            "SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='ogamex_essai' AND TABLE_NAME='combat_instances' AND COLUMN_NAME='mission_id';" \
-            "bigint(20) unsigned"
+          verifier_bigint combat_participants combat_instance_id
+          verifier_bigint combat_participants fleet_mission_id
+          verifier_bigint combat_instances mission_id
+          verifier_bigint combat_instances union_id
+          verifier_bigint combat_instances battle_report_id
+
+          # Et la colonne ajoutee a fleet_missions, qui designe le combat.
+          verifier_bigint fleet_missions combat_instance_id
