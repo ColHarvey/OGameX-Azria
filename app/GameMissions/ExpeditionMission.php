@@ -3,6 +3,8 @@
 namespace OGame\GameMissions;
 
 use Exception;
+use OGame\Combat\Enums\NoLootReason;
+use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\Enums\DarkMatterTransactionType;
 use OGame\Enums\FleetMissionStatus;
 use OGame\Enums\FleetSpeedType;
@@ -752,13 +754,28 @@ class ExpeditionMission extends GameMission
         // Le moteur de combat suit le reglage du serveur, comme dans AttackMission,
         // EspionageMission et MoonDestructionMission. Les expeditions imposaient Rust,
         // ce qui rendait battleEngine() sans effet pour elles.
+        // **Une rencontre d'expedition ne pille pas**, et le refus nomme ferme ici un piege reel.
+        // La planete PNJ est synthetique, mais elle est batie sur l'identifiant de la planete de
+        // **depart de l'attaquant** et n'ecrase pas `getResources()` : un contexte de pillage
+        // ordinaire y lirait le stock du joueur lui-meme. Son proprietaire PNJ, dont la date de
+        // derniere connexion ne bouge jamais, passerait de surcroit pour une cible inactive.
+        //
+        // La mission jette aujourd'hui ce butin et n'en subit rien. Le refus empeche qu'une
+        // reservation de combat persistant, elle, immobilise la planete de l'attaquant.
+        $lootContext = LiveLootContextFactory::withoutLoot(
+            NoLootReason::NpcEncounter,
+            [$attackerFleet],
+            $npcPlanetService
+        );
+
         switch ($this->settings->battleEngine()) {
             case 'php':
                 $battleEngine = new PhpBattleEngine(
                     [$attackerFleet],
                     $npcPlanetService,
                     $defenders,
-                    $this->settings
+                    $this->settings,
+                    $lootContext
                 );
                 break;
             case 'rust':
@@ -767,7 +784,8 @@ class ExpeditionMission extends GameMission
                     [$attackerFleet],
                     $npcPlanetService,
                     $defenders,
-                    $this->settings
+                    $this->settings,
+                    $lootContext
                 );
                 break;
         }

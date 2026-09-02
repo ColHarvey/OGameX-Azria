@@ -3,6 +3,9 @@
 namespace OGame\GameMissions;
 
 use Exception;
+use OGame\Combat\Support\OperationKey;
+use OGame\Combat\Support\ResourceDiagnosticsJournal;
+use OGame\Combat\Support\SealedResourceDiagnostics;
 use OGame\Enums\FleetMissionStatus;
 use OGame\Enums\FleetSpeedType;
 use OGame\GameMessages\DebrisFieldHarvest;
@@ -123,7 +126,20 @@ class RecycleMission extends GameMission
 
         // Get resources from the debris field and take as much as the harvesters can carry.
         $resourcesToHarvest = $debrisField->getResources();
-        $resourcesHarvested = LootService::distributeLoot($resourcesToHarvest, $total_cargo_capacity);
+        // **Le seul journal de cette operation.** La facade de distribution ne journalise pas : une
+        // resolution de combat l appelle cinq fois, et un avertissement pose la-bas en produirait
+        // autant. Le recyclage n a qu un appel, mais le proprietaire du journal doit rester le meme
+        // partout : l orchestrateur, jamais le calculateur.
+        $recolte = LootService::distribute($resourcesToHarvest, $total_cargo_capacity);
+        $resourcesHarvested = $recolte->resources;
+
+        ResourceDiagnosticsJournal::report(
+            SealedResourceDiagnostics::seal(
+                OperationKey::forFleetMission($mission),
+                $recolte->diagnostics
+            ),
+            ['coordinates' => $debrisField->getCoordinates()->asString()]
+        );
 
         // Remove the harvested resources from the debris field.
         if ($resourcesHarvested->any()) {

@@ -2,7 +2,7 @@
 
 namespace OGame\Combat\Support;
 
-use InvalidArgumentException;
+use OGame\Combat\Allocation\ExactLootAllocationV1;
 
 /**
  * La borne superieure du butin legalement pillable, calculee sans rien savoir de l'issue.
@@ -42,7 +42,7 @@ final class LootBound
     /**
      * Cent pour cent, en points de base. Le denominateur de tous les taux.
      */
-    private const int FULL_RATE = LootPolicy::FULL_RATE;
+    private const int FULL_RATE = ExactLootAllocationV1::FULL_RATE;
 
     /**
      * La borne a reserver pour cette cible et cette politique.
@@ -71,25 +71,20 @@ final class LootBound
     /**
      * La borne d'une seule ressource.
      *
-     * @param float $amount Le stock, positif ou nul et fini — `LootEnvelope` s'en porte garant.
+     * La conversion passe par la frontiere commune : c'est le seul endroit qui sait distinguer un
+     * artefact d'arrondi d'une donnee corrompue, et une fortune trop grande pour un entier d'une
+     * simple perte de precision.
+     *
+     * @param float $amount Le stock, positif ou nul et fini.
      * @param int $rateInBasisPoints
      * @return int
      */
     private static function boundFor(float $amount, int $rateInBasisPoints): int
     {
-        $plafond = ceil($amount);
+        // La borne reservee lit le meme stock que le butin : un diagnostic souleve ici serait le
+        // doublon de celui que la distribution remontera deja a son orchestrateur.
+        $plafond = ResourceBoundary::ceilingUnitsOfLivingStock($amount, 'stock')->units;
 
-        // **La verification precede la conversion, et pas l'inverse.** Depuis PHP 8.1, convertir un
-        // flottant hors plage en entier emet une alerte que Laravel transforme en exception : le
-        // controle serait alors arrive trop tard, et l'erreur remontee ne dirait pas ce qui s'est
-        // reellement passe.
-        if ($plafond >= (float)PHP_INT_MAX) {
-            throw new InvalidArgumentException(
-                'Un stock de ' . $amount . ' depasse la capacite d un entier : aucune mine du jeu ne peut l atteindre, '
-                . 'et cette valeur signale une donnee corrompue plutot qu une fortune.'
-            );
-        }
-
-        return ExactRatio::floorOfProductOverDivisor((int)$plafond, $rateInBasisPoints, self::FULL_RATE);
+        return ExactRatio::floorOfProductOverDivisor($plafond, $rateInBasisPoints, self::FULL_RATE);
     }
 }

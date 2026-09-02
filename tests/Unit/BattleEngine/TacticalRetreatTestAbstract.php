@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\BattleEngine;
 
+use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameConstants\UniverseConstants;
@@ -385,7 +386,14 @@ abstract class TacticalRetreatTestAbstract extends AccountTestCase
         $attackerFleet->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 100);
 
         $engineClass = $this->battleEngineClass();
-        $engine = new $engineClass([$this->makeAttackerFleet($attackerFleet, $attackerPlayer)], $defenderPlanet, $defenders, $settingsService);
+        $attaquantes = [$this->makeAttackerFleet($attackerFleet, $attackerPlayer)];
+        $engine = new $engineClass(
+            $attaquantes,
+            $defenderPlanet,
+            $defenders,
+            $settingsService,
+            LiveLootContextFactory::forBattle($attaquantes, $defenderPlanet)
+        );
         $result = $engine->simulateBattle();
 
         $this->assertFalse($result->tacticalRetreatDefenderFled);
@@ -538,12 +546,14 @@ abstract class TacticalRetreatTestAbstract extends AccountTestCase
         SettingsService $settingsService
     ): BattleEngine {
         $engineClass = $this->battleEngineClass();
+        $attaquantes = [$this->makeAttackerFleet($attackerFleet, $player)];
 
         return new $engineClass(
-            [$this->makeAttackerFleet($attackerFleet, $player)],
+            $attaquantes,
             $defenderPlanet,
             [DefenderFleet::fromPlanet($defenderPlanet)],
-            $settingsService
+            $settingsService,
+            LiveLootContextFactory::forBattle($attaquantes, $defenderPlanet)
         );
     }
 }

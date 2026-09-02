@@ -3,6 +3,7 @@
 namespace OGame\GameMissions\BattleEngine;
 
 use FFI;
+use OGame\Combat\Support\LootContext;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameMissions\BattleEngine\Models\BattleResultRound;
@@ -38,10 +39,11 @@ class RustBattleEngine extends BattleEngine
      * @param PlanetService $defenderPlanet The planet of the defender player (used for loot, moon calculation).
      * @param array<DefenderFleet> $defenders All defending fleets (planet owner + ACS defend fleets).
      * @param SettingsService $settings The settings service.
+     * @param LootContext $lootContext Les faits de pillage, deja photographies.
      */
-    public function __construct(array $attackers, PlanetService $defenderPlanet, array $defenders, SettingsService $settings)
+    public function __construct(array $attackers, PlanetService $defenderPlanet, array $defenders, SettingsService $settings, LootContext $lootContext)
     {
-        parent::__construct($attackers, $defenderPlanet, $defenders, $settings);
+        parent::__construct($attackers, $defenderPlanet, $defenders, $settings, $lootContext);
 
         $this->ffi = FFI::cdef(
             "char* fight_battle_rounds(const char* input_json);",

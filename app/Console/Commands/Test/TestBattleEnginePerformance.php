@@ -7,6 +7,8 @@ use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Support\Facades\Date;
 use InvalidArgumentException;
+use OGame\Combat\Enums\NoLootReason;
+use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\GameMissions\BattleEngine\BattleEngine;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
@@ -147,9 +149,18 @@ class TestBattleEnginePerformance extends TestCommand
         $attacker->isInitiator = true;
         $attacker->fleetMission = null;
 
+        // **Un banc d'essai ne pille rien.** La planete courante ne lui sert que de decor, et un
+        // contexte de pillage ordinaire ferait dependre les mesures du stock qu'elle porte au moment
+        // ou la commande tourne.
+        $lootContext = LiveLootContextFactory::withoutLoot(
+            NoLootReason::SyntheticBenchmark,
+            [$attacker],
+            $this->currentPlanetService
+        );
+
         return $engine === 'php'
-            ? new PhpBattleEngine([$attacker], $this->currentPlanetService, $defenders, $settingsService)
-            : new RustBattleEngine([$attacker], $this->currentPlanetService, $defenders, $settingsService);
+            ? new PhpBattleEngine([$attacker], $this->currentPlanetService, $defenders, $settingsService, $lootContext)
+            : new RustBattleEngine([$attacker], $this->currentPlanetService, $defenders, $settingsService, $lootContext);
     }
 
     /**

@@ -2,6 +2,9 @@
 
 namespace OGame\GameMissions\BattleEngine\Models;
 
+use OGame\Combat\Allocation\ExactLootAllocationV1;
+use OGame\Combat\Policies\CargoWeightedV1;
+use OGame\Combat\Support\ResourceNormalizationDiagnostics;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Resources;
 
@@ -44,8 +47,67 @@ class BattleResult
 
     /**
      * @var int The max. percentage of resources that the attacker player could steal from the defender player's planet.
+     *
+     * Arrondi vers le bas depuis `$lootRateInBasisPoints`, pour le rapport de combat.
      */
     public int $lootPercentage;
+
+    /**
+     * @var int Le taux reellement applique, en centiemes de pour-cent.
+     *
+     * La ponderation par le fret produit des taux comme 62,5 %, que le pour-cent entier
+     * ci-dessus ne sait pas representer. C'est cette valeur-ci qui a servi au calcul.
+     */
+    public int $lootRateInBasisPoints = CargoWeightedV1::BASE_RATE;
+
+    /**
+     * @var string La version de la regle de pillage sous laquelle ce combat a ete calcule.
+     *
+     * Un combat garde la version sous laquelle il a commence : changer la formule plus tard ne doit
+     * toucher que les combats suivants.
+     */
+    public string $lootPolicyVersion = CargoWeightedV1::VERSION;
+
+    /**
+     * @var string La version de la regle qui a reparti le butin entre les flottes.
+     */
+    public string $lootAllocatorVersion = ExactLootAllocationV1::VERSION;
+
+    /**
+     * @var array<string, mixed> Les faits geles qui ont produit le taux.
+     *
+     * Inactivite de la cible, fret total, fret des Decouvreurs, instant de la photographie. Le
+     * rapport differe les lit ; il ne les redemande pas aux modeles vivants, qui auront change.
+     */
+    public array $lootFrozenFacts = [];
+
+    /**
+     * @var string L empreinte de la photographie qui a produit ces faits.
+     *
+     * Elle lie le resultat a la composition exacte qui a combattu : ces flottes, cette cible, cet
+     * instant.
+     */
+    public string $lootSnapshotFingerprint = '';
+
+    /**
+     * @var ResourceNormalizationDiagnostics Ce que les conversions de ressources ont rencontre.
+     *
+     * Un artefact negatif ramene a zero, une precision degradee au-dela de deux puissance
+     * cinquante-trois : ni l un ni l autre n arrete le combat, mais tous deux doivent rester
+     * visibles. Ils voyagent avec le resultat jusqu a la mission, qui journalise une fois.
+     */
+    public ResourceNormalizationDiagnostics $resourceDiagnostics;
+
+    /**
+     * BattleResult constructor.
+     *
+     * Le seul champ initialise ici : une collection de diagnostics vide vaut mieux qu une propriete
+     * non initialisee, que le moindre lecteur ferait exploser.
+     */
+    public function __construct()
+    {
+        $this->resourceDiagnostics = ResourceNormalizationDiagnostics::none();
+    }
 
     /**
      * @var UnitCollection The units of attacker player at the start of the battle.

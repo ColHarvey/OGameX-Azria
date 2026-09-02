@@ -2,7 +2,7 @@
 
 namespace Tests\Unit\Combat;
 
-use InvalidArgumentException;
+use OGame\Combat\Exceptions\UnrepresentableResourceAmount;
 use OGame\Combat\Support\AttackerCargoShare;
 use OGame\Combat\Support\LootBound;
 use OGame\Combat\Support\LootEnvelope;
@@ -179,16 +179,31 @@ class LootBoundTest extends UnitTestCase
     /**
      * Un stock hors de portee d'un entier s'arrete, plutot que de produire une borne absurde.
      *
-     * `LootEnvelope` refuse deja l'infini et l'indefini, mais pas un flottant fini de l'ordre de
-     * dix puissance trente : aucune mine ne l'atteint, une donnee corrompue si. Le convertir en
-     * entier donnerait n'importe quoi, et ce n'importe quoi serait ensuite immobilise sur le compte
-     * d'un joueur.
+     * **Et le refus dit lequel des deux problemes se pose.** Un stock de dix puissance trente est
+     * une quantite reelle qu'aucun entier de la plateforme ne porte : ce n'est pas une donnee
+     * abimee, c'est un domaine trop etroit. Les confondre ferait chercher une corruption la ou il
+     * n'y a qu'une limite.
      */
     public function testAStockBeyondIntegerRangeIsRefused(): void
     {
-        $this->expectException(InvalidArgumentException::class);
+        $this->expectException(UnrepresentableResourceAmount::class);
 
         LootBound::upperBoundFor(new LootEnvelope(1e30, 0.0, 0.0), $this->policy(false, 0, 1_000));
+    }
+
+    /**
+     * Une fortune au-dela de la precision exacte reste pillable.
+     *
+     * **C'est ce qui evite une immunite economique.** Refuser les stocks superieurs a deux puissance
+     * cinquante-trois rendrait une planete assez riche impossible a piller : un verrou gagne en
+     * jouant. La borne est calculee sur l'entier canonique que la colonne represente reellement.
+     */
+    public function testAFortuneBeyondExactPrecisionRemainsLootable(): void
+    {
+        $enorme = 9007199254740992.0;
+        $borne = LootBound::upperBoundFor(new LootEnvelope($enorme, 0.0, 0.0), $this->policy(false, 0, 1_000));
+
+        $this->assertSame(4503599627370496.0, $borne->metal, 'Half of a fortune this size must still be reservable.');
     }
 
     /**

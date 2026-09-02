@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\BattleEngine;
 
+use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\GameMissions\BattleEngine\BattleEngine;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleetResult;
@@ -43,7 +44,8 @@ class BattleEngineResourceDistributionTest extends UnitTestCase
             [$fleetOne, $fleetTwo],
             $this->planetService,
             [DefenderFleet::fromPlanet($this->planetService)],
-            $this->settingsService
+            $this->settingsService,
+            LiveLootContextFactory::forBattle([$fleetOne, $fleetTwo], $this->planetService)
         );
 
         $result = new BattleResult();
@@ -102,7 +104,8 @@ class BattleEngineResourceDistributionTest extends UnitTestCase
             [$initiator, $ally],
             $this->planetService,
             [DefenderFleet::fromPlanet($this->planetService)],
-            $this->settingsService
+            $this->settingsService,
+            LiveLootContextFactory::forBattle([$initiator, $ally], $this->planetService)
         );
 
         $result = new BattleResult();

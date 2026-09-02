@@ -3,6 +3,8 @@
 namespace OGame\Combat\Services;
 
 use Closure;
+use OGame\Combat\Support\CombatParticipantKey;
+use OGame\Combat\Support\ResourceNormalizationDiagnostics;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameMessages\DebrisFieldHarvest;
@@ -93,7 +95,8 @@ class CombatResolutionService
      * @param int $originPlanetId
      * @param GameMission $missionDeJeu Porte le type de vitesse de flotte, qui determine la duree du retour.
      * @param Closure $creerRetour Cree une mission retour ; delegue a GameMission::startReturn().
-     * @return void
+     * @return CombatResolutionOutcome Ce que l application du resultat a rencontre — distinct du
+     *         resultat lui-meme, qui reste fige tel que le moteur l a calcule.
      */
     public function resolve(
         FleetMission $mission,
@@ -106,7 +109,11 @@ class CombatResolutionService
         int $originPlanetId,
         GameMission $missionDeJeu,
         Closure $creerRetour,
-    ): void {
+    ): CombatResolutionOutcome {
+        // Ce que l'application du resultat rencontre lui appartient : le `BattleResult` reste tel
+        // que le moteur l'a fige.
+        $diagnostics = ResourceNormalizationDiagnostics::none();
+
         // Deduct loot from the target planet.
         $defenderPlanet->deductResources($battleResult->loot);
 
@@ -226,7 +233,7 @@ class CombatResolutionService
                     // Ensure total doesn't exceed surviving cargo capacity
                     $remainingCargoCapacity = $fleetResult->unitsResult->getTotalCargoCapacity($fleetOwner);
                     if ($totalResources->sum() > $remainingCargoCapacity) {
-                        $totalResources = LootService::distributeLoot($totalResources, $remainingCargoCapacity);
+                        $totalResources = $this->capAndCollect($totalResources, $remainingCargoCapacity, $diagnostics, CombatResolutionOutcome::PHASE_RETURN_CAP, CombatParticipantKey::forFleet($fleetResult->fleetMissionId));
                     }
 
                     // Calculate natural return duration based on surviving ships and owner's tech.
@@ -297,7 +304,7 @@ class CombatResolutionService
                 $attackerCollectedDebris = $collectionAmount;
             } else {
                 // Distribute the 30% debris amount across Reaper capacity
-                $attackerCollectedDebris = LootService::distributeLoot($collectionAmount, $reaperCargoCapacity);
+                $attackerCollectedDebris = $this->capAndCollect($collectionAmount, $reaperCargoCapacity, $diagnostics, CombatResolutionOutcome::PHASE_ATTACKER_REAPER);
             }
         }
 
@@ -313,7 +320,7 @@ class CombatResolutionService
             );
 
             if ($attackerCollectedDebris->sum() > $availableForCollectedDebris) {
-                $attackerCollectedDebris = LootService::distributeLoot($attackerCollectedDebris, $availableForCollectedDebris);
+                $attackerCollectedDebris = $this->capAndCollect($attackerCollectedDebris, $availableForCollectedDebris, $diagnostics, CombatResolutionOutcome::PHASE_ATTACKER_REAPER_ROOM, CombatParticipantKey::forFleet($singleFleetResult->fleetMissionId));
             }
         }
 
@@ -346,7 +353,7 @@ class CombatResolutionService
                 $defenderCollectedDebris = $collectionAmount;
             } else {
                 // Distribute the 30% debris amount across Reaper capacity
-                $defenderCollectedDebris = LootService::distributeLoot($collectionAmount, $defenderReaperCargoCapacity);
+                $defenderCollectedDebris = $this->capAndCollect($collectionAmount, $defenderReaperCargoCapacity, $diagnostics, CombatResolutionOutcome::PHASE_DEFENDER_REAPER);
             }
 
             // Add collected debris to defender planet's resources
@@ -516,7 +523,7 @@ class CombatResolutionService
             // Defensive cap only: loot and carried cargo are already normalized before we reach
             // this point, so only edge-case rounding should ever hit this.
             if ($totalResources->sum() > $remainingCargoCapacity) {
-                $totalResources = LootService::distributeLoot($totalResources, $remainingCargoCapacity);
+                $totalResources = $this->capAndCollect($totalResources, $remainingCargoCapacity, $diagnostics, CombatResolutionOutcome::PHASE_RETURN_CAP_FINAL, CombatParticipantKey::forFleet($singleFleetResult->fleetMissionId));
             }
 
             // Calculate wreck field for General class attacker
@@ -537,6 +544,10 @@ class CombatResolutionService
         }
         // End of single-attacker return processing
         // Note: For multi-attacker battles, each fleet is already processed above with its own return mission
+
+        // Ce que l application a rencontre repart avec son propre resultat : le `BattleResult` reste
+        // celui que le moteur a fige.
+        return new CombatResolutionOutcome($diagnostics);
     }
 
     /**
@@ -548,6 +559,44 @@ class CombatResolutionService
      * @param PlanetService $originPlanet The planet whose Space Dock determines repairable wreckage.
      * @return array<array{machine_name: string, quantity: int, repair_progress: int}>|null Wreck field data with ships array, or null if conditions not met.
      */
+
+    /**
+     * Plafonne une cargaison, et retient ce que la conversion a rencontre.
+     *
+     * **Une seule resolution passe ici cinq fois** — Faucheurs des deux camps, plafonnement de leur
+     * place restante, et deux plafonds de cargaison de retour. Journaliser a chaque appel donnerait
+     * cinq lignes pour une operation ; les diagnostics s'accumulent donc sur le resultat, et la
+     * mission — le seul appelant qui voit l'operation entiere — ecrit une fois.
+     *
+     * **Les diagnostics n'entrent pas dans le `BattleResult`.** Celui-ci represente le resultat
+     * calcule et fige a la photographie ; dans le cycle persistant, il sera serialise a l'ouverture
+     * du combat et relu des heures plus tard. Y ecrire pendant son application melangerait deux
+     * instants, et la relecture differerait de l'ecriture.
+     *
+     * @param Resources $resources
+     * @param int $capacity
+     * @param ResourceNormalizationDiagnostics $diagnostics Accumulateur local de la resolution.
+     * @param string $phase Le moment fonctionnel, pour que deux incidents distincts le restent.
+     * @param string $subject L identite stable de la flotte concernee, quand cette etape se repete.
+     *                         **Sans elle, deux retours plafonnes dans la meme phase sur la meme
+     *                         ressource porteraient la meme identite et fusionneraient en une seule
+     *                         occurrence.** Les etapes qui n ont lieu qu une fois par resolution s en
+     *                         passent : leur phase suffit a les distinguer.
+     * @return Resources
+     */
+    private function capAndCollect(
+        Resources $resources,
+        int $capacity,
+        ResourceNormalizationDiagnostics &$diagnostics,
+        string $phase,
+        string $subject = '',
+    ): Resources {
+        $plafonne = LootService::distribute($resources, $capacity, $phase, $subject);
+        $diagnostics = $diagnostics->mergedWith($plafonne->diagnostics);
+
+        return $plafonne->resources;
+    }
+
     private function calculateAttackerWreckField(UnitCollection $attackerUnitsLost, UnitCollection $attackerUnitsStart, PlanetService $originPlanet): array|null
     {
         $spaceDockPlanet = $originPlanet->isMoon() ? $originPlanet->planet() : $originPlanet;

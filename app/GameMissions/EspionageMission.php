@@ -2,6 +2,8 @@
 
 namespace OGame\GameMissions;
 
+use OGame\Combat\Enums\NoLootReason;
+use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\Enums\FleetMissionStatus;
 use OGame\Enums\FleetSpeedType;
 use OGame\Factories\PlayerServiceFactory;
@@ -283,14 +285,24 @@ class EspionageMission extends GameMission
         $attackerFleet->isInitiator = true;
         $attackerFleet->fleetMission = null;
 
+        // **Un contre-espionnage ne pille pas**, et le rapport d'espionnage l'annonce deja : il
+        // ecrit un butin nul en toutes lettres. Le refus est nomme plutot que subi, pour qu'aucun
+        // lecteur futur ne prenne au serieux un butin que ce combat n'a jamais eu le droit de
+        // prendre.
+        $lootContext = LiveLootContextFactory::withoutLoot(
+            NoLootReason::CounterEspionage,
+            [$attackerFleet],
+            $targetPlanet
+        );
+
         // Execute battle using configured battle engine
         switch ($this->settings->battleEngine()) {
             case 'php':
-                $battleEngine = new PhpBattleEngine([$attackerFleet], $targetPlanet, $defenders, $this->settings);
+                $battleEngine = new PhpBattleEngine([$attackerFleet], $targetPlanet, $defenders, $this->settings, $lootContext);
                 break;
             case 'rust':
             default:
-                $battleEngine = new RustBattleEngine([$attackerFleet], $targetPlanet, $defenders, $this->settings);
+                $battleEngine = new RustBattleEngine([$attackerFleet], $targetPlanet, $defenders, $this->settings, $lootContext);
                 break;
         }
 

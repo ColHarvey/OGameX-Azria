@@ -3,6 +3,7 @@
 namespace Tests\Unit;
 
 use Illuminate\Contracts\Container\BindingResolutionException;
+use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
@@ -69,7 +70,13 @@ class HamillManoeuvreTest extends AccountTestCase
         $attacker->isInitiator = true;
         $attacker->fleetMission = null;
 
-        return new PhpBattleEngine([$attacker], $defenderPlanet, $defenders, $settingsService);
+        return new PhpBattleEngine(
+            [$attacker],
+            $defenderPlanet,
+            $defenders,
+            $settingsService,
+            LiveLootContextFactory::forBattle([$attacker], $defenderPlanet)
+        );
     }
 
     /**

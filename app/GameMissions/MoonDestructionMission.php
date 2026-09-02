@@ -3,6 +3,11 @@
 namespace OGame\GameMissions;
 
 use Illuminate\Support\Facades\DB;
+use OGame\Combat\Support\CombatParticipantKey;
+use OGame\Combat\Support\LootContextForMission;
+use OGame\Combat\Support\OperationKey;
+use OGame\Combat\Support\ResourceDiagnosticsJournal;
+use OGame\Combat\Support\SealedResourceDiagnostics;
 use OGame\Enums\FleetMissionStatus;
 use OGame\Enums\FleetSpeedType;
 use OGame\GameMessages\FleetLostContact;
@@ -145,14 +150,20 @@ class MoonDestructionMission extends GameMission
         // Collect all defending fleets (planet owner + ACS defend fleets)
         $defenders = $this->collectDefendingFleets($targetMoon);
 
+        // **Une destruction de lune pille**, et son comportement est conserve tel quel : le butin
+        // calcule ici est bel et bien preleve plus bas par `deductResources()`. La lune est un
+        // corps distinct de sa planete ; c'est l'inactivite de **son** proprietaire qui compte, et
+        // c'est ce que la fabrique lit sur le corps qu'on lui donne.
+        $lootContext = LootContextForMission::lootingOrDegraded([$attackerFleet], $targetMoon, 'moon_destruction', $mission->id);
+
         // Execute the battle logic using configured battle engine
         switch ($this->settings->battleEngine()) {
             case 'php':
-                $battleEngine = new PhpBattleEngine([$attackerFleet], $targetMoon, $defenders, $this->settings);
+                $battleEngine = new PhpBattleEngine([$attackerFleet], $targetMoon, $defenders, $this->settings, $lootContext);
                 break;
             case 'rust':
             default:
-                $battleEngine = new RustBattleEngine([$attackerFleet], $targetMoon, $defenders, $this->settings);
+                $battleEngine = new RustBattleEngine([$attackerFleet], $targetMoon, $defenders, $this->settings, $lootContext);
                 break;
         }
 
@@ -160,6 +171,19 @@ class MoonDestructionMission extends GameMission
 
         // Set the attacker's origin planet ID on the battle result for the battle report.
         $battleResult->attackerPlanetId = $mission->planet_id_from;
+
+        // **La frontiere d audit de cette mission.**
+        //
+        // Elle construit un moteur pillard, et le moteur ne journalise plus rien : sans ce point,
+        // les diagnostics de conversion de ce chemin seraient perdus en silence. La lune est lue par
+        // le meme chemin qu une planete attaquee, et peut donc produire les memes incidents.
+        ResourceDiagnosticsJournal::report(
+            SealedResourceDiagnostics::seal(
+                OperationKey::forFleetMission($mission),
+                $battleResult->resourceDiagnostics
+            ),
+            ['target_body' => CombatParticipantKey::forBody($targetMoon)]
+        );
 
         // Deduct loot from the target moon
         $targetMoon->deductResources($battleResult->loot);

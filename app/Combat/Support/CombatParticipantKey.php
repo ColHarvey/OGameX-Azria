@@ -3,6 +3,7 @@
 namespace OGame\Combat\Support;
 
 use InvalidArgumentException;
+use OGame\Services\PlanetService;
 
 /**
  * L'identite d'un participant a un combat, construite ici et nulle part ailleurs.
@@ -32,6 +33,11 @@ class CombatParticipantKey
     public const string PLANET_PREFIX = 'planet';
 
     /**
+     * Le nom reserve d'un corps sans identifiant, rencontre uniquement dans les bancs d'essai.
+     */
+    public const string UNIDENTIFIED_BODY = 'body:unidentified';
+
+    /**
      * Build the identity of a fleet taking part in a combat.
      *
      * Une flotte est identifiee par sa mission : c'est ce qui la distingue de toutes les autres,
@@ -58,6 +64,31 @@ class CombatParticipantKey
     public static function forPlanet(int $planetId): string
     {
         return self::build(self::PLANET_PREFIX, $planetId);
+    }
+
+    /**
+     * Build the identity of a celestial body taking part in a combat.
+     *
+     * Une fonction de **nommage**, pas d'observation : elle ne lit que l'identifiant du corps, et les
+     * deux chemins — instantane et persistant — doivent la partager. Sans cela, chacun ecrirait sa
+     * variante, et l'empreinte de photographie cesserait de correspondre d'un chemin a l'autre.
+     *
+     * Un corps sans identifiant ne se rencontre que dans les bancs d'essai. Lui donner un nom
+     * reserve vaut mieux que de refuser : le controle d'appariement reste utile entre deux montages
+     * differents, et aucune ligne de base ne porte ce nom.
+     *
+     * @param PlanetService $body
+     * @return string
+     */
+    public static function forBody(PlanetService $body): string
+    {
+        $identifiant = $body->getPlanetId();
+
+        if ($identifiant < 1) {
+            return self::UNIDENTIFIED_BODY;
+        }
+
+        return self::forPlanet($identifiant);
     }
 
     /**

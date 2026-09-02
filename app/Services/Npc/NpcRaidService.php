@@ -525,7 +525,7 @@ class NpcRaidService
         $userIds = User::query()
             ->where('is_npc', false)
             ->where('vacation_mode', false)
-            ->where('username', '!=', 'Legor')
+            ->where('username', '!=', User::SYSTEM_ACCOUNT_USERNAME)
             ->whereRaw('users.time + 0 >= ?', [$limit])
             ->pluck('id')
             ->all();

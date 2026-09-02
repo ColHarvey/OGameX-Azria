@@ -41,6 +41,16 @@ class AttackerFleetResult
     public Resources $survivingCargo;
 
     /**
+     * @var int La capacite de fret survivante qui a servi de poids a la part de butin.
+     *
+     * **Conservee, et non recalculee.** La part depend de ce poids ; un rapport differe ou un retour
+     * de flotte qui la recalculerait a partir des unites survivantes obtiendrait la meme valeur
+     * aujourd hui, et une autre le jour ou la formule de fret changera. La repartition, elle, a eu
+     * lieu une fois et ne doit plus bouger.
+     */
+    public int $survivingCargoCapacity = 0;
+
+    /**
      * @var bool Whether this fleet was completely destroyed.
      */
     public bool $completelyDestroyed;

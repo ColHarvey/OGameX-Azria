@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\BattleEngine;
 
+use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
 use OGame\GameMissions\BattleEngine\PhpBattleEngine;
@@ -55,7 +56,13 @@ class DefenseRepairBattleEngineTest extends UnitTestCase
         $attacker->isInitiator = true;
         $attacker->fleetMission = null;
 
-        return new PhpBattleEngine([$attacker], $this->planetService, $defenders, $this->settingsService);
+        return new PhpBattleEngine(
+            [$attacker],
+            $this->planetService,
+            $defenders,
+            $this->settingsService,
+            LiveLootContextFactory::forBattle([$attacker], $this->planetService)
+        );
     }
 
     /**

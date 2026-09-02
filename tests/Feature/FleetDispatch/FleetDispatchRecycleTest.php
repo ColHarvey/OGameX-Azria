@@ -392,9 +392,25 @@ class FleetDispatchRecycleTest extends FleetDispatchTestCase
         $debrisFieldService = resolve(DebrisFieldService::class);
         $debrisFieldService->loadForCoordinates($this->secondPlanet()->getPlanetCoordinates());
 
-        $this->assertEquals($beforeDebrisFieldResources->metal->get() - 33333.33333333, $debrisFieldService->getResources()->metal->get(), 'Metal resources are not correct in debris field after recyclers have harvested it.');
-        $this->assertEquals($beforeDebrisFieldResources->crystal->get() - 33333.33333333, $debrisFieldService->getResources()->crystal->get(), 'Crystal resources are not correct in debris field after recyclers have harvested it.');
-        $this->assertEquals($beforeDebrisFieldResources->deuterium->get() - 33333.33333333, $debrisFieldService->getResources()->deuterium->get(), 'Deuterium resources are not correct in debris field after recyclers have harvested it.');
+        // **La recolte se compte en unites entieres depuis `exact_loot_pipeline_v1`.**
+        //
+        // Cinq recycleurs portent cent mille. Le tiers entier vaut 33 333 par ressource, soit
+        // 99 999 : il reste **une** unite a placer, et elle va au metal, dans l ordre metal, cristal,
+        // deuterium que le jeu suit partout ailleurs.
+        //
+        //     entree : champ (505 000, 505 000, 500 000), fret 100 000
+        //     avant  : (33 333,33333333 x3) = 100 000,00  -> le champ gardait des fractions
+        //     apres  : (33 334, 33 333, 33 333)  = 100 000 -> le champ reste entier
+        //
+        // Le total emporte est identique ; seule sa repartition change, et le champ de debris cesse
+        // d accumuler des tiers d unite qu aucun vaisseau ne peut ramasser.
+        $this->assertEquals($beforeDebrisFieldResources->metal->get() - 33334, $debrisFieldService->getResources()->metal->get(), 'Metal resources are not correct in debris field after recyclers have harvested it.');
+        $this->assertEquals($beforeDebrisFieldResources->crystal->get() - 33333, $debrisFieldService->getResources()->crystal->get(), 'Crystal resources are not correct in debris field after recyclers have harvested it.');
+        $this->assertEquals($beforeDebrisFieldResources->deuterium->get() - 33333, $debrisFieldService->getResources()->deuterium->get(), 'Deuterium resources are not correct in debris field after recyclers have harvested it.');
+
+        // Et rien ne se perd : le total emporte vaut exactement le fret disponible.
+        $emporte = ($beforeDebrisFieldResources->sum() - $debrisFieldService->getResources()->sum());
+        $this->assertEquals(100_000, $emporte, 'The recyclers must carry exactly what they can hold, to the unit.');
 
         // Expecting a return trip that will contain the extracted resources.
         $activeMissions = $fleetMissionService->getActiveFleetMissionsForCurrentPlayer();
@@ -403,11 +419,28 @@ class FleetDispatchRecycleTest extends FleetDispatchTestCase
             $this->fail('No return mission found.');
         }
 
-        // Assert that the return mission contains the correct resources
-        // which should be the same as the total capacity of the recyclers.
-        $this->assertEquals(33333.0, $returnMission->metal, 'Metal resources are not correct in return trip.');
+        // **Ce que le retour rapporte est exactement ce que le champ a perdu.**
+        //
+        // L ancienne version ne le garantissait pas : le champ etait debite de 33 333,33333333 par
+        // ressource, et le retour n en transportait que 33 333. Un tiers d unite par ressource
+        // disparaissait entre les deux — preleve nulle part, livre a personne.
+        //
+        //     avant : champ -33 333,33333333  ->  retour 33 333      (0,33333333 perdu x3)
+        //     apres : champ -33 334 / -33 333 ->  retour 33 334 / 33 333  (rien ne se perd)
+        $this->assertEquals(33334.0, $returnMission->metal, 'Metal resources are not correct in return trip.');
         $this->assertEquals(33333.0, $returnMission->crystal, 'Crystal resources are not correct in return trip.');
         $this->assertEquals(33333.0, $returnMission->deuterium, 'Deuterium resources are not correct in return trip.');
+
+        // La conservation, ressource par ressource : ce qui quitte le champ arrive dans la soute.
+        $apres = $debrisFieldService->getResources();
+
+        foreach (['metal', 'crystal', 'deuterium'] as $ressource) {
+            $this->assertEquals(
+                $beforeDebrisFieldResources->{$ressource}->get() - $apres->{$ressource}->get(),
+                $returnMission->{$ressource},
+                "What left the debris field in {$ressource} is not what the recyclers carry back."
+            );
+        }
     }
 
     /**

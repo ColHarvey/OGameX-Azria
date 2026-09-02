@@ -228,8 +228,19 @@ class ReaperDebrisCollectionTest extends FleetDispatchTestCase
             $debrisInField = $debrisFieldAfter - $debrisFieldBefore;
 
             if ($totalDebris > 0) {
+                // **Conservation exacte, sans tolerance.** Depuis `exact_loot_pipeline_v1`, la
+                // collecte se compte en unites entieres : ce que les Faucheurs emportent et ce qui
+                // reste dans le champ redonnent exactement le champ initial.
+                //
+                // La tolerance de dix unites qui figurait ici couvrait les fractions que l ancienne
+                // division flottante laissait derriere elle. Elle n a plus lieu d etre, et la garder
+                // masquerait une fuite de dix unites le jour ou il y en aurait une.
                 $expectedInField = $totalDebris - $collectedDebris;
-                $this->assertEqualsWithDelta($expectedInField, $debrisInField, 10, 'Debris field should contain remaining debris after collection');
+                $this->assertSame(
+                    $expectedInField,
+                    (int)$debrisInField,
+                    'Collected debris plus remaining field must equal the debris the battle created, to the unit.'
+                );
             }
         }
 

@@ -3,7 +3,13 @@
 namespace OGame\GameMissions\BattleEngine;
 
 use InvalidArgumentException;
-use OGame\Combat\Support\ExactRatio;
+use OGame\Combat\Allocation\ExactLootAllocationV1;
+use OGame\Combat\Allocation\LootAllocator;
+use OGame\Combat\Allocation\LootAllocatorRegistry;
+use OGame\Combat\Policies\CargoWeightedV1;
+use OGame\Combat\Support\CombatParticipantKey;
+use OGame\Combat\Support\LootContext;
+use OGame\Combat\Support\ResourceNormalizationDiagnostics;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleetResult;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
@@ -11,7 +17,6 @@ use OGame\GameMissions\BattleEngine\Models\BattleResultRound;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleetResult;
 use OGame\GameMissions\BattleEngine\Services\DefenseRepairService;
-use OGame\GameMissions\BattleEngine\Services\LootService;
 use OGame\GameMissions\BattleEngine\Services\TacticalRetreatService;
 use OGame\GameObjects\Models\Enums\GameObjectType;
 use OGame\GameObjects\Models\Units\UnitCollection;
@@ -36,10 +41,28 @@ use RuntimeException;
 abstract class BattleEngine
 {
     /**
-     * @var int The percentage of loot that is gained from a battle.
-     * Base is 50%, but Discoverer class gets 75% from inactive players.
+     * Le taux de pillage de ce combat, en points de base.
+     *
+     * **En centiemes de pour-cent, jamais en pour-cent entiers.** La ponderation par le fret
+     * produit des taux comme 62,5 % : les tronquer a 62 ferait prendre moins que le taux
+     * annonce, et l'ecart grandirait avec le butin.
      */
-    private int $lootPercentage = 50;
+    protected int $lootRateInBasisPoints = CargoWeightedV1::BASE_RATE;
+
+    /**
+     * @var int Le meme taux en pour-cent entiers, pour le rapport de combat.
+     *
+     * Arrondi vers le bas : un rapport ne doit jamais annoncer plus que ce qui a ete pris.
+     */
+    protected int $lootPercentage = 50;
+
+    /**
+     * Ce que les conversions de ressources de ce combat ont rencontre.
+     *
+     * **Conserve, jamais journalise ici.** Un moteur qui journalise n est plus rejouable : rejouer
+     * les memes faits geles produirait un second journal. La mission agrege et ecrit une fois.
+     */
+    protected ResourceNormalizationDiagnostics $resourceDiagnostics;
 
     /**
      * @var bool Whether the attacking initiator withdraws if the defender flees.
@@ -53,19 +76,34 @@ abstract class BattleEngine
      * @param PlanetService $defenderPlanet The planet of the defender player (used for loot, moon calculation).
      * @param array<DefenderFleet> $defenders All defending fleets (planet owner + ACS defend fleets).
      * @param SettingsService $settings The settings service.
+     * @param LootContext $lootContext Les faits de pillage, deja photographies.
+     *
+     * ## Pourquoi le contexte est obligatoire
+     *
+     * Le moteur construisait lui-meme sa politique en interrogeant les modeles vivants. C'est juste
+     * pour une bataille instantanee, ou l'observation et le calcul se suivent d'un cheveu. Un combat
+     * persistant dure jusqu'a deux heures : la cible peut s'y connecter, un attaquant changer de
+     * classe, une recherche s'achever. Relire ces donnees a la resolution ferait dependre le butin de
+     * ce qui s'est passe **pendant** le combat.
+     *
+     * Il n'y a donc pas de valeur par defaut : un contexte construit d'office rendrait au moteur la
+     * decision qu'on vient de lui retirer, et accorderait au passage un droit de pillage aux combats
+     * qui n'en ont aucun.
      */
-    public function __construct(protected array $attackers, protected PlanetService $defenderPlanet, protected array $defenders, private SettingsService $settings)
+    public function __construct(protected array $attackers, protected PlanetService $defenderPlanet, protected array $defenders, private SettingsService $settings, protected LootContext $lootContext)
     {
-        // For backward compatibility, use the first attacker as the primary attacker
-        // For multi-attacker battles, we'll use combined fleet data for loot calculation
-        $primaryAttacker = $this->attackers[0] ?? null;
-        if ($primaryAttacker === null) {
+        if (($this->attackers[0] ?? null) === null) {
             throw new InvalidArgumentException('At least one attacker fleet is required');
         }
 
-        // Determine loot percentage based on character class and defender status
-        $characterClassService = app(CharacterClassService::class);
-        $this->lootPercentage = (int)($characterClassService->getInactiveLootPercentage($primaryAttacker->player->getUser()) * 100);
+        // Le contexte doit avoir ete photographie pour **ces** flottes et **cette** cible. Sans ce
+        // controle, rien n'empecherait d'appliquer le taux calcule sur le fret d'un combat aux
+        // flottes d'un autre.
+        $this->lootContext->ensureItBindsTo($this->attackers, CombatParticipantKey::forBody($this->defenderPlanet));
+
+        $this->resourceDiagnostics = ResourceNormalizationDiagnostics::none();
+        $this->lootRateInBasisPoints = $this->lootContext->rateInBasisPoints;
+        $this->lootPercentage = intdiv($this->lootRateInBasisPoints, 100);
     }
 
     /**
@@ -113,6 +151,15 @@ abstract class BattleEngine
 
         // Initialize the battle result object with the attacker and defender information.
         $result->lootPercentage = $this->lootPercentage;
+        $result->lootRateInBasisPoints = $this->lootRateInBasisPoints;
+
+        // Tout ce qu'il faudra pour expliquer ce butin sans le recalculer. Un rapport differe et un
+        // retour de flotte lisent ces valeurs ; ils ne repartissent rien de nouveau a l'echeance.
+        $result->lootPolicyVersion = $this->lootContext->policyVersion;
+        $result->lootAllocatorVersion = $this->lootContext->allocatorVersion;
+        $result->lootFrozenFacts = $this->lootContext->toFrozenFacts();
+        $result->lootSnapshotFingerprint = $this->lootContext->snapshotFingerprint;
+        $result->resourceDiagnostics = $this->resourceDiagnostics;
 
         // Use primary attacker for tech levels (first attacker in array)
         $primaryAttacker = $this->attackers[0];
@@ -378,17 +425,59 @@ abstract class BattleEngine
      *
      * @return Resources
      */
-    private function calculateLootCapacityConstrained(): Resources
+    protected function calculateLootCapacityConstrained(): Resources
     {
         $resources = $this->defenderPlanet->getResources();
         $loot = new Resources(
-            max(0, $resources->metal->get()) * ($this->lootPercentage / 100),
-            max(0, $resources->crystal->get()) * ($this->lootPercentage / 100),
-            max(0, $resources->deuterium->get()) * ($this->lootPercentage / 100),
+            $this->lootableAmount($resources->metal->get()),
+            $this->lootableAmount($resources->crystal->get()),
+            $this->lootableAmount($resources->deuterium->get()),
             0
         );
 
-        return LootService::distributeLoot($loot, $this->getTotalAttackerCargoCapacity());
+        // **Le moteur appelle la regle directement, sans passer par la facade.** Un combat traverse
+        // deja la facade cinq fois pendant sa resolution ; y ajouter le butin melangerait deux
+        // proprietaires pour une meme operation.
+        //
+        // Il ne journalise pas non plus : les diagnostics sont conserves sur le resultat, et la
+        // mission — le seul appelant qui voit l operation entiere — ecrira une fois.
+        $plafonne = $this->lootAllocator()->capByCargo($loot, $this->getTotalAttackerCargoCapacity());
+        $this->resourceDiagnostics = $this->resourceDiagnostics->mergedWith($plafonne->diagnostics);
+
+        return $plafonne->resources;
+    }
+
+    /**
+     * Ce qu'un stock permet de piller, au taux de ce combat.
+     *
+     * **Le stock est arrondi vers le bas avant le taux** : on ne peut pas prendre une fraction
+     * d'unite qui n'existe pas encore. La borne reservee, elle, arrondit vers le haut — c'est ce
+     * qui garantit qu'elle couvre toujours ce calcul-ci.
+     *
+     * @param float $inStock
+     * @return int
+     */
+    private function lootableAmount(float $inStock): int
+    {
+        $diagnostics = $this->resourceDiagnostics;
+        $montant = $this->lootAllocator()->lootableAmount($inStock, $this->lootRateInBasisPoints, ExactLootAllocationV1::PHASE_TARGET_LOOT, $diagnostics);
+        $this->resourceDiagnostics = $diagnostics;
+
+        return $montant;
+    }
+
+    /**
+     * La regle de pillage sous laquelle ce combat est calcule.
+     *
+     * **La version vient du contexte, jamais du registre.** Le registre dit quelle regle sert aux
+     * nouveaux combats ; celui-ci se reclame de la sienne, et changer la valeur par defaut ne doit
+     * rien changer a une instance deja ouverte.
+     *
+     * @return LootAllocator
+     */
+    protected function lootAllocator(): LootAllocator
+    {
+        return LootAllocatorRegistry::default()->forVersion($this->lootContext->allocatorVersion);
     }
 
     /**
@@ -442,6 +531,7 @@ abstract class BattleEngine
             $survivingCapacity = $attacker->getSurvivingCargoCapacity($fleetResult->unitsResult);
 
             $survivingCapacityByFleet[$fleetResult->fleetMissionId] = $survivingCapacity;
+            $fleetResult->survivingCargoCapacity = $survivingCapacity;
             $totalSurvivingCapacity += $survivingCapacity;
 
             // Carried resources survive at the same rate as cargo capacity.
@@ -487,12 +577,11 @@ abstract class BattleEngine
     }
 
     /**
-     * Distribute one resource type across attacker fleets proportionally by surviving capacity.
+     * Applique aux flottes ce que la regle versionnee leur attribue pour une ressource.
      *
-     * The allocation is performed in weighted passes so that:
-     * - integer rounding does not silently drop resources;
-     * - fleets never exceed their remaining cargo space;
-     * - leftover resources from capped fleets are redistributed to other eligible fleets.
+     * Le moteur ne decide plus de la repartition : il fournit les poids et la place restante, et
+     * inscrit le resultat. La regle — plus forts restes, priorite de l'initiateur, plafonnement par
+     * le fret — appartient a `ExactLootAllocationV1`, sous une version persistee avec le combat.
      *
      * @param int $resourceAmount
      * @param string $resourceName
@@ -512,109 +601,26 @@ abstract class BattleEngine
             return;
         }
 
-        $remainingAmount = $resourceAmount;
-        $initiatorFleetMissionId = $this->getInitiatorFleetMissionId();
+        $poids = [];
 
-        while ($remainingAmount > 0) {
-            $eligibleFleetIds = [];
-            $totalWeight = 0;
+        foreach ($result->attackerFleetResults as $fleetResult) {
+            $poids[$fleetResult->fleetMissionId] = $survivingCapacityByFleet[$fleetResult->fleetMissionId] ?? 0;
+        }
 
-            foreach ($result->attackerFleetResults as $fleetResult) {
-                $fleetMissionId = $fleetResult->fleetMissionId;
-                $survivingCapacity = $survivingCapacityByFleet[$fleetMissionId] ?? 0;
-                $remainingCapacity = $remainingLootCapacityByFleet[$fleetMissionId] ?? 0;
+        $parts = $this->lootAllocator()->shareBetweenFleets(
+            $resourceAmount,
+            $poids,
+            $remainingLootCapacityByFleet,
+            $this->getInitiatorFleetMissionId()
+        );
 
-                if ($survivingCapacity <= 0 || $remainingCapacity <= 0) {
-                    continue;
-                }
-
-                $eligibleFleetIds[] = $fleetMissionId;
-                $totalWeight += $survivingCapacity;
+        foreach ($parts as $fleetMissionId => $part) {
+            if ($part <= 0) {
+                continue;
             }
 
-            if ($totalWeight <= 0 || count($eligibleFleetIds) === 0) {
-                return;
-            }
-
-            // Les parts sont calculees en entiers exacts : le quotient et le reste sortent du meme
-            // calcul, sans qu'aucun produit trop grand ne soit forme.
-            //
-            // La division flottante qui se trouvait ici ecrivait d'abord
-            // `$remainingAmount * $capacite`, un produit qui bascule en flottant des les milliers de
-            // milliards, puis comparait les parts fractionnaires avec `!==`. Deux flottes ayant droit
-            // exactement a la meme fraction pouvaient alors etre departagees par le dernier bit d'un
-            // flottant, et l'ordre d'attribution des unites restantes cessait d'etre reproductible.
-            //
-            // La regle ne change pas : a denominateur commun, le reste classe dans le meme ordre que
-            // la partie fractionnaire qu'il remplace.
-            $divisions = [];
-            $allocatedThisPass = 0;
-
-            foreach ($eligibleFleetIds as $fleetMissionId) {
-                $division = ExactRatio::multiplyDivideWithRemainder(
-                    $remainingAmount,
-                    $survivingCapacityByFleet[$fleetMissionId],
-                    $totalWeight
-                );
-                $assignedShare = min($division->quotient, $remainingLootCapacityByFleet[$fleetMissionId]);
-
-                $divisions[$fleetMissionId] = $division;
-
-                if ($assignedShare > 0) {
-                    $this->addLootShareToFleet($result, $fleetMissionId, $resourceName, $assignedShare);
-                    $remainingLootCapacityByFleet[$fleetMissionId] -= $assignedShare;
-                    $allocatedThisPass += $assignedShare;
-                }
-            }
-
-            $remainingAmount -= $allocatedThisPass;
-            if ($remainingAmount <= 0) {
-                return;
-            }
-
-            $rankedFleetIds = $eligibleFleetIds;
-            usort($rankedFleetIds, function (int $left, int $right) use ($divisions, $survivingCapacityByFleet, $initiatorFleetMissionId): int {
-                $leftIsInitiator = $left === $initiatorFleetMissionId;
-                $rightIsInitiator = $right === $initiatorFleetMissionId;
-                if ($leftIsInitiator !== $rightIsInitiator) {
-                    return $rightIsInitiator <=> $leftIsInitiator;
-                }
-
-                // Un reste n'a de sens que rapporte a son denominateur. Ceux d'une meme passe le
-                // partagent par construction, mais la condition est verifiee plutot que supposee :
-                // comparer des restes de denominateurs differents reviendrait a comparer des
-                // fractions par leurs seuls numerateurs.
-                if ($divisions[$left]->isComparableWith($divisions[$right])
-                    && $divisions[$left]->remainder !== $divisions[$right]->remainder) {
-                    return $divisions[$right]->remainder <=> $divisions[$left]->remainder;
-                }
-
-                if ($survivingCapacityByFleet[$left] !== $survivingCapacityByFleet[$right]) {
-                    return $survivingCapacityByFleet[$right] <=> $survivingCapacityByFleet[$left];
-                }
-
-                return $left <=> $right;
-            });
-
-            $allocatedExtra = 0;
-            foreach ($rankedFleetIds as $fleetMissionId) {
-                if ($remainingAmount <= 0) {
-                    break;
-                }
-
-                if (($remainingLootCapacityByFleet[$fleetMissionId] ?? 0) <= 0) {
-                    continue;
-                }
-
-                $this->addLootShareToFleet($result, $fleetMissionId, $resourceName, 1);
-                $remainingLootCapacityByFleet[$fleetMissionId] -= 1;
-                $remainingAmount -= 1;
-                $allocatedExtra += 1;
-            }
-
-            if ($allocatedThisPass === 0 && $allocatedExtra === 0) {
-                return;
-            }
+            $this->addLootShareToFleet($result, $fleetMissionId, $resourceName, $part);
+            $remainingLootCapacityByFleet[$fleetMissionId] -= $part;
         }
     }
 

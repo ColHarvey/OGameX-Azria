@@ -21,6 +21,7 @@ use OGame\Models\FleetMission;
 use OGame\Models\FleetUnion;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
+use OGame\Models\User;
 use OGame\Services\FleetMissionService;
 use OGame\Services\FleetUnionService;
 use OGame\Services\MessageService;
@@ -452,7 +453,7 @@ abstract class GameMission
      */
     protected function checkAdminProtection(PlanetService|null $targetPlanet, string $errorMessage): MissionPossibleStatus|null
     {
-        if ($targetPlanet !== null && $targetPlanet->getPlayer()?->getUsername(false) === 'Legor') {
+        if ($targetPlanet !== null && $targetPlanet->getPlayer()?->getUsername(false) === User::SYSTEM_ACCOUNT_USERNAME) {
             return new MissionPossibleStatus(false, $errorMessage);
         }
         return null;

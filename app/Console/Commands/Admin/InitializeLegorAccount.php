@@ -25,7 +25,7 @@ class InitializeLegorAccount extends Command
     public function handle(PlanetServiceFactory $planetServiceFactory): int
     {
         // Check if Legor already exists (created by migration)
-        $legor = User::where('username', 'Legor')->first();
+        $legor = User::where('username', User::SYSTEM_ACCOUNT_USERNAME)->first();
 
         if ($legor) {
             // Legor exists, check if moon already exists
@@ -81,7 +81,7 @@ class InitializeLegorAccount extends Command
         if ($userId !== null) {
             $user->id = $userId;
         }
-        $user->username = 'Legor';
+        $user->username = User::SYSTEM_ACCOUNT_USERNAME;
         $user->email = 'legor@ogamex.local';
         $user->password = Hash::make(Str::random(32));
         $user->lang = 'en';

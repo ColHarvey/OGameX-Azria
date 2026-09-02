@@ -4,6 +4,7 @@ namespace Tests\Unit\Combat;
 
 use InvalidArgumentException;
 use OGame\Combat\Enums\HonorPolicy;
+use OGame\Combat\Policies\CargoWeightedV1;
 use OGame\Combat\Support\AttackerCargoShare;
 use OGame\Combat\Support\LootPolicy;
 use Tests\UnitTestCase;
@@ -157,8 +158,8 @@ class LootPolicyTest extends UnitTestCase
         for ($decouvreur = 0; $decouvreur <= $total; $decouvreur += 137) {
             $taux = (new LootPolicy(true, new AttackerCargoShare($decouvreur, $total)))->maximumRateInBasisPoints();
 
-            $this->assertGreaterThanOrEqual(LootPolicy::BASE_RATE, $taux);
-            $this->assertLessThanOrEqual(LootPolicy::BASE_RATE + LootPolicy::DISCOVERER_BONUS, $taux);
+            $this->assertGreaterThanOrEqual(CargoWeightedV1::BASE_RATE, $taux);
+            $this->assertLessThanOrEqual(CargoWeightedV1::BASE_RATE + CargoWeightedV1::DISCOVERER_BONUS, $taux);
         }
     }
 
@@ -197,7 +198,7 @@ class LootPolicyTest extends UnitTestCase
      */
     public function testThePolicyVersionIsNamed(): void
     {
-        $this->assertSame('cargo_weighted_v1', LootPolicy::VERSION);
+        $this->assertSame('cargo_weighted_v1', CargoWeightedV1::VERSION);
     }
 
     /**

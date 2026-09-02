@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\BattleEngine;
 
+use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\GameMissions\BattleEngine\BattleEngine;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleetResult;
@@ -243,6 +244,47 @@ class LootMonotonicityTest extends UnitTestCase
     }
 
     /**
+     * Le plafonnement par le fret ne perd plus d unites, et ce que cela a change.
+     *
+     * ## Le defaut, mesure
+     *
+     * L ancien plafonnement partageait la place restante par une division **flottante** :
+     * `$reste / $nombreDeRessources`. Il produisait des montants comme `17 794,666...`, que le
+     * moteur transtypait ensuite en entiers. Les unites tombees dans la fraction disparaissaient.
+     *
+     * Sur vingt mille repartitions tirees au hasard, **quarante pour cent perdaient une ou deux
+     * unites**, pour un total de dix mille sept cent quatre-vingt-une. Jamais plus de deux par
+     * combat, jamais au-dela du fret disponible : un defaut discret, et constant.
+     *
+     * ## Le cas ci-dessous, avant et apres
+     *
+     *     entree   : butin (37 991, 41 583, 20 836), fret total 53 384
+     *     avant    : (17 794,67, 17 794,67, 17 794,67) -> transtype (17 794, 17 794, 17 794) = 53 382
+     *     apres    : (17 795, 17 795, 17 794) = 53 384
+     *
+     * **La raison des deux unites deplacees** : 53 384 ne se divise pas par trois. Le quotient
+     * entier vaut 17 794, et il reste deux unites a placer. La regle exacte les attribue dans
+     * l ordre metal, cristal, deuterium — celui dans lequel le jeu enumere ses ressources partout
+     * ailleurs. L ancienne version les laissait dans une fraction que personne ne ramassait.
+     *
+     * Aucune compensation n a ete ajoutee pour imiter l ancien comportement : le butin etait
+     * simplement incomplet.
+     */
+    public function testTheCargoCapIsExactAndLosesNothing(): void
+    {
+        $plafonne = LootService::distributeLoot(new Resources(37_991, 41_583, 20_836, 0), 53_384);
+
+        $this->assertSame(17_795.0, $plafonne->metal->get());
+        $this->assertSame(17_795.0, $plafonne->crystal->get());
+        $this->assertSame(17_794.0, $plafonne->deuterium->get());
+        $this->assertSame(53_384.0, $plafonne->sum(), 'The cap must use the whole cargo, to the unit.');
+
+        // Et il ne depasse jamais le fret, meme quand le butin est bien plus petit que lui.
+        $petit = LootService::distributeLoot(new Resources(10, 20, 30, 0), 1_000);
+        $this->assertSame(60.0, $petit->sum(), 'Nothing was to be capped here.');
+    }
+
+    /**
      * Les deux regles de departage, chacune rendue observable separement.
      *
      * ## Pourquoi la fixture precedente ne suffisait pas
@@ -403,7 +445,8 @@ class LootMonotonicityTest extends UnitTestCase
             $flottes,
             $this->planetService,
             [DefenderFleet::fromPlanet($this->planetService)],
-            $this->settingsService
+            $this->settingsService,
+            LiveLootContextFactory::forBattle($flottes, $this->planetService)
         );
 
         $resultat = new BattleResult();

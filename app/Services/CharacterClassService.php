@@ -591,6 +591,22 @@ class CharacterClassService
      * Get inactive player loot percentage (Discoverer only).
      * Returns percentage (e.g., 0.75 for 75%).
      *
+     * **Ne sert plus a fixer le taux de pillage d'un combat.** Le nom promet plus que la methode ne
+     * fait : elle recoit l'attaquant et ne regarde jamais si la cible est reellement inactive. Le
+     * moteur l'appelait pourtant pour cela, sur le premier attaquant de la collection, ce qui
+     * faisait dependre le butin de toute une attaque groupee de l'ordre d'un tableau.
+     *
+     * Le taux d'un combat vient desormais de `OGame\Combat\Support\LootPolicy`, qui croise
+     * l'inactivite constatee de la cible et la part de fret engagee par des Decouvreurs. Cette
+     * methode-ci ne decrit plus que le bonus nominal de la classe, tel que l'interface l'annonce.
+     *
+     * Elle est conservee pour la compatibilite avec le depot amont, et non parce qu'elle sert
+     * encore : `LootPolicyUsageTest` echoue si elle reapparait dans le moteur de combat ou dans
+     * `app/Combat/`.
+     *
+     * @deprecated Le taux d'un combat vient de `OGame\Combat\Support\LootPolicy`. Cette methode ne
+     *             consulte pas l'etat de la cible et ne doit plus servir a fixer un pillage.
+     *
      * @param User $user
      * @return float
      */

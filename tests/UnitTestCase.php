@@ -30,7 +30,10 @@ abstract class UnitTestCase extends TestCase
     /**
      * Helper method to create a planet model and configure it.
      *
-     * @param array<string, int> $attributes
+     * Les colonnes de ressources sont des `double` : un stock peut porter une fraction, et un essai
+     * doit pouvoir en poser une.
+     *
+     * @param array<string, int|float> $attributes
      * @throws Exception
      */
     protected function createAndSetPlanetModel(array $attributes): void
@@ -46,8 +49,11 @@ abstract class UnitTestCase extends TestCase
             $planetModelFake = Planet::factory()->make($attributes);
 
             // Set a fake ID if not provided (needed for database queries in services)
+            //
+            // La valeur est ecrite en clair : dans cette branche, `$attributes['id']` est par
+            // definition absent, et le `?? 1` qui s y trouvait ne pouvait rendre que 1.
             if (!isset($attributes['id'])) {
-                $planetModelFake->id = $attributes['id'] ?? 1;
+                $planetModelFake->id = 1;
             }
         } catch (Exception $e) {
             $this->fail('Failed to create fake planet model: ' . $e->getMessage());

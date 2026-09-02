@@ -343,7 +343,7 @@ class NpcReport extends Command
     private function reportNewcomers(): void
     {
         $recents = User::where('is_npc', false)
-            ->where('username', '!=', 'Legor')
+            ->where('username', '!=', User::SYSTEM_ACCOUNT_USERNAME)
             ->orderByDesc('created_at')
             ->limit(5)
             ->get();

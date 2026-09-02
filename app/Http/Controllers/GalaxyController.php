@@ -15,6 +15,7 @@ use OGame\Models\FleetMission;
 use OGame\Models\Highscore;
 use OGame\Models\Planet;
 use OGame\Models\Planet\Coordinate;
+use OGame\Models\User;
 use OGame\Services\BuddyService;
 use OGame\Services\CharacterClassService;
 use OGame\Services\DebrisFieldService;
@@ -315,7 +316,7 @@ class GalaxyController extends OGameController
 
         if ($targetPlayer->getId() !== $this->playerService->getId()) {
             // Skip aggressive missions (Espionage, Attack) against Legor
-            $isLegor = $targetPlayer->getUsername(false) === 'Legor';
+            $isLegor = $targetPlayer->getUsername(false) === User::SYSTEM_ACCOUNT_USERNAME;
 
             if (!$isLegor) {
                 // Espionage (only if foreign planet and not Legor).

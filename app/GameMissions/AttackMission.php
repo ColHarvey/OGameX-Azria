@@ -3,6 +3,11 @@
 namespace OGame\GameMissions;
 
 use OGame\Combat\Services\CombatResolutionService;
+use OGame\Combat\Support\CombatParticipantKey;
+use OGame\Combat\Support\LootContextForMission;
+use OGame\Combat\Support\OperationKey;
+use OGame\Combat\Support\ResourceDiagnosticsJournal;
+use OGame\Combat\Support\SealedResourceDiagnostics;
 use OGame\Enums\FleetMissionStatus;
 use OGame\Enums\FleetSpeedType;
 use OGame\GameMissions\Abstracts\GameMission;
@@ -136,15 +141,20 @@ class AttackMission extends GameMission
         // Collect all defending fleets (planet owner + ACS defend fleets)
         $defenders = $this->collectDefendingFleets($defenderPlanet);
 
+        // **Une attaque pille.** Les faits sont photographies ici, une fois, et pour les deux
+        // moteurs : l'inactivite de la cible et le fret engage doivent etre les memes quel que
+        // soit le moteur configure.
+        $lootContext = LootContextForMission::lootingOrDegraded($attackerFleets, $defenderPlanet, 'attack', $mission->id);
+
         // Execute the battle logic using configured battle engine
         switch ($this->settings->battleEngine()) {
             case 'php':
-                $battleEngine = new PhpBattleEngine($attackerFleets, $defenderPlanet, $defenders, $this->settings);
+                $battleEngine = new PhpBattleEngine($attackerFleets, $defenderPlanet, $defenders, $this->settings, $lootContext);
                 break;
             case 'rust':
             default:
                 // Default to RustBattleEngine if no specific engine is configured
-                $battleEngine = new RustBattleEngine($attackerFleets, $defenderPlanet, $defenders, $this->settings);
+                $battleEngine = new RustBattleEngine($attackerFleets, $defenderPlanet, $defenders, $this->settings, $lootContext);
                 break;
         }
 
@@ -170,7 +180,7 @@ class AttackMission extends GameMission
         //
         // startReturn() est protected ici : la fermeture la rend accessible au service sans
         // elargir sa visibilite pour tout le monde.
-        resolve(CombatResolutionService::class)->resolve(
+        $resolution = resolve(CombatResolutionService::class)->resolve(
             $mission,
             $battleResult,
             $defenderPlanet,
@@ -183,6 +193,23 @@ class AttackMission extends GameMission
             function (FleetMission $retourDe, Resources $ressources, UnitCollection $unites, int $tempsSupplementaire = 0, array|null $epaves = null, int|null $dureeImposee = null): void {
                 $this->startReturn($retourDe, $ressources, $unites, $tempsSupplementaire, $epaves, $dureeImposee);
             },
+        );
+
+        // **Le seul journal de l operation, et la fusion de ses deux sources.**
+        //
+        // Le moteur a fige ses diagnostics dans le resultat ; la resolution a rendu les siens
+        // separement, parce qu ils appartiennent a l application du resultat et non a son calcul.
+        // La mission est le seul appelant qui voie l attaque entiere, et le seul a connaitre son
+        // identite.
+        // **Chaque source est scellee avant la fusion, jamais apres.** Fusionner deux collections
+        // brutes puis apposer une cle effacerait justement l'information qui permet de constater
+        // qu'elles ne viennent pas de la meme operation.
+        $operation = OperationKey::forFleetMission($mission);
+
+        ResourceDiagnosticsJournal::report(
+            SealedResourceDiagnostics::seal($operation, $battleResult->resourceDiagnostics)
+                ->mergedWith(SealedResourceDiagnostics::seal($operation, $resolution->diagnostics)),
+            ['target_body' => CombatParticipantKey::forBody($defenderPlanet)]
         );
     }
 

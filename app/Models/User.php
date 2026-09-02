@@ -102,6 +102,19 @@ class User extends Authenticatable
     use HasRoles;
     use Impersonate;
     use Notifiable;
+    /**
+     * Le nom du compte systeme.
+     *
+     * **Une seule source, parce que ce nom est un identifiant deguise.** Il decidait jusqu ici, en
+     * clair et en onze endroits, qui est exclu des classements, qui ne peut pas etre attaque, et
+     * quel compte la generation de rangs ignore. Une faute de frappe dans l un d eux se serait vue
+     * a l usage, pas a la lecture.
+     *
+     * A terme, une colonne explicite vaudrait mieux qu un nom d utilisateur : un joueur qui
+     * choisirait ce pseudonyme heriterait de tous ces traitements. C est un chantier additif
+     * separe ; centraliser la chaine en est le prealable.
+     */
+    public const string SYSTEM_ACCOUNT_USERNAME = 'Legor';
 
     /**
      * Disable use of default "remember_token" laravel behavior.
@@ -119,12 +132,12 @@ class User extends Authenticatable
         // Automatically assign admin role to the first non-Legor user
         static::created(function (User $user) {
             // Skip Legor
-            if ($user->username === 'Legor') {
+            if ($user->username === self::SYSTEM_ACCOUNT_USERNAME) {
                 return;
             }
 
             // Check if this is the first non-Legor user
-            $nonLegorUserCount = User::where('username', '!=', 'Legor')->where('id', '!=', $user->id)->count();
+            $nonLegorUserCount = User::where('username', '!=', self::SYSTEM_ACCOUNT_USERNAME)->where('id', '!=', $user->id)->count();
 
             if ($nonLegorUserCount === 0) {
                 // This is the first real user - assign admin role and rename to Admin

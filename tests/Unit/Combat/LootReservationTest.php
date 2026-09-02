@@ -5,6 +5,7 @@ namespace Tests\Unit\Combat;
 use OGame\Combat\Enums\LootReservationState;
 use OGame\Combat\Enums\ReservationRaise;
 use OGame\Combat\Exceptions\LootReservationRefused;
+use OGame\Combat\Policies\CargoWeightedV1;
 use OGame\Combat\Support\AttackerCargoShare;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\LootEnvelope;
@@ -193,8 +194,8 @@ class LootReservationTest extends UnitTestCase
         $contexte = new LootPolicy(true, new AttackerCargoShare(300, 1_000));
         $borne = $this->borneDe($contexte, new LootEnvelope(1_000, 800, 200));
 
-        $victoire = LootReservation::open('res-a', 1, CombatParticipantKey::forPlanet(1), LootPolicy::VERSION, $borne);
-        $defaite = LootReservation::open('res-b', 2, CombatParticipantKey::forPlanet(2), LootPolicy::VERSION, $borne);
+        $victoire = LootReservation::open('res-a', 1, CombatParticipantKey::forPlanet(1), CargoWeightedV1::VERSION, $borne);
+        $defaite = LootReservation::open('res-b', 2, CombatParticipantKey::forPlanet(2), CargoWeightedV1::VERSION, $borne);
 
         $victoire->seal('photo-a');
         $defaite->seal('photo-b');
@@ -224,7 +225,7 @@ class LootReservationTest extends UnitTestCase
 
         // L'initiateur est Decouvreur, seul : 75 %.
         $seul = new LootPolicy(true, new AttackerCargoShare(1_000, 1_000));
-        $reservation = LootReservation::open('res-1', 1, CombatParticipantKey::forPlanet(1), LootPolicy::VERSION, $this->borneDe($seul, $enCaisse));
+        $reservation = LootReservation::open('res-1', 1, CombatParticipantKey::forPlanet(1), CargoWeightedV1::VERSION, $this->borneDe($seul, $enCaisse));
 
         $this->assertTrue($reservation->reserved()->equals(new LootEnvelope(750, 750, 750)));
 
@@ -253,7 +254,7 @@ class LootReservationTest extends UnitTestCase
         $enCaisse = new LootEnvelope(1_000, 1_000, 1_000);
 
         $sansDecouvreur = new LootPolicy(true, new AttackerCargoShare(0, 1_000));
-        $reservation = LootReservation::open('res-1', 1, CombatParticipantKey::forPlanet(1), LootPolicy::VERSION, $this->borneDe($sansDecouvreur, $enCaisse));
+        $reservation = LootReservation::open('res-1', 1, CombatParticipantKey::forPlanet(1), CargoWeightedV1::VERSION, $this->borneDe($sansDecouvreur, $enCaisse));
 
         $this->assertTrue($reservation->reserved()->equals(new LootEnvelope(500, 500, 500)));
 
@@ -271,15 +272,15 @@ class LootReservationTest extends UnitTestCase
         $taux = $politique->maximumRateInBasisPoints();
 
         return new LootEnvelope(
-            floor($enCaisse->metal * $taux / LootPolicy::FULL_RATE),
-            floor($enCaisse->crystal * $taux / LootPolicy::FULL_RATE),
-            floor($enCaisse->deuterium * $taux / LootPolicy::FULL_RATE),
+            floor($enCaisse->metal * $taux / CargoWeightedV1::FULL_RATE),
+            floor($enCaisse->crystal * $taux / CargoWeightedV1::FULL_RATE),
+            floor($enCaisse->deuterium * $taux / CargoWeightedV1::FULL_RATE),
         );
     }
 
     private function ouverte(LootEnvelope $borne): LootReservation
     {
-        return LootReservation::open('res-1', 77, CombatParticipantKey::forPlanet(1_234), LootPolicy::VERSION, $borne);
+        return LootReservation::open('res-1', 77, CombatParticipantKey::forPlanet(1_234), CargoWeightedV1::VERSION, $borne);
     }
 
     private function scellee(LootEnvelope $borne): LootReservation

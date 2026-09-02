@@ -62,7 +62,7 @@ class NpcPopulationService
         $scores = DB::table('highscores')
             ->join('users', 'users.id', '=', 'highscores.player_id')
             ->where('users.is_npc', false)
-            ->where('users.username', '!=', 'Legor')
+            ->where('users.username', '!=', User::SYSTEM_ACCOUNT_USERNAME)
             // users.time est une colonne texte qui contient un horodatage. L'addition force
             // la comparaison numerique, et elle le fait aussi bien sur MariaDB que sur le
             // SQLite des tests, la ou un CAST ... AS UNSIGNED n'existerait que sur l'un des

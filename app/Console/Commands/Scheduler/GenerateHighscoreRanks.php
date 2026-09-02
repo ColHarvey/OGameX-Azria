@@ -62,7 +62,7 @@ class GenerateHighscoreRanks extends Command
         $this->info("\nUpdating player highscore ranks for $type->name...");
 
         // Set Legor's rank to 0 (Legor is excluded from highscore, ranked players start at 1)
-        $legor = User::where('username', 'Legor')->first();
+        $legor = User::where('username', User::SYSTEM_ACCOUNT_USERNAME)->first();
         if ($legor) {
             $legorHighscore = Highscore::where('player_id', $legor->id)->first();
             if ($legorHighscore) {
@@ -109,7 +109,7 @@ class GenerateHighscoreRanks extends Command
         // Admin users are excluded if the highscore_admin_visible setting is disabled.
         $query = Highscore::query()
             ->join('users', 'highscores.player_id', '=', 'users.id')
-            ->where('users.username', '!=', 'Legor')
+            ->where('users.username', '!=', User::SYSTEM_ACCOUNT_USERNAME)
             ->where('users.is_npc', false)
             ->select('highscores.*')
             ->orderByDesc($type->name)

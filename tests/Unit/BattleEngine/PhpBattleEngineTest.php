@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\BattleEngine;
 
+use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\GameMissions\BattleEngine\BattleEngine;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\PhpBattleEngine;
@@ -40,7 +41,8 @@ class PhpBattleEngineTest extends BattleEngineTestAbstract
             [$attacker],
             $this->planetService,
             $defenders,
-            $this->settingsService
+            $this->settingsService,
+            LiveLootContextFactory::forBattle([$attacker], $this->planetService)
         );
     }
 }
