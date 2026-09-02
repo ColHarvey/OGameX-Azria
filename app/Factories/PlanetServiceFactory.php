@@ -351,18 +351,28 @@ class PlanetServiceFactory
             $planetCount = Planet::where('galaxy', $galaxy)->where('system', $system)->count();
 
             if ($planetCount < $maxPlanetsForTier) {
+                // Les positions deja prises du systeme, en une seule requete plutot qu'une par
+                // case essayee. Aucun filtre sur le type : une lune ou un champ de debris
+                // occupe la case aussi surement qu'une planete.
+                $takenPositions = Planet::where('galaxy', $galaxy)
+                    ->where('system', $system)
+                    ->pluck('planet')
+                    ->map(fn ($takenPosition): int => (int)$takenPosition)
+                    ->all();
+
                 // Find a random position between 4 and 12 that's not already taken
                 $positions = range(4, 12);
                 shuffle($positions);
 
                 foreach ($positions as $position) {
-                    $existingPlanet = Planet::where('galaxy', $galaxy)->where('system', $system)->where('planet', $position)->first();
-                    if (!$existingPlanet) {
-                        // Update last assigned position for next time
-                        $this->settings->set('last_assigned_galaxy', $galaxy);
-                        $this->settings->set('last_assigned_system', $system);
-                        return new Coordinate($galaxy, $system, $position);
+                    if (!$this->positionIsFreeAndSpaced($position, $takenPositions)) {
+                        continue;
                     }
+
+                    // Update last assigned position for next time
+                    $this->settings->set('last_assigned_galaxy', $galaxy);
+                    $this->settings->set('last_assigned_system', $system);
+                    return new Coordinate($galaxy, $system, $position);
                 }
             }
 
@@ -385,6 +395,35 @@ class PlanetServiceFactory
 
         // If more than 100 tries have been done with no success, give up.
         throw new RuntimeException('Unable to determine new planet position. Universe may be full.');
+    }
+
+    /**
+     * Indique si une case est libre **et** separee des planetes voisines.
+     *
+     * L'ancien tirage prenait la premiere case libre venue parmi 4 a 12. Deux comptes crees a la
+     * suite dans le meme systeme se retrouvaient donc regulierement colles — mesure faite sur
+     * douze inscriptions : trois paires adjacentes, en 10-11, 8-9 et 5-6.
+     *
+     * Une case vide est desormais laissee entre deux planetes. Les positions 4 a 12 en accueillent
+     * encore cinq (4, 6, 8, 10, 12), soit bien plus que les deux ou trois du palier de densite
+     * courant : l'espacement ne coute donc aucune place en pratique.
+     *
+     * Quand un systeme n'a plus de case espacee, il est simplement passe — la boucle appelante
+     * essaie le suivant. Aucune planete n'est collee faute de mieux.
+     *
+     * @param int $position La case envisagee.
+     * @param array<int, int> $takenPositions Les cases deja occupees du systeme.
+     * @return bool
+     */
+    private function positionIsFreeAndSpaced(int $position, array $takenPositions): bool
+    {
+        foreach ([$position - 1, $position, $position + 1] as $occupied) {
+            if (in_array($occupied, $takenPositions, true)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
