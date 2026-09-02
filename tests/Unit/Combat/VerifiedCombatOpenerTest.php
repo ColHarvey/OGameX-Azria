@@ -8,6 +8,7 @@ use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Enums\FlightLeg;
 use OGame\Combat\Exceptions\NotTheCombatOpener;
 use OGame\Combat\Support\CombatOpenerClaim;
+use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\EffectOrderKey;
 use OGame\Combat\Support\PersistedCombatOpener;
 use OGame\Combat\Support\VerifiedCombatOpener;
@@ -25,7 +26,7 @@ use Tests\UnitTestCase;
 class VerifiedCombatOpenerTest extends UnitTestCase
 {
     private const int INSTANCE = 77;
-    private const string CIBLE = 'planet:1234';
+    private const int CIBLE_ID = 1_234;
     private const int ARRIVEE = 1_000;
 
     /**
@@ -36,7 +37,7 @@ class VerifiedCombatOpenerTest extends UnitTestCase
         $verifie = VerifiedCombatOpener::verify($this->persistedOpener(), $this->claim());
 
         $this->assertSame(self::INSTANCE, $verifie->combatInstanceId);
-        $this->assertSame(self::CIBLE, $verifie->targetBodyKey);
+        $this->assertSame(self::cible(), $verifie->targetBodyKey);
         $this->assertSame(self::ARRIVEE, $verifie->plannedArrival);
         $this->assertSame(CombatMissionKind::Attack, $verifie->missionKind);
         $this->assertSame(ActorKind::Player, $verifie->actorKind);
@@ -194,6 +195,20 @@ class VerifiedCombatOpenerTest extends UnitTestCase
     }
 
     /**
+     * La cible de ces essais.
+     *
+     * Une methode et non une constante : la forme de la cle appartient a sa fabrique, et une
+     * constante ne peut pas l appeler. L ecrire en clair ici en ferait une seconde orthographe
+     * de la meme identite — exactement ce que la contrainte d unicite ne saurait pas rattraper.
+     *
+     * @return string
+     */
+    private static function cible(): string
+    {
+        return CombatParticipantKey::forPlanet(self::CIBLE_ID);
+    }
+
+    /**
      * Ce que l instance de combat enregistre sur son initiateur.
      */
     private function persistedOpener(): PersistedCombatOpener
@@ -201,7 +216,7 @@ class VerifiedCombatOpenerTest extends UnitTestCase
         return new PersistedCombatOpener(
             self::INSTANCE,
             EffectOrderKey::forEvent(self::ARRIVEE, CombatEventType::FleetArrival, 42),
-            self::CIBLE,
+            self::cible(),
             self::ARRIVEE,
             500,
         );
@@ -212,7 +227,7 @@ class VerifiedCombatOpenerTest extends UnitTestCase
      */
     private function claim(
         EffectOrderKey|null $eventKey = null,
-        string $targetBodyKey = self::CIBLE,
+        string|null $targetBodyKey = null,
         FlightLeg $leg = FlightLeg::Outbound,
         CombatMissionKind $missionKind = CombatMissionKind::Attack,
         ActorKind $actorKind = ActorKind::Player,
@@ -220,7 +235,7 @@ class VerifiedCombatOpenerTest extends UnitTestCase
     ): CombatOpenerClaim {
         return new CombatOpenerClaim(
             $eventKey ?? EffectOrderKey::forEvent(self::ARRIVEE, CombatEventType::FleetArrival, 42),
-            $targetBodyKey,
+            $targetBodyKey ?? self::cible(),
             $leg,
             $missionKind,
             $actorKind,
