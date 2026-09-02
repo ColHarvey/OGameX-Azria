@@ -5,11 +5,11 @@ namespace OGame\Combat\Enums;
 /**
  * Les seules raisons pour lesquelles un combat peut etre annule.
  *
- * L'etat `Cancelled` n'est accessible que depuis `Pending` — la fenetre entre l'arrivee de la
- * flotte et le premier round. Cette fenetre est courte, mais elle existe, et **aucun joueur ne
- * doit pouvoir s'y engouffrer** : le resultat y est deja calcule, donc deja connaissable par
- * qui saurait le lire. Un rappel accepte a ce moment-la reviendrait a effacer une bataille
- * perdue d'avance.
+ * L'etat `Cancelled` n'est accessible que depuis `Rallying` — la fenetre de soixante secondes
+ * pendant laquelle les flottes se rassemblent. Elle est courte, mais elle existe, et **aucun
+ * joueur ne doit pouvoir s'y engouffrer** : c'est precisement le moment ou un attaquant voit
+ * arriver les renforts du defenseur. Un retrait accepte la reviendrait a laisser fuir celui qui
+ * a compris qu'il allait perdre.
  *
  * D'ou cette enumeration : l'annulation exige une cause, et **aucune cause n'est a la main d'un
  * joueur**. Ce n'est pas un commentaire qu'on peut oublier de lire, c'est une valeur qu'il faut

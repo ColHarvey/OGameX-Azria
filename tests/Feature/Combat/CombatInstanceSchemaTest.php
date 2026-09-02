@@ -339,7 +339,7 @@ class CombatInstanceSchemaTest extends UnitTestCase
     private function unCombat(array $remplace): array
     {
         return array_merge([
-            'status' => CombatState::Pending,
+            'status' => CombatState::Rallying,
             'mission_id' => 1,
             'target_planet_id' => 1,
             'target_type' => 1,

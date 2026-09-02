@@ -10,11 +10,26 @@ namespace OGame\Combat\Enums;
  *
  * Le cycle nominal :
  *
- *     EnAttente ─→ Actif ─→ Resolution ─→ Termine
+ *     Ralliement ─→ Actif ─→ Resolution ─→ Termine
  *
- * `EnAttente` couvre la fenetre entre l'arrivee de la flotte et le debut du combat : le
- * resultat y est deja calcule et fige, mais rien n'est encore applique. C'est le moment ou le
- * verrou se pose.
+ * `Ralliement` couvre les soixante secondes qui suivent l'arrivee de la premiere attaque.
+ * **Rien n'y est encore calcule** — c'est toute la difference avec la conception precedente,
+ * ou le resultat etait fige des l'arrivee.
+ *
+ * Cette fenetre existe pour les vagues. Dans OGame, on lance plusieurs attaques a quelques
+ * secondes d'intervalle sur la meme cible ; un combat qui dure deux heures et une vague qui
+ * arrive cinq secondes plus tard sont en conflit direct. La fenetre les reconcilie : les
+ * flottes qui arrivent pendant ces soixante secondes rejoignent **la meme bataille**, et la
+ * photo n'est prise qu'a la fermeture. Un instantane, un calcul, un resultat — la garantie
+ * centrale du systeme est intacte, et les vagues restent jouables.
+ *
+ * **La fenetre ne se prolonge jamais.** Une arrivee tardive ne la rouvre pas et ne la
+ * repousse pas : elle dure soixante secondes a partir de la premiere attaque, un point c'est
+ * tout. Sans cette regle, un attaquant pourrait la maintenir ouverte indefiniment en faisant
+ * arriver une sonde toutes les cinquante secondes.
+ *
+ * Le verrou du corps celeste se pose des la premiere arrivee, donc des l'entree en
+ * `Ralliement`.
  *
  * `Resolution` est court mais indispensable : il marque qu'un processus applique le resultat.
  * Sans lui, deux workers pourraient croire tous deux qu'un combat `Actif` arrive a echeance
@@ -31,9 +46,9 @@ namespace OGame\Combat\Enums;
 enum CombatState: string
 {
     /**
-     * Le resultat est calcule et fige, le combat n'a pas commence.
+     * La fenetre de ralliement est ouverte : les flottes se rassemblent, rien n'est calcule.
      */
-    case Pending = 'pending';
+    case Rallying = 'rallying';
 
     /**
      * Le combat se deroule. Le corps celeste vise est verrouille.
@@ -63,7 +78,7 @@ enum CombatState: string
     public function allowedTransitions(): array
     {
         return match ($this) {
-            self::Pending => [self::Active, self::Cancelled],
+            self::Rallying => [self::Active, self::Cancelled],
             self::Active => [self::Resolving],
             self::Resolving => [self::Resolved],
             // Deux etats terminaux : rien n'en sort, et c'est ce qui rend la resolution
@@ -92,9 +107,10 @@ enum CombatState: string
     /**
      * Get whether the targeted celestial body is locked in this state.
      *
-     * Le verrou couvre `Pending` autant qu'`Active` : entre l'arrivee de la flotte et le
-     * premier round, le resultat est deja fige. Laisser partir une flotte dans cette fenetre
-     * la ferait echapper a une bataille qui la compte deja parmi les defenseurs.
+     * Le verrou couvre `Rallying` autant qu'`Active`, et il se pose des la premiere arrivee.
+     * Pendant le ralliement rien n'est encore calcule, mais les forces presentes sont deja
+     * celles qui composeront la photo : laisser partir une flotte dans cette fenetre la ferait
+     * echapper a une bataille dont elle fait partie.
      *
      * `Resolving` reste verrouille : le resultat s'applique, et rien ne doit bouger pendant
      * qu'on retire des pertes et distribue un butin.
@@ -102,7 +118,7 @@ enum CombatState: string
     public function locksTargetBody(): bool
     {
         return match ($this) {
-            self::Pending, self::Active, self::Resolving => true,
+            self::Rallying, self::Active, self::Resolving => true,
             self::Resolved, self::Cancelled => false,
         };
     }
@@ -110,9 +126,12 @@ enum CombatState: string
     /**
      * Get whether the attacking fleet may still be recalled.
      *
-     * Regle arretee : le rappel n'est possible qu'**avant l'arrivee**, donc avant qu'un combat
-     * existe. Des qu'il en existe un — meme a l'etat `Pending`, avant le premier round — la
-     * flotte y est engagee et son resultat est deja calcule.
+     * Regle arretee : le rappel **volontaire** n'est possible qu'avant l'arrivee. Des qu'une
+     * flotte est admise dans un combat, elle y est engagee et ne peut plus en sortir.
+     *
+     * A ne pas confondre avec le demi-tour automatique d'une flotte arrivee trop tard : celui-la
+     * n'est pas un rappel demande par le joueur, c'est le serveur qui constate qu'elle n'a plus
+     * rien a faire la. Le joueur ne choisit ni l'un ni l'autre.
      *
      * Aucun etat ne rend donc vrai : il n'y a pas d'etat de combat dans lequel un rappel soit
      * acceptable.
@@ -126,9 +145,9 @@ enum CombatState: string
      * Get whether this state may be cancelled for the given cause.
      *
      * L'annulation **exige une cause**, et aucune cause n'est a la main d'un joueur. C'est ce
-     * qui ferme la fenetre entre l'arrivee et le premier round : elle est courte, mais le
-     * resultat y est deja calcule, donc deja connaissable par qui saurait le lire. Un rappel
-     * accepte a ce moment-la reviendrait a effacer une bataille perdue d'avance.
+     * qui ferme la fenetre de ralliement a tout retrait : elle dure une minute, pendant
+     * laquelle un attaquant voit arriver les renforts du defenseur. Un rappel accepte la
+     * reviendrait a laisser fuir celui qui a compris qu'il allait perdre.
      *
      * Exiger une valeur plutot que documenter une intention : on ne peut pas oublier de la
      * fournir, et il n'en existe aucune qui conviendrait a un rappel.

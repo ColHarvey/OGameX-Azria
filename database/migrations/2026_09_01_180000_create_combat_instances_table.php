@@ -3,6 +3,7 @@
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use OGame\Combat\Enums\CombatState;
 
 /*
  * Une bataille qui dure.
@@ -43,7 +44,7 @@ return new class () extends Migration {
             $table->id();
 
             // pending / active / resolving / resolved / cancelled — voir CombatState.
-            $table->string('status', 16)->default('pending');
+            $table->string('status', 16)->default(CombatState::Rallying->value);
 
             // La cause d'annulation, quand il y en a une. Aucune n'est a la main d'un joueur.
             $table->string('cancellation_cause', 32)->nullable();

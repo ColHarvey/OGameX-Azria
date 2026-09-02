@@ -101,36 +101,60 @@ class CombatLockedActions
     }
 
     /**
-     * Le cas qui n'est **pas** tranche, et qui ne doit pas l'etre par accident.
+     * Les cas encore en suspens. **Il n'y en a plus.**
      *
-     * Une attaque hostile deja en vol vers un corps celeste qui entre en combat : c'est le
-     * probleme des vagues. Les combats longs et les vagues successives a quelques secondes
-     * d'intervalle — un pilier d'OGame — entrent en conflit direct.
+     * Ce tableau a porte pendant tout le chantier le probleme des vagues : une attaque hostile
+     * deja en vol vers un corps celeste qui entre en combat. Il est desormais tranche — voir
+     * `CombatRallyWindow` — et le cas en est retire.
      *
-     * Quatre options existent, aucune n'est neutre :
-     *
-     * 1. **Rejoindre le combat en cours.** Fidele a l'esprit des vagues, mais la photo est
-     *    deja prise : il faudrait la rouvrir, ce qui defait la garantie centrale du systeme.
-     * 2. **Attendre la fin, puis ouvrir un nouveau combat.** Techniquement propre, mais une
-     *    seconde vague lancee cinq secondes apres la premiere arriverait deux heures plus tard :
-     *    la mecanique des vagues disparait.
-     * 3. **Refuser l'arrivee et renvoyer la flotte.** Le plus simple, et le plus brutal.
-     * 4. **Resoudre le combat round par round**, une vague arrivee entre deux rounds rejoignant
-     *    le round suivant. C'est la seule option qui preserve vraiment les vagues — et de loin
-     *    la plus lourde : il faudrait renoncer a calculer et figer le resultat complet a
-     *    l'arrivee, donc rendre **les deux moteurs, PHP et Rust, reprenables apres chaque
-     *    round**. C'est un autre projet, pas une variante de celui-ci.
-     *
-     * Les trois premieres sont mauvaises chacune a leur facon ; la quatrieme est bonne et hors
-     * de portee du prototype. Aucune n'est implementee. Ce commentaire existe pour que le
-     * comportement ne surgisse pas d'un choix par defaut que personne n'aurait fait.
+     * Le tableau reste, vide, et le test qui le surveillait aussi : c'est ici que se declarera
+     * la prochaine question a laquelle personne n'a repondu. Un cas ecrit ici est un cas qu'on
+     * s'interdit de resoudre par un comportement par defaut.
      *
      * @return array<int, string>
      */
     public static function undecidedCases(): array
     {
+        return [];
+    }
+
+    /**
+     * La decision prise sur les vagues, et les quatre options ecartees.
+     *
+     * Ecrite ici parce qu'une decision de jeu qui ne survit pas a la memoire de celui qui l'a
+     * prise n'a pas ete prise : elle a ete devinee.
+     *
+     * **Retenu — la fenetre de ralliement.** Le combat ne demarre pas a l'arrivee de la premiere
+     * flotte : il s'ouvre pour soixante secondes fixes, pendant lesquelles les vagues du meme
+     * attaquant et les membres de son alliance rejoignent la meme bataille. La photo est prise a
+     * la fermeture, une seule fois.
+     *
+     * **Ni file d'attente ni second combat automatique.** Une premiere version faisait attendre
+     * les flottes tardives au-dessus de la cible pour ouvrir le ralliement suivant ; elle a ete
+     * ecartee parce qu'elle transformait une cible en file d'attente ou des flottes s'empilaient
+     * sans que leur proprietaire puisse rien en faire. Une attaque arrivee trop tard, ou
+     * etrangere a l'alliance attaquante, **fait demi-tour** par la mecanique normale de rappel :
+     * vaisseaux et fret reviennent, sans second cout de carburant.
+     *
+     * Les quatre options ecartees, et pourquoi :
+     *
+     * 1. **Rejoindre un combat en cours.** Il faudrait rouvrir une photo deja prise, ce qui
+     *    defait la garantie centrale du systeme.
+     * 2. **Attendre la fin, puis ouvrir un nouveau combat.** Techniquement propre, mais une
+     *    seconde vague lancee cinq secondes apres la premiere n'attaquerait que deux heures plus
+     *    tard : la mecanique des vagues disparait. La fenetre garde cette idee pour les arrivees
+     *    tardives, ou elle est le moindre mal, et l'evite pour les vagues rapprochees.
+     * 3. **Refuser l'arrivee et renvoyer la flotte.** Le plus simple, et le plus brutal.
+     * 4. **Resoudre round par round.** La seule option parfaitement fidele, et hors de portee :
+     *    elle exige de rendre **les deux moteurs, PHP et Rust, reprenables apres chaque round**.
+     *    C'est un autre projet, pas une variante de celui-ci.
+     *
+     * @return array<int, string>
+     */
+    public static function decidedCases(): array
+    {
         return [
-            'Une attaque hostile deja en vol vers un corps celeste qui entre en combat.',
+            'Vagues : fenetre de ralliement de 60 secondes fixes a partir de la premiere arrivee, photo unique a la fermeture, attaques tardives ou etrangeres a l alliance rappelees vers leur origine.',
         ];
     }
 }

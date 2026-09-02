@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Route;
 use OGame\Combat\Enums\CombatCancellationCause;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Support\CombatLockedActions;
+use OGame\Combat\Support\CombatRallyWindow;
 use Tests\UnitTestCase;
 
 /**
@@ -22,7 +23,7 @@ class CombatStateTest extends UnitTestCase
      */
     public function testTheNominalCycleCanBeWalkedFromEndToEnd(): void
     {
-        $cycle = [CombatState::Pending, CombatState::Active, CombatState::Resolving, CombatState::Resolved];
+        $cycle = [CombatState::Rallying, CombatState::Active, CombatState::Resolving, CombatState::Resolved];
 
         foreach ($cycle as $rang => $etat) {
             $suivant = $cycle[$rang + 1] ?? null;
@@ -41,13 +42,14 @@ class CombatStateTest extends UnitTestCase
     /**
      * Assert that a combat already under way can no longer be cancelled.
      *
-     * C'est la contrepartie de la regle « un combat engage ne se rappelle pas ». Si `Active`
-     * pouvait revenir a `Cancelled`, un attaquant pourrait effacer une bataille dont il connait
-     * deja l'issue defavorable — le resultat etant fige des l'arrivee.
+     * C'est la contrepartie de la regle « un combat engage ne se rappelle pas ». Une annulation
+     * n'est concevable que pendant le ralliement, tant que rien n'est calcule. Des que la photo
+     * est prise, le resultat existe : si `Active` pouvait revenir a `Cancelled`, un attaquant
+     * effacerait une bataille dont il connait deja l'issue defavorable.
      */
     public function testACombatUnderWayCanNoLongerBeCancelled(): void
     {
-        $this->assertTrue(CombatState::Pending->canTransitionTo(CombatState::Cancelled), 'A combat that has not started cannot be cancelled.');
+        $this->assertTrue(CombatState::Rallying->canTransitionTo(CombatState::Cancelled), 'A combat that has not started cannot be cancelled.');
 
         foreach ([CombatState::Active, CombatState::Resolving, CombatState::Resolved] as $etat) {
             $this->assertFalse(
@@ -60,10 +62,10 @@ class CombatStateTest extends UnitTestCase
     /**
      * Assert that no cancellation cause is ever within a player's reach.
      *
-     * La fenetre `Pending` — entre l'arrivee de la flotte et le premier round — est courte,
-     * mais le resultat y est deja calcule. Un joueur qui pourrait s'y engouffrer effacerait une
-     * bataille perdue d'avance. L'annulation exige donc une cause, et aucune n'est declenchable
-     * par un rappel.
+     * La fenetre de ralliement dure une minute, et c'est precisement le moment ou un attaquant
+     * voit arriver les renforts du defenseur. Un joueur qui pourrait s'y engouffrer se retirerait
+     * des qu'il comprend qu'il va perdre. L'annulation exige donc une cause, et aucune n'est
+     * declenchable par un rappel.
      */
     public function testNoCancellationCauseIsEverWithinAPlayerReach(): void
     {
@@ -76,7 +78,7 @@ class CombatStateTest extends UnitTestCase
             );
 
             $this->assertTrue(
-                CombatState::Pending->canBeCancelledFor($cause),
+                CombatState::Rallying->canBeCancelledFor($cause),
                 "A pending combat cannot be cancelled for « {$cause->value} », so a system cancellation has no way through."
             );
 
@@ -138,13 +140,13 @@ class CombatStateTest extends UnitTestCase
     /**
      * Assert that the lock covers the whole window during which the result is frozen.
      *
-     * `Pending` est la fenetre entre l'arrivee et le premier round : le resultat y est deja
-     * calcule. Laisser partir une flotte a ce moment-la la ferait echapper a une bataille qui
-     * la compte deja parmi les defenseurs.
+     * `Rallying` est la fenetre de rassemblement : rien n'y est encore calcule, mais les forces
+     * presentes sont deja celles qui composeront la photo. Laisser partir une flotte a ce
+     * moment-la la ferait echapper a une bataille dont elle fait partie.
      */
     public function testTheLockCoversTheWholeWindowDuringWhichTheResultIsFrozen(): void
     {
-        foreach ([CombatState::Pending, CombatState::Active, CombatState::Resolving] as $etat) {
+        foreach ([CombatState::Rallying, CombatState::Active, CombatState::Resolving] as $etat) {
             $this->assertTrue($etat->locksTargetBody(), "The state {$etat->value} does not lock the target body, so a fleet could escape a battle it is already counted in.");
         }
 
@@ -215,16 +217,31 @@ class CombatStateTest extends UnitTestCase
     }
 
     /**
-     * Assert that the undecided case is still marked as undecided.
+     * Assert that the waves question left the undecided list by being answered.
      *
-     * Les vagues d'attaques successives ne doivent pas recevoir un comportement par defaut que
-     * personne n'aurait choisi. Tant que la decision n'est pas prise, elle reste ecrite ici.
+     * Ce test gardait le probleme des vagues parmi les indecis. La decision ayant ete prise — la
+     * fenetre de ralliement — il garde maintenant l'autre moitie de la meme exigence : un cas ne
+     * sort de la liste que **si la decision est ecrite**, jamais parce qu'un comportement s'est
+     * installe tout seul.
      */
-    public function testTheUndecidedCaseIsStillMarkedAsUndecided(): void
+    public function testTheWavesQuestionLeftTheUndecidedListByBeingAnswered(): void
     {
         $this->assertNotEmpty(
-            CombatLockedActions::undecidedCases(),
-            'The waves case is no longer listed as undecided. If it was decided, say so explicitly; if it was implemented silently, that is the problem this test exists for.'
+            CombatLockedActions::decidedCases(),
+            'The waves case left the undecided list without any decision being written down, which is exactly the silent default this guard exists to prevent.'
+        );
+
+        $decision = implode(' ', CombatLockedActions::decidedCases());
+
+        $this->assertStringContainsString('ralliement', $decision, 'The written decision no longer mentions the rally window it is supposed to record.');
+        $this->assertStringContainsString('60', $decision, 'The written decision no longer states the length of the window.');
+
+        // La duree ecrite dans la decision et celle qu'applique le code doivent etre la meme.
+        // Deux endroits qui disent 60 aujourd'hui peuvent dire deux choses differentes demain.
+        $this->assertStringContainsString(
+            (string)CombatRallyWindow::WINDOW_SECONDS,
+            $decision,
+            'The recorded decision and the window the code actually applies have drifted apart.'
         );
     }
 }
