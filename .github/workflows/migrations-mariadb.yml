@@ -1,0 +1,152 @@
+name: Validation MariaDB des migrations
+
+# Les tests tournent sur SQLite, la production sur MariaDB. SQLite ne voit pas certaines
+# incompatibilites : un type de cle etrangere qui ne correspond pas exactement a la colonne
+# referencee, une colonne JSON, une longueur d'index. Une suite verte ne prouve donc rien
+# quant a MariaDB.
+#
+# Ce workflow applique les migrations sur une base MariaDB **jetable**, les defait, les
+# reapplique, puis lit les contraintes reellement produites. Aucun acces au serveur de
+# production n'est necessaire, et rien ne survit a la fin du travail.
+#
+# Il ne remplace pas la suite de tests : il repond a une question qu'elle ne peut pas poser.
+
+on:
+  push:
+    branches:
+      - combats-persistants
+    paths:
+      - 'database/migrations/**'
+      - '.github/workflows/migrations-mariadb.yml'
+  pull_request:
+    paths:
+      - 'database/migrations/**'
+  workflow_dispatch:
+
+jobs:
+  cycle:
+    name: migrate, rollback, migrate
+    runs-on: ubuntu-latest
+
+    services:
+      mariadb:
+        image: mariadb:11.3.2-jammy
+        env:
+          MARIADB_ROOT_PASSWORD: essai
+          MARIADB_DATABASE: ogamex_essai
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: pdo_mysql, bcmath, gd, zip, intl
+          coverage: none
+
+      - name: Installer les dependances
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Preparer la configuration
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+        env:
+          DB_CONNECTION: mysql
+
+      # Aucun cache de configuration n'est ecrit ici, contrairement au conteneur de
+      # production : les variables ci-dessous sont donc bien celles qu'utilise Laravel.
+      - name: Verifier la base visee avant toute migration
+        run: |
+          BASE=$(php artisan tinker --execute="echo config('database.connections.mysql.database');")
+          echo "Laravel vise : $BASE"
+          test "$BASE" = "ogamex_essai" || { echo "ARRET : Laravel ne vise pas la base d'essai."; exit 1; }
+        env:
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_DATABASE: ogamex_essai
+          DB_USERNAME: root
+          DB_PASSWORD: essai
+
+      - name: Cycle migrate → rollback → migrate
+        run: |
+          php artisan migrate --force
+          php artisan migrate:rollback --step=3 --force
+          php artisan migrate --force
+        env:
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_DATABASE: ogamex_essai
+          DB_USERNAME: root
+          DB_PASSWORD: essai
+
+      # RESTRICT etant le comportement par defaut de MariaDB, SHOW CREATE TABLE peut ne pas
+      # l'ecrire. On interroge donc la regle elle-meme, pas son affichage.
+      - name: Verifier les contraintes reellement produites
+        run: |
+          mysql -h 127.0.0.1 -P 3306 -uroot -pessai ogamex_essai <<'SQL'
+            SELECT 'types des colonnes' AS controle;
+            SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE
+              FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = 'ogamex_essai'
+               AND (TABLE_NAME IN ('combat_instances', 'combat_participants')
+                    OR (TABLE_NAME = 'fleet_missions' AND COLUMN_NAME = 'combat_instance_id'))
+             ORDER BY TABLE_NAME, ORDINAL_POSITION;
+
+            SELECT 'regle de suppression de la cle etrangere' AS controle;
+            SELECT CONSTRAINT_NAME, DELETE_RULE, REFERENCED_TABLE_NAME
+              FROM information_schema.REFERENTIAL_CONSTRAINTS
+             WHERE CONSTRAINT_SCHEMA = 'ogamex_essai'
+               AND TABLE_NAME = 'combat_participants';
+
+            SELECT 'index et unicite' AS controle;
+            SELECT TABLE_NAME, INDEX_NAME, NON_UNIQUE, GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) AS colonnes
+              FROM information_schema.STATISTICS
+             WHERE TABLE_SCHEMA = 'ogamex_essai'
+               AND TABLE_NAME IN ('combat_instances', 'combat_participants')
+             GROUP BY TABLE_NAME, INDEX_NAME, NON_UNIQUE
+             ORDER BY TABLE_NAME, INDEX_NAME;
+          SQL
+
+      - name: Faire echouer si une garantie manque
+        run: |
+          verifier() {
+            RESULTAT=$(mysql -h 127.0.0.1 -P 3306 -uroot -pessai -N -B ogamex_essai -e "$2")
+            if [ "$RESULTAT" != "$3" ]; then
+              echo "ECHEC — $1"
+              echo "  attendu : $3"
+              echo "  obtenu  : $RESULTAT"
+              exit 1
+            fi
+            echo "OK — $1"
+          }
+
+          verifier "la cle etrangere refuse la suppression en cascade" \
+            "SELECT DELETE_RULE FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA='ogamex_essai' AND CONSTRAINT_NAME='combat_part_instance_fk';" \
+            "RESTRICT"
+
+          verifier "l'identite du participant n'est pas nullable" \
+            "SELECT IS_NULLABLE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='ogamex_essai' AND TABLE_NAME='combat_participants' AND COLUMN_NAME='participant_key';" \
+            "NO"
+
+          verifier "l'index d'identite est unique" \
+            "SELECT NON_UNIQUE FROM information_schema.STATISTICS WHERE TABLE_SCHEMA='ogamex_essai' AND TABLE_NAME='combat_participants' AND INDEX_NAME='combat_part_unique_idx' LIMIT 1;" \
+            "0"
+
+          verifier "la cle du combat est un bigint des deux cotes" \
+            "SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='ogamex_essai' AND TABLE_NAME='combat_participants' AND COLUMN_NAME='combat_instance_id';" \
+            "bigint(20) unsigned"
+
+          verifier "la mission designee tient sur un bigint" \
+            "SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='ogamex_essai' AND TABLE_NAME='combat_instances' AND COLUMN_NAME='mission_id';" \
+            "bigint(20) unsigned"
