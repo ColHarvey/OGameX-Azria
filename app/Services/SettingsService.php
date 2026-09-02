@@ -1110,4 +1110,62 @@ class SettingsService
     {
         return (int)$this->get('npc_last_spawn_at', 0);
     }
+
+    /**
+     * Returns whether combats last in time instead of resolving on arrival.
+     *
+     * **Desactive par defaut, et c'est deliberé.** Tant que ce reglage vaut 0, le jeu garde
+     * exactement son comportement actuel : combat instantane a l'arrivee, rapport immediat,
+     * retour immediat. Les tables peuvent donc exister en production sans qu'aucun combat ne
+     * les utilise, et l'activation est un geste separe du deploiement.
+     *
+     * @return bool
+     */
+    public function combatDurationEnabled(): bool
+    {
+        return (bool)(int)$this->get('combat_duration_enabled', 0);
+    }
+
+    /**
+     * Returns the pace coefficient: how much combat work is consumed per second.
+     *
+     * Choisi sur le tableau de calibrage, pas au jugé. Il n'a de sens qu'avec l'amortissement
+     * ci-dessous : les deux forment un modele.
+     *
+     * Ce reglage n'est lu **qu'au demarrage** d'un combat, et la valeur employee est ecrite avec
+     * lui. L'ajuster ne touche donc jamais une bataille deja commencee.
+     *
+     * @return float
+     */
+    public function combatDurationRate(): float
+    {
+        return (float)$this->get('combat_duration_rate', 2083);
+    }
+
+    /**
+     * Returns the root applied to the combat work before converting it to seconds.
+     *
+     * La regle multiplie quatre grandeurs qui croissent chacune avec la taille des flottes :
+     * sans amortissement, le travail s'etale sur onze ordres de grandeur et aucun rythme unique
+     * ne convient. La racine cubique comprime cet ecart sans changer l'ordre des batailles.
+     *
+     * @return float
+     */
+    public function combatDurationDamping(): float
+    {
+        return (float)$this->get('combat_duration_damping', 3);
+    }
+
+    /**
+     * Returns the floor duration of a battle that actually took place.
+     *
+     * Ne s'applique pas a une bataille sans round — une retraite tactique se resout
+     * immediatement.
+     *
+     * @return int
+     */
+    public function combatDurationMinimumSeconds(): int
+    {
+        return (int)$this->get('combat_duration_minimum_seconds', 5);
+    }
 }

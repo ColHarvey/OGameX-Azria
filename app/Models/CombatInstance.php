@@ -1,0 +1,113 @@
+<?php
+
+namespace OGame\Models;
+
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Carbon;
+use OGame\Combat\Enums\CombatCancellationCause;
+use OGame\Combat\Enums\CombatState;
+
+/**
+ * Une bataille qui dure.
+ *
+ * Le resultat est calcule a l'arrivee de la flotte et conserve ici **sans etre applique**.
+ * C'est la garantie centrale du systeme : recalculer a la fin laisserait le defenseur changer
+ * retroactivement l'issue d'une bataille deja engagee.
+ *
+ * Le modele de duree — rythme, amortissement, plancher — est ecrit avec le combat, pas lu dans
+ * les reglages a la resolution. Ajuster un reglage ne touche donc que les combats suivants.
+ *
+ * @property int $id
+ * @property CombatState $status
+ * @property CombatCancellationCause|null $cancellation_cause
+ * @property int $mission_id
+ * @property int|null $union_id
+ * @property int|null $target_planet_id
+ * @property int $target_type
+ * @property int $galaxy
+ * @property int $system
+ * @property int $position
+ * @property int|null $started_at
+ * @property int|null $ends_at
+ * @property int $duration_seconds
+ * @property float $duration_rate
+ * @property float $duration_damping
+ * @property int $duration_minimum_seconds
+ * @property bool $duration_implausible
+ * @property array<mixed>|null $round_schedule
+ * @property array<mixed>|null $battle_snapshot
+ * @property array<mixed>|null $battle_result
+ * @property int|null $battle_report_id
+ * @property Carbon $created_at
+ * @property Carbon $updated_at
+ * @method static Builder|CombatInstance newModelQuery()
+ * @method static Builder|CombatInstance newQuery()
+ * @method static Builder|CombatInstance query()
+ * @mixin \Eloquent
+ */
+#[Fillable([
+    'status',
+    'cancellation_cause',
+    'mission_id',
+    'union_id',
+    'target_planet_id',
+    'target_type',
+    'galaxy',
+    'system',
+    'position',
+    'started_at',
+    'ends_at',
+    'duration_seconds',
+    'duration_rate',
+    'duration_damping',
+    'duration_minimum_seconds',
+    'duration_implausible',
+    'round_schedule',
+    'battle_snapshot',
+    'battle_result',
+    'battle_report_id',
+])]
+class CombatInstance extends Model
+{
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'status' => CombatState::class,
+            'cancellation_cause' => CombatCancellationCause::class,
+            'duration_rate' => 'float',
+            'duration_damping' => 'float',
+            'duration_implausible' => 'boolean',
+            'round_schedule' => 'array',
+            'battle_snapshot' => 'array',
+            'battle_result' => 'array',
+        ];
+    }
+
+    /**
+     * Get the participants of this combat.
+     *
+     * @return HasMany<CombatParticipant, $this>
+     */
+    public function participants(): HasMany
+    {
+        return $this->hasMany(CombatParticipant::class);
+    }
+
+    /**
+     * Get whether the targeted celestial body is locked by this combat.
+     *
+     * Le verrou couvre `Pending` autant qu'`Active` : entre l'arrivee et le premier round, le
+     * resultat est deja fige, et laisser partir une flotte la ferait echapper a une bataille
+     * qui la compte deja parmi les defenseurs.
+     */
+    public function locksTargetBody(): bool
+    {
+        return $this->status->locksTargetBody();
+    }
+}
