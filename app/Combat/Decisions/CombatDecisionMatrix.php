@@ -8,6 +8,7 @@ use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\FlightLeg;
 use OGame\Combat\Enums\InvariantCode;
+use OGame\Combat\Enums\SnapshotObligation;
 use OGame\Combat\Enums\TargetScope;
 use OGame\Combat\Support\ReturnPlan;
 
@@ -70,12 +71,40 @@ final class CombatDecisionMatrix
      *                               decision et son application.
      * @return ArrivalDecision
      */
-    public function arrivalOf(CombatSituation $situation, ReturnPlan $returnPlan): ArrivalDecision
+    public function verdictOf(CombatSituation $situation, ReturnPlan $returnPlan): ArrivalVerdict
+    {
+        $mouvement = $this->movementOf($situation, $returnPlan);
+
+        return new ArrivalVerdict(
+            $mouvement,
+            $this->snapshotObligationOf($situation, $mouvement, $returnPlan)
+        );
+    }
+
+    /**
+     * Ce que devient la flotte, sans rien dire de la photographie.
+     *
+     * **Privee, et c'est le point.** Un appelant qui obtiendrait le mouvement seul pourrait lire
+     * `AllowNormally` et conclure que rien d'autre ne reste a decider — puis inclure ou exclure la
+     * flotte de son propre chef. Le verdict oblige a recevoir les deux.
+     *
+     * @param CombatSituation $situation
+     * @param ReturnPlan $returnPlan
+     * @return ArrivalDecision
+     */
+    private function movementOf(CombatSituation $situation, ReturnPlan $returnPlan): ArrivalDecision
     {
         // Une case qui ne peut pas exister se range plutot qu'elle n'echoue : la matrice enumere. Sur
         // un chemin vivant, c'est `CombatSituation::ensureItCanOccur()` qui leve, bien avant ici.
         if (!$situation->isPossible()) {
             return ArrivalDecision::outsideMatrixDomain(InvariantCode::SituationCannotOccur);
+        }
+
+        // Le plan resolu ne designe aucun corps : les recours ordonnes du jeu sont epuises. Cela ne
+        // depend pas de l'etat de la cible — une flotte sans destination n a nulle part ou se poser,
+        // combat ou non.
+        if ($situation->scopeFor($returnPlan) === TargetScope::NoDestination) {
+            return ArrivalDecision::cancelWithoutImpact(CombatReasonCode::NoReturnDestination);
         }
 
         // L'espace profond ne porte aucun corps celeste, donc aucun verrou. Un combat d'expedition
@@ -98,6 +127,50 @@ final class CombatDecisionMatrix
                 $this->afterTheSnapshot($situation, $returnPlan)
             ),
         };
+    }
+
+    /**
+     * Ce qui reste a obtenir au sujet de la photographie.
+     *
+     * ## La garantie positive
+     *
+     * Interdire a la matrice de rendre `LandOutsideSnapshot` pendant le ralliement empechait le
+     * mauvais resultat ; cela n'obligeait personne a en demander un bon. Toute arrivee qui **se
+     * pose** pendant que la photographie n'est pas prise porte donc `RequiresCausalDecision`, et
+     * le constructeur du verdict verifie la coherence.
+     *
+     * Les deux barrieres restent hors de cette classe : engagement irrevocable avant l'ouverture,
+     * effet planifie strictement avant la fermeture, une egalite comptant pour « apres ». C'est le
+     * reconciliateur causal qui les evalue, avec des faits que la situation ne porte pas.
+     *
+     * @param CombatSituation $situation
+     * @param ArrivalDecision $movement
+     * @param ReturnPlan $returnPlan
+     * @return SnapshotObligation
+     */
+    private function snapshotObligationOf(
+        CombatSituation $situation,
+        ArrivalDecision $movement,
+        ReturnPlan $returnPlan,
+    ): SnapshotObligation {
+        // Pas de combat a l'heure planifiee : il n'y a aucune photographie a rejoindre.
+        if (!$situation->targetIsEngaged()) {
+            return SnapshotObligation::NotConcerned;
+        }
+
+        // Un champ de debris, une position vide ou une flotte sans destination ne figurent dans
+        // aucune photographie de corps celeste.
+        if ($situation->scopeFor($returnPlan) !== TargetScope::CelestialBody) {
+            return SnapshotObligation::NotConcerned;
+        }
+
+        if (!ArrivalVerdict::decisionLands($movement)) {
+            return SnapshotObligation::NotConcerned;
+        }
+
+        return $situation->targetState === CombatState::Rallying
+            ? SnapshotObligation::RequiresCausalDecision
+            : SnapshotObligation::SettledOutsideSnapshot;
     }
 
     /**

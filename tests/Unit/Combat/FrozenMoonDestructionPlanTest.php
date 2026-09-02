@@ -4,11 +4,16 @@ namespace Tests\Unit\Combat;
 
 use InvalidArgumentException;
 use LogicException;
+use OGame\Combat\Exceptions\UnknownMoonDestructionRuleVersion;
 use OGame\Combat\MoonDestruction\FrozenMoonDestructionAttempt;
 use OGame\Combat\MoonDestruction\FrozenMoonDestructionPlan;
+use OGame\Combat\MoonDestruction\FrozenMoonIdentity;
 use OGame\Combat\MoonDestruction\MoonDestructionCandidate;
 use OGame\Combat\MoonDestruction\MoonDestructionOdds;
 use OGame\Combat\MoonDestruction\MoonDestructionOutcome;
+use OGame\Combat\MoonDestruction\MoonDestructionRule;
+use OGame\Combat\MoonDestruction\MoonDestructionRuleRegistry;
+use OGame\Combat\MoonDestruction\MoonDestructionRuleV1;
 use Tests\UnitTestCase;
 
 /**
@@ -20,6 +25,12 @@ use Tests\UnitTestCase;
  * appels** : c'est ce qui rend verifiable la regle « une mission sautee ne consomme aucun tirage ».
  * Sans ce compteur, une mission sautee qui tirerait quand meme passerait inapercue — et decalerait
  * le hasard de toutes les suivantes.
+ *
+ * ## Une lune de 8100
+ *
+ * Elle revient partout parce qu'elle donne des nombres ronds : 90 de racine, donc 10 % de chance de
+ * destruction par etoile de la mort et 45 % de chance de tout perdre. Les tirages choisis tombent
+ * loin des bornes, sauf la ou l'essai porte precisement sur une borne.
  */
 class FrozenMoonDestructionPlanTest extends UnitTestCase
 {
@@ -45,9 +56,6 @@ class FrozenMoonDestructionPlanTest extends UnitTestCase
 
     /**
      * L'ordre ne depend pas de l'ordre de lecture en base.
-     *
-     * Heure d'arrivee planifiee, puis identifiant. Deux lectures dans un ordre different doivent
-     * produire exactement le meme plan — sans quoi le hasard lui-meme dependrait de la base.
      */
     public function testTheOrderDoesNotDependOnHowTheDatabaseReturnedTheRows(): void
     {
@@ -57,8 +65,8 @@ class FrozenMoonDestructionPlanTest extends UnitTestCase
             new MoonDestructionCandidate(20, 900, 5),
         ];
 
-        $premier = $this->freeze($candidates, tirages: [50, 50, 50, 50, 50, 50]);
-        $second = $this->freeze(array_reverse($candidates), tirages: [50, 50, 50, 50, 50, 50]);
+        $premier = $this->freeze($candidates, tirages: [99, 99, 99, 99, 99, 99]);
+        $second = $this->freeze(array_reverse($candidates), tirages: [99, 99, 99, 99, 99, 99]);
 
         $this->assertSame(
             [10, 20, 30],
@@ -81,15 +89,12 @@ class FrozenMoonDestructionPlanTest extends UnitTestCase
      */
     public function testWhenTheFirstAttemptFailsTheNextOneMayStillTry(): void
     {
-        // Une lune de 8100 : 90 de racine, donc 10 % de chance par etoile de la mort. Avec une seule
-        // etoile, un tirage de 99 echoue et un tirage de 1 reussit.
         $plan = $this->freeze(
             [
                 new MoonDestructionCandidate(1, 100, 1),
                 new MoonDestructionCandidate(2, 200, 1),
             ],
-            tirages: [99, 99, 1, 99],
-            moonDiameter: 8_100
+            tirages: [99, 99, 1, 99]
         );
 
         $this->assertSame(MoonDestructionOutcome::AttemptFailed, $plan->attempts[0]->outcome);
@@ -112,8 +117,7 @@ class FrozenMoonDestructionPlanTest extends UnitTestCase
                 new MoonDestructionCandidate(2, 200, 1),
                 new MoonDestructionCandidate(3, 300, 1),
             ],
-            tirages: [1, 99],
-            moonDiameter: 8_100
+            tirages: [1, 99]
         );
 
         $this->assertSame(MoonDestructionOutcome::MoonDestroyed, $plan->attempts[0]->outcome);
@@ -169,16 +173,34 @@ class FrozenMoonDestructionPlanTest extends UnitTestCase
                 new MoonDestructionCandidate(1, 100, 1),
                 new MoonDestructionCandidate(2, 200, 4),
             ],
-            tirages: [99, 99, 99, 99],
-            moonDiameter: 8_100
+            tirages: [99, 99, 99, 99]
         );
 
         $this->assertSame(1, $plan->attempts[0]->survivingDeathstars);
         $this->assertSame(4, $plan->attempts[1]->survivingDeathstars);
 
-        // Et la probabilite de chacune suit sa propre quantite : 10 % contre 20 %.
-        $this->assertEqualsWithDelta(10.0, MoonDestructionOdds::destructionChance(8_100, 1), 0.001);
-        $this->assertEqualsWithDelta(20.0, MoonDestructionOdds::destructionChance(8_100, 4), 0.001);
+        // Et la chance gelee de chacune suit sa propre quantite : 10 % contre 20 %.
+        $this->assertEqualsWithDelta(10.0, $plan->attempts[0]->destructionChance, 0.001);
+        $this->assertEqualsWithDelta(20.0, $plan->attempts[1]->destructionChance, 0.001);
+    }
+
+    /**
+     * La perte d'une mission n'affecte aucune autre.
+     */
+    public function testOneMissionsLossDoesNotTouchAnother(): void
+    {
+        // Le premier tirage de perte gagne (1 <= 45), le second perd (99 > 45).
+        $plan = $this->freeze(
+            [
+                new MoonDestructionCandidate(1, 100, 3),
+                new MoonDestructionCandidate(2, 200, 7),
+            ],
+            tirages: [99, 1, 99, 99]
+        );
+
+        $this->assertSame(3, $plan->attempts[0]->extraDeathstarLosses);
+        $this->assertSame(0, $plan->attempts[1]->extraDeathstarLosses);
+        $this->assertSame(7, $plan->attempts[1]->survivingDeathstars);
     }
 
     /**
@@ -196,19 +218,128 @@ class FrozenMoonDestructionPlanTest extends UnitTestCase
                 new MoonDestructionCandidate(2, 200, 0),
                 new MoonDestructionCandidate(3, 300, 3),
             ],
-            tirages: [99, 1, 42, 99],
-            moonDiameter: 8_100
+            tirages: [99, 1, 42, 99]
         );
 
-        $relu = FrozenMoonDestructionPlan::fromFrozenFacts($plan->combatInstanceId, $plan->toFrozenFacts());
+        $consommesAuGel = $this->tiragesConsommes;
+
+        $relu = FrozenMoonDestructionPlan::fromFrozenFacts($plan->toFrozenFacts());
 
         $this->assertSame($plan->toFrozenFacts(), $relu->toFrozenFacts());
         $this->assertSame($plan->destroysTheMoon(), $relu->destroysTheMoon());
 
-        // La relecture ne retire aucun tirage.
-        $consommesAuGel = $this->tiragesConsommes;
-        FrozenMoonDestructionPlan::fromFrozenFacts($plan->combatInstanceId, $plan->toFrozenFacts());
+        // **La relecture ne retire aucun tirage.** L'application a l'echeance relit ; elle ne rejoue
+        // pas le hasard.
         $this->assertSame($consommesAuGel, $this->tiragesConsommes);
+    }
+
+    /**
+     * La lune reste lisible apres sa destruction.
+     *
+     * Si l'identite n'etait qu'une cle etrangere, la destruction rendrait le rapport muet : le
+     * joueur lirait qu'une lune a ete detruite sans savoir laquelle.
+     */
+    public function testTheMoonStaysReadableAfterItIsGone(): void
+    {
+        $plan = $this->freeze([new MoonDestructionCandidate(1, 100, 1)], tirages: [1, 99]);
+
+        $relu = FrozenMoonDestructionPlan::fromFrozenFacts($plan->toFrozenFacts());
+
+        $this->assertTrue($relu->destroysTheMoon());
+        $this->assertSame(4_242, $relu->moon->moonId);
+        $this->assertSame('1:2:3', $relu->moon->coordinates);
+        $this->assertSame('Lune de Keven', $relu->moon->name);
+        $this->assertSame(8_100, $relu->moon->diameter);
+    }
+
+    /**
+     * Le diametre vivant peut changer : le plan gele ne bouge pas.
+     */
+    public function testTheLivingDiameterCannotChangeAFrozenPlan(): void
+    {
+        $plan = $this->freeze([new MoonDestructionCandidate(1, 100, 1)], tirages: [99, 99]);
+
+        $faits = $plan->toFrozenFacts();
+
+        // Une lune plus petite donnerait une tout autre chance : 2500 a 50 pour racine, donc 50 %.
+        $this->assertEqualsWithDelta(10.0, MoonDestructionOdds::destructionChance(8_100, 1), 0.001);
+        $this->assertEqualsWithDelta(50.0, MoonDestructionOdds::destructionChance(2_500, 1), 0.001);
+
+        $relu = FrozenMoonDestructionPlan::fromFrozenFacts($faits);
+
+        $this->assertEqualsWithDelta(10.0, $relu->attempts[0]->destructionChance, 0.001);
+        $this->assertSame(8_100, $relu->moon->diameter);
+    }
+
+    /**
+     * Un plan reste lisible apres qu'une v2 est devenue la version courante.
+     *
+     * C'est ce que le registre garantit, et ce qu'une constante ne garantirait pas : comparer la
+     * version persistee a la version courante rendrait illisibles, d'un coup, tous les plans en
+     * cours le jour ou la constante change.
+     */
+    public function testAnOldPlanStaysReadableAfterANewerRuleBecomesCurrent(): void
+    {
+        $v2 = $this->aSecondRule();
+        $registre = MoonDestructionRuleRegistry::of([new MoonDestructionRuleV1(), $v2], $v2->version());
+
+        $this->assertSame($v2->version(), $registre->currentVersion());
+
+        // La version persistee **selectionne** l'implementation ; elle n'est jamais comparee a la
+        // version courante.
+        $this->assertInstanceOf(
+            MoonDestructionRuleV1::class,
+            $registre->forVersion(MoonDestructionRuleV1::VERSION)
+        );
+
+        $plan = $this->freeze([new MoonDestructionCandidate(1, 100, 1)], tirages: [99, 99]);
+
+        $this->assertSame(MoonDestructionRuleV1::VERSION, $plan->ruleVersion);
+        $this->assertSame(
+            $plan->toFrozenFacts(),
+            FrozenMoonDestructionPlan::fromFrozenFacts($plan->toFrozenFacts())->toFrozenFacts()
+        );
+    }
+
+    /**
+     * Une version inconnue est refusee, jamais remplacee par la version courante.
+     */
+    public function testAnUnknownRuleVersionIsRefusedRatherThanReplaced(): void
+    {
+        $this->expectException(UnknownMoonDestructionRuleVersion::class);
+
+        MoonDestructionRuleRegistry::default()->forVersion('moon_destruction_odds_v99');
+    }
+
+    /**
+     * Deux implementations ne peuvent pas se reclamer de la meme version.
+     */
+    public function testTwoImplementationsMayNotClaimTheSameVersion(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+
+        MoonDestructionRuleRegistry::of(
+            [new MoonDestructionRuleV1(), new MoonDestructionRuleV1()],
+            MoonDestructionRuleV1::VERSION
+        );
+    }
+
+    /**
+     * Un schema inconnu est refuse.
+     *
+     * Le relire au petit bonheur donnerait des champs manquants pour des valeurs nulles, et un
+     * resultat different de celui qui a ete calcule.
+     */
+    public function testAnUnknownSchemaIsRefused(): void
+    {
+        $plan = $this->freeze([new MoonDestructionCandidate(1, 100, 0)], tirages: []);
+
+        $faits = $plan->toFrozenFacts();
+        $faits['schema'] = FrozenMoonDestructionPlan::SCHEMA + 1;
+
+        $this->expectException(InvalidArgumentException::class);
+
+        FrozenMoonDestructionPlan::fromFrozenFacts($faits);
     }
 
     /**
@@ -229,23 +360,26 @@ class FrozenMoonDestructionPlanTest extends UnitTestCase
      */
     public function testAPlanThatDestroysTheMoonTwiceIsRefused(): void
     {
-        $detruit = static fn (int $mission, int $rang): FrozenMoonDestructionAttempt => new FrozenMoonDestructionAttempt(
+        $detruit = static fn (int $mission, int $rang): array => (new FrozenMoonDestructionAttempt(
             $mission,
             $rang,
             1,
-            8_100,
-            FrozenMoonDestructionPlan::VERSION,
+            10.0,
+            45.0,
             1,
             99,
             MoonDestructionOutcome::MoonDestroyed,
             0
-        );
+        ))->toFrozenFacts();
 
         $this->expectException(LogicException::class);
 
-        FrozenMoonDestructionPlan::fromFrozenFacts(1, [
-            $detruit(1, 1)->toFrozenFacts(),
-            $detruit(2, 2)->toFrozenFacts(),
+        FrozenMoonDestructionPlan::fromFrozenFacts([
+            'schema' => FrozenMoonDestructionPlan::SCHEMA,
+            'combat_instance_id' => 1,
+            'rule_version' => MoonDestructionRuleV1::VERSION,
+            'moon' => $this->aMoon()->toFrozenFacts(),
+            'attempts' => [$detruit(1, 1), $detruit(2, 2)],
         ]);
     }
 
@@ -256,32 +390,34 @@ class FrozenMoonDestructionPlanTest extends UnitTestCase
     {
         $this->expectException(InvalidArgumentException::class);
 
-        new FrozenMoonDestructionAttempt(
-            1,
-            1,
-            1,
-            8_100,
-            FrozenMoonDestructionPlan::VERSION,
-            50,
-            50,
-            MoonDestructionOutcome::TargetAlreadyDestroyed,
-            0
-        );
+        new FrozenMoonDestructionAttempt(1, 1, 1, 10.0, 45.0, 50, 50, MoonDestructionOutcome::TargetAlreadyDestroyed, 0);
+    }
+
+    /**
+     * Un resultat gele qui ne concorde pas avec son tirage est refuse.
+     *
+     * Sans ce controle, relire le plan et le recalculer donneraient deux reponses, et personne ne
+     * saurait laquelle le joueur a vue.
+     */
+    public function testAFrozenOutcomeThatContradictsItsRollIsRefused(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+
+        // 99 contre 10 % : la lune tient. Pretendre qu'elle a ete detruite est une contradiction.
+        new FrozenMoonDestructionAttempt(1, 1, 1, 10.0, 45.0, 99, 99, MoonDestructionOutcome::MoonDestroyed, 0);
     }
 
     /**
      * Les formules restent celles du jeu.
      *
-     * Ce chantier deplace le moment du tirage, pas la probabilite. Ces valeurs sont calculees a la
-     * main depuis les formules d'OGameX : une lune de 8100 a 90 pour racine, donc 10 % de chance de
-     * destruction par etoile de la mort et 45 % de chance de tout perdre.
+     * Ce chantier deplace le moment du tirage, pas la probabilite.
      */
     public function testTheGameFormulasAreUnchanged(): void
     {
         $this->assertEqualsWithDelta(10.0, MoonDestructionOdds::destructionChance(8_100, 1), 0.001);
         $this->assertEqualsWithDelta(45.0, MoonDestructionOdds::deathstarLossChance(8_100), 0.001);
 
-        // Les deux bornes du jeu, et la comparaison inclusive.
+        // La comparaison est inclusive, comme dans le chemin immediat.
         $this->assertTrue(MoonDestructionOdds::succeeds(10, 10.0), 'The comparison is no longer inclusive.');
         $this->assertFalse(MoonDestructionOdds::succeeds(11, 10.0));
 
@@ -296,23 +432,22 @@ class FrozenMoonDestructionPlanTest extends UnitTestCase
      * @param array<int, MoonDestructionCandidate> $candidates
      * @param array<int, int> $tirages
      * @param bool $attackSideWon
-     * @param int $moonDiameter
      * @return FrozenMoonDestructionPlan
      */
     private function freeze(
         array $candidates,
         array $tirages,
         bool $attackSideWon = true,
-        int $moonDiameter = 8_100,
     ): FrozenMoonDestructionPlan {
         $this->tiragesAServir = $tirages;
         $this->tiragesConsommes = 0;
 
         return FrozenMoonDestructionPlan::freeze(
             99,
+            $this->aMoon(),
             $candidates,
             $attackSideWon,
-            $moonDiameter,
+            MoonDestructionRuleRegistry::default()->current(),
             function (): int {
                 if ($this->tiragesAServir === []) {
                     $this->fail('The plan asked for more draws than the test provided.');
@@ -323,5 +458,44 @@ class FrozenMoonDestructionPlanTest extends UnitTestCase
                 return (int)array_shift($this->tiragesAServir);
             }
         );
+    }
+
+    /**
+     * La lune des essais : 8100 de diametre, donc des nombres ronds.
+     */
+    private function aMoon(): FrozenMoonIdentity
+    {
+        return new FrozenMoonIdentity(4_242, '1:2:3', 'Lune de Keven', 8_100);
+    }
+
+    /**
+     * Une seconde version de regle, qui n'existe que dans cet essai.
+     *
+     * Elle ne modifie aucune formule : elle sert seulement a montrer qu'une version courante
+     * differente ne rend pas illisible un plan calcule sous l'ancienne.
+     */
+    private function aSecondRule(): MoonDestructionRule
+    {
+        return new class implements MoonDestructionRule {
+            public function version(): string
+            {
+                return 'moon_destruction_odds_v2';
+            }
+
+            public function destructionChance(int $moonDiameter, int $deathstarCount): float
+            {
+                return MoonDestructionOdds::destructionChance($moonDiameter, $deathstarCount);
+            }
+
+            public function deathstarLossChance(int $moonDiameter): float
+            {
+                return MoonDestructionOdds::deathstarLossChance($moonDiameter);
+            }
+
+            public function succeeds(int $roll, float $chance): bool
+            {
+                return MoonDestructionOdds::succeeds($roll, $chance);
+            }
+        };
     }
 }

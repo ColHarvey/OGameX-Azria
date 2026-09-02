@@ -420,6 +420,7 @@ final readonly class ArrivalDecision implements CombatDecision
                 CombatReasonCode::PlayerLimitReached,
                 CombatReasonCode::TargetCombatLocked,
                 CombatReasonCode::PositionNoLongerFree,
+                CombatReasonCode::NoReturnDestination,
             ],
             default => [],
         };

@@ -44,4 +44,15 @@ enum TargetScope: string
      * L'espace profond. Aucun corps celeste, donc aucun verrou possible.
      */
     case DeepSpace = 'deep_space';
+
+    /**
+     * Le plan de retour resolu ne designe aucun corps.
+     *
+     * `FlightLeg::Return` ne suffit pas a garantir qu'une flotte se pose quelque part : le corps
+     * d'origine peut avoir disparu pendant le vol. Le jeu prevoit les recours, et ils sont ordonnes
+     * — corps d'origine, planete associee, planete mere —, mais leur epuisement est possible pour
+     * un acteur qui n'a plus rien. C'est le plan resolu sous verrou qui le dit, jamais le genre de
+     * mission ni l'etape de vol.
+     */
+    case NoDestination = 'no_destination';
 }

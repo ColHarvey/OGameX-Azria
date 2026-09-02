@@ -31,6 +31,9 @@ use LogicException;
  * relu pourrait differer de celui qui a ete calcule. Ce sont donc les valeurs effectivement tirees
  * qui sont conservees.
  *
+ * L'application a l'echeance ne consulte donc **ni le registre courant, ni le hasard, ni le diametre
+ * vivant de la lune** : elle relit.
+ *
  * ## Ce que l'ordre garantit
  *
  *     1. heure d'arrivee planifiee
@@ -38,16 +41,33 @@ use LogicException;
  *
  * Deux lectures de la base dans un ordre different donnent le meme plan. Une mission sautee ne
  * consomme aucun tirage : sans cela, l'ordre de lecture deplacerait le hasard des suivantes.
+ *
+ * ## Ordre d'application, a l'echeance
+ *
+ * Il est impose, et le chemin actuel ne le respecte pas encore — il cree les retours avant que les
+ * pertes propres aux tentatives ne soient connues :
+ *
+ *     resultat de bataille commun
+ *       -> butin, pertes et debris du combat
+ *       -> tentatives de destruction gelees, dans leur ordre
+ *       -> pertes supplementaires d'etoiles de la mort
+ *       -> destruction ou reroutage de la lune, au plus une fois
+ *       -> creation des retours avec les survivants definitifs
+ *       -> rapports, encore caches
+ *       -> Resolved, commit, puis notifications
+ *
+ * Une erreur au milieu annule tout : aucune lune detruite sans retours, aucun retour cree sans
+ * pertes, aucun rapport visible avant le resultat definitif.
  */
 final readonly class FrozenMoonDestructionPlan
 {
     /**
-     * La version de la regle d'orchestration.
+     * La version du **schema** du plan : la forme des faits persistes.
      *
-     * Elle ne couvre pas les probabilites, qui sont celles du jeu et ne changent pas ici : elle
-     * couvre l'ordre, la selection et le gel.
+     * Distincte de la version de la **regle**, qui gouverne les probabilites. Les deux evoluent
+     * independamment : on peut ajouter un champ sans toucher aux formules, et l'inverse.
      */
-    public const string VERSION = 'moon_destruction_frozen_v1';
+    public const int SCHEMA = 1;
 
     /**
      * Le nom du compteur qui rend la cle d'idempotence unique.
@@ -56,16 +76,27 @@ final readonly class FrozenMoonDestructionPlan
 
     /**
      * @param int $combatInstanceId Le combat commun auquel ce plan appartient.
+     * @param FrozenMoonIdentity $moon La lune visee, telle qu'elle etait a la fermeture.
+     * @param string $ruleVersion La regle qui a produit les chances et lu les tirages.
      * @param array<int, FrozenMoonDestructionAttempt> $attempts Les tentatives, dans leur ordre.
      */
     private function __construct(
         public int $combatInstanceId,
+        public FrozenMoonIdentity $moon,
+        public string $ruleVersion,
         public array $attempts,
     ) {
         if ($combatInstanceId < 1) {
             throw new InvalidArgumentException(
                 'Un plan de destruction appartient a un combat persiste : sans son identifiant, la cle '
                 . 'd idempotence ne distinguerait pas deux combats.'
+            );
+        }
+
+        if ($ruleVersion === '') {
+            throw new InvalidArgumentException(
+                'Un plan sans version de regle serait relu sous la regle courante, qui n est peut-etre plus '
+                . 'celle qui l a calcule.'
             );
         }
 
@@ -109,28 +140,33 @@ final readonly class FrozenMoonDestructionPlan
      * Gele les tentatives d'un combat, dans l'ordre deterministe.
      *
      * @param int $combatInstanceId
+     * @param FrozenMoonIdentity $moon Son diametre est **la** entree des probabilites : celui de la
+     *                                 fermeture, jamais le diametre vivant a l'echeance.
      * @param array<int, MoonDestructionCandidate> $candidates Les missions **admises**, dans n'importe quel ordre.
      * @param bool $attackSideWon Selon la condition deja utilisee par la mission de destruction.
-     * @param int $moonDiameter
+     * @param MoonDestructionRule $rule La regle courante, prise dans le registre au moment du gel.
      * @param callable(): int $roll Un tirage dans la plage du jeu. Injecte pour que le gel soit
      *                              observable : ce sont ses resultats qui sont conserves, pas lui.
      * @return self
      */
     public static function freeze(
         int $combatInstanceId,
+        FrozenMoonIdentity $moon,
         array $candidates,
         bool $attackSideWon,
-        int $moonDiameter,
+        MoonDestructionRule $rule,
         callable $roll,
     ): self {
-        $ordonnees = self::inDeterministicOrder($candidates);
-
         $tentatives = [];
         $luneDetruite = false;
         $rang = 0;
 
-        foreach ($ordonnees as $candidate) {
+        $chancePerte = $rule->deathstarLossChance($moon->diameter);
+
+        foreach (self::inDeterministicOrder($candidates) as $candidate) {
             $rang++;
+
+            $chanceDestruction = $rule->destructionChance($moon->diameter, $candidate->survivingDeathstars);
 
             // L'ordre de ces trois refus n'est pas indifferent : il decide quelle raison le joueur
             // lira. Le camp battu passe avant tout le reste, puis la lune deja detruite, puis
@@ -147,8 +183,8 @@ final readonly class FrozenMoonDestructionPlan
                     $candidate->fleetMissionId,
                     $rang,
                     $candidate->survivingDeathstars,
-                    $moonDiameter,
-                    self::VERSION,
+                    $chanceDestruction,
+                    $chancePerte,
                     null,
                     null,
                     $issue,
@@ -162,22 +198,15 @@ final readonly class FrozenMoonDestructionPlan
             $tirageDestruction = $roll();
             $tiragePerte = $roll();
 
-            $detruite = MoonDestructionOdds::succeeds(
-                $tirageDestruction,
-                MoonDestructionOdds::destructionChance($moonDiameter, $candidate->survivingDeathstars)
-            );
-
-            $perdues = MoonDestructionOdds::succeeds(
-                $tiragePerte,
-                MoonDestructionOdds::deathstarLossChance($moonDiameter)
-            ) ? $candidate->survivingDeathstars : 0;
+            $detruite = $rule->succeeds($tirageDestruction, $chanceDestruction);
+            $perdues = $rule->succeeds($tiragePerte, $chancePerte) ? $candidate->survivingDeathstars : 0;
 
             $tentatives[] = new FrozenMoonDestructionAttempt(
                 $candidate->fleetMissionId,
                 $rang,
                 $candidate->survivingDeathstars,
-                $moonDiameter,
-                self::VERSION,
+                $chanceDestruction,
+                $chancePerte,
                 $tirageDestruction,
                 $tiragePerte,
                 $detruite ? MoonDestructionOutcome::MoonDestroyed : MoonDestructionOutcome::AttemptFailed,
@@ -187,24 +216,41 @@ final readonly class FrozenMoonDestructionPlan
             $luneDetruite = $luneDetruite || $detruite;
         }
 
-        return new self($combatInstanceId, $tentatives);
+        return new self($combatInstanceId, $moon, $rule->version(), $tentatives);
     }
 
     /**
-     * Le plan relu, sans rien recalculer.
+     * Le plan relu, sans rien recalculer et sans consulter aucun registre.
      *
-     * @param int $combatInstanceId
-     * @param array<int, array<string, int|string|null>> $facts
+     * @param array<string, mixed> $facts
      * @return self
      */
-    public static function fromFrozenFacts(int $combatInstanceId, array $facts): self
+    public static function fromFrozenFacts(array $facts): self
     {
+        $schema = (int)($facts['schema'] ?? 0);
+
+        if ($schema !== self::SCHEMA) {
+            throw new InvalidArgumentException(
+                'Ce plan se reclame du schema ' . $schema . ', et celui qui est connu est le '
+                . self::SCHEMA . '. Le relire au petit bonheur donnerait des champs manquants pour des '
+                . 'valeurs nulles, et un resultat different de celui qui a ete calcule.'
+            );
+        }
+
+        /** @var array<string, int|string> $lune */
+        $lune = $facts['moon'];
+
+        /** @var array<int, array<string, int|float|string|null>> $tentatives */
+        $tentatives = $facts['attempts'];
+
         return new self(
-            $combatInstanceId,
+            (int)$facts['combat_instance_id'],
+            FrozenMoonIdentity::fromFrozenFacts($lune),
+            (string)$facts['rule_version'],
             array_map(
                 static fn (array $fait): FrozenMoonDestructionAttempt
                     => FrozenMoonDestructionAttempt::fromFrozenFacts($fait),
-                array_values($facts)
+                array_values($tentatives)
             )
         );
     }
@@ -212,14 +258,20 @@ final readonly class FrozenMoonDestructionPlan
     /**
      * Le plan, sous une forme comparable apres serialisation.
      *
-     * @return array<int, array<string, int|string|null>>
+     * @return array<string, mixed>
      */
     public function toFrozenFacts(): array
     {
-        return array_map(
-            static fn (FrozenMoonDestructionAttempt $tentative): array => $tentative->toFrozenFacts(),
-            $this->attempts
-        );
+        return [
+            'schema' => self::SCHEMA,
+            'combat_instance_id' => $this->combatInstanceId,
+            'rule_version' => $this->ruleVersion,
+            'moon' => $this->moon->toFrozenFacts(),
+            'attempts' => array_map(
+                static fn (FrozenMoonDestructionAttempt $tentative): array => $tentative->toFrozenFacts(),
+                $this->attempts
+            ),
+        ];
     }
 
     /**

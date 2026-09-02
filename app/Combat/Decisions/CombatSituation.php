@@ -8,6 +8,7 @@ use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\FlightLeg;
 use OGame\Combat\Enums\TargetScope;
 use OGame\Combat\Exceptions\ImpossibleCombatSituation;
+use OGame\Combat\Support\ReturnPlan;
 
 /**
  * Une situation d'arrivee, telle que la matrice la recoit.
@@ -112,6 +113,26 @@ final readonly class CombatSituation
         }
 
         return $this->mission->targetScope();
+    }
+
+    /**
+     * La portee reelle, une fois le plan de retour resolu sous verrou.
+     *
+     * **`scope()` dit l'intention, celle-ci dit le fait.** `FlightLeg::Return` ne garantit pas un
+     * corps celeste : la lune d'origine peut avoir ete detruite pendant le vol. Le jeu prevoit les
+     * recours et ils sont ordonnes — corps d'origine, planete associee, planete mere — mais un
+     * acteur peut les epuiser tous. C'est `ReturnPlan` qui porte le fait, apres les avoir epuises.
+     *
+     * @param ReturnPlan $resolvedReturn Le plan fige au moment de la decision, sous verrou.
+     * @return TargetScope
+     */
+    public function scopeFor(ReturnPlan $resolvedReturn): TargetScope
+    {
+        if ($this->leg !== FlightLeg::Return) {
+            return $this->mission->targetScope();
+        }
+
+        return $resolvedReturn->isPossible() ? TargetScope::CelestialBody : TargetScope::NoDestination;
     }
 
     /**

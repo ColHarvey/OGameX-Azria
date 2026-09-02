@@ -81,4 +81,11 @@ enum CombatReasonCode: string
      * La position visee par une colonisation a cesse d'etre libre pendant le vol.
      */
     case PositionNoLongerFree = 'position_no_longer_free';
+
+    /**
+     * Le plan de retour resolu ne designe aucun corps ou se poser.
+     *
+     * Le dernier recours, apres le corps d'origine, la planete associee et la planete mere.
+     */
+    case NoReturnDestination = 'no_return_destination';
 }

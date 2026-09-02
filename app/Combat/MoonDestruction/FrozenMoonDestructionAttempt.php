@@ -13,8 +13,10 @@ use InvalidArgumentException;
  * ordre ni en meme nombre. Deux heures plus tard, rejouer la graine pourrait donner un autre
  * resultat que celui qui avait ete calcule — et le joueur verrait le second.
  *
- * Ce sont donc les **valeurs effectivement tirees** qui sont conservees, avec les entrees qui ont
- * servi aux probabilites. Le resultat est relisible sans rien recalculer.
+ * Ce sont donc les **valeurs effectivement tirees** qui sont conservees, avec les chances calculees
+ * et la version de la regle qui les a produites. Le resultat est relisible sans rien recalculer :
+ * l'application a l'echeance ne consulte ni le registre courant, ni le hasard, ni le diametre
+ * vivant de la lune.
  *
  * ## Les invariants que cet objet fait respecter
  *
@@ -22,7 +24,9 @@ use InvalidArgumentException;
  *   mission sautee qui consommerait quand meme un tirage decalerait la suite du hasard ;
  * - **une issue qui tire porte ses deux tirages**. Il y en a deux : la destruction, puis la perte ;
  * - **`NoSurvivingDeathstar` n'est possible qu'avec zero survivante**, et reciproquement ;
- * - **on ne perd pas plus d'etoiles de la mort qu'on n'en a**.
+ * - **on ne perd pas plus d'etoiles de la mort qu'on n'en a** ;
+ * - **le resultat gele et le tirage concordent** : un tirage qui perd ne peut pas avoir detruit la
+ *   lune, sinon relire le plan et le recalculer donneraient deux reponses.
  */
 final readonly class FrozenMoonDestructionAttempt
 {
@@ -30,8 +34,8 @@ final readonly class FrozenMoonDestructionAttempt
      * @param int $fleetMissionId La mission a qui appartient cette tentative.
      * @param int $order Son rang, a partir de 1, dans l'ordre deterministe.
      * @param int $survivingDeathstars Les survivantes de cette mission seule.
-     * @param int $moonDiameter L'entree des deux probabilites, conservee pour l'audit.
-     * @param string $ruleVersion La version de la regle qui a produit ce gel.
+     * @param float $destructionChance La chance calculee, conservee pour l'audit et le rapport.
+     * @param float $deathstarLossChance De meme, pour la perte.
      * @param int|null $destructionRoll Le tirage de destruction, ou null si la tentative n'a pas eu lieu.
      * @param int|null $deathstarLossRoll Le tirage de perte, ou null de meme.
      * @param MoonDestructionOutcome $outcome Ce qui a ete obtenu.
@@ -41,8 +45,8 @@ final readonly class FrozenMoonDestructionAttempt
         public int $fleetMissionId,
         public int $order,
         public int $survivingDeathstars,
-        public int $moonDiameter,
-        public string $ruleVersion,
+        public float $destructionChance,
+        public float $deathstarLossChance,
         public int|null $destructionRoll,
         public int|null $deathstarLossRoll,
         public MoonDestructionOutcome $outcome,
@@ -98,6 +102,19 @@ final readonly class FrozenMoonDestructionAttempt
                 'Une tentative qui n a pas eu lieu ne coute aucune etoile de la mort.'
             );
         }
+
+        // **Le resultat gele doit concorder avec son tirage.** Sans ce controle, relire le plan et le
+        // recalculer donneraient deux reponses, et personne ne saurait laquelle le joueur a vue.
+        if ($destructionRoll !== null) {
+            $auraitDetruit = MoonDestructionOdds::succeeds($destructionRoll, $destructionChance);
+
+            if ($auraitDetruit !== ($outcome === MoonDestructionOutcome::MoonDestroyed)) {
+                throw new InvalidArgumentException(
+                    'Le tirage ' . $destructionRoll . ' et l issue « ' . $outcome->value . ' » ne concordent pas '
+                    . 'avec une chance de ' . $destructionChance . ' %.'
+                );
+            }
+        }
     }
 
     /**
@@ -111,7 +128,7 @@ final readonly class FrozenMoonDestructionAttempt
     /**
      * La tentative, sous une forme comparable apres serialisation.
      *
-     * @return array<string, int|string|null>
+     * @return array<string, int|float|string|null>
      */
     public function toFrozenFacts(): array
     {
@@ -119,8 +136,8 @@ final readonly class FrozenMoonDestructionAttempt
             'fleet_mission_id' => $this->fleetMissionId,
             'order' => $this->order,
             'surviving_deathstars' => $this->survivingDeathstars,
-            'moon_diameter' => $this->moonDiameter,
-            'rule_version' => $this->ruleVersion,
+            'destruction_chance' => $this->destructionChance,
+            'deathstar_loss_chance' => $this->deathstarLossChance,
             'destruction_roll' => $this->destructionRoll,
             'deathstar_loss_roll' => $this->deathstarLossRoll,
             'outcome' => $this->outcome->value,
@@ -131,7 +148,7 @@ final readonly class FrozenMoonDestructionAttempt
     /**
      * La tentative relue, sans rien recalculer.
      *
-     * @param array<string, int|string|null> $facts
+     * @param array<string, int|float|string|null> $facts
      * @return self
      */
     public static function fromFrozenFacts(array $facts): self
@@ -140,8 +157,8 @@ final readonly class FrozenMoonDestructionAttempt
             (int)$facts['fleet_mission_id'],
             (int)$facts['order'],
             (int)$facts['surviving_deathstars'],
-            (int)$facts['moon_diameter'],
-            (string)$facts['rule_version'],
+            (float)$facts['destruction_chance'],
+            (float)$facts['deathstar_loss_chance'],
             $facts['destruction_roll'] === null ? null : (int)$facts['destruction_roll'],
             $facts['deathstar_loss_roll'] === null ? null : (int)$facts['deathstar_loss_roll'],
             MoonDestructionOutcome::from((string)$facts['outcome']),

@@ -4,8 +4,10 @@ namespace Tests\Unit\Combat;
 
 use InvalidArgumentException;
 use OGame\Combat\Decisions\ArrivalDecision;
+use OGame\Combat\Decisions\ArrivalVerdict;
 use OGame\Combat\Decisions\CombatDecisionMatrix;
 use OGame\Combat\Decisions\CombatSituation;
+use OGame\Combat\Decisions\FinalCombatDecision;
 use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\Enums\CombatMissionAction;
 use OGame\Combat\Enums\CombatMissionKind;
@@ -15,6 +17,7 @@ use OGame\Combat\Enums\DecisionRequirement;
 use OGame\Combat\Enums\FlightLeg;
 use OGame\Combat\Enums\InvariantCode;
 use OGame\Combat\Enums\OpenCellCategory;
+use OGame\Combat\Enums\SnapshotObligation;
 use OGame\Combat\Enums\TargetScope;
 use OGame\Combat\Exceptions\ImpossibleCombatSituation;
 use OGame\Combat\Exceptions\NonFinalCombatReason;
@@ -512,10 +515,10 @@ class CombatDecisionMatrixTest extends UnitTestCase
             CombatState::Active
         );
 
-        $decision = (new CombatDecisionMatrix())->arrivalOf(
+        $decision = (new CombatDecisionMatrix())->verdictOf(
             $situation,
             ReturnPlan::cannotReturn(CombatReasonCode::RallyClosed)
-        );
+        )->movement;
 
         $this->assertSame(CombatMissionAction::CancelWithoutImpact, $decision->action());
         $this->assertNull($decision->returnPlan, 'A cancelled arrival was given a destination.');
@@ -703,11 +706,194 @@ class CombatDecisionMatrixTest extends UnitTestCase
     }
 
     /**
+     * Toute arrivee qui se pose pendant le ralliement exige une decision causale.
+     *
+     * ## Une obligation, pas une interdiction
+     *
+     * Interdire `LandOutsideSnapshot` pendant le ralliement empechait le mauvais resultat. Cela
+     * n'obligeait personne a en demander un bon : un appelant qui recevait `AllowNormally` pouvait
+     * conclure que rien ne restait a decider, et inclure ou exclure la flotte de son propre chef.
+     *
+     * Cet essai est la preuve **positive** : chaque case qui depose quelque chose sur le corps
+     * pendant que la photographie n'est pas prise porte `RequiresCausalDecision`.
+     */
+    public function testEveryArrivalThatLandsDuringTheRallyDemandsACausalDecision(): void
+    {
+        $posees = 0;
+
+        foreach (CombatSituation::all() as $situation) {
+            $verdict = $this->verdictOf($situation);
+
+            if ($situation->targetState !== CombatState::Rallying || !$verdict->landsOnTheBody()) {
+                continue;
+            }
+
+            if ($situation->scope() !== TargetScope::CelestialBody) {
+                continue;
+            }
+
+            $posees++;
+
+            $this->assertSame(
+                SnapshotObligation::RequiresCausalDecision,
+                $verdict->snapshot,
+                'A fleet landed during the rally without the causal decision being demanded: '
+                . $situation->describe()
+            );
+        }
+
+        $this->assertGreaterThan(0, $posees, 'No landing cell was examined: this test would prove nothing.');
+
+        // Tous les retours en font partie, et c'etait le cas incertain : leur mouvement est
+        // `AllowNormally`, qui ne dit rien de la photographie.
+        foreach (CombatMissionKind::cases() as $mission) {
+            $retour = new CombatSituation($mission, FlightLeg::Return, ActorKind::Player, CombatState::Rallying);
+
+            if (!$retour->isPossible()) {
+                continue;
+            }
+
+            $verdict = $this->verdictOf($retour);
+
+            $this->assertSame(CombatMissionAction::AllowNormally, $verdict->movement->action());
+            $this->assertSame(SnapshotObligation::RequiresCausalDecision, $verdict->snapshot, $retour->describe());
+        }
+    }
+
+    /**
+     * Une fois la photographie prise, la question est tranchee et ne se redemande pas.
+     */
+    public function testOnceTheSnapshotIsTakenMembershipIsSettled(): void
+    {
+        $verdict = $this->verdictOf(new CombatSituation(
+            CombatMissionKind::Transport,
+            FlightLeg::Return,
+            ActorKind::Player,
+            CombatState::Active
+        ));
+
+        $this->assertSame(CombatMissionAction::LandOutsideSnapshot, $verdict->movement->action());
+        $this->assertSame(SnapshotObligation::SettledOutsideSnapshot, $verdict->snapshot);
+    }
+
+    /**
+     * Une arrivee qui ne se pose pas ne porte aucune obligation de photographie.
+     *
+     * Sans ce controle, une flotte renvoyee pourrait se voir attacher une contribution, et le
+     * reconciliateur chercherait des vaisseaux la ou il n'y en a aucun.
+     */
+    public function testAnArrivalThatDoesNotLandCarriesNoSnapshotObligation(): void
+    {
+        foreach (CombatSituation::all() as $situation) {
+            $verdict = $this->verdictOf($situation);
+
+            if ($verdict->landsOnTheBody()) {
+                continue;
+            }
+
+            $this->assertSame(
+                SnapshotObligation::NotConcerned,
+                $verdict->snapshot,
+                'A fleet that never lands was given a snapshot obligation: ' . $situation->describe()
+            );
+        }
+    }
+
+    /**
+     * Une decision interne ne peut pas devenir un resultat montre a un joueur.
+     *
+     * `reason()` levait deja, mais **au moment de l'appel** : rien n'empechait un chemin de
+     * serialiser l'action sans jamais demander la raison, et de publier ainsi
+     * `select_by_attack_admission` dans un rapport. Le passage de type ferme cette porte.
+     */
+    public function testAnInternalDecisionCannotBecomeAPlayerFacingResult(): void
+    {
+        $refusees = 0;
+
+        foreach (CombatSituation::all() as $situation) {
+            $decision = $this->arrivalOf($situation);
+
+            if ($decision->isFinal() && $decision->action() !== CombatMissionAction::DeferUntilResolved) {
+                $finale = FinalCombatDecision::of($decision);
+
+                $this->assertSame($decision->action()->value, $finale->toPlayerFacingFacts()['action']);
+                $this->assertStringNotContainsStringIgnoringCase(
+                    'pending',
+                    (string)$finale->toPlayerFacingFacts()['reason']
+                );
+
+                continue;
+            }
+
+            $refusees++;
+
+            try {
+                FinalCombatDecision::of($decision);
+                $this->fail('An internal decision was published as a result: ' . $situation->describe());
+            } catch (NonFinalCombatReason) {
+                $this->addToAssertionCount(1);
+            }
+        }
+
+        // Les 57 delegations, plus les reports : un report n'est pas un resultat, ce qui sera montre
+        // au joueur est sa continuation.
+        $this->assertGreaterThan(57, $refusees, 'Deferred decisions were accepted as final results.');
+    }
+
+    /**
+     * Un retour dont le plan resolu ne designe aucun corps est annule, jamais pose.
+     *
+     * `FlightLeg::Return` ne garantit pas un corps celeste : la lune d'origine peut avoir ete
+     * detruite pendant le vol. C'est le plan resolu sous verrou qui porte le fait, apres avoir
+     * epuise les recours ordonnes du jeu.
+     */
+    public function testAReturnWithNoResolvedDestinationIsCancelledRatherThanLanded(): void
+    {
+        $sansDestination = ReturnPlan::cannotReturn(CombatReasonCode::TargetCombatLocked);
+
+        foreach ([null, CombatState::Rallying, CombatState::Active, CombatState::Resolving] as $etat) {
+            $situation = new CombatSituation(
+                CombatMissionKind::Expedition,
+                FlightLeg::Return,
+                ActorKind::Player,
+                $etat
+            );
+
+            $this->assertSame(TargetScope::NoDestination, $situation->scopeFor($sansDestination));
+
+            $verdict = (new CombatDecisionMatrix())->verdictOf($situation, $sansDestination);
+
+            $this->assertSame(CombatMissionAction::CancelWithoutImpact, $verdict->movement->action());
+            $this->assertSame(CombatReasonCode::NoReturnDestination, $verdict->movement->reason());
+            $this->assertSame(SnapshotObligation::NotConcerned, $verdict->snapshot);
+        }
+
+        // Et le meme retour avec un plan praticable se pose bien.
+        $this->assertSame(
+            TargetScope::CelestialBody,
+            (new CombatSituation(
+                CombatMissionKind::Expedition,
+                FlightLeg::Return,
+                ActorKind::Player,
+                CombatState::Active
+            ))->scopeFor($this->aPossibleReturn())
+        );
+    }
+
+    /**
      * La decision d'une situation, avec un plan de retour praticable.
      */
     private function arrivalOf(CombatSituation $situation): ArrivalDecision
     {
-        return (new CombatDecisionMatrix())->arrivalOf($situation, $this->aPossibleReturn());
+        return $this->verdictOf($situation)->movement;
+    }
+
+    /**
+     * Le verdict complet d'une situation, avec un plan de retour praticable.
+     */
+    private function verdictOf(CombatSituation $situation): ArrivalVerdict
+    {
+        return (new CombatDecisionMatrix())->verdictOf($situation, $this->aPossibleReturn());
     }
 
     /**
