@@ -31,10 +31,14 @@ final readonly class CausalWindow
     /**
      * @param int $openedAt L'instant d'ouverture du ralliement, en secondes.
      * @param int $closesAt L'instant de fermeture. Egal a l'ouverture pour une fenetre nulle.
+     * @param CausalEventOrder $order L'ordre causal **du combat**, relu depuis sa version
+     *                                persistee. Jamais la version courante prise au vol : un
+     *                                worker en retard reordonnerait une ouverture deja fixee.
      */
     public function __construct(
         public int $openedAt,
         public int $closesAt,
+        public CausalEventOrder $order,
     ) {
         if ($closesAt < $openedAt) {
             throw new InvalidArgumentException(
@@ -61,7 +65,7 @@ final readonly class CausalWindow
         // place avant tout evenement reel de la meme seconde : un effet prevu pile a la fermeture
         // lui est donc posterieur, et exclu. C'est la convention deja retenue partout ailleurs, et
         // la reprendre evite d'en ecrire une seconde qui finirait par en differer.
-        return $effect->isBefore(EffectOrderKey::barrierAt($this->closesAt));
+        return $effect->isBefore(EffectOrderKey::barrierAt($this->closesAt, $this->order));
     }
 
     /**

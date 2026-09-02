@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Combat;
 
+use OGame\Combat\Causality\CausalEventOrderV1;
 use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\Enums\CombatEventType;
 use OGame\Combat\Enums\CombatMissionKind;
@@ -70,7 +71,7 @@ class VerifiedCombatOpenerTest extends UnitTestCase
 
         VerifiedCombatOpener::verify(
             $this->persistedOpener(),
-            $this->claim(eventKey: EffectOrderKey::forEvent(self::ARRIVEE, CombatEventType::FleetArrival, 999))
+            $this->claim(eventKey: EffectOrderKey::forEvent(self::ARRIVEE, CombatEventType::FleetArrival, 999, new CausalEventOrderV1()))
         );
     }
 
@@ -215,7 +216,7 @@ class VerifiedCombatOpenerTest extends UnitTestCase
     {
         return new PersistedCombatOpener(
             self::INSTANCE,
-            EffectOrderKey::forEvent(self::ARRIVEE, CombatEventType::FleetArrival, 42),
+            EffectOrderKey::forEvent(self::ARRIVEE, CombatEventType::FleetArrival, 42, new CausalEventOrderV1()),
             self::cible(),
             self::ARRIVEE,
             500,
@@ -234,7 +235,7 @@ class VerifiedCombatOpenerTest extends UnitTestCase
         int $plannedArrival = self::ARRIVEE,
     ): CombatOpenerClaim {
         return new CombatOpenerClaim(
-            $eventKey ?? EffectOrderKey::forEvent(self::ARRIVEE, CombatEventType::FleetArrival, 42),
+            $eventKey ?? EffectOrderKey::forEvent(self::ARRIVEE, CombatEventType::FleetArrival, 42, new CausalEventOrderV1()),
             $targetBodyKey ?? self::cible(),
             $leg,
             $missionKind,

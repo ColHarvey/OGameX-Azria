@@ -44,24 +44,4 @@ enum CombatEventType: string
      * apres l'ouverture, elle ne modifie pas ce combat.
      */
     case ResearchCompletion = 'research_completion';
-
-    /**
-     * Le rang de cette sorte dans le departage.
-     *
-     * Toujours strictement positif : zero appartient aux barrieres.
-     */
-    public function rank(): int
-    {
-        return match ($this) {
-            self::FleetArrival => 1,
-            self::MissileImpact => 2,
-            self::QueueCompletion => 3,
-
-            // **Ajoute apres les trois autres, deliberement.** Les changer de place
-            // modifierait l'ordre de deux effets simultanes deja en production ; ce rang-ci est
-            // additif et ne touche a rien. Si l'achevement d'une recherche doit precer un
-            // chantier a la meme seconde, c'est une decision de jeu a prendre separement.
-            self::ResearchCompletion => 4,
-        };
-    }
 }

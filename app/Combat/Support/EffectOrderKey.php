@@ -3,7 +3,9 @@
 namespace OGame\Combat\Support;
 
 use InvalidArgumentException;
+use OGame\Combat\Causality\CausalEventOrder;
 use OGame\Combat\Enums\CombatEventType;
+use OGame\Combat\Exceptions\MismatchedCausalEventOrder;
 
 /**
  * Quand l'effet d'un engagement doit logiquement se produire.
@@ -22,27 +24,32 @@ use OGame\Combat\Enums\CombatEventType;
  *
  * ## Un ordre reellement total
  *
- * L'heure planifiee decide. Mais deux evenements peuvent tomber sur la meme seconde — la
- * precision metier du jeu est la seconde — et il faut alors un depart **qui ne puisse jamais etre
- * une egalite**.
+ * L'heure planifiee decide. Mais deux evenements peuvent tomber sur la meme seconde — la precision
+ * metier du jeu est la seconde — et il faut alors un depart **qui ne puisse jamais etre une
+ * egalite** :
+ *
+ *     (heure planifiee, rang du genre, identifiant de source)
  *
  * Un identifiant seul n'y suffit pas : un missile numero douze et une construction numero douze
- * viennent de tables distinctes, dont les espaces se recouvrent. La cle porte donc trois
- * composantes, comparees dans cet ordre :
- *
- *     (heure planifiee, rang du type d'evenement, identifiant de source)
- *
- * Sans cela, l'ordre de deux evenements simultanes dependrait du worker qui prend le verrou en
- * premier, c'est-a-dire du hasard de la charge serveur — et rejouer les memes evenements dans un
- * autre ordre donnerait un autre resultat.
+ * viennent de tables distinctes, dont les espaces se recouvrent.
  *
  * ## Les barrieres ne sont pas des evenements
  *
- * Une ouverture, une fermeture n'ont ni type ni identifiant de source. Elles portent le rang zero,
- * ce qui les place **avant** tout evenement reel de la meme seconde. C'est exactement la
- * convention retenue partout ailleurs : ce qui tombe pile sur une barriere lui est posterieur.
+ * Une ouverture, une fermeture n'ont ni genre ni identifiant de source. Elles portent le rang zero,
+ * ce qui les place **avant** tout evenement reel de la meme seconde. C'est la convention retenue
+ * partout ailleurs : ce qui tombe pile sur une barriere lui est posterieur. Un evenement reel ne
+ * peut donc jamais porter le rang zero, et le constructeur le refuse.
  *
- * Un evenement reel ne peut donc jamais porter le rang zero, et le constructeur le refuse.
+ * ## Trois regles invariantes, une seule versionnee
+ *
+ *     heure planifiee d'abord           -> invariant
+ *     barriere avant tout evenement     -> invariant
+ *     departage par identite persistee  -> invariant
+ *     ordre entre genres                -> **versionne**
+ *
+ * La cle porte donc la version de l'ordre qui l'a produite, et **deux cles de versions differentes
+ * refusent d'etre comparees**. Un rang 2 sous v1 et un rang 2 sous v2 ne designent pas le meme
+ * genre : les mettre sur la meme echelle donnerait un resultat plausible et faux.
  */
 final readonly class EffectOrderKey
 {
@@ -50,15 +57,16 @@ final readonly class EffectOrderKey
      * @param int $plannedAt Heure planifiee de l'effet, en secondes. **Jamais l'heure a laquelle
      *                       un worker le traite** : un retard du serveur ne doit pas reclasser
      *                       les evenements.
-     * @param int $typeRank Rang du type d'evenement. Zero pour une barriere, strictement positif
+     * @param int $typeRank Rang du genre d'evenement. Zero pour une barriere, strictement positif
      *                      pour tout evenement reel.
-     * @param int $sourceId Identifiant de la mission, du missile ou de la file, stable et
-     *                      persiste.
+     * @param int $sourceId Identifiant de la mission, du missile ou de la file, stable et persiste.
+     * @param string $orderVersion La version de l'ordre causal qui a produit ce rang.
      */
     private function __construct(
         public int $plannedAt,
         public int $typeRank,
         public int $sourceId,
+        public string $orderVersion,
     ) {
     }
 
@@ -68,37 +76,53 @@ final readonly class EffectOrderKey
      * @param int $plannedAt
      * @param CombatEventType $type
      * @param int $sourceId
+     * @param CausalEventOrder $order L'ordre **du combat**, relu depuis sa version persistee — jamais
+     *                                la version courante prise au vol par un worker.
      * @return self
      */
-    public static function forEvent(int $plannedAt, CombatEventType $type, int $sourceId): self
-    {
+    public static function forEvent(
+        int $plannedAt,
+        CombatEventType $type,
+        int $sourceId,
+        CausalEventOrder $order,
+    ): self {
         if ($sourceId <= 0) {
             throw new InvalidArgumentException(
-                'Un evenement doit porter un identifiant de source strictement positif : sans lui, deux evenements simultanes du meme type seraient a egalite.'
+                'Un evenement doit porter un identifiant de source strictement positif : sans lui, deux evenements simultanes du meme genre seraient a egalite.'
             );
         }
 
-        return new self($plannedAt, $type->rank(), $sourceId);
+        $rang = $order->rankOf($type);
+
+        if ($rang <= 0) {
+            throw new InvalidArgumentException(
+                'L ordre « ' . $order->version() . ' » attribue le rang ' . $rang . ' au genre « ' . $type->value
+                . ' ». Zero et les negatifs appartiennent aux barrieres : un evenement qui les porterait se '
+                . 'placerait avant une fermeture tombant a la meme seconde.'
+            );
+        }
+
+        return new self($plannedAt, $rang, $sourceId, $order->version());
     }
 
     /**
-     * La cle d'une barriere : ni type, ni source.
+     * La cle d'une barriere : ni genre, ni source.
+     *
+     * Elle porte quand meme la version, pour qu'une barriere v1 ne se compare jamais a un evenement
+     * v2. Le rang zero, lui, est invariant : c'est ce qui fait qu'une egalite avec une barriere
+     * compte pour « apres », dans toutes les versions.
      *
      * @param int $plannedAt
+     * @param CausalEventOrder $order
      * @return self
      */
-    public static function barrierAt(int $plannedAt): self
+    public static function barrierAt(int $plannedAt, CausalEventOrder $order): self
     {
-        return new self($plannedAt, 0, 0);
+        return new self($plannedAt, 0, 0, $order->version());
     }
 
     /**
      * Si cet effet precede strictement l'autre.
-     *
-     * Comparaison lexicographique sur les trois composantes.
-     *
-     * @param self $other
-     * @return bool
      */
     public function isBefore(self $other): bool
     {
@@ -113,6 +137,8 @@ final readonly class EffectOrderKey
      */
     public function compareTo(self $other): int
     {
+        $this->ensureSameOrderAs($other);
+
         return [$this->plannedAt, $this->typeRank, $this->sourceId]
             <=> [$other->plannedAt, $other->typeRank, $other->sourceId];
     }
@@ -122,9 +148,6 @@ final readonly class EffectOrderKey
      *
      * Deux evenements reels distincts ne peuvent jamais etre egaux : c'est ce qui fait de ce
      * classement un ordre total.
-     *
-     * @param self $other
-     * @return bool
      */
     public function equals(self $other): bool
     {
@@ -133,11 +156,28 @@ final readonly class EffectOrderKey
 
     /**
      * Si cette cle designe une barriere plutot qu'un evenement.
-     *
-     * @return bool
      */
     public function isBarrier(): bool
     {
         return $this->typeRank === 0;
+    }
+
+    /**
+     * Refuse de comparer deux cles produites sous des ordres differents.
+     *
+     * @param self $other
+     * @return void
+     */
+    private function ensureSameOrderAs(self $other): void
+    {
+        if ($this->orderVersion === $other->orderVersion) {
+            return;
+        }
+
+        throw new MismatchedCausalEventOrder(
+            'Une cle d effet de « ' . $this->orderVersion . ' » a ete comparee a une cle de « '
+            . $other->orderVersion . ' ». Les rangs de genre ne veulent pas dire la meme chose d une version '
+            . 'a l autre : un combat ouvert sous une version se rejoue sous cette version-la, entierement.'
+        );
     }
 }

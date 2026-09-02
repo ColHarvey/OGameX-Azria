@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Combat;
 
+use OGame\Combat\Causality\CausalEventOrderV1;
 use OGame\Combat\Enums\CombatEventType;
 use OGame\Combat\Support\CombatSnapshotEligibility;
 use OGame\Combat\Support\EffectOrderKey;
@@ -131,13 +132,13 @@ class CombatSnapshotEligibilityTest extends UnitTestCase
      */
     public function testZeroLengthRallyAdmitsNoAdditionalEffectsButKeepsTheOpener(): void
     {
-        $ouverture = EffectOrderKey::barrierAt(self::OUVERTURE);
+        $ouverture = EffectOrderKey::barrierAt(self::OUVERTURE, new CausalEventOrderV1());
 
         $this->assertFalse(
             CombatSnapshotEligibility::entersSnapshot(
                 false,
                 self::OUVERTURE - 100,
-                EffectOrderKey::forEvent(self::OUVERTURE, CombatEventType::FleetArrival, 4),
+                EffectOrderKey::forEvent(self::OUVERTURE, CombatEventType::FleetArrival, 4, new CausalEventOrderV1()),
                 self::OUVERTURE,
                 $ouverture
             ),
@@ -148,7 +149,7 @@ class CombatSnapshotEligibilityTest extends UnitTestCase
             CombatSnapshotEligibility::entersSnapshot(
                 true,
                 self::OUVERTURE,
-                EffectOrderKey::forEvent(self::OUVERTURE, CombatEventType::FleetArrival, 1),
+                EffectOrderKey::forEvent(self::OUVERTURE, CombatEventType::FleetArrival, 1, new CausalEventOrderV1()),
                 self::OUVERTURE,
                 $ouverture
             ),
@@ -169,9 +170,9 @@ class CombatSnapshotEligibilityTest extends UnitTestCase
                     CombatSnapshotEligibility::entersSnapshot(
                         true,
                         $decision,
-                        EffectOrderKey::forEvent($effet, CombatEventType::FleetArrival, 1),
+                        EffectOrderKey::forEvent($effet, CombatEventType::FleetArrival, 1, new CausalEventOrderV1()),
                         self::OUVERTURE,
-                        EffectOrderKey::barrierAt(self::FERMETURE)
+                        EffectOrderKey::barrierAt(self::FERMETURE, new CausalEventOrderV1())
                     ),
                     'A combination of barriers excluded the combat opener from its own battle.'
                 );
@@ -223,9 +224,9 @@ class CombatSnapshotEligibilityTest extends UnitTestCase
         return CombatSnapshotEligibility::entersSnapshot(
             false,
             $engagement,
-            EffectOrderKey::forEvent($effet, $type, 12),
+            EffectOrderKey::forEvent($effet, $type, 12, new CausalEventOrderV1()),
             self::OUVERTURE,
-            EffectOrderKey::barrierAt(self::FERMETURE)
+            EffectOrderKey::barrierAt(self::FERMETURE, new CausalEventOrderV1())
         );
     }
 }

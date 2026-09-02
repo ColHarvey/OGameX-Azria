@@ -7,6 +7,7 @@ use LogicException;
 use OGame\Combat\Causality\AppliedEffectReceipt;
 use OGame\Combat\Causality\CausalAdmission;
 use OGame\Combat\Causality\CausalEvent;
+use OGame\Combat\Causality\CausalEventOrderV1;
 use OGame\Combat\Causality\CausalEventSliceClaim;
 use OGame\Combat\Causality\CausalEventSource;
 use OGame\Combat\Causality\CausallyReconciledSnapshot;
@@ -125,18 +126,18 @@ class CausalOrderReconcilerTest extends UnitTestCase
     /**
      * A effet simultane, le rang par genre decide, et il decide quelque chose de reel.
      *
-     * ## Le classement est celui qui existait deja
+     * ## Ce que chaque rang produit en jeu
      *
-     * `CombatEventType::rank()` etait ecrit avant ce chantier : arrivee, missile, chantier. J'avais
-     * d'abord ecrit l'ordre **inverse** dans une seconde cle d'effet, en raisonnant qu'une defense
-     * achevee devait pouvoir etre touchee par un missile de la meme seconde. Cette seconde cle a ete
-     * supprimee : deux classements concurrents pour un meme enum finissent par diverger.
+     * L'ordre a ete tranche comme decision de jeu, et `causal_event_order_v1` le porte :
      *
-     * L'essai fige donc l'ordre **en vigueur**. Si l'autre est preferable, c'est une decision de jeu
-     * a prendre separement, et elle changera `rank()` — pas une seconde table.
+     * - **recherche avant chantier** : l'unite construite se bat avec la technologie nouvelle ;
+     * - **chantier avant missile** : la defense achevee existe deja, et **le missile la detruit** ;
+     * - **missile avant arrivee** : la flotte qui se pose voit la cible telle que le missile l'a
+     *   laissee.
      *
-     * `ResearchCompletion` a ete ajoute **apres** les trois autres, en rang 4 : additif, il ne
-     * reordonne aucun couple existant.
+     * Le classement precedent, herite de `CombatEventType::rank()`, etait exactement l'inverse. Il
+     * a ete remplace parce que le domaine n'est branche nulle part : c'etait le moment de choisir,
+     * pas de preserver une compatibilite avec rien.
      */
     public function testAtEqualEffectTimeTheRankDecidesSomethingReal(): void
     {
@@ -148,10 +149,10 @@ class CausalOrderReconcilerTest extends UnitTestCase
         ]);
 
         $this->assertSame(
-            ['ouverture', 'arrivee', 'missile', 'chantier', 'recherche'],
+            ['ouverture', 'recherche', 'chantier', 'missile', 'arrivee'],
             array_map(static fn (ReconciledEvent $e): string => $e->event->identity, $etat->reconciled),
-            'The simultaneous ranking changed. It is the one CombatEventType::rank() already carried, '
-            . 'and changing it is a game decision, not a refactor.'
+            'The simultaneous ranking changed. What a missile can hit, and with which technology a new '
+            . 'unit fights, depend on it.'
         );
     }
 
@@ -304,7 +305,7 @@ class CausalOrderReconcilerTest extends UnitTestCase
         $etat = (new CausalOrderReconciler())->reconcile(
             $this->anOpeningState(),
             'ouverture',
-            new CausalWindow(self::OPENING, self::OPENING),
+            new CausalWindow(self::OPENING, self::OPENING, new CausalEventOrderV1()),
             $this->aVerifiedSlice([
                 $this->anEvent('ouverture', decidedAt: self::OPENING, effectAt: self::OPENING),
                 // Engage avant l'ouverture, mais son effet tombe exactement sur la barriere.
@@ -428,7 +429,7 @@ class CausalOrderReconcilerTest extends UnitTestCase
         (new CausalOrderReconciler())->reconcile(
             $this->anOpeningState(),
             'ouverture',
-            new CausalWindow(self::OPENING, self::CLOSING),
+            new CausalWindow(self::OPENING, self::CLOSING, new CausalEventOrderV1()),
             $this->aVerifiedSlice([$this->anEvent('e1', decidedAt: 500, effectAt: 1_010)])
         );
     }
@@ -536,7 +537,7 @@ class CausalOrderReconcilerTest extends UnitTestCase
 
         new CausallyReconciledSnapshot(
             $this->anOpeningState(),
-            new CausalWindow(self::OPENING, self::CLOSING),
+            new CausalWindow(self::OPENING, self::CLOSING, new CausalEventOrderV1()),
             [
                 new ReconciledEvent($this->anEvent('tard', effectAt: 1_050, identifier: 1), CausalAdmission::AppliedBeforeSnapshot, ''),
                 new ReconciledEvent($this->anEvent('tot', effectAt: 1_010, identifier: 2), CausalAdmission::AppliedBeforeSnapshot, ''),
@@ -553,7 +554,7 @@ class CausalOrderReconcilerTest extends UnitTestCase
 
         new CausallyReconciledSnapshot(
             $this->anOpeningState(),
-            new CausalWindow(self::OPENING, self::CLOSING),
+            new CausalWindow(self::OPENING, self::CLOSING, new CausalEventOrderV1()),
             [
                 new ReconciledEvent($this->anEvent('e1', effectAt: 1_010), CausalAdmission::AppliedBeforeSnapshot, ''),
                 new ReconciledEvent($this->anEvent('e1', effectAt: 1_010), CausalAdmission::AppliedBeforeSnapshot, ''),
@@ -601,7 +602,7 @@ class CausalOrderReconcilerTest extends UnitTestCase
         return (new CausalOrderReconciler())->reconcile(
             $this->anOpeningState($provenance),
             'ouverture',
-            new CausalWindow(self::OPENING, self::CLOSING),
+            new CausalWindow(self::OPENING, self::CLOSING, new CausalEventOrderV1()),
             $this->aVerifiedSlice($events)
         );
     }
@@ -628,7 +629,7 @@ class CausalOrderReconcilerTest extends UnitTestCase
         return new PartitionBarrier(
             42,
             self::TARGET_BODY,
-            EffectOrderKey::forEvent(1_000_000, CombatEventType::FleetArrival, 1_000_000)
+            EffectOrderKey::forEvent(1_000_000, CombatEventType::FleetArrival, 1_000_000, new CausalEventOrderV1())
         );
     }
 
@@ -691,7 +692,7 @@ class CausalOrderReconcilerTest extends UnitTestCase
             $identity,
             'fleet_arrival_v1',
             new DecisionOrder($decidedAt, $identifier),
-            EffectOrderKey::forEvent($effectAt, $type, $identifier),
+            EffectOrderKey::forEvent($effectAt, $type, $identifier, new CausalEventOrderV1()),
             $targetBodyId,
             $scope,
             $contributions ?? [SnapshotContribution::DeliveredCargo],

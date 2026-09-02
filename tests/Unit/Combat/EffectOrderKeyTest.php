@@ -3,6 +3,8 @@
 namespace Tests\Unit\Combat;
 
 use InvalidArgumentException;
+use OGame\Combat\Causality\CausalEventOrder;
+use OGame\Combat\Causality\CausalEventOrderV1;
 use OGame\Combat\Enums\CombatEventType;
 use OGame\Combat\Support\EffectOrderKey;
 use Tests\UnitTestCase;
@@ -17,41 +19,30 @@ use Tests\UnitTestCase;
 class EffectOrderKeyTest extends UnitTestCase
 {
     /**
-     * Chaque sorte d'evenement a un rang strictement positif.
+     * Le rang d'un genre n'appartient plus a l'enumeration.
      *
-     * Zero est reserve aux barrieres. Un evenement qui le porterait se placerait avant une
-     * fermeture tombant a la meme seconde, alors que la convention veut l'inverse.
-     */
-    public function testEveryEventTypeHasAStrictlyPositiveRank(): void
-    {
-        $this->assertNotEmpty(CombatEventType::cases());
-
-        foreach (CombatEventType::cases() as $type) {
-            $this->assertGreaterThan(
-                0,
-                $type->rank(),
-                "The event type « {$type->value} » carries rank zero, which belongs to barriers alone."
-            );
-        }
-    }
-
-    /**
-     * Deux sortes d'evenements n'ont jamais le meme rang.
+     * Il vivait sur `CombatEventType::rank()`. Deux essais y verifiaient qu'il etait strictement
+     * positif et unique — deux proprietes qui appartiennent desormais a la **regle versionnee**,
+     * et que `CausalEventOrderTest` verifie pour chaque version connue.
      *
-     * **Le garde-fou pour l'avenir.** Le jour ou une sorte sera ajoutee, elle devra recevoir son
-     * propre rang. Lui laisser celui d'une autre rendrait l'ordre non deterministe entre les deux,
-     * exactement le defaut que ce classement existe pour supprimer — et cela ne se verrait qu'en
-     * production, sur deux evenements simultanes.
+     * Ce qui reste ici est ce que la cle garantit d'elle-meme : elle refuse un rang nul, quelle
+     * que soit la regle qui le lui donne.
      */
-    public function testNoTwoEventTypesShareARank(): void
+    public function testTheKeyRefusesARankOfZeroWhateverTheRuleSays(): void
     {
-        $rangs = array_map(static fn (CombatEventType $t): int => $t->rank(), CombatEventType::cases());
+        $this->expectException(InvalidArgumentException::class);
 
-        $this->assertSame(
-            count($rangs),
-            count(array_unique($rangs)),
-            'Two event types share the same rank, so their order at the same second is left to chance.'
-        );
+        EffectOrderKey::forEvent(1_000, CombatEventType::FleetArrival, 1, new class () implements CausalEventOrder {
+            public function version(): string
+            {
+                return 'causal_event_order_zero_test';
+            }
+
+            public function rankOf(CombatEventType $type): int
+            {
+                return 0;
+            }
+        });
     }
 
     /**
@@ -59,12 +50,12 @@ class EffectOrderKeyTest extends UnitTestCase
      */
     public function testABarrierComesBeforeEveryEventOfTheSameSecond(): void
     {
-        $barriere = EffectOrderKey::barrierAt(1_000);
+        $barriere = EffectOrderKey::barrierAt(1_000, new CausalEventOrderV1());
 
         $this->assertTrue($barriere->isBarrier());
 
         foreach (CombatEventType::cases() as $type) {
-            $evenement = EffectOrderKey::forEvent(1_000, $type, 1);
+            $evenement = EffectOrderKey::forEvent(1_000, $type, 1, new CausalEventOrderV1());
 
             $this->assertTrue(
                 $barriere->isBefore($evenement),
@@ -83,8 +74,8 @@ class EffectOrderKeyTest extends UnitTestCase
      */
     public function testEqualIdentifiersFromDifferentTablesDoNotCollide(): void
     {
-        $arrivee = EffectOrderKey::forEvent(1_000, CombatEventType::FleetArrival, 12);
-        $missile = EffectOrderKey::forEvent(1_000, CombatEventType::MissileImpact, 12);
+        $arrivee = EffectOrderKey::forEvent(1_000, CombatEventType::FleetArrival, 12, new CausalEventOrderV1());
+        $missile = EffectOrderKey::forEvent(1_000, CombatEventType::MissileImpact, 12, new CausalEventOrderV1());
 
         $this->assertFalse($arrivee->equals($missile), 'A fleet arrival and a missile impact sharing an id were treated as one event.');
         $this->assertTrue($arrivee->isBefore($missile) xor $missile->isBefore($arrivee), 'Their order is not total.');
@@ -99,11 +90,11 @@ class EffectOrderKeyTest extends UnitTestCase
     public function testSortingYieldsTheSameOrderWhateverTheInputOrder(): void
     {
         $cles = [
-            EffectOrderKey::forEvent(1_000, CombatEventType::QueueCompletion, 3),
-            EffectOrderKey::barrierAt(1_000),
-            EffectOrderKey::forEvent(999, CombatEventType::MissileImpact, 50),
-            EffectOrderKey::forEvent(1_000, CombatEventType::FleetArrival, 12),
-            EffectOrderKey::forEvent(1_000, CombatEventType::FleetArrival, 7),
+            EffectOrderKey::forEvent(1_000, CombatEventType::QueueCompletion, 3, new CausalEventOrderV1()),
+            EffectOrderKey::barrierAt(1_000, new CausalEventOrderV1()),
+            EffectOrderKey::forEvent(999, CombatEventType::MissileImpact, 50, new CausalEventOrderV1()),
+            EffectOrderKey::forEvent(1_000, CombatEventType::FleetArrival, 12, new CausalEventOrderV1()),
+            EffectOrderKey::forEvent(1_000, CombatEventType::FleetArrival, 7, new CausalEventOrderV1()),
         ];
 
         $attendu = null;
@@ -124,9 +115,10 @@ class EffectOrderKeyTest extends UnitTestCase
             $this->assertSame($attendu, $signature, 'Sorting the same events in another input order produced another logical order.');
         }
 
-        // Et l'ordre obtenu est bien celui qu'on attend.
+        // Et l'ordre obtenu est bien celui qu'on attend. Les rangs sont ceux de
+        // `causal_event_order_v1` : chantier 2, missile 3, arrivee 4.
         $this->assertSame(
-            ['999/2/50', '1000/0/0', '1000/1/7', '1000/1/12', '1000/3/3'],
+            ['999/3/50', '1000/0/0', '1000/2/3', '1000/4/7', '1000/4/12'],
             $attendu
         );
     }
@@ -138,7 +130,7 @@ class EffectOrderKeyTest extends UnitTestCase
     {
         $this->expectException(InvalidArgumentException::class);
 
-        EffectOrderKey::forEvent(1_000, CombatEventType::FleetArrival, 0);
+        EffectOrderKey::forEvent(1_000, CombatEventType::FleetArrival, 0, new CausalEventOrderV1());
     }
 
     /**
@@ -206,28 +198,30 @@ class EffectOrderKeyTest extends UnitTestCase
 
         // Heures differentes : seule l'heure decide.
         $this->assertTrue(
-            EffectOrderKey::forEvent(999, CombatEventType::QueueCompletion, 999)
-                ->isBefore(EffectOrderKey::forEvent(1_000, $type, 1)),
+            EffectOrderKey::forEvent(999, CombatEventType::QueueCompletion, 999, new CausalEventOrderV1())
+                ->isBefore(EffectOrderKey::forEvent(1_000, $type, 1, new CausalEventOrderV1())),
             'A later planned time was not ordered after an earlier one.'
         );
 
-        // Meme heure, types differents : le rang du type decide.
+        // Meme heure, genres differents : le rang du genre decide. Sous `causal_event_order_v1`,
+        // le missile precede l'arrivee — la flotte qui se pose voit la cible telle que le missile
+        // l'a laissee.
         $this->assertTrue(
-            EffectOrderKey::forEvent(1_000, CombatEventType::FleetArrival, 999)
-                ->isBefore(EffectOrderKey::forEvent(1_000, CombatEventType::MissileImpact, 1)),
-            'At the same second, the event type did not decide.'
+            EffectOrderKey::forEvent(1_000, CombatEventType::MissileImpact, 999, new CausalEventOrderV1())
+                ->isBefore(EffectOrderKey::forEvent(1_000, CombatEventType::FleetArrival, 1, new CausalEventOrderV1())),
+            'At the same second, the event kind did not decide.'
         );
 
         // Meme heure, meme type : l'identifiant decide.
         $this->assertTrue(
-            EffectOrderKey::forEvent(1_000, $type, 1)->isBefore(EffectOrderKey::forEvent(1_000, $type, 2)),
+            EffectOrderKey::forEvent(1_000, $type, 1, new CausalEventOrderV1())->isBefore(EffectOrderKey::forEvent(1_000, $type, 2, new CausalEventOrderV1())),
             'At the same second and same type, the source identifier did not decide.'
         );
 
         // La barriere precede chaque type a la meme seconde.
         foreach (CombatEventType::cases() as $sorte) {
             $this->assertTrue(
-                EffectOrderKey::barrierAt(1_000)->isBefore(EffectOrderKey::forEvent(1_000, $sorte, 1)),
+                EffectOrderKey::barrierAt(1_000, new CausalEventOrderV1())->isBefore(EffectOrderKey::forEvent(1_000, $sorte, 1, new CausalEventOrderV1())),
                 "The barrier did not come before a « {$sorte->value} » at the same second."
             );
         }
@@ -247,14 +241,14 @@ class EffectOrderKeyTest extends UnitTestCase
         $presqueAussiGrand = PHP_INT_MAX - 1;
 
         $this->assertTrue(
-            EffectOrderKey::forEvent(1_000, $type, $presqueAussiGrand)
-                ->isBefore(EffectOrderKey::forEvent(1_000, $type, $tresGrand)),
+            EffectOrderKey::forEvent(1_000, $type, $presqueAussiGrand, new CausalEventOrderV1())
+                ->isBefore(EffectOrderKey::forEvent(1_000, $type, $tresGrand, new CausalEventOrderV1())),
             'Two identifiers near the bigint limit were ordered wrongly, which a subtraction-based comparison would do.'
         );
 
         $this->assertFalse(
-            EffectOrderKey::forEvent(1_000, $type, $tresGrand)
-                ->isBefore(EffectOrderKey::forEvent(1_000, $type, 1)),
+            EffectOrderKey::forEvent(1_000, $type, $tresGrand, new CausalEventOrderV1())
+                ->isBefore(EffectOrderKey::forEvent(1_000, $type, 1, new CausalEventOrderV1())),
             'A huge identifier was ordered before a small one.'
         );
     }
@@ -333,11 +327,11 @@ class EffectOrderKeyTest extends UnitTestCase
         $cles = [];
 
         foreach ([999, 1_000, 1_001] as $seconde) {
-            $cles[] = EffectOrderKey::barrierAt($seconde);
+            $cles[] = EffectOrderKey::barrierAt($seconde, new CausalEventOrderV1());
 
             foreach (CombatEventType::cases() as $type) {
                 foreach ([1, 12, 4_294_967_296] as $identifiant) {
-                    $cles[] = EffectOrderKey::forEvent($seconde, $type, $identifiant);
+                    $cles[] = EffectOrderKey::forEvent($seconde, $type, $identifiant, new CausalEventOrderV1());
                 }
             }
         }
