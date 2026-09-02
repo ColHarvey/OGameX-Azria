@@ -3,6 +3,7 @@
 namespace OGame\Combat\Support;
 
 use OGame\Combat\Enums\LootReservationState;
+use OGame\Combat\Enums\ReservationRaise;
 use OGame\Combat\Exceptions\LootReservationRefused;
 
 /**
@@ -103,21 +104,38 @@ final class LootReservation
     }
 
     /**
-     * Releve la borne, composante par composante.
+     * S'assure que la borne couvre au moins celle-ci, composante par composante.
+     *
+     * Le nom dit ce que la methode garantit, et non ce qu'elle fait : **aucune ressource n'est
+     * jamais liberee par cette operation**. `raiseTo()` laissait croire qu'une valeur plus basse
+     * ferait descendre la borne.
      *
      * Sert quand une cargaison admissible rejoint la cible avant la fermeture : la base logique
      * grossit, donc le maximum pillable aussi.
      *
-     * **La borne ne peut que monter.** Une valeur plus basse est ignoree sans erreur — ce n'est
-     * pas une faute, c'est simplement une borne moins contraignante que celle deja retenue.
+     * **Une borne plus basse est ignoree, et ce n'est pas une faute.** Le taux pondere par le fret
+     * peut reculer pendant le ralliement — une immense flotte sans Decouvreur qui rejoint une
+     * attaque ouverte par un Decouvreur ramene le taux de 75 % vers 50 %. Laisser le solde
+     * disponible du defenseur remonter lui annoncerait que la composition adverse a change.
+     *
+     * @param LootEnvelope $atLeast
+     * @return ReservationRaise Ce qui s'est reellement passe, pour le journal d'audit.
      */
-    public function raiseTo(LootEnvelope $newUpperBound): void
+    public function ensureAtLeast(LootEnvelope $atLeast): ReservationRaise
     {
         if (!$this->state->acceptsARaise()) {
             throw LootReservationRefused::becauseTheBoundIsFrozen($this->state);
         }
 
-        $this->reserved = $this->reserved->raisedTo($newUpperBound);
+        $releve = $this->reserved->raisedTo($atLeast);
+
+        if ($releve->equals($this->reserved)) {
+            return ReservationRaise::Unchanged;
+        }
+
+        $this->reserved = $releve;
+
+        return ReservationRaise::Raised;
     }
 
     /**
