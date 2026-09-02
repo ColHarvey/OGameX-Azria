@@ -18,6 +18,14 @@
 
 require __DIR__ . '/../vendor/autoload.php';
 
+// **Reentrance explicite.** `scripts/suite.php` pose le meme verrou avant `migrate:fresh`, donc
+// avant que PHPUnit ne demarre. S'il le detient deja, le reprendre ici bloquerait le lanceur
+// contre lui-meme. Le marqueur dit ce que la seule presence du fichier ne peut pas dire :
+// qui tient le verrou.
+if (getenv('OGAMEX_SUITE_LOCK_HELD') === '1') {
+    return;
+}
+
 $fichierVerrou = __DIR__ . '/../storage/framework/testing/suite.lock';
 
 if (!is_dir(dirname($fichierVerrou))) {
@@ -50,8 +58,10 @@ if (!flock($verrou, LOCK_EX | LOCK_NB)) {
 // globale : sans cela, PHP la fermerait a la fin de ce fichier et le verrou tomberait aussitot.
 $GLOBALS['ogamex_verrou_suite'] = $verrou;
 
-register_shutdown_function(static function () use ($verrou, $fichierVerrou): void {
+register_shutdown_function(static function () use ($verrou): void {
+    // **Le fichier n'est pas supprime.** Un `unlink` liberait le verrou tout en laissant un
+    // autre processus ouvrir un fichier neuf du meme nom et l'obtenir aussitot : deux passages
+    // se croiraient seuls. Le fichier vide qui reste ne coute rien.
     flock($verrou, LOCK_UN);
     fclose($verrou);
-    @unlink($fichierVerrou);
 });
