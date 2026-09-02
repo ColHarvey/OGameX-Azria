@@ -32,9 +32,11 @@ use OGame\Combat\Enums\CombatState;
  *
  * ## Les regles, telles qu'arretees
  *
- * - **Soixante secondes fixes**, comptees depuis l'arrivee de la premiere attaque. La fenetre
- *   **ne se prolonge jamais** : sans cette regle, un attaquant la maintiendrait ouverte
- *   indefiniment en faisant arriver une sonde toutes les cinquante secondes.
+ * - **Soixante secondes au maximum**, comptees depuis l'arrivee de la premiere attaque. La
+ *   fenetre **ne se prolonge jamais** : sans cette regle, un attaquant la maintiendrait ouverte
+ *   indefiniment en faisant arriver une sonde toutes les cinquante secondes. Elle se **raccourcit**
+ *   en revanche des que la derniere flotte admissible attendue est arrivee, et tombe a zero s'il
+ *   n'y en a aucune — c'est la protection contre le harcelement par une flotte insignifiante.
  * - Le corps celeste est **verrouille des la premiere arrivee**, pas a la fermeture.
  * - **Seules des flottes deja en vol** peuvent rejoindre. Une attaque lancee apres l'ouverture
  *   est refusee au depart, pas a l'arrivee — c'est le role de `CombatLockedActions`.
@@ -60,13 +62,30 @@ use OGame\Combat\Enums\CombatState;
 final class CombatRallyWindow
 {
     /**
-     * Duree de la fenetre, en secondes.
+     * Duree **maximale** de la fenetre, en secondes.
      *
      * Soixante secondes couvrent les vagues telles qu'elles se lancent reellement — a quelques
      * secondes d'intervalle — sans faire attendre le premier attaquant de facon perceptible :
      * une minute face a une bataille de deux heures.
+     *
+     * C'est un plafond, pas une duree garantie : voir `closesAt()`, ou la fenetre se ferme des
+     * que la derniere flotte admissible attendue est arrivee.
      */
     public const int WINDOW_SECONDS = 60;
+
+    /**
+     * Le pas de temps du jeu, en secondes.
+     *
+     * **La precision metier est la seconde, et c'est un choix explicite.** Tout OGame fonctionne
+     * a cette echelle : les heures d'arrivee, les comptes a rebours affiches, les evenements
+     * planifies. Concevoir une precision plus fine n'apporterait rien a un joueur et compliquerait
+     * chaque comparaison.
+     *
+     * Ce pas est nomme plutot que suppose. Le calcul de l'echeance s'exprime en fonction de lui,
+     * de sorte qu'une eventuelle migration vers une autre precision se fasse a un seul endroit —
+     * au lieu de laisser des `+ 1` disperses signifier autre chose du jour au lendemain.
+     */
+    public const int TICK_SECONDS = 1;
 
     /**
      * Nombre maximal de joueurs d'un meme cote.
@@ -183,29 +202,90 @@ final class CombatRallyWindow
     }
 
     /**
-     * L'instant ou la fenetre se ferme, a partir de l'ouverture.
+     * L'instant ou la fenetre se fermera, calcule **une seule fois, a l'ouverture**.
      *
-     * Une fonction plutot qu'une addition recopiee : c'est le seul endroit qui decide de cette
-     * echeance, et l'unique facon de garantir qu'aucun code n'aille la repousser.
+     * ## Pourquoi la fenetre n'est pas toujours de soixante secondes
+     *
+     * Une duree fixe se retourne en outil de harcelement. Le corps celeste est verrouille des la
+     * premiere arrivee : un unique chasseur leger, envoye en boucle, immobiliserait une minute
+     * les departs et les ressources d'une planete, indefiniment et pour un cout derisoire.
+     *
+     * D'ou la regle : **la fenetre s'arrete des que la derniere flotte admissible deja en vol est
+     * arrivee**, et soixante secondes restent la limite haute. Si aucune flotte admissible n'est
+     * en vol au moment de l'ouverture, il n'y a rien a attendre — le combat commence
+     * immediatement.
+     *
+     * L'attaquant isole n'obtient donc plus une minute de verrou : il obtient un combat, tout de
+     * suite. Celui qui a reellement prepare des vagues garde sa fenetre.
+     *
+     * **La liste est figee a l'ouverture.** Une flotte lancee apres ne la rallonge pas — elle est
+     * de toute facon refusee au depart.
+     *
+     * **L'echeance rendue ici est calculee une fois et persistee avec le combat.** Elle ne doit
+     * jamais etre recalculee pour un ralliement deja ouvert : un changement de regle, de plafond
+     * ou de precision deplacerait alors l'echeance de combats en cours, et une flotte partie sous
+     * une regle se verrait jugee sous une autre.
      *
      * @param int $openedAt Horodatage d'ouverture, en secondes.
+     * @param array<int, int> $admissibleArrivalsInFlight Heures d'arrivee **planifiees** des
+     *                                                    flottes deja en vol qui seraient
+     *                                                    admises. L'heure planifiee, jamais
+     *                                                    celle du traitement : un worker en
+     *                                                    retard ne doit pas raccourcir la
+     *                                                    fenetre de quelqu'un.
      * @return int
      */
-    public static function closesAt(int $openedAt): int
+    public static function closesAt(int $openedAt, array $admissibleArrivalsInFlight = []): int
     {
-        return $openedAt + self::WINDOW_SECONDS;
+        $limite = $openedAt + self::WINDOW_SECONDS;
+
+        // Une arrivee n'est retenable que si la fenetre peut se fermer **apres elle** sans
+        // depasser le plafond. Exprimee avec le pas de temps plutot qu'avec un `< $limite`, la
+        // condition dit ce qu'elle veut dire : il faut qu'il reste la place de l'inclure.
+        $attendues = array_filter(
+            $admissibleArrivalsInFlight,
+            static fn (int $arrivee): bool => $arrivee >= $openedAt && $arrivee + self::TICK_SECONDS <= $limite
+        );
+
+        if ($attendues === []) {
+            // Personne a attendre : le ralliement se ferme a l'instant meme ou il s'ouvre, et le
+            // combat demarre. C'est la protection anti-harcelement.
+            return $openedAt;
+        }
+
+        // La fenetre se ferme **un pas de temps apres** la derniere arrivee attendue, et pas un
+        // instant plus tard. Deux proprietes, et il faut les deux :
+        //
+        // - **surete** : sans ce decalage, cette flotte arriverait a l'instant exact de la
+        //   fermeture — donc trop tard, par la regle de la borne — alors que c'est precisement
+        //   elle qui a fixe l'echeance ;
+        // - **minimalite** : la fenetre se ferme des que la derniere attendue est la. Un
+        //   decalage plus large respecterait encore le plafond tant qu'on en est loin, tout en
+        //   verrouillant la cible pour rien.
+        //
+        // Le plafond n'a pas a etre reapplique ici : le filtre ci-dessus a deja ecarte toute
+        // arrivee qui ne laisserait pas la place au decalage.
+        return max($attendues) + self::TICK_SECONDS;
     }
 
     /**
-     * Si la fenetre ouverte a cet instant court encore.
+     * Si une arrivee prevue a cet instant tombe dans la fenetre.
      *
-     * @param int $openedAt Horodatage d'ouverture, en secondes.
-     * @param int $now Horodatage courant, en secondes.
+     * **L'instant compare est l'heure planifiee de l'arrivee, pas celle du traitement.** Un
+     * worker en retard ne doit pas refuser une flotte qui devait arriver a temps : le retard est
+     * un fait du serveur, pas un choix du joueur.
+     *
+     * La fenetre est un intervalle **semi-ouvert** : ouverte a l'instant d'ouverture, fermee a
+     * l'instant de fermeture. Une arrivee prevue pile a la fermeture est donc en retard, et cette
+     * unique regle vaut pour tous les workers.
+     *
+     * @param int $closesAt Horodatage de fermeture, tel que calcule a l'ouverture.
+     * @param int $scheduledArrival Heure planifiee de l'arrivee, en secondes.
      * @return bool
      */
-    public static function isOpenAt(int $openedAt, int $now): bool
+    public static function admitsArrivalAt(int $closesAt, int $scheduledArrival): bool
     {
-        return $now < self::closesAt($openedAt);
+        return $scheduledArrival < $closesAt;
     }
 
     /**
@@ -213,12 +293,12 @@ final class CombatRallyWindow
      *
      * Sert l'affichage « Ralliement en cours — debut du combat dans 00:42 ».
      *
-     * @param int $openedAt Horodatage d'ouverture, en secondes.
+     * @param int $closesAt Horodatage de fermeture, tel que calcule a l'ouverture.
      * @param int $now Horodatage courant, en secondes.
      * @return int
      */
-    public static function secondsRemaining(int $openedAt, int $now): int
+    public static function secondsRemaining(int $closesAt, int $now): int
     {
-        return max(0, self::closesAt($openedAt) - $now);
+        return max(0, $closesAt - $now);
     }
 }
