@@ -101,6 +101,19 @@ enum CombatMissionAction: string
     case SelectByEventOrder = 'select_by_event_order';
 
     /**
+     * La flotte n'a nulle part ou se poser, et porte des actifs a preserver.
+     *
+     * **Distincte de `CancelWithoutImpact`**, et la distinction n'est pas cosmetique : annuler une
+     * flotte de joueur chargee ferait disparaitre ses vaisseaux et sa cargaison. Le cas ne devrait
+     * pas se produire — la planete mere garantit normalement une destination —, et c'est justement
+     * pourquoi il compte : s'il survient, c'est une corruption ou un etat administratif.
+     *
+     * Le traitement conserve la mission, les unites et la cargaison, empeche le rejeu automatique
+     * infini, place l'operation en quarantaine et leve une alerte critique persistante.
+     */
+    case RequiresAssetRecovery = 'requires_asset_recovery';
+
+    /**
      * Cette cible ne releve pas du verrou d'un corps celeste.
      *
      * L'espace profond n'en porte aucun. Le dire explicitement evite qu'une egalite de coordonnees

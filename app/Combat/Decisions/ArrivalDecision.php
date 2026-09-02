@@ -227,6 +227,26 @@ final readonly class ArrivalDecision implements CombatDecision
      * @param InvariantCode $code
      * @return self
      */
+    public static function requiresAssetRecovery(): self
+    {
+        return new self(
+            CombatMissionAction::RequiresAssetRecovery,
+            null,
+            null,
+            false,
+            null,
+            null,
+            null,
+            InvariantCode::AssetsWithoutDestination
+        );
+    }
+
+    /**
+     * Cette situation ne releve pas de la matrice des corps celestes.
+     *
+     * @param InvariantCode $code
+     * @return self
+     */
     public static function outsideMatrixDomain(InvariantCode $code): self
     {
         return new self(
@@ -379,6 +399,7 @@ final readonly class ArrivalDecision implements CombatDecision
             CombatMissionAction::SelectByDefenceAdmission => OpenCellCategory::NeedsRallyAdmission,
             CombatMissionAction::SelectByEventOrder => OpenCellCategory::NeedsCausalEligibility,
             CombatMissionAction::OutsideMatrixDomain => OpenCellCategory::StructurallyNotApplicable,
+            CombatMissionAction::RequiresAssetRecovery => OpenCellCategory::NeedsAssetRecovery,
             default => null,
         };
     }

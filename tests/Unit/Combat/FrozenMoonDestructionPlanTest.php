@@ -366,6 +366,8 @@ class FrozenMoonDestructionPlanTest extends UnitTestCase
             1,
             10.0,
             45.0,
+            10,
+            45,
             1,
             99,
             MoonDestructionOutcome::MoonDestroyed,
@@ -390,7 +392,7 @@ class FrozenMoonDestructionPlanTest extends UnitTestCase
     {
         $this->expectException(InvalidArgumentException::class);
 
-        new FrozenMoonDestructionAttempt(1, 1, 1, 10.0, 45.0, 50, 50, MoonDestructionOutcome::TargetAlreadyDestroyed, 0);
+        new FrozenMoonDestructionAttempt(1, 1, 1, 10.0, 45.0, 10, 45, 50, 50, MoonDestructionOutcome::TargetAlreadyDestroyed, 0);
     }
 
     /**
@@ -403,8 +405,9 @@ class FrozenMoonDestructionPlanTest extends UnitTestCase
     {
         $this->expectException(InvalidArgumentException::class);
 
-        // 99 contre 10 % : la lune tient. Pretendre qu'elle a ete detruite est une contradiction.
-        new FrozenMoonDestructionAttempt(1, 1, 1, 10.0, 45.0, 99, 99, MoonDestructionOutcome::MoonDestroyed, 0);
+        // 99 contre un seuil de 10 : la lune tient. Pretendre qu'elle a ete detruite est une
+        // contradiction.
+        new FrozenMoonDestructionAttempt(1, 1, 1, 10.0, 45.0, 10, 45, 99, 99, MoonDestructionOutcome::MoonDestroyed, 0);
     }
 
     /**
@@ -427,6 +430,73 @@ class FrozenMoonDestructionPlanTest extends UnitTestCase
     }
 
     /**
+     * Le seuil entier selectionne exactement les memes tirages que la chance flottante.
+     *
+     * ## Pourquoi persister un entier
+     *
+     * Le tirage est un entier de 1 a 100, et la reussite est `tirage <= chance`. Pour un tirage
+     * entier, c'est exactement `tirage <= plancher(chance)`. Le seuil est donc l'information
+     * **observable** — et il se relit sans perte, la ou une chance flottante peut differer du
+     * dernier bit apres un aller-retour JSON.
+     *
+     * Le balayage porte sur toute la plage des tirages et sur des chances aux decimales variees :
+     * un seul ecart ferait tomber l'essai.
+     */
+    public function testTheIntegerThresholdSelectsExactlyTheSameRolls(): void
+    {
+        $ecarts = [];
+
+        foreach ([0.0, 0.4, 1.0, 9.99, 10.0, 14.142, 45.0, 99.5, 100.0] as $chance) {
+            $seuil = MoonDestructionOdds::thresholdFor($chance);
+
+            for ($tirage = MoonDestructionOdds::ROLL_MINIMUM; $tirage <= MoonDestructionOdds::ROLL_MAXIMUM; $tirage++) {
+                if (MoonDestructionOdds::succeeds($tirage, $chance) !== MoonDestructionOdds::succeedsAgainst($tirage, $seuil)) {
+                    $ecarts[] = $tirage . ' contre ' . $chance;
+                }
+            }
+        }
+
+        $this->assertSame([], $ecarts, 'The integer threshold no longer selects the same rolls.');
+
+        // Et les bornes du seuil restent dans la plage des tirages.
+        $this->assertSame(0, MoonDestructionOdds::thresholdFor(-50.0));
+        $this->assertSame(100, MoonDestructionOdds::thresholdFor(1_000.0));
+    }
+
+    /**
+     * Les frontieres du diametre, la ou la formule change de regime.
+     *
+     * `(100 - racine(diametre))` devient nul a **10 000** et negatif au-dela : la borne ramene alors
+     * a zero, et aucune etoile de la mort ne peut plus rien. Ce n'est pas une decroissance douce,
+     * c'est un mur, et il vaut d'etre fige.
+     */
+    public function testTheDiameterBoundariesWhereTheFormulaChangesRegime(): void
+    {
+        // Juste avant : une chance minuscule mais reelle, dont le seuil entier vaut deja zero.
+        $this->assertGreaterThan(0.0, MoonDestructionOdds::destructionChance(9_999, 1));
+        $this->assertSame(0, MoonDestructionOdds::thresholdFor(MoonDestructionOdds::destructionChance(9_999, 1)));
+
+        // Exactement 10 000 : racine 100, donc chance nulle.
+        $this->assertSame(0.0, MoonDestructionOdds::destructionChance(10_000, 100));
+
+        // Au-dela : la valeur brute est negative, et la borne la ramene a zero.
+        $this->assertSame(0.0, MoonDestructionOdds::destructionChance(10_001, 100));
+        $this->assertSame(0.0, MoonDestructionOdds::destructionChance(1_000_000, 100));
+
+        // **Une chance nulle ne detruit jamais**, meme au tirage le plus favorable. Le comportement
+        // est celui du chemin immediat : `random_int` ne rend jamais zero.
+        $plan = $this->freeze(
+            [new MoonDestructionCandidate(1, 100, 5)],
+            tirages: [MoonDestructionOdds::ROLL_MINIMUM, 99],
+            moonDiameter: 10_000
+        );
+
+        $this->assertSame(MoonDestructionOutcome::AttemptFailed, $plan->attempts[0]->outcome);
+        $this->assertSame(0, $plan->attempts[0]->destructionThreshold);
+        $this->assertFalse($plan->destroysTheMoon());
+    }
+
+    /**
      * Gele un plan avec un tirage observable.
      *
      * @param array<int, MoonDestructionCandidate> $candidates
@@ -438,13 +508,14 @@ class FrozenMoonDestructionPlanTest extends UnitTestCase
         array $candidates,
         array $tirages,
         bool $attackSideWon = true,
+        int $moonDiameter = 8_100,
     ): FrozenMoonDestructionPlan {
         $this->tiragesAServir = $tirages;
         $this->tiragesConsommes = 0;
 
         return FrozenMoonDestructionPlan::freeze(
             99,
-            $this->aMoon(),
+            $this->aMoon($moonDiameter),
             $candidates,
             $attackSideWon,
             MoonDestructionRuleRegistry::default()->current(),
@@ -463,9 +534,9 @@ class FrozenMoonDestructionPlanTest extends UnitTestCase
     /**
      * La lune des essais : 8100 de diametre, donc des nombres ronds.
      */
-    private function aMoon(): FrozenMoonIdentity
+    private function aMoon(int $diameter = 8_100): FrozenMoonIdentity
     {
-        return new FrozenMoonIdentity(4_242, '1:2:3', 'Lune de Keven', 8_100);
+        return new FrozenMoonIdentity(4_242, '1:2:3', 'Lune de Keven', $diameter);
     }
 
     /**

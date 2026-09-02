@@ -36,6 +36,8 @@ final readonly class FrozenMoonDestructionAttempt
      * @param int $survivingDeathstars Les survivantes de cette mission seule.
      * @param float $destructionChance La chance calculee, conservee pour l'audit et le rapport.
      * @param float $deathstarLossChance De meme, pour la perte.
+     * @param int $destructionThreshold Le seuil entier reellement compare au tirage.
+     * @param int $deathstarLossThreshold De meme, pour la perte.
      * @param int|null $destructionRoll Le tirage de destruction, ou null si la tentative n'a pas eu lieu.
      * @param int|null $deathstarLossRoll Le tirage de perte, ou null de meme.
      * @param MoonDestructionOutcome $outcome Ce qui a ete obtenu.
@@ -47,6 +49,8 @@ final readonly class FrozenMoonDestructionAttempt
         public int $survivingDeathstars,
         public float $destructionChance,
         public float $deathstarLossChance,
+        public int $destructionThreshold,
+        public int $deathstarLossThreshold,
         public int|null $destructionRoll,
         public int|null $deathstarLossRoll,
         public MoonDestructionOutcome $outcome,
@@ -103,15 +107,38 @@ final readonly class FrozenMoonDestructionAttempt
             );
         }
 
-        // **Le resultat gele doit concorder avec son tirage.** Sans ce controle, relire le plan et le
-        // recalculer donneraient deux reponses, et personne ne saurait laquelle le joueur a vue.
+        foreach ([$destructionThreshold, $deathstarLossThreshold] as $seuil) {
+            if ($seuil < 0 || $seuil > MoonDestructionOdds::ROLL_MAXIMUM) {
+                throw new InvalidArgumentException(
+                    'Un seuil hors de la plage des tirages ne pourrait jamais etre atteint ni depasse : « '
+                    . $seuil . ' ».'
+                );
+            }
+        }
+
+        // **Le resultat gele doit concorder avec son seuil entier.** La comparaison se refait sans
+        // aucun flottant : une chance relue apres un aller-retour JSON peut differer du dernier bit,
+        // le seuil non. Sans ce controle, relire le plan et le recalculer donneraient deux reponses,
+        // et personne ne saurait laquelle le joueur a vue.
         if ($destructionRoll !== null) {
-            $auraitDetruit = MoonDestructionOdds::succeeds($destructionRoll, $destructionChance);
+            $auraitDetruit = MoonDestructionOdds::succeedsAgainst($destructionRoll, $destructionThreshold);
 
             if ($auraitDetruit !== ($outcome === MoonDestructionOutcome::MoonDestroyed)) {
                 throw new InvalidArgumentException(
                     'Le tirage ' . $destructionRoll . ' et l issue « ' . $outcome->value . ' » ne concordent pas '
-                    . 'avec une chance de ' . $destructionChance . ' %.'
+                    . 'avec un seuil de ' . $destructionThreshold . '.'
+                );
+            }
+        }
+
+        if ($deathstarLossRoll !== null) {
+            $auraitPerdu = MoonDestructionOdds::succeedsAgainst($deathstarLossRoll, $deathstarLossThreshold);
+
+            if ($auraitPerdu !== ($extraDeathstarLosses > 0)) {
+                throw new InvalidArgumentException(
+                    'Le tirage de perte ' . $deathstarLossRoll . ' et les ' . $extraDeathstarLosses
+                    . ' etoiles de la mort perdues ne concordent pas avec un seuil de '
+                    . $deathstarLossThreshold . '.'
                 );
             }
         }
@@ -138,6 +165,8 @@ final readonly class FrozenMoonDestructionAttempt
             'surviving_deathstars' => $this->survivingDeathstars,
             'destruction_chance' => $this->destructionChance,
             'deathstar_loss_chance' => $this->deathstarLossChance,
+            'destruction_threshold' => $this->destructionThreshold,
+            'deathstar_loss_threshold' => $this->deathstarLossThreshold,
             'destruction_roll' => $this->destructionRoll,
             'deathstar_loss_roll' => $this->deathstarLossRoll,
             'outcome' => $this->outcome->value,
@@ -159,6 +188,8 @@ final readonly class FrozenMoonDestructionAttempt
             (int)$facts['surviving_deathstars'],
             (float)$facts['destruction_chance'],
             (float)$facts['deathstar_loss_chance'],
+            (int)$facts['destruction_threshold'],
+            (int)$facts['deathstar_loss_threshold'],
             $facts['destruction_roll'] === null ? null : (int)$facts['destruction_roll'],
             $facts['deathstar_loss_roll'] === null ? null : (int)$facts['deathstar_loss_roll'],
             MoonDestructionOutcome::from((string)$facts['outcome']),

@@ -35,4 +35,9 @@ final readonly class MoonDestructionRuleV1 implements MoonDestructionRule
     {
         return MoonDestructionOdds::succeeds($roll, $chance);
     }
+
+    public function thresholdFor(float $chance): int
+    {
+        return MoonDestructionOdds::thresholdFor($chance);
+    }
 }

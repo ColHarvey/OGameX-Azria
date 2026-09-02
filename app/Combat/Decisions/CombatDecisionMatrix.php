@@ -71,9 +71,12 @@ final class CombatDecisionMatrix
      *                               decision et son application.
      * @return ArrivalDecision
      */
-    public function verdictOf(CombatSituation $situation, ReturnPlan $returnPlan): ArrivalVerdict
-    {
-        $mouvement = $this->movementOf($situation, $returnPlan);
+    public function verdictOf(
+        CombatSituation $situation,
+        ReturnPlan $returnPlan,
+        ArrivingAssets $assets,
+    ): ArrivalVerdict {
+        $mouvement = $this->movementOf($situation, $returnPlan, $assets);
 
         return new ArrivalVerdict(
             $mouvement,
@@ -92,8 +95,11 @@ final class CombatDecisionMatrix
      * @param ReturnPlan $returnPlan
      * @return ArrivalDecision
      */
-    private function movementOf(CombatSituation $situation, ReturnPlan $returnPlan): ArrivalDecision
-    {
+    private function movementOf(
+        CombatSituation $situation,
+        ReturnPlan $returnPlan,
+        ArrivingAssets $assets,
+    ): ArrivalDecision {
         // Une case qui ne peut pas exister se range plutot qu'elle n'echoue : la matrice enumere. Sur
         // un chemin vivant, c'est `CombatSituation::ensureItCanOccur()` qui leve, bien avant ici.
         if (!$situation->isPossible()) {
@@ -104,7 +110,13 @@ final class CombatDecisionMatrix
         // depend pas de l'etat de la cible — une flotte sans destination n a nulle part ou se poser,
         // combat ou non.
         if ($situation->scopeFor($returnPlan) === TargetScope::NoDestination) {
-            return ArrivalDecision::cancelWithoutImpact(CombatReasonCode::NoReturnDestination);
+            // **Annuler une flotte chargee la supprimerait.** Pour une operation systeme sans rien a
+            // preserver, l'annulation est exacte ; pour une flotte de joueur, c'est une perte
+            // silencieuse d'actifs. Le cas ne devrait pas se produire — la planete mere garantit
+            // normalement une destination —, et c'est justement pourquoi il compte.
+            return $assets->arePreservable()
+                ? ArrivalDecision::requiresAssetRecovery()
+                : ArrivalDecision::cancelWithoutImpact(CombatReasonCode::NoReturnDestination);
         }
 
         // L'espace profond ne porte aucun corps celeste, donc aucun verrou. Un combat d'expedition
@@ -167,6 +179,12 @@ final class CombatDecisionMatrix
         // **La question n'est pas « depose-t-elle des vaisseaux ».** Un missile modifie des defenses
         // sans poser de flotte ; une admission encore a prononcer fera entrer une flotte entiere.
         if (!ArrivalVerdict::decisionMayTouchTheSnapshot($movement)) {
+            return SnapshotObligation::NotConcerned;
+        }
+
+        // Et le genre doit declarer une projection. « Tout sauf un depart » aurait fait heriter un
+        // genre nouveau d'un comportement que personne n'a decide.
+        if ($situation->possibleProjections() === []) {
             return SnapshotObligation::NotConcerned;
         }
 

@@ -27,4 +27,12 @@ enum InvariantCode: string
      * telle cible confondrait deux domaines.
      */
     case NotACelestialBodyTarget = 'not_a_celestial_body_target';
+
+    /**
+     * Une flotte porte des actifs et n'a plus aucune destination.
+     *
+     * Les recours ordonnes du jeu — corps d'origine, planete associee, planete mere — sont epuises.
+     * Ce n'est pas une regle de jeu mais un defaut : une alerte, pas un message de rapport.
+     */
+    case AssetsWithoutDestination = 'assets_without_destination';
 }

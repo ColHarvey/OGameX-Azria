@@ -2,14 +2,14 @@
 
 namespace OGame\Combat\Causality;
 
-use InvalidArgumentException;
+use OGame\Combat\Exceptions\ContradictoryOpeningProvenance;
 
 /**
- * Ce que l'etat protege reflete deja, evenement par evenement.
+ * Ce que l'etat protege reflete deja, effet par effet.
  *
  * ## Le risque que cette classe existe pour supprimer
  *
- * C'est le piege principal de toute la reconciliation, et il survit a des comparaisons temporelles
+ * C'est le piege central de toute la reconciliation, et il survit a des comparaisons temporelles
  * parfaitement justes :
  *
  *     1. un transport arrive et livre 100 metal
@@ -21,23 +21,30 @@ use InvalidArgumentException;
  * L'engagement **etait** anterieur a l'ouverture, et son effet **etait** prevu avant la fermeture :
  * les deux barrieres disent oui. Seule la provenance dit que c'est deja fait.
  *
+ * ## Pourquoi l'identite seule ne suffit pas non plus
+ *
+ * Savoir que `mission:42` a deja ete appliquee ne dit pas **quel** effet de `mission:42` est present.
+ * Une cargaison modifiee, une cible corrigee, un genre reversionne : la seule correspondance
+ * d'identifiant declarerait « deja fait » un effet qui ne l'est pas. Chaque entree porte donc un
+ * recu complet.
+ *
  * ## Pourquoi un numero maximal ne suffit pas
  *
- * Un simple « tout ce qui est en dessous de N est deja reflete » suppose que les identifiants sont
- * consommes dans l'ordre et sans trou. Un evenement plus ancien peut encore etre en retard : son
- * identifiant est inferieur a N, il n'a pas ete applique, et le watermark le declare pourtant
- * comptabilise. Il disparaitrait alors sans que rien ne le signale.
+ * Un « tout ce qui est en dessous de N est deja reflete » suppose des identifiants consommes dans
+ * l'ordre et sans trou. Un evenement plus ancien encore en retard a un identifiant inferieur a N,
+ * n'a pas ete applique, et le watermark le declare pourtant comptabilise : il disparaitrait sans
+ * que rien ne le signale.
  *
- * Cette classe porte donc les **identites exactes**. Un watermark n'est admissible que si
- * l'infrastructure garantit la continuite, ce qui n'est pas le cas ici.
+ * Cette classe porte donc les **recus exacts**. Un watermark ne serait admissible que si
+ * l'infrastructure garantissait la continuite, ce qui n'est pas le cas ici.
  */
 final readonly class OpeningProvenance
 {
     /**
-     * @param array<string, true> $identities Les identites deja refletees, en cles.
+     * @param array<string, AppliedEffectReceipt> $receipts Les recus, par identite d'evenement.
      */
     private function __construct(
-        private array $identities,
+        private array $receipts,
     ) {
     }
 
@@ -50,42 +57,46 @@ final readonly class OpeningProvenance
     }
 
     /**
-     * La provenance faite d'identites exactes.
+     * La provenance faite de recus d'application.
      *
-     * @param array<int, string> $identities
+     * @param array<int, AppliedEffectReceipt> $receipts
      * @return self
      */
-    public static function ofIdentities(array $identities): self
+    public static function ofReceipts(array $receipts): self
     {
-        $connues = [];
+        $connus = [];
 
-        foreach ($identities as $identity) {
-            if ($identity === '') {
-                throw new InvalidArgumentException(
-                    'Une identite vide ne designe aucun evenement : la provenance ne pourrait rien en dire.'
+        foreach ($receipts as $receipt) {
+            $deja = $connus[$receipt->eventIdentity] ?? null;
+
+            if ($deja !== null && $deja->effectFingerprint !== $receipt->effectFingerprint) {
+                throw new ContradictoryOpeningProvenance(
+                    'Deux recus de « ' . $receipt->eventIdentity . ' » decrivent des effets differents. L etat '
+                    . 'protege ne peut pas refleter les deux, et choisir l un des deux ferait dependre la '
+                    . 'photographie de celui qu on a garde.'
                 );
             }
 
-            $connues[$identity] = true;
+            $connus[$receipt->eventIdentity] = $receipt;
         }
 
-        return new self($connues);
+        return new self($connus);
     }
 
     /**
-     * Si l'etat protege reflete deja cet evenement.
+     * Le recu d'un evenement, s'il en existe un.
      */
-    public function alreadyReflects(CausalEvent $event): bool
+    public function receiptFor(CausalEvent $event): AppliedEffectReceipt|null
     {
-        return isset($this->identities[$event->identity]);
+        return $this->receipts[$event->identity] ?? null;
     }
 
     /**
-     * Combien d'evenements l'etat protege reflete.
+     * Combien d'effets l'etat protege reflete.
      */
     public function count(): int
     {
-        return count($this->identities);
+        return count($this->receipts);
     }
 
     /**
@@ -95,7 +106,7 @@ final readonly class OpeningProvenance
      */
     public function identities(): array
     {
-        $identities = array_keys($this->identities);
+        $identities = array_keys($this->receipts);
         sort($identities);
 
         return $identities;

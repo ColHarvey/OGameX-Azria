@@ -39,6 +39,10 @@ final readonly class CausalEvent
      * @param TargetScope $targetScope Ce que l'evenement touche reellement.
      * @param array<int, SnapshotContribution> $contributions Ce que l'evenement apporte a la photographie.
      * @param string $payloadFingerprint L'empreinte des faits relus, pour constater une divergence.
+     * @param string $effectFingerprint L'empreinte canonique de l'effet que cet evenement appliquerait.
+     *                                  Distincte de la precedente : deux lectures peuvent differer par
+     *                                  des faits qui ne changent rien a l'effet, et c'est l'effet que la
+     *                                  provenance compare.
      * @param bool $stillValid Si l'evenement n'a ete ni annule ni remplace depuis.
      * @param bool $alreadyApplied S'il a deja produit son effet dans le monde.
      * @param bool $isFoundingInitiator S'il est l'engagement qui a ouvert le combat.
@@ -52,6 +56,7 @@ final readonly class CausalEvent
         public TargetScope $targetScope,
         public array $contributions,
         public string $payloadFingerprint,
+        public string $effectFingerprint,
         public bool $stillValid = true,
         public bool $alreadyApplied = false,
         public bool $isFoundingInitiator = false,
@@ -82,6 +87,13 @@ final readonly class CausalEvent
                 'Sans empreinte, deux lectures divergentes du meme evenement passeraient pour identiques.'
             );
         }
+
+        if ($effectFingerprint === '') {
+            throw new InvalidArgumentException(
+                'Sans empreinte d effet, la provenance ne pourrait comparer que des identifiants : une '
+                . 'mission dont la cargaison a change serait declaree deja appliquee.'
+            );
+        }
     }
 
     /**
@@ -107,6 +119,7 @@ final readonly class CausalEvent
         return $this->identity === $other->identity
             && $this->kindVersion === $other->kindVersion
             && $this->payloadFingerprint === $other->payloadFingerprint
+            && $this->effectFingerprint === $other->effectFingerprint
             && $this->targetBodyId === $other->targetBodyId
             && $this->effect->compareTo($other->effect) === 0
             && $this->decision->compareTo($other->decision) === 0;

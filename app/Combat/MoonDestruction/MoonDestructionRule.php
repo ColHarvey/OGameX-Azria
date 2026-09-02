@@ -50,4 +50,15 @@ interface MoonDestructionRule
      * @return bool
      */
     public function succeeds(int $roll, float $chance): bool;
+
+    /**
+     * Le seuil entier qu'une chance produit.
+     *
+     * Il fait partie de la regle : c'est lui que le plan gele persiste, et lui que la relecture
+     * compare au tirage — jamais une probabilite recalculee.
+     *
+     * @param float $chance
+     * @return int
+     */
+    public function thresholdFor(float $chance): int;
 }

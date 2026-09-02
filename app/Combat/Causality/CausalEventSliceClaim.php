@@ -3,17 +3,21 @@
 namespace OGame\Combat\Causality;
 
 use OGame\Combat\Exceptions\ContradictoryCausalEvent;
-use OGame\Combat\Exceptions\IncompleteEventSlice;
 
 /**
- * Tous les evenements candidats d'une fermeture, declares complets.
+ * Des evenements assembles, et les sources qu'on affirme avoir interrogees.
  *
- * ## Pourquoi la completude est declaree, et pas supposee
+ * ## Une revendication, pas une preuve
  *
- * Un reconciliateur qui accepterait une tranche partielle produirait une photographie **plausible et
- * fausse** : il manquerait une livraison, et personne ne le saurait. Le service de fermeture, qui
- * seul a relu sous verrou, est le seul a pouvoir affirmer que la tranche est complete — et il doit
- * le dire explicitement, pas par omission.
+ * Ce type peut **dire** qu'une tranche est complete ; il ne peut pas le prouver. La preuve exige la
+ * base, le verrou et la barriere de partition — trois choses qu'un objet pur n'a pas. Une premiere
+ * version melangeait les deux, et une fabrique publique permettait de declarer arbitrairement une
+ * tranche complete : la garantie n'etait plus qu'une convention de nommage.
+ *
+ *     CausalEventSliceClaim      -> ce qu'on a assemble, et ce qu'on affirme
+ *     VerifiedCompleteEventSlice -> ce qui a ete verifie sous verrou
+ *
+ * Seul `VerifiedCompleteEventSlice` entre dans le reconciliateur.
  *
  * ## Deduplication et contradiction
  *
@@ -22,33 +26,27 @@ use OGame\Combat\Exceptions\IncompleteEventSlice;
  * identite avec un contenu different sont refusees : elles signifient que quelque chose a change
  * entre deux lectures qui se croyaient equivalentes, et choisir l'une des deux serait arbitraire.
  */
-final readonly class CompleteEventSlice
+final readonly class CausalEventSliceClaim
 {
     /**
      * @param array<string, CausalEvent> $events Les evenements, par identite.
+     * @param array<string, CausalEventSource> $sources Les sources interrogees, par valeur.
      */
     private function __construct(
         private array $events,
+        private array $sources,
     ) {
     }
 
     /**
-     * La tranche relue sous verrou, declaree complete.
+     * Les evenements assembles, avec les sources qu'on affirme avoir interrogees.
      *
      * @param array<int, CausalEvent> $events
-     * @param bool $readUnderLock Ce que le service de fermeture affirme.
+     * @param array<int, CausalEventSource> $queriedSources
      * @return self
      */
-    public static function readUnderLock(array $events, bool $readUnderLock = true): self
+    public static function assembledFrom(array $events, array $queriedSources): self
     {
-        if (!$readUnderLock) {
-            throw new IncompleteEventSlice(
-                'Une tranche incomplete produirait une photographie plausible et fausse : il y manquerait un '
-                . 'effet, et rien ne le signalerait. Seul le service de fermeture, qui a relu sous verrou, '
-                . 'peut affirmer la completude.'
-            );
-        }
-
         $parIdentite = [];
 
         foreach ($events as $event) {
@@ -71,14 +69,20 @@ final readonly class CompleteEventSlice
             );
         }
 
-        return new self($parIdentite);
+        $sources = [];
+
+        foreach ($queriedSources as $source) {
+            $sources[$source->value] = $source;
+        }
+
+        return new self($parIdentite, $sources);
     }
 
     /**
      * Les evenements, dans l'ordre ou ils ont ete lus.
      *
      * L'ordre de lecture n'a aucune valeur : c'est le reconciliateur qui ordonne, par
-     * `EffectOrderKey`. Cette methode ne sert qu'a les parcourir.
+     * `EffectOrderKey`.
      *
      * @return array<int, CausalEvent>
      */
@@ -88,10 +92,28 @@ final readonly class CompleteEventSlice
     }
 
     /**
-     * Combien d'evenements distincts la tranche porte.
+     * Combien d'evenements distincts la revendication porte.
      */
     public function count(): int
     {
         return count($this->events);
+    }
+
+    /**
+     * Les sources qui n'ont pas ete interrogees.
+     *
+     * @return array<int, CausalEventSource>
+     */
+    public function missingSources(): array
+    {
+        $manquantes = [];
+
+        foreach (CausalEventSource::cases() as $source) {
+            if (!isset($this->sources[$source->value])) {
+                $manquantes[] = $source;
+            }
+        }
+
+        return $manquantes;
     }
 }

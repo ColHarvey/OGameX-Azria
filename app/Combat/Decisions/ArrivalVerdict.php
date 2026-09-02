@@ -132,6 +132,7 @@ final readonly class ArrivalVerdict
             CombatMissionAction::CancelWithoutImpact,
             CombatMissionAction::DeferUntilResolved,
             CombatMissionAction::RefuseLaunch,
+            CombatMissionAction::RequiresAssetRecovery,
             CombatMissionAction::OutsideMatrixDomain => false,
         };
     }

@@ -6,6 +6,7 @@ use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\FlightLeg;
+use OGame\Combat\Enums\SnapshotContribution;
 use OGame\Combat\Enums\TargetScope;
 use OGame\Combat\Exceptions\ImpossibleCombatSituation;
 use OGame\Combat\Support\ReturnPlan;
@@ -133,6 +134,60 @@ final readonly class CombatSituation
         }
 
         return $resolvedReturn->isPossible() ? TargetScope::CelestialBody : TargetScope::NoDestination;
+    }
+
+    /**
+     * Ce que cette arrivee peut projeter dans la photographie.
+     *
+     * ## Pourquoi une declaration, et non un defaut
+     *
+     * « Tout sauf un depart peut toucher » etait commode et dangereux : un genre de mission ajoute
+     * plus tard aurait herite silencieusement d'un `true` ou d'un `false`, sans que personne ne
+     * decide lequel. Le `match` est exhaustif : un genre nouveau fait tomber un essai avant de
+     * pouvoir entrer en production.
+     *
+     * **Le retour ne depend pas du genre de l'aller.** Une flotte qui rentre depose ses vaisseaux
+     * et sa cargaison, qu'elle soit partie espionner ou recycler.
+     *
+     * @return array<int, SnapshotContribution>
+     */
+    public function possibleProjections(): array
+    {
+        if ($this->leg === FlightLeg::Return) {
+            return [SnapshotContribution::DeliveredFleet, SnapshotContribution::DeliveredCargo];
+        }
+
+        return match ($this->mission) {
+            // Elles disputent la possession du corps : leurs vaisseaux entrent du cote attaquant.
+            CombatMissionKind::Attack,
+            CombatMissionKind::AcsAttack,
+            CombatMissionKind::MoonDestruction => [SnapshotContribution::AttackingFleet],
+
+            CombatMissionKind::AcsDefend => [SnapshotContribution::DefendingFleet],
+
+            // La cargaison seulement : les transporteurs repartent et ne deviennent jamais
+            // defenseurs.
+            CombatMissionKind::Transport => [SnapshotContribution::DeliveredCargo],
+
+            CombatMissionKind::Deployment => [
+                SnapshotContribution::DeliveredFleet,
+                SnapshotContribution::DeliveredCargo,
+            ],
+
+            CombatMissionKind::Missile => [SnapshotContribution::TargetDefences],
+
+            // Un espionnage bloque rentre intact : ni rapport, ni contre-espionnage, ni effet.
+            CombatMissionKind::Espionage => [],
+
+            // La colonisation echoue et repart ; elle ne pose rien sur un corps verrouille.
+            CombatMissionKind::Colonisation => [],
+
+            // Le recyclage touche le champ de debris, jamais l'etat du corps.
+            CombatMissionKind::Recycle => [],
+
+            // L'aller vise l'espace profond : hors portee du corps.
+            CombatMissionKind::Expedition => [],
+        };
     }
 
     /**

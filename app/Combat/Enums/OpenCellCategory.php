@@ -51,4 +51,13 @@ enum OpenCellCategory: string
      * arrivee a traiter.
      */
     case StructurallyNotApplicable = 'structurally_not_applicable';
+
+    /**
+     * Des actifs sont a preserver et aucune destination n'existe.
+     *
+     * Une decision fermee, mais qui delegue a une recuperation plutot qu'a une regle de jeu. La
+     * ranger avec les situations impossibles laisserait croire qu'elle ne se produit jamais ; la
+     * ranger avec les actions immediates laisserait croire qu'elle est ordinaire.
+     */
+    case NeedsAssetRecovery = 'needs_asset_recovery';
 }

@@ -78,4 +78,44 @@ final class MoonDestructionOdds
     {
         return $roll <= $chance;
     }
+
+    /**
+     * Le seuil entier qu'une chance produit reellement.
+     *
+     * ## Pourquoi un entier alors que la chance est un flottant
+     *
+     * Le tirage est un **entier** de 1 a 100, et la reussite est `tirage <= chance`. Pour un tirage
+     * entier, cette comparaison est exactement equivalente a `tirage <= plancher(chance)` : une
+     * chance de 14,14 % et un seuil de 14 selectionnent les memes tirages, du premier au dernier.
+     *
+     * Le seuil est donc l'information **observable**, et c'est lui qu'il faut persister. Une chance
+     * flottante relue apres un aller-retour JSON peut differer du dernier bit ; le seuil, lui, se
+     * relit sans perte, et le resultat gele se valide contre lui.
+     *
+     * La chance canonique reste conservee a part, pour l'audit et l'affichage.
+     *
+     * @param float $chance
+     * @return int
+     */
+    public static function thresholdFor(float $chance): int
+    {
+        $seuil = (int)floor($chance);
+
+        return max(0, min(self::ROLL_MAXIMUM, $seuil));
+    }
+
+    /**
+     * Si un tirage l'emporte sur un seuil entier.
+     *
+     * Aucun flottant n'intervient : c'est cette comparaison-la que la relecture d'un plan gele
+     * refait, sans jamais recalculer une probabilite.
+     *
+     * @param int $roll
+     * @param int $threshold
+     * @return bool
+     */
+    public static function succeedsAgainst(int $roll, int $threshold): bool
+    {
+        return $roll <= $threshold;
+    }
 }

@@ -5,6 +5,7 @@ namespace Tests\Unit\Combat;
 use InvalidArgumentException;
 use OGame\Combat\Decisions\ArrivalDecision;
 use OGame\Combat\Decisions\ArrivalVerdict;
+use OGame\Combat\Decisions\ArrivingAssets;
 use OGame\Combat\Decisions\CombatDecisionMatrix;
 use OGame\Combat\Decisions\CombatSituation;
 use OGame\Combat\Decisions\FinalCombatDecision;
@@ -17,6 +18,7 @@ use OGame\Combat\Enums\DecisionRequirement;
 use OGame\Combat\Enums\FlightLeg;
 use OGame\Combat\Enums\InvariantCode;
 use OGame\Combat\Enums\OpenCellCategory;
+use OGame\Combat\Enums\SnapshotContribution;
 use OGame\Combat\Enums\SnapshotObligation;
 use OGame\Combat\Enums\TargetScope;
 use OGame\Combat\Exceptions\ImpossibleCombatSituation;
@@ -517,7 +519,8 @@ class CombatDecisionMatrixTest extends UnitTestCase
 
         $decision = (new CombatDecisionMatrix())->verdictOf(
             $situation,
-            ReturnPlan::cannotReturn(CombatReasonCode::RallyClosed)
+            ReturnPlan::cannotReturn(CombatReasonCode::RallyClosed),
+            ArrivingAssets::nothingToPreserve()
         )->movement;
 
         $this->assertSame(CombatMissionAction::CancelWithoutImpact, $decision->action());
@@ -880,7 +883,11 @@ class CombatDecisionMatrixTest extends UnitTestCase
 
             $this->assertSame(TargetScope::NoDestination, $situation->scopeFor($sansDestination));
 
-            $verdict = (new CombatDecisionMatrix())->verdictOf($situation, $sansDestination);
+            $verdict = (new CombatDecisionMatrix())->verdictOf(
+                $situation,
+                $sansDestination,
+                ArrivingAssets::nothingToPreserve()
+            );
 
             $this->assertSame(CombatMissionAction::CancelWithoutImpact, $verdict->movement->action());
             $this->assertSame(CombatReasonCode::NoReturnDestination, $verdict->movement->reason());
@@ -900,6 +907,100 @@ class CombatDecisionMatrixTest extends UnitTestCase
     }
 
     /**
+     * Une flotte chargee sans destination n'est jamais supprimee en silence.
+     *
+     * ## Deux situations que rien ne distinguait
+     *
+     * Pour une operation systeme sans flotte ni cargaison, `CancelWithoutImpact` est exact : il n'y
+     * a rien a preserver. Pour une flotte de joueur, la meme decision **supprime ses vaisseaux et
+     * sa cargaison**.
+     *
+     * Le cas ne devrait pas se produire — la planete mere garantit normalement une destination. C'est
+     * justement pourquoi il compte : s'il survient, c'est une corruption ou un etat administratif, et
+     * la reponse est une quarantaine, pas une regle de jeu ordinaire.
+     */
+    public function testALoadedFleetWithNoDestinationIsNeverSilentlyDeleted(): void
+    {
+        $sansDestination = ReturnPlan::cannotReturn(CombatReasonCode::TargetCombatLocked);
+
+        $situation = new CombatSituation(
+            CombatMissionKind::Transport,
+            FlightLeg::Return,
+            ActorKind::Player,
+            CombatState::Active
+        );
+
+        $matrice = new CombatDecisionMatrix();
+
+        $charge = $matrice->verdictOf($situation, $sansDestination, ArrivingAssets::fleetWithCargo());
+        $vide = $matrice->verdictOf($situation, $sansDestination, ArrivingAssets::nothingToPreserve());
+
+        $this->assertSame(CombatMissionAction::RequiresAssetRecovery, $charge->movement->action());
+        $this->assertSame(InvariantCode::AssetsWithoutDestination, $charge->movement->invariant());
+        $this->assertSame(OpenCellCategory::NeedsAssetRecovery, $charge->movement->openCellCategory());
+
+        $this->assertSame(CombatMissionAction::CancelWithoutImpact, $vide->movement->action());
+        $this->assertSame(CombatReasonCode::NoReturnDestination, $vide->movement->reason());
+
+        // Une mise en recuperation n'est pas un resultat a montrer : c'est une alerte.
+        $this->expectException(NonFinalCombatReason::class);
+
+        FinalCombatDecision::of($charge->movement);
+    }
+
+    /**
+     * Chaque genre de mission declare ce qu'il peut projeter dans la photographie.
+     *
+     * ## Pourquoi ce parcours plutot qu'une confiance dans le `match`
+     *
+     * Le `match` est exhaustif : un genre nouveau leverait une `UnhandledMatchError`. Mais elle ne se
+     * produirait qu'a l'execution du chemin concerne, peut-etre en production. Ce parcours la
+     * declenche dans la suite d'essais, avant.
+     */
+    public function testEveryMissionKindDeclaresWhatItCanProject(): void
+    {
+        $sansProjection = [
+            CombatMissionKind::Espionage,
+            CombatMissionKind::Colonisation,
+            CombatMissionKind::Recycle,
+            CombatMissionKind::Expedition,
+        ];
+
+        foreach (CombatMissionKind::cases() as $mission) {
+            $aller = new CombatSituation($mission, FlightLeg::Outbound, ActorKind::Player, CombatState::Rallying);
+            $retour = new CombatSituation($mission, FlightLeg::Return, ActorKind::Player, CombatState::Rallying);
+
+            $attendu = in_array($mission, $sansProjection, true) ? [] : 'quelque chose';
+
+            if ($attendu === []) {
+                $this->assertSame([], $aller->possibleProjections(), $mission->value);
+            } else {
+                $this->assertNotSame([], $aller->possibleProjections(), $mission->value);
+            }
+
+            // **Un retour ne depend pas du genre de son aller.** Une flotte qui rentre depose ses
+            // vaisseaux et sa cargaison, qu'elle soit partie espionner ou recycler.
+            $this->assertSame(
+                [SnapshotContribution::DeliveredFleet, SnapshotContribution::DeliveredCargo],
+                $retour->possibleProjections(),
+                $mission->value
+            );
+        }
+
+        // Et le transport n'apporte que sa cargaison : ses transporteurs ne deviennent jamais
+        // defenseurs.
+        $this->assertSame(
+            [SnapshotContribution::DeliveredCargo],
+            (new CombatSituation(
+                CombatMissionKind::Transport,
+                FlightLeg::Outbound,
+                ActorKind::Player,
+                CombatState::Rallying
+            ))->possibleProjections()
+        );
+    }
+
+    /**
      * La decision d'une situation, avec un plan de retour praticable.
      */
     private function arrivalOf(CombatSituation $situation): ArrivalDecision
@@ -912,7 +1013,11 @@ class CombatDecisionMatrixTest extends UnitTestCase
      */
     private function verdictOf(CombatSituation $situation): ArrivalVerdict
     {
-        return (new CombatDecisionMatrix())->verdictOf($situation, $this->aPossibleReturn());
+        return (new CombatDecisionMatrix())->verdictOf(
+            $situation,
+            $this->aPossibleReturn(),
+            ArrivingAssets::fleetWithCargo()
+        );
     }
 
     /**

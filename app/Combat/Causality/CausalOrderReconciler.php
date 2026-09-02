@@ -56,14 +56,14 @@ final class CausalOrderReconciler
      * @param ProtectedOpeningState $protectedOpeningState L'etat d'ouverture, avec sa provenance.
      * @param string $verifiedOpener L'identite de l'engagement fondateur, verifiee ailleurs.
      * @param CausalWindow $causalWindow Les deux barrieres.
-     * @param CompleteEventSlice $completeEventSlice Tous les candidats, declares complets.
+     * @param VerifiedCompleteEventSlice $completeEventSlice Tous les candidats, **verifies** complets.
      * @return CausallyReconciledSnapshot
      */
     public function reconcile(
         ProtectedOpeningState $protectedOpeningState,
         string $verifiedOpener,
         CausalWindow $causalWindow,
-        CompleteEventSlice $completeEventSlice,
+        VerifiedCompleteEventSlice $completeEventSlice,
     ): CausallyReconciledSnapshot {
         if ($verifiedOpener === '') {
             throw new InvalidArgumentException(
@@ -149,7 +149,7 @@ final class CausalOrderReconciler
         // **La provenance avant les barrieres.** Un evenement deja reflete les satisfait toutes les
         // deux : c'est precisement pourquoi le tester apres les aurait laisse passer en
         // « a appliquer », et son effet aurait ete compte une seconde fois.
-        if ($opening->provenance->alreadyReflects($event)) {
+        if ($opening->alreadyReflects($event)) {
             return new ReconciledEvent(
                 $event,
                 CausalAdmission::AlreadyInOpeningState,

@@ -4,22 +4,23 @@ namespace OGame\Combat\Causality;
 
 use InvalidArgumentException;
 use OGame\Combat\Enums\TargetScope;
+use OGame\Combat\Exceptions\ContradictoryOpeningProvenance;
 
 /**
  * L'etat du corps vise au moment de l'ouverture, avec **ce qu'il reflete deja**.
  *
  * ## Pourquoi l'etat et sa provenance sont indissociables
  *
- * Un solde tout seul ne dit pas quels evenements l'ont produit. Le reconciliateur retrouverait alors
- * comme « engagements anterieurs » des livraisons qui sont deja dans ce solde, et les ajouterait une
- * seconde fois — sans qu'aucune comparaison temporelle ne soit fausse.
+ * Un solde tout seul ne dit pas quels effets l'ont produit. Le reconciliateur retrouverait alors
+ * comme « engagements anterieurs » des livraisons deja encaissees, et les ajouterait une seconde
+ * fois — sans qu'aucune comparaison temporelle ne soit fausse.
  *
  * Les deux voyagent donc ensemble, et il n'existe pas de fabrique qui donne l'un sans l'autre.
  *
  * ## La reserve de butin commence ici
  *
  * La production continue physiquement pendant le combat, mais elle **n'augmente pas** la reserve
- * pillable. Celle-ci vaut :
+ * pillable :
  *
  *     ressources protegees = base reservee a l'ouverture
  *                          + livraisons causalement admissibles
@@ -33,12 +34,14 @@ final readonly class ProtectedOpeningState
     /**
      * @param int $combatInstanceId Le combat auquel cet etat appartient.
      * @param int $targetBodyId Le corps **exact** : planete et lune ne se confondent pas.
+     * @param int $capturedAt L'instant de la capture, en secondes.
      * @param OpeningProvenance $provenance Ce que cet etat reflete deja.
      * @param string $stateFingerprint L'empreinte des faits relus a l'ouverture.
      */
     public function __construct(
         public int $combatInstanceId,
         public int $targetBodyId,
+        public int $capturedAt,
         public OpeningProvenance $provenance,
         public string $stateFingerprint,
     ) {
@@ -67,5 +70,65 @@ final readonly class ProtectedOpeningState
     {
         return $event->targetBodyId === $this->targetBodyId
             && $event->targetScope === TargetScope::CelestialBody;
+    }
+
+    /**
+     * Si l'etat protege reflete deja **cet effet-la**, et non seulement cet identifiant.
+     *
+     * ## Ce que cette methode refuse plutot que d'admettre
+     *
+     * Cinq desaccords ne sont pas des issues a trancher mais des defauts. Les admettre en silence
+     * ferait passer une corruption pour une regle de jeu :
+     *
+     * - **une empreinte differente** : la mission a change entre son application et cette relecture ;
+     * - **un genre versionne different** : l'effet a ete applique sous une autre forme ;
+     * - **un agregat different** : le recu concerne un autre corps ;
+     * - **une contradiction temporelle** : l'effet est declare present dans un etat capture avant lui ;
+     * - **un recu vide**, deja refuse a la construction du recu.
+     *
+     * @param CausalEvent $event
+     * @return bool
+     */
+    public function alreadyReflects(CausalEvent $event): bool
+    {
+        $recu = $this->provenance->receiptFor($event);
+
+        if ($recu === null) {
+            return false;
+        }
+
+        if ($recu->kindVersion !== $event->kindVersion) {
+            throw new ContradictoryOpeningProvenance(
+                'L evenement « ' . $event->identity .' » est reflete sous le genre « ' . $recu->kindVersion
+                . ' » et relu sous « ' . $event->kindVersion . ' » : l effet applique n est pas celui qu on '
+                . 'renonce a appliquer.'
+            );
+        }
+
+        if ($recu->effectFingerprint !== $event->effectFingerprint) {
+            throw new ContradictoryOpeningProvenance(
+                'L evenement « ' . $event->identity . ' » a ete applique avec un effet different de celui '
+                . 'qu on relit. Le declarer deja reflete sur la seule foi de son identifiant renoncerait a '
+                . 'appliquer un effet qui, lui, ne l a pas ete.'
+            );
+        }
+
+        if ($recu->aggregateId !== $event->targetBodyId) {
+            throw new ContradictoryOpeningProvenance(
+                'Le recu de « ' . $event->identity . ' » concerne le corps ' . $recu->aggregateId
+                . ', et l evenement relu vise le corps ' . $event->targetBodyId . '.'
+            );
+        }
+
+        // **Une contradiction temporelle, pas une admission.** Un effet ne peut pas figurer dans un
+        // etat capture avant qu'il n'ait lieu.
+        if ($recu->appliedAt > $this->capturedAt) {
+            throw new ContradictoryOpeningProvenance(
+                'L evenement « ' . $event->identity . ' » est declare present dans un etat capture a '
+                . $this->capturedAt . ' alors qu il a ete applique a ' . $recu->appliedAt . '.'
+            );
+        }
+
+        return true;
     }
 }

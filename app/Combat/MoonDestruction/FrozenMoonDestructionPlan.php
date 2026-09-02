@@ -162,11 +162,13 @@ final readonly class FrozenMoonDestructionPlan
         $rang = 0;
 
         $chancePerte = $rule->deathstarLossChance($moon->diameter);
+        $seuilPerte = $rule->thresholdFor($chancePerte);
 
         foreach (self::inDeterministicOrder($candidates) as $candidate) {
             $rang++;
 
             $chanceDestruction = $rule->destructionChance($moon->diameter, $candidate->survivingDeathstars);
+            $seuilDestruction = $rule->thresholdFor($chanceDestruction);
 
             // L'ordre de ces trois refus n'est pas indifferent : il decide quelle raison le joueur
             // lira. Le camp battu passe avant tout le reste, puis la lune deja detruite, puis
@@ -185,6 +187,8 @@ final readonly class FrozenMoonDestructionPlan
                     $candidate->survivingDeathstars,
                     $chanceDestruction,
                     $chancePerte,
+                    $seuilDestruction,
+                    $seuilPerte,
                     null,
                     null,
                     $issue,
@@ -198,8 +202,12 @@ final readonly class FrozenMoonDestructionPlan
             $tirageDestruction = $roll();
             $tiragePerte = $roll();
 
-            $detruite = $rule->succeeds($tirageDestruction, $chanceDestruction);
-            $perdues = $rule->succeeds($tiragePerte, $chancePerte) ? $candidate->survivingDeathstars : 0;
+            // Les seuils entiers, jamais les chances flottantes : c'est cette comparaison-la que la
+            // relecture refera, et elle doit donner le meme resultat sans recalculer une probabilite.
+            $detruite = MoonDestructionOdds::succeedsAgainst($tirageDestruction, $seuilDestruction);
+            $perdues = MoonDestructionOdds::succeedsAgainst($tiragePerte, $seuilPerte)
+                ? $candidate->survivingDeathstars
+                : 0;
 
             $tentatives[] = new FrozenMoonDestructionAttempt(
                 $candidate->fleetMissionId,
@@ -207,6 +215,8 @@ final readonly class FrozenMoonDestructionPlan
                 $candidate->survivingDeathstars,
                 $chanceDestruction,
                 $chancePerte,
+                $seuilDestruction,
+                $seuilPerte,
                 $tirageDestruction,
                 $tiragePerte,
                 $detruite ? MoonDestructionOutcome::MoonDestroyed : MoonDestructionOutcome::AttemptFailed,
