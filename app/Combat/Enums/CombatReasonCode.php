@@ -83,6 +83,30 @@ enum CombatReasonCode: string
     case PositionNoLongerFree = 'position_no_longer_free';
 
     /**
+     * La candidate ne vise pas exactement le meme corps celeste.
+     *
+     * Une planete et sa lune partagent leurs coordonnees : viser l'une n'est pas viser l'autre.
+     */
+    case WrongTargetBody = 'wrong_target_body';
+
+    /**
+     * La candidate n'etait pas deja en vol au moment de l'ouverture.
+     *
+     * Le ralliement rassemble ce qui volait deja ; il n'ouvre pas une fenetre de lancement.
+     */
+    case NotAlreadyInFlight = 'not_already_in_flight';
+
+    /**
+     * L'arrivee planifiee depasse le plafond temporel du ralliement.
+     */
+    case RallyWindowLimit = 'rally_window_limit';
+
+    /**
+     * La candidate a ete rappelee : elle ne rejoint rien.
+     */
+    case CandidateRecalled = 'candidate_recalled';
+
+    /**
      * Le plan de retour resolu ne designe aucun corps ou se poser.
      *
      * Le dernier recours, apres le corps d'origine, la planete associee et la planete mere.

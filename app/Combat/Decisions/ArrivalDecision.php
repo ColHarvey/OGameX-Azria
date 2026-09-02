@@ -426,6 +426,10 @@ final readonly class ArrivalDecision implements CombatDecision
                 CombatReasonCode::NpcSideNotReinforceable,
                 CombatReasonCode::TargetCombatLocked,
                 CombatReasonCode::PositionNoLongerFree,
+                CombatReasonCode::WrongTargetBody,
+                CombatReasonCode::NotAlreadyInFlight,
+                CombatReasonCode::RallyWindowLimit,
+                CombatReasonCode::CandidateRecalled,
             ],
             CombatMissionAction::LandOutsideSnapshot => [
                 CombatReasonCode::OwnFleetComingHome,
