@@ -2,7 +2,9 @@
 
 namespace Tests\Unit\Combat;
 
+use OGame\Combat\Enums\CombatEventType;
 use OGame\Combat\Support\CombatSnapshotEligibility;
+use OGame\Combat\Support\EffectOrderKey;
 use Tests\UnitTestCase;
 
 /**
@@ -10,24 +12,24 @@ use Tests\UnitTestCase;
  *
  * La regle repose sur deux instants qui ne servent pas a la meme chose : l'ouverture est la
  * barriere des **decisions**, la fermeture celle des **effets**. Les deux conditions sont
- * necessaires et aucune ne suffit — c'est ce que ces tests etablissent cas par cas.
+ * necessaires et aucune ne suffit.
+ *
+ * L'initiateur du combat echappe aux deux : il ne les franchit pas, il les pose.
  */
 class CombatSnapshotEligibilityTest extends UnitTestCase
 {
     /**
-     * Rang de l'ouverture du ralliement.
+     * Rang de l'ouverture du ralliement, dans l'ordre des decisions.
      */
     private const int OUVERTURE = 1_000;
 
     /**
-     * Rang de la fermeture, soixante crans plus loin.
+     * Heure de la fermeture, soixante secondes plus loin.
      */
     private const int FERMETURE = 1_060;
 
     /**
      * Un engagement pris avant l'ouverture et arrivant avant la fermeture entre.
-     *
-     * Le transport lance la veille, qui se pose pendant le ralliement.
      */
     public function testACommitmentTakenBeforeAndArrivingInTimeEnters(): void
     {
@@ -65,8 +67,8 @@ class CombatSnapshotEligibilityTest extends UnitTestCase
     /**
      * Les deux bornes sont fermees du meme cote.
      *
-     * Une seule convention a retenir dans tout le systeme : ce qui tombe **pile** sur une
-     * barriere est du cote posterieur.
+     * Une seule convention a retenir dans tout le systeme : ce qui tombe **pile** sur une barriere
+     * est du cote posterieur.
      */
     public function testBothBarriersAreClosedOnTheSameSide(): void
     {
@@ -107,43 +109,93 @@ class CombatSnapshotEligibilityTest extends UnitTestCase
     public function testTheBuildQueueCasesBehaveAsDecided(): void
     {
         // Commencee avant l'ouverture et terminee avant la fermeture : elle compte.
-        $this->assertTrue($this->entre(self::OUVERTURE - 3_600, self::OUVERTURE + 30));
+        $this->assertTrue($this->entre(self::OUVERTURE - 3_600, self::OUVERTURE + 30, CombatEventType::QueueCompletion));
 
         // Commencee avant, terminee apres : les unites sont posterieures a la photographie.
-        $this->assertFalse($this->entre(self::OUVERTURE - 3_600, self::FERMETURE + 10));
+        $this->assertFalse($this->entre(self::OUVERTURE - 3_600, self::FERMETURE + 10, CombatEventType::QueueCompletion));
 
         // Commencee apres l'ouverture : jamais incluse, meme terminee immediatement.
         $this->assertFalse(
-            $this->entre(self::OUVERTURE + 1, self::OUVERTURE + 2),
+            $this->entre(self::OUVERTURE + 1, self::OUVERTURE + 2, CombatEventType::QueueCompletion),
             'A build started after the barrier reached the snapshot, so the target could add units to the battle.'
         );
     }
 
     /**
-     * Un ralliement de duree nulle n'inclut aucun effet.
+     * Un ralliement de duree nulle n'admet aucun effet **supplementaire**, mais garde l'initiateur.
      *
-     * C'est le cas de l'attaquant isole : la fenetre se ferme a l'instant ou elle s'ouvre. Rien
-     * ne peut alors se produire strictement avant la fermeture tout en ayant ete decide
-     * strictement avant l'ouverture.
+     * **La nuance est essentielle.** C'est le cas de l'attaquant isole : la fenetre se ferme a
+     * l'instant ou elle s'ouvre. Aucun effet secondaire ne peut franchir les barrieres — mais il
+     * serait absurde d'en conclure que l'attaquant lui-meme n'est pas dans la bataille. Il est la
+     * donnee fondatrice : sans lui, il n'y a pas de combat du tout.
      */
-    public function testAZeroLengthRallyAdmitsNoEffect(): void
+    public function testZeroLengthRallyAdmitsNoAdditionalEffectsButKeepsTheOpener(): void
     {
+        $ouverture = EffectOrderKey::barrierAt(self::OUVERTURE);
+
         $this->assertFalse(
             CombatSnapshotEligibility::entersSnapshot(
+                false,
                 self::OUVERTURE - 100,
+                EffectOrderKey::forEvent(self::OUVERTURE, CombatEventType::FleetArrival, 4),
                 self::OUVERTURE,
-                self::OUVERTURE,
-                self::OUVERTURE
+                $ouverture
             ),
-            'With no rally window at all, an effect still slipped into the snapshot.'
+            'With no rally window at all, a secondary effect still slipped into the snapshot.'
+        );
+
+        $this->assertTrue(
+            CombatSnapshotEligibility::entersSnapshot(
+                true,
+                self::OUVERTURE,
+                EffectOrderKey::forEvent(self::OUVERTURE, CombatEventType::FleetArrival, 1),
+                self::OUVERTURE,
+                $ouverture
+            ),
+            'The fleet that opened the combat was left out of its own battle.'
+        );
+    }
+
+    /**
+     * L'initiateur entre quelles que soient les barrieres.
+     *
+     * Il ne les franchit pas : il les pose. Aucune combinaison ne doit pouvoir l'exclure.
+     */
+    public function testTheOpenerEntersWhateverTheBarriers(): void
+    {
+        foreach ([self::OUVERTURE - 10, self::OUVERTURE, self::OUVERTURE + 10] as $decision) {
+            foreach ([self::OUVERTURE, self::FERMETURE, self::FERMETURE + 10] as $effet) {
+                $this->assertTrue(
+                    CombatSnapshotEligibility::entersSnapshot(
+                        true,
+                        $decision,
+                        EffectOrderKey::forEvent($effet, CombatEventType::FleetArrival, 1),
+                        self::OUVERTURE,
+                        EffectOrderKey::barrierAt(self::FERMETURE)
+                    ),
+                    'A combination of barriers excluded the combat opener from its own battle.'
+                );
+            }
+        }
+    }
+
+    /**
+     * Une mission creee tot mais prevue tard est classee sur son heure prevue.
+     *
+     * Les deux ordres sont bien distincts : un transport lent lance a midi arrive apres un
+     * transport rapide lance a treize heures. Classer par rang de creation inverserait leur ordre
+     * reel.
+     */
+    public function testAMissionCommittedEarlyButDueLateIsJudgedOnItsDueTime(): void
+    {
+        $this->assertFalse(
+            $this->entre(1, self::FERMETURE + 1),
+            'A mission committed very early was let in although its effect lands after the snapshot.'
         );
     }
 
     /**
      * Les deux conditions sont bien independantes.
-     *
-     * Le balayage croise les deux cotes de chaque barriere : une seule combinaison sur quatre doit
-     * entrer.
      */
     public function testBothConditionsAreNecessaryAndNeitherSuffices(): void
     {
@@ -161,12 +213,19 @@ class CombatSnapshotEligibilityTest extends UnitTestCase
     }
 
     /**
-     * @param int $engagement
-     * @param int $effet
+     * @param int $engagement Rang de la decision.
+     * @param int $effet Heure planifiee de l'effet.
+     * @param CombatEventType $type
      * @return bool
      */
-    private function entre(int $engagement, int $effet): bool
+    private function entre(int $engagement, int $effet, CombatEventType $type = CombatEventType::FleetArrival): bool
     {
-        return CombatSnapshotEligibility::entersSnapshot($engagement, $effet, self::OUVERTURE, self::FERMETURE);
+        return CombatSnapshotEligibility::entersSnapshot(
+            false,
+            $engagement,
+            EffectOrderKey::forEvent($effet, $type, 12),
+            self::OUVERTURE,
+            EffectOrderKey::barrierAt(self::FERMETURE)
+        );
     }
 }

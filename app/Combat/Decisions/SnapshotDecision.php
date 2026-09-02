@@ -56,8 +56,9 @@ final readonly class SnapshotDecision implements CombatDecision
     /**
      * Une candidate au ralliement, retenue par la selection de son camp.
      *
-     * **La seule fabrique qui produise `Extend`.** Elle exige une flotte combattante : une
-     * candidate qui n'apporterait que des ressources n'a pas de bataille a faire attendre.
+     * **La seule fabrique qui produise `Extend`.** Une candidate qui n'apporterait pas de flotte
+     * n'aurait aucune bataille a faire attendre — et la table des provenances garantit qu'elle en
+     * apporte une, puisqu'elle n'admet ici que des flottes.
      *
      * @param array<int, SnapshotContribution> $contributions
      * @return self
@@ -67,12 +68,14 @@ final readonly class SnapshotDecision implements CombatDecision
         self::guardContributions($contributions);
         self::guardContributionsMatchSource($contributions, SnapshotSource::SelectedRallyCandidate);
 
-        if (!self::containsAFightingFleet($contributions)) {
-            throw new InvalidArgumentException(
-                'Une candidate retenue doit apporter une flotte combattante : sans elle, il n y a pas de bataille a faire attendre.'
-            );
-        }
-
+        // Aucune verification supplementaire « apporte-t-elle une flotte combattante ? » : la
+        // table des provenances n'admet, pour une candidate retenue, que `AttackingFleet` et
+        // `DefendingFleet`. Un ensemble non vide et conforme en contient donc forcement une.
+        //
+        // Le controle existait, et il etait **inatteignable**. Le garder aurait donne l'illusion
+        // d'une protection que rien ne pouvait declencher. L'invariant reel — toute contribution
+        // admise pour cette provenance est une flotte combattante — est verifie par un test sur
+        // la table elle-meme, ou il tombera si quelqu'un elargit la liste.
         return new self(
             true,
             array_values($contributions),
@@ -229,20 +232,5 @@ final readonly class SnapshotDecision implements CombatDecision
                 )) . '. Compter la meme unite deux fois est exactement ce que cette table empeche.'
             );
         }
-    }
-
-    /**
-     * @param array<int, SnapshotContribution> $contributions
-     * @return bool
-     */
-    private static function containsAFightingFleet(array $contributions): bool
-    {
-        foreach ($contributions as $contribution) {
-            if ($contribution->isFightingFleet()) {
-                return true;
-            }
-        }
-
-        return false;
     }
 }

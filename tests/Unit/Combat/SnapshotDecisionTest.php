@@ -52,7 +52,7 @@ class SnapshotDecisionTest extends UnitTestCase
     public function testALoadedReturnCountsButExtendsNothing(): void
     {
         $decision = SnapshotDecision::includeWithoutExtendingWindow(
-            [SnapshotContribution::DefendingFleet, SnapshotContribution::TargetResources],
+            [SnapshotContribution::DeliveredFleet, SnapshotContribution::DeliveredCargo],
             SnapshotSource::IncidentalArrival
         );
 
@@ -66,7 +66,7 @@ class SnapshotDecisionTest extends UnitTestCase
     public function testAPersonalDeploymentExtendsNothing(): void
     {
         $decision = SnapshotDecision::includeWithoutExtendingWindow(
-            [SnapshotContribution::DefendingFleet, SnapshotContribution::TargetResources],
+            [SnapshotContribution::DeliveredFleet, SnapshotContribution::DeliveredCargo],
             SnapshotSource::IncidentalArrival
         );
 
@@ -79,11 +79,11 @@ class SnapshotDecisionTest extends UnitTestCase
     public function testATransportBringsResourcesOnly(): void
     {
         $decision = SnapshotDecision::includeWithoutExtendingWindow(
-            [SnapshotContribution::TargetResources],
+            [SnapshotContribution::DeliveredCargo],
             SnapshotSource::IncidentalArrival
         );
 
-        $this->assertSame([SnapshotContribution::TargetResources], $decision->contributions());
+        $this->assertSame([SnapshotContribution::DeliveredCargo], $decision->contributions());
         $this->assertFalse($decision->extendsRallyWindow());
     }
 
@@ -117,38 +117,71 @@ class SnapshotDecisionTest extends UnitTestCase
     }
 
     /**
-     * Il n'existe aucun chemin pour faire prolonger la fenetre a une arrivee de passage.
+     * Aucune provenance autre que la selection ne peut prolonger la fenetre.
      *
      * Le controle ne repose pas sur la vigilance de l'appelant : la seule fabrique qui produise
-     * `Extend` est celle des candidates retenues, et elle exige une flotte combattante.
+     * `Extend` est celle des candidates retenues.
      */
     public function testNothingIncidentalCanEverExtendTheWindow(): void
     {
-        $dePassage = [
-            'retour charge' => [SnapshotContribution::DefendingFleet, SnapshotContribution::TargetResources],
-            'transport' => [SnapshotContribution::TargetResources],
-            'garnison' => [SnapshotContribution::DefendingFleet, SnapshotContribution::TargetDefences],
+        $autres = [
+            SnapshotSource::IncidentalArrival->value => [
+                'retour charge' => [SnapshotContribution::DeliveredFleet, SnapshotContribution::DeliveredCargo],
+                'transport' => [SnapshotContribution::DeliveredCargo],
+            ],
+            SnapshotSource::ExistingTargetState->value => [
+                'garnison et defenses' => [SnapshotContribution::DefendingFleet, SnapshotContribution::TargetDefences],
+                'solde de la cible' => [SnapshotContribution::TargetResources],
+            ],
         ];
 
-        foreach ($dePassage as $quoi => $contributions) {
-            foreach ([SnapshotSource::IncidentalArrival, SnapshotSource::ExistingTargetState] as $provenance) {
-                $decision = SnapshotDecision::includeWithoutExtendingWindow($contributions, $provenance);
+        foreach ($autres as $provenance => $cas) {
+            foreach ($cas as $quoi => $contributions) {
+                $decision = SnapshotDecision::includeWithoutExtendingWindow(
+                    $contributions,
+                    SnapshotSource::from($provenance)
+                );
 
                 $this->assertFalse(
                     $decision->extendsRallyWindow(),
-                    "A {$quoi} arriving as {$provenance->value} held the rally window open."
+                    "A {$quoi} arriving as {$provenance} held the rally window open."
                 );
             }
         }
     }
 
     /**
-     * Une candidate retenue sans flotte combattante est refusee a la construction.
+     * Toute contribution admise pour une candidate retenue est une flotte combattante.
+     *
+     * **L'invariant a remplace un controle inatteignable.** Le code verifiait, a la construction,
+     * qu'une candidate retenue apportait bien une flotte — mais la table des provenances n'admet
+     * ici que des flottes, si bien que ce controle ne pouvait jamais se declencher. Le garder
+     * aurait donne l'illusion d'une protection que rien n'active.
+     *
+     * L'invariant reel est celui-ci, et il tombera si quelqu'un elargit la liste sans y penser.
      */
-    public function testASelectedCandidateWithoutAFightingFleetIsRefused(): void
+    public function testEveryContributionAllowedForASelectedCandidateIsAFightingFleet(): void
+    {
+        $admises = SnapshotContribution::allowedFor(SnapshotSource::SelectedRallyCandidate);
+
+        $this->assertNotEmpty($admises);
+
+        foreach ($admises as $contribution) {
+            $this->assertTrue(
+                $contribution->isFightingFleet(),
+                "« {$contribution->value} » is allowed for a selected candidate but is not a fighting fleet, "
+                . 'so a candidate could now hold the rally window open without any battle to wait for.'
+            );
+        }
+    }
+
+    /**
+     * Une candidate retenue ne peut pas declarer autre chose qu'une flotte.
+     */
+    public function testASelectedCandidateCannotDeclareAnythingButAFleet(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessageMatches('/flotte combattante/');
+        $this->expectExceptionMessageMatches('/ne peut pas venir de/');
 
         SnapshotDecision::includeSelectedRallyCandidate([SnapshotContribution::TargetResources]);
     }
@@ -161,7 +194,7 @@ class SnapshotDecisionTest extends UnitTestCase
         $refus = [
             'aucune contribution' => static fn (): SnapshotDecision => SnapshotDecision::includeWithoutExtendingWindow([], SnapshotSource::IncidentalArrival),
             'contribution repetee' => static fn (): SnapshotDecision => SnapshotDecision::includeWithoutExtendingWindow(
-                [SnapshotContribution::TargetResources, SnapshotContribution::TargetResources],
+                [SnapshotContribution::DeliveredCargo, SnapshotContribution::DeliveredCargo],
                 SnapshotSource::IncidentalArrival
             ),
         ];
