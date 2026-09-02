@@ -76,4 +76,9 @@ enum CombatReasonCode: string
      * test veille a ce qu'aucune case ne quitte cette liste sans qu'une regle ait ete ecrite.
      */
     case Undecided = 'undecided';
+
+    /**
+     * La position visee par une colonisation a cesse d'etre libre pendant le vol.
+     */
+    case PositionNoLongerFree = 'position_no_longer_free';
 }

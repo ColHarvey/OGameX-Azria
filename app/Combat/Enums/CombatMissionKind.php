@@ -129,4 +129,27 @@ enum CombatMissionKind: string
             self::Colonisation, self::Recycle, self::Missile, self::Expedition => false,
         };
     }
+
+    /**
+     * Ce que l'aller de cette mission vise reellement.
+     *
+     * **Le retour n'est pas concerne** : une flotte qui rentre se pose toujours sur un corps
+     * celeste, quel qu'ait ete l'objet de son aller. C'est `CombatSituation::scope()` qui en tient
+     * compte, parce que la portee depend de l'etape de vol autant que du genre.
+     *
+     * Sans cette distinction, une egalite de coordonnees suffirait a faire heriter un champ de
+     * debris ou une position de colonisation du verrou d'une planete assiegee.
+     *
+     * @return TargetScope
+     */
+    public function targetScope(): TargetScope
+    {
+        return match ($this) {
+            self::Attack, self::AcsAttack, self::MoonDestruction, self::AcsDefend,
+            self::Transport, self::Deployment, self::Espionage, self::Missile => TargetScope::CelestialBody,
+            self::Recycle => TargetScope::DebrisField,
+            self::Colonisation => TargetScope::EmptyPosition,
+            self::Expedition => TargetScope::DeepSpace,
+        };
+    }
 }

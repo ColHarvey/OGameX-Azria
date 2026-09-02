@@ -4,6 +4,10 @@ namespace OGame\Combat\Decisions;
 
 use InvalidArgumentException;
 use OGame\Combat\Enums\CombatMissionAction;
+use OGame\Combat\Enums\DecisionRequirement;
+use OGame\Combat\Enums\InvariantCode;
+use OGame\Combat\Enums\OpenCellCategory;
+use OGame\Combat\Exceptions\NonFinalCombatReason;
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Support\ReturnPlan;
 
@@ -39,10 +43,13 @@ final readonly class ArrivalDecision implements CombatDecision
      */
     private function __construct(
         private CombatMissionAction $action,
-        private CombatReasonCode $reason,
+        private CombatReasonCode|null $reason,
         public ReturnPlan|null $returnPlan = null,
         public bool $alreadyProcessed = false,
         private string|null $openQuestion = null,
+        private self|null $continuation = null,
+        private DecisionRequirement|null $requirement = null,
+        private InvariantCode|null $invariant = null,
     ) {
     }
 
@@ -119,11 +126,119 @@ final readonly class ArrivalDecision implements CombatDecision
     }
 
     /**
-     * L'evenement attend la fin de la resolution, sans rien modifier.
+     * L'evenement attend la fin de la resolution, **avec ce qu'il faudra en faire ensuite**.
+     *
+     * ## Pourquoi la continuation est obligatoire
+     *
+     * Reporter puis rejouer l'arrivee telle quelle la ferait retomber sur un corps devenu libre :
+     * une attaque tardive y ouvrirait un second combat, c'est-a-dire exactement la file d'attente
+     * que le jeu refuse. Le report ne suspend donc pas la decision, il en differe seulement
+     * l'application — une attaque tardive repart, un espionnage rentre intact, un missile frappe ce
+     * qui reste.
+     *
+     * @param self $continuation Ce qui sera applique une fois la resolution close.
+     * @return self
      */
-    public static function deferUntilResolved(): self
+    public static function deferUntilResolved(self $continuation): self
     {
-        return new self(CombatMissionAction::DeferUntilResolved, CombatReasonCode::ResolutionInProgress);
+        if (!$continuation->isResolved()) {
+            throw new InvalidArgumentException(
+                'Differer une arrivee sans savoir ce qu on en fera revient a la suspendre indefiniment : la '
+                . 'continuation doit etre une decision tranchee.'
+            );
+        }
+
+        if ($continuation->action === CombatMissionAction::DeferUntilResolved) {
+            throw new InvalidArgumentException(
+                'Une continuation qui differe a son tour ne termine jamais : l evenement serait repousse a '
+                . 'chaque reprise.'
+            );
+        }
+
+        return new self(
+            CombatMissionAction::DeferUntilResolved,
+            CombatReasonCode::ResolutionInProgress,
+            null,
+            false,
+            null,
+            $continuation
+        );
+    }
+
+    /**
+     * Le camp attaquant tranchera : la flotte y est admise, ou elle repart.
+     *
+     * **C'est une decision, pas un trou.** Ce qui manque n'est pas une regle mais un fait collectif
+     * et persiste : la liste figee a l'ouverture, l'alliance de l'initiateur, les budgets du camp.
+     * La matrice nomme le mecanisme qui tranche et exige qu'il le fasse sous verrou.
+     */
+    public static function selectByAttackAdmission(): self
+    {
+        return new self(
+            CombatMissionAction::SelectByAttackAdmission,
+            null,
+            null,
+            false,
+            null,
+            null,
+            DecisionRequirement::RallyAdmission
+        );
+    }
+
+    /**
+     * Le camp defenseur tranchera, avec ses propres budgets.
+     */
+    public static function selectByDefenceAdmission(): self
+    {
+        return new self(
+            CombatMissionAction::SelectByDefenceAdmission,
+            null,
+            null,
+            false,
+            null,
+            null,
+            DecisionRequirement::RallyAdmission
+        );
+    }
+
+    /**
+     * L'ordre des evenements tranchera, pas l'etat courant de la cible.
+     */
+    public static function selectByEventOrder(): self
+    {
+        return new self(
+            CombatMissionAction::SelectByEventOrder,
+            null,
+            null,
+            false,
+            null,
+            null,
+            DecisionRequirement::CausalOrder
+        );
+    }
+
+    /**
+     * Cette situation ne releve pas de la matrice des corps celestes.
+     *
+     * Elle couvre deux cas : une cible qui n'est pas un corps celeste, et une situation qui ne peut
+     * pas se produire. Dans une enumeration elles se rangent ; sur un chemin vivant,
+     * CombatSituation::ensureItCanOccur() leve avant qu'on en arrive la.
+     *
+     * @param InvariantCode $code
+     * @return self
+     */
+    public static function outsideMatrixDomain(InvariantCode $code): self
+    {
+        return new self(
+            CombatMissionAction::OutsideMatrixDomain,
+            null,
+            null,
+            false,
+            null,
+            null,
+            null,
+            $code
+        );
     }
 
     /**
@@ -175,9 +290,58 @@ final readonly class ArrivalDecision implements CombatDecision
         return $this->action;
     }
 
+    /**
+     * La raison finale, celle qu'un joueur peut lire.
+     *
+     * **Elle echoue quand il n'y en a pas encore.** Une decision qui delegue porte une exigence,
+     * une decision qui constate une contradiction porte un code d'invariant : ni l'un ni l'autre
+     * n'est destine a un joueur. C'est ici que se ferme la regle « aucun code d'attente ne
+     * survit dans un `FinalArrivalResolution` » — la question ne rend pas un code plausible,
+     * elle echoue.
+     */
     public function reason(): CombatReasonCode
     {
+        if ($this->reason === null) {
+            throw new NonFinalCombatReason(
+                'Cette decision n a pas de raison finale : elle porte '
+                . ($this->requirement !== null
+                    ? 'l exigence « ' . $this->requirement->value . ' »'
+                    : 'le code d invariant « ' . (string)$this->invariant?->value . ' »')
+                . '. Servir un code d attente a la place laisserait un etat intermediaire du serveur '
+                . 'passer pour une regle du jeu.'
+            );
+        }
+
         return $this->reason;
+    }
+
+    /**
+     * Ce qu'il reste a consommer, ou `null` si la decision se suffit.
+     */
+    public function requirement(): DecisionRequirement|null
+    {
+        return $this->requirement;
+    }
+
+    /**
+     * Le defaut constate, ou `null` s'il n'y en a pas.
+     */
+    public function invariant(): InvariantCode|null
+    {
+        return $this->invariant;
+    }
+
+    /**
+     * Si cette decision peut entrer telle quelle dans une resolution finale.
+     *
+     * Ni question ouverte, ni exigence a consommer, ni code d'invariant : une action et une
+     * raison qu'un joueur peut lire.
+     */
+    public function isFinal(): bool
+    {
+        return $this->openQuestion === null
+            && $this->reason !== null
+            && $this->reason !== CombatReasonCode::Undecided;
     }
 
     public function isResolved(): bool
@@ -188,6 +352,35 @@ final readonly class ArrivalDecision implements CombatDecision
     public function openQuestion(): string|null
     {
         return $this->openQuestion;
+    }
+
+    /**
+     * Ce qui sera applique une fois la resolution close, pour un report seulement.
+     */
+    public function continuation(): self|null
+    {
+        return $this->continuation;
+    }
+
+    /**
+     * Pourquoi cette case n'est pas une action immediate, ou `null` si elle en est une.
+     *
+     * Trois des quatre categories sont des **decisions fermees** : la matrice a tranche, et ce
+     * qu'elle a tranche est de deleguer a un mecanisme nomme. Seule `MissingRule` designe un trou.
+     */
+    public function openCellCategory(): OpenCellCategory|null
+    {
+        if ($this->openQuestion !== null) {
+            return OpenCellCategory::MissingRule;
+        }
+
+        return match ($this->action) {
+            CombatMissionAction::SelectByAttackAdmission,
+            CombatMissionAction::SelectByDefenceAdmission => OpenCellCategory::NeedsRallyAdmission,
+            CombatMissionAction::SelectByEventOrder => OpenCellCategory::NeedsCausalEligibility,
+            CombatMissionAction::OutsideMatrixDomain => OpenCellCategory::StructurallyNotApplicable,
+            default => null,
+        };
     }
 
     /**
@@ -211,6 +404,7 @@ final readonly class ArrivalDecision implements CombatDecision
                 CombatReasonCode::PlayerLimitReached,
                 CombatReasonCode::NpcSideNotReinforceable,
                 CombatReasonCode::TargetCombatLocked,
+                CombatReasonCode::PositionNoLongerFree,
             ],
             CombatMissionAction::LandOutsideSnapshot => [
                 CombatReasonCode::OwnFleetComingHome,
@@ -225,6 +419,7 @@ final readonly class ArrivalDecision implements CombatDecision
                 CombatReasonCode::FleetLimitReached,
                 CombatReasonCode::PlayerLimitReached,
                 CombatReasonCode::TargetCombatLocked,
+                CombatReasonCode::PositionNoLongerFree,
             ],
             default => [],
         };

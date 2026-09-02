@@ -72,4 +72,39 @@ enum CombatMissionAction: string
      * Le combat n'a rien a dire : la mission suit son cours ordinaire.
      */
     case AllowNormally = 'allow_normally';
+
+    /**
+     * Le camp attaquant decidera : la flotte y est admise, ou elle repart.
+     *
+     * **Une decision, pas un trou.** L'admission ne se lit pas dans une situation : elle depend de
+     * faits persistes et collectifs — la liste figee a l'ouverture, l'alliance de l'initiateur, les
+     * budgets du camp. La matrice ne peut que nommer le mecanisme qui tranche, et exiger qu'il le
+     * fasse sous verrou : deux workers ne doivent jamais prendre ensemble la derniere place.
+     */
+    case SelectByAttackAdmission = 'select_by_attack_admission';
+
+    /**
+     * Le camp defenseur decidera, avec ses propres budgets.
+     *
+     * Distinct de l'admission attaquante : les deux camps ont des listes et des limites separees,
+     * et une Defense ACS refusee repart au lieu de stationner.
+     */
+    case SelectByDefenceAdmission = 'select_by_defence_admission';
+
+    /**
+     * L'ordre des evenements decidera, pas l'etat courant de la cible.
+     *
+     * Un recycleur prevu avant la creation de nouveaux debris ne doit pas les recolter au seul
+     * motif que son worker etait en retard. Un missile engage apres l'ouverture malgre le verrou
+     * est une anomalie a signaler, pas une admission silencieuse.
+     */
+    case SelectByEventOrder = 'select_by_event_order';
+
+    /**
+     * Cette cible ne releve pas du verrou d'un corps celeste.
+     *
+     * L'espace profond n'en porte aucun. Le dire explicitement evite qu'une egalite de coordonnees
+     * fasse heriter un champ de debris ou une position vide du verrou d'une planete.
+     */
+    case OutsideMatrixDomain = 'outside_matrix_domain';
 }
