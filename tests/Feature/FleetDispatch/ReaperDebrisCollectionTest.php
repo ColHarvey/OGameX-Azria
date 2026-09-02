@@ -76,15 +76,19 @@ class ReaperDebrisCollectionTest extends FleetDispatchTestCase
     /**
      * Make the battle outcome certain rather than leaving it to the drawn opponent.
      *
-     * `getNearbyForeignPlanet()` choisit sa cible avec `inRandomOrder()` : le defenseur change
-     * a chaque execution, et avec lui ses niveaux d'arme, de bouclier et de blindage. Dix
-     * Faucheurs aux technologies par defaut contre cinq Croiseurs d'un joueur avance perdaient
-     * parfois, et la collecte de debris exige des Faucheurs survivants — le test echouait donc
-     * au hasard, deux fois sur quatre a la mesure.
+     * Le moteur de combat tire des des : a technologies voisines, dix Faucheurs contre cinq
+     * Croiseurs gagnent le plus souvent, pas toujours. Or la collecte de debris exige des
+     * Faucheurs **survivants** : sans ecart net, l'essai dependrait de l'issue du combat plutot
+     * que de ce qu'il pretend verifier.
      *
-     * On met le defenseur au niveau zero et l'attaquant a un niveau confortable : l'ecart
-     * devient assez large pour que l'issue ne depende plus du tirage. C'est le combat lui-meme
-     * qui reste teste, pas la chance.
+     * On met donc le defenseur au niveau zero et l'attaquant a un niveau confortable. L'ecart
+     * devient assez large pour que le tirage ne change plus l'issue. C'est la collecte qui reste
+     * testee, pas la chance.
+     *
+     * Cette rustine visait aussi, a l'origine, la cible tiree au hasard par
+     * `getNearbyForeignPlanet()` — dont le defenseur, et donc ses technologies, changeaient a
+     * chaque execution. Ce choix est desormais deterministe ; la rustine reste utile pour le
+     * hasard du moteur lui-meme.
      *
      * @param int $defenderId
      * @return void

@@ -25,13 +25,18 @@ class FactoryTest extends AccountTestCase
      */
     public function testPlayerFactoryLoad(): void
     {
-        // Return two random user ids from database.
-        $playerIds = DB::table('users')->inRandomOrder()->limit(2)->pluck('id');
+        // Two user ids, chosen deterministically.
+        //
+        // Cet essai ne cherche pas a eprouver le hasard : il verifie que la fabrique rend bien le
+        // joueur demande. N'importe quelle paire convient, et `inRandomOrder()` n'y ajoutait qu'une
+        // variation inutile — la derniere du repertoire de tests.
+        $playerIds = DB::table('users')->orderBy('id')->limit(2)->pluck('id');
+
         if (count($playerIds) < 2) {
-            // Create users if there are not enough in the database.
+            // Assez de joueurs manquent : on en cree, puis on relit dans le meme ordre.
             $this->createAndLoginUser();
             $this->createAndLoginUser();
-            $playerIds = DB::table('users')->inRandomOrder()->limit(2)->pluck('id');
+            $playerIds = DB::table('users')->orderBy('id')->limit(2)->pluck('id');
         }
 
         // Get the player service factory.

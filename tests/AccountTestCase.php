@@ -18,6 +18,7 @@ use OGame\Models\Planet;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
 use OGame\Models\User;
+use OGame\Services\InitialUserDataService;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
@@ -239,14 +240,36 @@ abstract class AccountTestCase extends TestCase
      */
     protected function getSecondPlayerId(): int
     {
-        $playerIds = DB::table('users')->whereNot('id', $this->currentUserId)->inRandomOrder()->limit(1)->pluck('id');
-        if (count($playerIds) < 1) {
-            // Create user if there are not enough in the database.
-            $this->createAndLoginUser();
-            $playerIds = DB::table('users')->whereNot('id', $this->currentUserId)->inRandomOrder()->limit(1)->pluck('id');
+        return $this->getSecondPlayerIdFor($this->currentUserId);
+    }
+
+    /**
+     * Gets the id of a player other than the given one.
+     *
+     * **Le troisieme membre de la meme famille.** Comme les deux helpers de corps celestes, il tirait
+     * au hasard et se rabattait sur `createAndLoginUser()`, dont la seconde requete excluait alors le
+     * **nouveau** joueur — et pouvait donc rendre l'identifiant de l'appelant lui-meme.
+     *
+     * @param int $excludedPlayerId
+     * @return int
+     */
+    protected function getSecondPlayerIdFor(int $excludedPlayerId): int
+    {
+        $playerId = DB::table('users')
+            ->whereNot('id', $excludedPlayerId)
+            ->orderBy('id')
+            ->value('id');
+
+        if ($playerId === null) {
+            // Un compte cree sans connexion : la fixture ne change pas qui joue.
+            $playerId = $this->createNearbyPlanetForANewPlayer()->getPlayer()?->getId();
         }
 
-        return $playerIds[0];
+        if ($playerId === null || (int)$playerId === $excludedPlayerId) {
+            $this->fail('The « second » player is the very one that was supposed to be excluded.');
+        }
+
+        return (int)$playerId;
     }
 
     /**
@@ -273,55 +296,116 @@ abstract class AccountTestCase extends TestCase
      */
     protected function getNearbyForeignPlanet(): PlanetService
     {
-        // Get the max galaxies setting to ensure we only search within valid galaxy bounds.
-        $settingsService = resolve(SettingsService::class);
-        $maxGalaxies = $settingsService->numberOfGalaxies();
+        return $this->getNearbyForeignPlanetFor($this->currentUserId);
+    }
 
-        // Find a planet of another player that is close to the current player by checking the same galaxy
-        // and up to 15 systems away. Only search in valid galaxies. Exclude admin players.
-        $planet_id = DB::table('planets')
-            ->where('user_id', '!=', $this->currentUserId)
-            ->where('galaxy', $this->planetService->getPlanetCoordinates()->galaxy)
+    /**
+     * Gets a nearby planet belonging to someone other than the given player.
+     *
+     * ## Pourquoi le joueur exclu est un parametre
+     *
+     * L'ancienne version lisait `$this->currentUserId`, un champ **mutable**, et son repli appelait
+     * `createAndLoginUser()` — qui le remplace, avec l'authentification et la planete courante. La
+     * seconde requete excluait alors le **nouveau** joueur, et pouvait rendre une planete du joueur
+     * d'origine. Un appelant qui cherchait un etranger recevait parfois lui-meme.
+     *
+     * C'est ainsi que `JumpGateTest::testDetectsUnprocessedArrivedFleet` echouait par intermittence :
+     * la flotte « etrangere » appartenait au proprietaire de la lune, et
+     * `hasUnprocessedArrivedFleet()` filtre precisement sur ce proprietaire.
+     *
+     * ## Deux garanties
+     *
+     * - **aucun hasard** : l'ordre est geographique puis par identifiant. Deux appels sur le meme
+     *   etat rendent la meme planete. Une graine aurait rendu l'accident reproductible, pas corrige
+     *   le contrat ;
+     * - **aucun changement de contexte** : le repli cree un joueur **sans le connecter**. L'utilisateur
+     *   authentifie, `currentUserId` et la planete courante restent ceux de l'appelant.
+     *
+     * @param int $excludedPlayerId
+     * @return PlanetService
+     */
+    protected function getNearbyForeignPlanetFor(int $excludedPlayerId): PlanetService
+    {
+        $planetId = $this->nearbyForeignBodyIdFor($excludedPlayerId, PlanetType::Planet);
+
+        $planet = $planetId === null
+            ? $this->createNearbyPlanetForANewPlayer()
+            : resolve(PlanetServiceFactory::class)->make($planetId);
+
+        if ($planet === null) {
+            $this->fail('Failed to obtain a nearby foreign planet for testing.');
+        }
+
+        $owner = $planet->getPlayer();
+
+        // **Postcondition, et pas un commentaire.** C'est exactement ce que l'ancienne version ne
+        // garantissait plus des que son repli avait change de joueur connecte.
+        if ($owner === null || $owner->getId() === $excludedPlayerId) {
+            $this->fail('The « foreign » planet belongs to the very player it was supposed to exclude.');
+        }
+
+        return $planet;
+    }
+
+    /**
+     * The id of a nearby body of another player, chosen deterministically.
+     *
+     * @param int $excludedPlayerId
+     * @param PlanetType $bodyType
+     * @return int|null
+     */
+    private function nearbyForeignBodyIdFor(int $excludedPlayerId, PlanetType $bodyType): int|null
+    {
+        $coordinates = $this->planetService->getPlanetCoordinates();
+        $maxGalaxies = resolve(SettingsService::class)->numberOfGalaxies();
+
+        $id = DB::table('planets')
+            ->where('user_id', '!=', $excludedPlayerId)
+            ->where('galaxy', $coordinates->galaxy)
             ->where('galaxy', '<=', $maxGalaxies)
-            ->where('planet_type', PlanetType::Planet)
+            ->where('planet_type', $bodyType)
             ->where('destroyed', 0)
-            ->whereBetween('system', [$this->planetService->getPlanetCoordinates()->system - 15, $this->planetService->getPlanetCoordinates()->system + 15])
+            ->whereBetween('system', [$coordinates->system - 15, $coordinates->system + 15])
             ->whereNotIn('user_id', $this->getAdminUserIds())
-            ->inRandomOrder()
-            ->limit(1)
-            ->pluck('planets.id');
+            // **Le plus proche, pas le plus petit.** Un tri par systeme croissant choisirait
+            // systematiquement le bord inferieur de la fenetre — le plus **eloigne** —, ce qui
+            // trahirait le nom du helper. La distance d'abord, puis la position, puis l'identifiant :
+            // deterministe, et reellement proche.
+            ->orderByRaw('ABS(system - ?)', [$coordinates->system])
+            ->orderBy('position')
+            ->orderBy('id')
+            ->value('id');
 
-        if ($planet_id === null || count($planet_id) === 0) {
-            // No planets found, attempt to create a new user to see if this fixes it.
-            $this->createAndLoginUser();
-            $planet_id = DB::table('planets')
-                ->where('user_id', '!=', $this->currentUserId)
-                ->where('galaxy', $this->planetService->getPlanetCoordinates()->galaxy)
-                ->where('galaxy', '<=', $maxGalaxies)
-                ->where('planet_type', PlanetType::Planet)
-                ->where('destroyed', 0)
-                ->whereBetween('system', [$this->planetService->getPlanetCoordinates()->system - 15, $this->planetService->getPlanetCoordinates()->system + 15])
-                ->whereNotIn('user_id', $this->getAdminUserIds())
-                ->inRandomOrder()
-                ->limit(1)
-                ->pluck('planets.id');
+        return $id === null ? null : (int)$id;
+    }
+
+    /**
+     * Creates a new player nearby **without logging them in**.
+     *
+     * `createAndLoginUser()` remplacerait l'utilisateur authentifie, `currentUserId` et la planete
+     * courante. Une fixture qui cherche un tiers n'a aucune raison de changer qui joue.
+     *
+     * @return PlanetService
+     */
+    private function createNearbyPlanetForANewPlayer(): PlanetService
+    {
+        $user = User::factory()->create(['username' => 'foreign_' . Str::random(16)]);
+
+        // Le crochet `created` du modele promeut le premier utilisateur d'une transaction en admin.
+        // Un etranger administrateur serait ensuite ecarte par `getAdminUserIds()`.
+        if ($user->hasRole('admin')) {
+            $user->removeRole('admin');
+            $user->username = 'foreign_' . Str::random(16);
+            $user->save();
         }
 
-        if ($planet_id === null || count($planet_id) === 0) {
-            $this->fail('Failed to find a nearby foreign planet for testing.');
-        } else {
-            // Create and return a new PlanetService instance for the found planet.
-            try {
-                $planetServiceFactory =  resolve(PlanetServiceFactory::class);
-                $foundPlanet = $planetServiceFactory->make($planet_id[0]);
-                if ($foundPlanet === null) {
-                    $this->fail('Failed to create planet service for planet id: ' . $planet_id[0]);
-                }
-                return $foundPlanet;
-            } catch (Exception $e) {
-                $this->fail('Failed to create planet service for planet id: ' . $planet_id[0] . '. Error: ' . $e->getMessage());
-            }
-        }
+        resolve(InitialUserDataService::class)->createFor($user);
+
+        $player = resolve(PlayerServiceFactory::class)->make($user->id);
+        return resolve(PlanetServiceFactory::class)->createAdditionalPlanetForPlayer(
+            $player,
+            $this->getNearbyEmptyCoordinate()
+        );
     }
 
     /**
@@ -363,61 +447,64 @@ abstract class AccountTestCase extends TestCase
      */
     protected function getNearbyForeignMoon(): PlanetService
     {
-        // Get the max galaxies setting to ensure we only search within valid galaxy bounds.
-        $settingsService = resolve(SettingsService::class);
-        $maxGalaxies = $settingsService->numberOfGalaxies();
+        return $this->getNearbyForeignMoonFor($this->currentUserId);
+    }
 
-        // Find a planet of another player that is close to the current player by checking the same galaxy
-        // and up to 15 systems away. Only search in valid galaxies. Exclude admin players.
-        $planet_id = DB::table('planets')
-            ->where('user_id', '!=', $this->currentUserId)
-            ->where('galaxy', $this->planetService->getPlanetCoordinates()->galaxy)
-            ->where('galaxy', '<=', $maxGalaxies)
-            ->where('planet_type', PlanetType::Moon)
-            ->where('destroyed', 0)
-            ->whereBetween('system', [$this->planetService->getPlanetCoordinates()->system - 15, $this->planetService->getPlanetCoordinates()->system + 15])
-            ->whereNotIn('user_id', $this->getAdminUserIds())
-            ->inRandomOrder()
-            ->limit(1)
-            ->pluck('id');
+    /**
+     * Gets a nearby moon belonging to someone other than the given player.
+     *
+     * ## Le meme defaut que pour la planete, et il devait partir avec elle
+     *
+     * `inRandomOrder()` rendait le choix imprevisible, et le repli appelait `createAndLoginUser()`,
+     * qui remplace l'utilisateur authentifie, `currentUserId` et la planete courante. Corriger la
+     * planete en laissant la lune aurait garanti une intermittence future, dans un essai qu'on
+     * n'aurait pas su relier a celui-ci.
+     *
+     * ## Pourquoi la recherche reste distincte
+     *
+     * Le repli n'est pas le meme : une lune ne se cree pas a une coordonnee libre, elle se cree **sur
+     * une planete**. La fabrique de compte etranger est partagee ; la geographie ne l'est pas.
+     *
+     * @param int $excludedPlayerId
+     * @return PlanetService
+     */
+    protected function getNearbyForeignMoonFor(int $excludedPlayerId): PlanetService
+    {
+        $moonId = $this->nearbyForeignBodyIdFor($excludedPlayerId, PlanetType::Moon);
 
-        if ($planet_id->isEmpty()) {
-            // No nearby moons found, give current user a moon then login as a new user to see if this fixes it.
-            // Use default test values (20% moon chance = 2,000,000 debris)
-            $planetServiceFactory =  resolve(PlanetServiceFactory::class);
-            $planetServiceFactory->createMoonForPlanet($this->planetService, 2000000, 20);
+        $moon = $moonId === null
+            ? $this->createNearbyMoonForANewPlayer()
+            : resolve(PlanetServiceFactory::class)->make($moonId);
 
-            // Switch to new user that should then be able to find the moon of the previous player.
-            $this->createAndLoginUser();
-
-            $planet_id = DB::table('planets')
-                ->where('user_id', '!=', $this->currentUserId)
-                ->where('galaxy', $this->planetService->getPlanetCoordinates()->galaxy)
-                ->where('galaxy', '<=', $maxGalaxies)
-                ->where('planet_type', PlanetType::Moon)
-                ->where('destroyed', 0)
-                ->whereBetween('system', [$this->planetService->getPlanetCoordinates()->system - 15, $this->planetService->getPlanetCoordinates()->system + 15])
-                ->whereNotIn('user_id', $this->getAdminUserIds())
-                ->inRandomOrder()
-                ->limit(1)
-                ->pluck('id');
+        if ($moon === null) {
+            $this->fail('Failed to obtain a nearby foreign moon for testing.');
         }
 
-        if ($planet_id->isEmpty()) {
-            $this->fail('Failed to find a nearby foreign moon for testing.');
-        } else {
-            // Create and return a new PlanetService instance for the found planet.
-            try {
-                $planetServiceFactory =  resolve(PlanetServiceFactory::class);
-                $foundPlanet = $planetServiceFactory->make($planet_id[0]);
-                if ($foundPlanet === null) {
-                    $this->fail('Failed to create planet service for planet id: ' . $planet_id[0]);
-                }
-                return $foundPlanet;
-            } catch (Exception $e) {
-                $this->fail('Failed to create planet service for planet id: ' . $planet_id[0] . '. Error: ' . $e->getMessage());
-            }
+        $owner = $moon->getPlayer();
+
+        if ($owner === null || $owner->getId() === $excludedPlayerId) {
+            $this->fail('The « foreign » moon belongs to the very player it was supposed to exclude.');
         }
+
+        return $moon;
+    }
+
+    /**
+     * Creates a nearby moon for a new player, **without logging them in**.
+     *
+     * L'ancien repli donnait une lune au joueur **courant** puis se connectait sous un autre compte,
+     * pour que cette lune devienne « etrangere » par changement de point de vue. Deux effets de bord
+     * pour un besoin qui n'en demandait aucun : la fixture creait une lune a l'appelant, et changeait
+     * qui joue.
+     *
+     * @return PlanetService
+     */
+    private function createNearbyMoonForANewPlayer(): PlanetService
+    {
+        $planet = $this->createNearbyPlanetForANewPlayer();
+
+        // Les memes valeurs que l'ancien repli : 20 % de chance de lune, 2 000 000 de debris.
+        return resolve(PlanetServiceFactory::class)->createMoonForPlanet($planet, 2000000, 20);
     }
 
     /**
