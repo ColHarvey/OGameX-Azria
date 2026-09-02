@@ -635,6 +635,94 @@ class CombatRallyWindowTest extends UnitTestCase
     }
 
     /**
+     * Retirer la candidate qui fixait l'echeance raccourcit la fenetre.
+     */
+    public function testWithdrawingTheFleetThatSetTheDeadlineShortensTheWindow(): void
+    {
+        $ouverture = 1_000_000;
+        $avant = CombatRallyWindow::closesAt($ouverture, [$ouverture + 8, $ouverture + 40]);
+
+        $this->assertSame($ouverture + 41, $avant);
+
+        $apres = CombatRallyWindow::closesAfterWithdrawal($ouverture, [$ouverture + 8], $avant);
+
+        $this->assertSame($ouverture + 9, $apres, 'The window kept waiting for a fleet that will never come.');
+    }
+
+    /**
+     * Retirer une candidate qui ne fixait pas l'echeance ne change rien.
+     */
+    public function testWithdrawingAnyOtherCandidateChangesNothing(): void
+    {
+        $ouverture = 1_000_000;
+        $avant = CombatRallyWindow::closesAt($ouverture, [$ouverture + 8, $ouverture + 40]);
+
+        $this->assertSame(
+            $avant,
+            CombatRallyWindow::closesAfterWithdrawal($ouverture, [$ouverture + 40], $avant),
+            'Withdrawing a fleet that was not the last one moved the deadline.'
+        );
+    }
+
+    /**
+     * Retirer la derniere candidate ferme le ralliement sur-le-champ.
+     */
+    public function testWithdrawingTheLastCandidateClosesTheRallyAtOnce(): void
+    {
+        $ouverture = 1_000_000;
+        $avant = CombatRallyWindow::closesAt($ouverture, [$ouverture + 30]);
+
+        $this->assertSame(
+            $ouverture,
+            CombatRallyWindow::closesAfterWithdrawal($ouverture, [], $avant),
+            'With every candidate withdrawn the rally must close immediately.'
+        );
+    }
+
+    /**
+     * L'echeance ne se rallonge jamais, quoi qu'on lui presente.
+     *
+     * **C'est la garantie, pas une precaution.** Un rappel suivi d'un nouveau lancement, ou une
+     * candidate reintroduite par un evenement rejoue, rallongerait sinon une fenetre deja
+     * ouverte — et rendrait au harcelement ce que la fenetre dynamique lui a retire.
+     *
+     * Le test presente donc volontairement des candidates plus tardives que l'echeance en cours,
+     * ce qui ne devrait jamais arriver, et verifie que la fenetre ne bouge pas.
+     */
+    public function testTheDeadlineNeverGrowsBackWhateverItIsHanded(): void
+    {
+        $ouverture = 1_000_000;
+        $courante = CombatRallyWindow::closesAt($ouverture, [$ouverture + 10]);
+
+        $this->assertSame($ouverture + 11, $courante);
+
+        foreach ([[$ouverture + 50], [$ouverture + 10, $ouverture + 59], [$ouverture + 59]] as $restantes) {
+            $this->assertLessThanOrEqual(
+                $courante,
+                CombatRallyWindow::closesAfterWithdrawal($ouverture, $restantes, $courante),
+                'A withdrawal lengthened a window that was already open.'
+            );
+        }
+    }
+
+    /**
+     * Le meme retrait applique deux fois donne le meme resultat.
+     *
+     * Un evenement de rappel livre deux fois ne doit pas raccourcir la fenetre une seconde fois,
+     * ni la deplacer d'un pas de temps supplementaire.
+     */
+    public function testApplyingTheSameWithdrawalTwiceIsIdempotent(): void
+    {
+        $ouverture = 1_000_000;
+        $avant = CombatRallyWindow::closesAt($ouverture, [$ouverture + 8, $ouverture + 40]);
+
+        $unePremiereFois = CombatRallyWindow::closesAfterWithdrawal($ouverture, [$ouverture + 8], $avant);
+        $uneSecondeFois = CombatRallyWindow::closesAfterWithdrawal($ouverture, [$ouverture + 8], $unePremiereFois);
+
+        $this->assertSame($unePremiereFois, $uneSecondeFois, 'Replaying the same withdrawal moved the deadline again.');
+    }
+
+    /**
      * Une arrivee attaquante, avec les faits qu'on veut lui donner.
      */
     private function attacker(

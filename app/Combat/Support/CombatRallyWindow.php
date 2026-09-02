@@ -221,10 +221,16 @@ final class CombatRallyWindow
      * **La liste est figee a l'ouverture.** Une flotte lancee apres ne la rallonge pas — elle est
      * de toute facon refusee au depart.
      *
-     * **L'echeance rendue ici est calculee une fois et persistee avec le combat.** Elle ne doit
-     * jamais etre recalculee pour un ralliement deja ouvert : un changement de regle, de plafond
-     * ou de precision deplacerait alors l'echeance de combats en cours, et une flotte partie sous
-     * une regle se verrait jugee sous une autre.
+     * **L'echeance rendue ici est calculee une fois et persistee avec le combat**, sous le nom
+     * `initial_closes_at`. Aucun changement de regle, de plafond ou de precision ne doit la
+     * deplacer : une flotte partie sous une regle serait sinon jugee sous une autre.
+     *
+     * Elle n'est pas immuable pour autant, et la formulation « jamais recalculee » etait fausse.
+     * Un rappel retire une candidate, et l'echeance doit alors pouvoir se **raccourcir** — voir
+     * `closesAfterWithdrawal()`. La regle exacte tient en deux phrases :
+     *
+     * - **la configuration ne la deplace jamais** ;
+     * - **le retrait d'une candidate peut la raccourcir, jamais la prolonger**.
      *
      * @param int $openedAt Horodatage d'ouverture, en secondes.
      * @param array<int, int> $admissibleArrivalsInFlight Heures d'arrivee **planifiees** des
@@ -266,6 +272,33 @@ final class CombatRallyWindow
         // Le plafond n'a pas a etre reapplique ici : le filtre ci-dessus a deja ecarte toute
         // arrivee qui ne laisserait pas la place au decalage.
         return max($attendues) + self::TICK_SECONDS;
+    }
+
+    /**
+     * L'echeance apres le retrait d'une candidate, qui ne peut que se raccourcir.
+     *
+     * Un joueur peut rappeler une flotte tant qu'elle n'est pas arrivee. Si c'etait elle qui
+     * fixait l'echeance, la fenetre n'a plus de raison de rester ouverte jusque-la : le
+     * ralliement attendrait quelqu'un qui ne viendra pas, en gardant la cible verrouillee pour
+     * rien.
+     *
+     * **Le sens unique est la garantie.** L'echeance se raccourcit, jamais ne s'allonge. Sans ce
+     * garde-fou, un rappel suivi d'un nouveau lancement — ou une candidate reintroduite par un
+     * evenement rejoue — rallongerait une fenetre deja ouverte, et rendrait au harcelement ce que
+     * la fenetre dynamique lui a retire.
+     *
+     * Le `min()` n'est donc pas une precaution decorative : il est la regle. Il tient meme si le
+     * recalcul recoit, par erreur ou par rejeu, une candidate qui n'aurait pas du revenir.
+     *
+     * @param int $openedAt Horodatage d'ouverture, inchange.
+     * @param array<int, int> $remainingArrivals Heures planifiees des candidates **restantes**,
+     *                                           celle qui vient d'etre retiree exclue.
+     * @param int $currentClosesAt L'echeance en vigueur avant le retrait.
+     * @return int
+     */
+    public static function closesAfterWithdrawal(int $openedAt, array $remainingArrivals, int $currentClosesAt): int
+    {
+        return min($currentClosesAt, self::closesAt($openedAt, $remainingArrivals));
     }
 
     /**
