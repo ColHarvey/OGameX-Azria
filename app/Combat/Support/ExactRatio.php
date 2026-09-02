@@ -54,8 +54,25 @@ final class ExactRatio
             throw new InvalidArgumentException('Le denominateur doit etre strictement positif.');
         }
 
+        return self::longDivision($multiplier, $numerator, $divisor)[0];
+    }
+
+    /**
+     * La division longue elle-meme : quotient et reste, en un seul parcours.
+     *
+     * Extraite pour que `floorOfProductOverDivisor()` et `multiplyDivideWithRemainder()` partagent
+     * exactement le meme calcul. Deux implementations voisines finiraient par diverger d une unite,
+     * et cette unite ferait echouer un reglage.
+     *
+     * @param int $multiplier
+     * @param int $numerator
+     * @param int $divisor
+     * @return array{0: int, 1: int} Le quotient, puis le reste.
+     */
+    private static function longDivision(int $multiplier, int $numerator, int $divisor): array
+    {
         if ($multiplier === 0 || $numerator === 0) {
-            return 0;
+            return [0, 0];
         }
 
         $entier = intdiv($numerator, $divisor);
@@ -70,7 +87,7 @@ final class ExactRatio
         $resultat = $multiplier * $entier;
 
         if ($reste === 0) {
-            return $resultat;
+            return [$resultat, 0];
         }
 
         // Division longue : on parcourt les bits du multiplicateur du plus fort au plus faible, en
@@ -95,7 +112,50 @@ final class ExactRatio
             }
         }
 
-        return $resultat + $partielle;
+        return [$resultat + $partielle, $accumulateur];
+    }
+
+    /**
+     * La part proportionnelle d'un participant : quotient **et** reste, du meme calcul.
+     *
+     * `quotient = floor($amount x $weight / $totalWeight)` et
+     * `remainder = ($amount x $weight) mod $totalWeight`.
+     *
+     * **Les deux ensemble, jamais l'un puis l'autre.** Reconstruire le reste par
+     * `($amount * $weight) % $totalWeight` reformerait le produit que cette classe existe pour
+     * eviter, et ce produit deborde des que le butin et le fret sont grands.
+     *
+     * Un poids total nul n'est pas traite ici : c'est a l'appelant de constater qu'il n'y a rien a
+     * repartir. Inventer un resultat pour une division par zero masquerait un etat qui merite
+     * d'etre vu.
+     *
+     * @param int $amount Le montant a repartir, positif ou nul.
+     * @param int $weight Le poids de ce participant, entre zero et le poids total.
+     * @param int $totalWeight Le poids total, strictement positif.
+     * @return ExactDivision
+     */
+    public static function multiplyDivideWithRemainder(int $amount, int $weight, int $totalWeight): ExactDivision
+    {
+        if ($amount < 0 || $weight < 0) {
+            throw new InvalidArgumentException('Un montant et un poids sont positifs ou nuls.');
+        }
+
+        if ($totalWeight <= 0) {
+            throw new InvalidArgumentException(
+                'Le poids total doit etre strictement positif : c est a l appelant de constater qu il n y a rien a repartir.'
+            );
+        }
+
+        if ($weight > $totalWeight) {
+            throw new InvalidArgumentException(
+                'Le poids d un participant (' . $weight . ') ne peut pas depasser le poids total (' . $totalWeight . ') : '
+                . 'sa part depasserait le montant a repartir.'
+            );
+        }
+
+        [$quotient, $reste] = self::longDivision($amount, $weight, $totalWeight);
+
+        return new ExactDivision($quotient, $reste, $totalWeight);
     }
 
     /**
