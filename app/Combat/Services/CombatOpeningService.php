@@ -16,6 +16,7 @@ use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\CombatRallyWindow;
 use OGame\Combat\Support\CombatRuleVersionSet;
 use OGame\Combat\Support\SnapshotFingerprint;
+use OGame\Combat\Support\SnapshotProjection;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
 use OGame\Models\FleetMission;
@@ -164,6 +165,10 @@ final class CombatOpeningService
             'loot_policy_version' => $versions->lootPolicy,
             'moon_destruction_rule_version' => $versions->moonDestruction,
             'fingerprint_schema_version' => (string)SnapshotFingerprint::SCHEMA,
+            // **Le seul endroit qui a le droit de lire `CURRENT`.** Deux heures plus tard, la
+            // fermeture relit cette colonne : une bascule de projection entre les deux ferait
+            // entrer le meme evenement une seconde fois, l unicite portant sur la version.
+            'projection_version' => SnapshotProjection::CURRENT,
             'frozen_alliance_membership' => $appartenances->toStorage(),
             ...$this->frozenColumns($faits),
             // L'empreinte porte les versions **et** les faits : deux combats sous deux regles

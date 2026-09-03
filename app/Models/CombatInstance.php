@@ -69,6 +69,7 @@ use OGame\Combat\Enums\CombatState;
  * @property array<mixed>|null $moon_destruction_plan
  * @property string|null $frozen_facts_fingerprint
  * @property array<mixed>|null $frozen_alliance_membership
+ * @property string|null $projection_version
  * @property bool $result_published
  * @property Carbon $created_at
  * @property Carbon $updated_at
@@ -117,6 +118,7 @@ use OGame\Combat\Enums\CombatState;
     'moon_destruction_plan',
     'frozen_facts_fingerprint',
     'frozen_alliance_membership',
+    'projection_version',
     'result_published',
 ])]
 class CombatInstance extends Model
