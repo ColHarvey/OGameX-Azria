@@ -86,7 +86,7 @@ final class CombatSettlementService
         return DB::transaction(function () use ($combatInstanceId, $missionDeJeu, $creerRetour, $now): CombatSettlementOutcome {
             // 1. La barriere, par l'identifiant de combat. Elle peut manquer — un combat purge —
             // et ce n'est pas a elle de dire si le combat existe : c'est l'instance qui le dit.
-            CelestialBodyCombatBarrier::query()
+            $barriere = CelestialBodyCombatBarrier::query()
                 ->where('combat_instance_id', $combatInstanceId)
                 ->lockForUpdate()
                 ->first();
@@ -184,6 +184,14 @@ final class CombatSettlementService
             $combat->loot_settled_at = $now;
             $combat->battle_report_id = $issue->battleReportId;
             $combat->save();
+
+            // **La barriere se leve avec le combat.** Elle est le « ce corps est pris » du systeme,
+            // et son unicite par corps est ce qui arbitre la course a l'ouverture : la laisser
+            // derriere un combat termine rendrait ce corps inattaquable pour toujours — aucune
+            // nouvelle barriere ne pourrait etre posee, et l'ouverture rendrait indefiniment la
+            // bataille d'hier. Rien n'est perdu : ce qui s'est passe vit dans l'instance, ses
+            // participants et son rapport.
+            $barriere?->delete();
 
             return CombatSettlementOutcome::settled(
                 $reglement,

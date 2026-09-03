@@ -853,6 +853,19 @@ class SettingsService
     // ------------------------------------------------------------------
 
     /**
+     * Returns whether attacks open a combat that lasts instead of resolving on arrival.
+     *
+     * **Un seul interrupteur, et il vaut non par defaut.** Le deploiement des combats durables se
+     * fait en une fois, par decision explicite : ni beta, ni activation progressive, ni canari. Tant
+     * qu'il vaut non, une attaque se resout a l'arrivee exactement comme avant, et rien du socle
+     * durable ne s'execute — pas une table lue, pas une ligne ecrite.
+     */
+    public function persistentCombatEnabled(): bool
+    {
+        return $this->get('persistent_combat_enabled', '0') === '1';
+    }
+
+    /**
      * Returns whether the hostile faction system is switched on at all.
      */
     public function npcEnabled(): bool

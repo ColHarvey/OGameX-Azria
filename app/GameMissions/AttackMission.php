@@ -3,6 +3,8 @@
 namespace OGame\GameMissions;
 
 use OGame\Combat\Allocation\FrozenLootAllocation;
+use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Services\CombatOpeningService;
 use OGame\Combat\Services\CombatResolutionService;
 use OGame\Combat\Services\CombatSettlementOutcome;
 use OGame\Combat\Services\CombatSettlementService;
@@ -152,6 +154,40 @@ class AttackMission extends GameMission
                 $this->fleetMissionService->getResources($mission),
                 $this->fleetMissionService->getFleetUnits($mission)
             );
+
+            return;
+        }
+
+        // **L'aiguillage du combat durable.** Ce qui suit — simuler, appliquer, creer le retour —
+        // est le chemin instantane, et il reste intact. Quand l'interrupteur est mis, l'arrivee
+        // n'est plus la fin de l'histoire mais son debut : la flotte entre dans un combat qui dure,
+        // et tout ce qui la concerne se decidera a l'echeance de ce combat.
+        //
+        // **L'heure d'ouverture est l'arrivee, pas l'horloge du travailleur.** Un traitement en
+        // retard ouvrirait sinon un combat plus tard qu'il n'a commence, et decalerait de la meme
+        // duree l'echeance du ralliement — donc les flottes admises.
+        if ($this->settings->persistentCombatEnabled()) {
+            $combat = resolve(CombatOpeningService::class)->openOrJoin(
+                $mission,
+                $defenderPlanet->getPlanetId(),
+                (int)$mission->time_arrival
+            );
+
+            // **Les rangs de ce combat sont deja figes.** La flotte est arrivee apres la fermeture
+            // du ralliement : elle ne peut pas y entrer — la photographie est prise, les budgets
+            // consommes, la bataille calculee — et elle ne peut pas non plus attaquer un corps que
+            // ce combat tient. Elle attend donc, sans etre rattachee : quand la bataille sera
+            // reglee et le corps libre, la tique suivante ouvrira **son** combat.
+            //
+            // Le traitement des arrivees repasse sur elle a chaque tique tant qu'elle n'est pas
+            // traitee ; `openOrJoin()` rend le combat qui tient le corps sans jamais en creer un
+            // second, et c'est ce qui rend ce chemin repetable.
+            if ($combat->status !== CombatState::Rallying) {
+                return;
+            }
+
+            $mission->combat_instance_id = $combat->id;
+            $mission->save();
 
             return;
         }

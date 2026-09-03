@@ -11,6 +11,7 @@ use Illuminate\Support\Carbon;
  *
  *
  * @property int $id
+ * @property int|null $combat_instance_id Le combat durable dans lequel cette flotte est engagee.
  * @property int|null $planet_id_from
  * @property int|null $planet_id_to
  * @property int|null $galaxy_to
