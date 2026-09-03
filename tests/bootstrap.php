@@ -1,7 +1,7 @@
 <?php
 
 /*
- * Amorcage de la suite de tests, et verrou d'execution.
+ * Amorcage de la suite de tests : une base par processus, et le verrou d'execution.
  *
  * La suite travaille sur un unique fichier SQLite. Deux executions simultanees le partagent :
  * l'une vide la base pendant que l'autre insere, et les erreurs qui en resultent — « database
@@ -17,6 +17,31 @@
  */
 
 require __DIR__ . '/../vendor/autoload.php';
+
+// ---------------------------------------------------------------------------------------------
+// Une base par processus.
+// ---------------------------------------------------------------------------------------------
+//
+// **C'est ce qui rend la parallelisation possible.** La consigne « ne jamais paralleliser » etait
+// juste, et sa raison etait precise : huit processus sur un seul fichier SQLite produisent des
+// « database is locked » et des « UNIQUE constraint failed » qui ressemblent a des regressions.
+// Ce n'est pas la parallelisation qui casse, c'est la base partagee.
+//
+// ParaTest donne a chaque processus un `TEST_TOKEN`. Chacun recoit donc son fichier, et les
+// collisions disparaissent au lieu d'etre subies.
+//
+// **Avant tout le reste** : `config/database.php` lit `env('DB_DATABASE', ...)`, et Dotenv ne
+// remplace pas une variable deja posee. Poser celle-ci plus tard n'aurait aucun effet.
+$jeton = getenv('TEST_TOKEN');
+
+if (is_string($jeton) && $jeton !== '' && $jeton !== '1') {
+    $baseDuProcessus = realpath(__DIR__ . '/..') . DIRECTORY_SEPARATOR
+        . 'database' . DIRECTORY_SEPARATOR . 'database_test_' . $jeton . '.sqlite';
+
+    putenv('DB_DATABASE=' . $baseDuProcessus);
+    $_ENV['DB_DATABASE'] = $baseDuProcessus;
+    $_SERVER['DB_DATABASE'] = $baseDuProcessus;
+}
 
 // **Reentrance explicite.** `scripts/suite.php` pose le meme verrou avant `migrate:fresh`, donc
 // avant que PHPUnit ne demarre. S'il le detient deja, le reprendre ici bloquerait le lanceur

@@ -26,9 +26,17 @@ class FleetDispatchLargeResourcesTest extends FleetDispatchTestCase
         // 10,000 Large Cargo ships = 250,000,000 total capacity
         $this->planetAddUnit('large_cargo', 10000);
 
-        // Add large resources to the planet (75M of each + buffer for fuel consumption)
-        // Fuel consumption for 10k Large Cargo ships can be ~50k-100k depending on distance
-        $this->planetAddResources(new Resources(75000000, 75000000, 75100000, 0));
+        // Add large resources to the planet (75M of each + a wide fuel buffer).
+        //
+        // **La marge est large a dessein.** Le carburant depend de la distance a la cible, et la
+        // cible est la planete etrangere la plus proche — donc de la densite de l univers de test,
+        // c est-a-dire de ce que les autres essais ont cree avant celui-ci.
+        //
+        // Un tampon de cent mille suffisait tant que la suite tournait en un seul processus et que
+        // la base accumulait des planetes. En parallele, chaque processus a la sienne, la cible est
+        // plus lointaine, et l essai echouait sur « Not enough resources » — un echec qui ne disait
+        // rien du volume de ressources, qui est pourtant son sujet.
+        $this->planetAddResources(new Resources(75000000, 75000000, 150000000, 0));
     }
 
     /**

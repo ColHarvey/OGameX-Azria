@@ -7,7 +7,9 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use OGame\Models\User;
 use OGame\Services\HighscoreService;
+use OGame\Services\InitialUserDataService;
 use OGame\Services\Npc\NpcBaseService;
 use OGame\Services\Npc\NpcThreatService;
 use OGame\Services\PlayerService;
@@ -278,12 +280,26 @@ class NpcInterfaceTest extends AccountTestCase
      *
      * @return array<int, int> Les joueurs touches, a remettre a zero ensuite.
      */
-    private function giveHumanPlayersAScoreLadder(): array
+    private function ensureTheUniverseHoldsRankablePlayers(int $wanted): void
     {
-        // Des joueurs reellement classables, et non les premiers venus : la page du classement
-        // exige une fiche technique et saute les comptes sans planete. Un barème pose sur des
-        // comptes vides serait ecarte a l'affichage, et la page finirait malgre tout sur des
-        // joueurs a zero.
+        $manquants = $wanted - count($this->rankablePlayerIds());
+
+        for ($rang = 0; $rang < $manquants; $rang++) {
+            // Un compte complet : la page du classement saute les comptes sans planete ni fiche
+            // technique, et un joueur incomplet ne compterait donc pas.
+            $utilisateur = User::factory()->create();
+
+            resolve(InitialUserDataService::class)->createFor($utilisateur);
+        }
+    }
+
+    /**
+     * Les joueurs que la page du classement peut afficher.
+     *
+     * @return array<int, int>
+     */
+    private function rankablePlayerIds(): array
+    {
         $ids = DB::table('users')
             ->join('users_tech', 'users_tech.user_id', '=', 'users.id')
             ->join('planets', 'planets.user_id', '=', 'users.id')
@@ -295,11 +311,22 @@ class NpcInterfaceTest extends AccountTestCase
             ->pluck('users.id')
             ->all();
 
-        $this->assertGreaterThanOrEqual(
-            101,
-            count($ids),
-            'The test universe holds too few players for a full highscore page.'
-        );
+        return array_map(static fn (mixed $id): int => (int)$id, $ids);
+    }
+
+    private function giveHumanPlayersAScoreLadder(): array
+    {
+        // Des joueurs reellement classables, et non les premiers venus : la page du classement
+        // exige une fiche technique et saute les comptes sans planete. Un barème pose sur des
+        // comptes vides serait ecarte a l'affichage, et la page finirait malgre tout sur des
+        // joueurs a zero.
+        // **L'essai etablit ce qu'il exige, il ne l'espere pas.** Le commentaire ci-dessus le disait
+        // deja du bareme ; il vaut autant pour les joueurs eux-memes. Les chercher dans la base
+        // revenait a dependre de ce que les essais precedents y avaient laisse — vrai tant que la
+        // suite tournait en un seul processus, faux des qu'elle se partage entre plusieurs bases.
+        $this->ensureTheUniverseHoldsRankablePlayers(101);
+
+        $ids = $this->rankablePlayerIds();
 
         $touches = [];
 

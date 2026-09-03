@@ -30,9 +30,24 @@
  * celle des tests, et si son chemin n'est pas ambigu. Un `migrate:fresh` sur autre chose que la
  * base de test detruirait des donnees.
  *
+ * ## Une base par processus
+ *
+ * La consigne etait « ne jamais paralleliser ». Elle etait juste, et sa raison etait precise : huit
+ * processus sur **un seul fichier SQLite** produisent des « database is locked » et des « UNIQUE
+ * constraint failed » qui ressemblent trait pour trait a des regressions.
+ *
+ * Ce n'est pas la parallelisation qui casse, c'est la base partagee. ParaTest donne un `TEST_TOKEN`
+ * a chaque processus, `tests/bootstrap.php` lui donne sa base, et ce lanceur les remet toutes a zero
+ * avant le depart.
+ *
+ * La parallelisation reste **interne a un passage** : le verrou est pris avant tout, et deux suites
+ * concurrentes demeurent aussi dangereuses qu'avant.
+ *
  * Usage :
  *
- *     php scripts/suite.php                      la suite complete
+ *     php scripts/suite.php                      la suite complete, sur tous les coeurs
+ *     php scripts/suite.php --sequentiel         un seul processus, l'ancien chemin
+ *     php scripts/suite.php --processus=4        un nombre choisi
  *     php scripts/suite.php tests/Unit/Combat/   une partie, avec la meme securite
  */
 
@@ -162,17 +177,115 @@ $executer = static function (array $commande) use ($racine): int {
 
 $php = PHP_BINARY;
 
-$code = $executer([$php, 'artisan', 'migrate:fresh', '--force', '--env=testing']);
+// ---------------------------------------------------------------------------------------------
+// 4. Combien de processus, et sur quoi.
+// ---------------------------------------------------------------------------------------------
+
+$arguments = [];
+$sequentiel = false;
+$processus = null;
+
+foreach (array_slice($argv, 1) as $argument) {
+    if ($argument === '--sequentiel') {
+        $sequentiel = true;
+
+        continue;
+    }
+
+    if (str_starts_with($argument, '--processus=')) {
+        $processus = max(1, (int)substr($argument, strlen('--processus=')));
+
+        continue;
+    }
+
+    $arguments[] = $argument;
+}
+
+/**
+ * Le nombre de coeurs logiques, ou une valeur prudente.
+ */
+$coeurs = static function (): int {
+    $annonce = getenv('NUMBER_OF_PROCESSORS');
+
+    if (is_string($annonce) && (int)$annonce > 0) {
+        return (int)$annonce;
+    }
+
+    return 4;
+};
+
+// **Les coeurs logiques, sans reserve.** Les processus attendent le disque autant qu'ils calculent :
+// en laisser un de cote ne rendrait pas la machine plus reactive, et couterait un huitieme du temps.
+$processus ??= $coeurs();
+
+if ($sequentiel) {
+    $processus = 1;
+}
+
+fwrite(STDOUT, "\n  Processus : " . $processus . ($sequentiel ? ' (sequentiel demande)' : '') . "\n");
+
+// ---------------------------------------------------------------------------------------------
+// 5. Une base remise a zero par processus.
+// ---------------------------------------------------------------------------------------------
+
+$racineBase = $racine . DIRECTORY_SEPARATOR . 'database' . DIRECTORY_SEPARATOR;
+
+/**
+ * Le fichier de base d'un processus. Le premier garde la base du depot.
+ */
+$baseDuJeton = static function (int $jeton) use ($racineBase): string {
+    return $jeton === 1
+        ? $racineBase . 'database.sqlite'
+        : $racineBase . 'database_test_' . $jeton . '.sqlite';
+};
+
+$migrations = [];
+
+for ($jeton = 1; $jeton <= $processus; $jeton++) {
+    $fichier = $baseDuJeton($jeton);
+
+    if (!file_exists($fichier)) {
+        touch($fichier);
+    }
+
+    // Les remises a zero partent ensemble : huit fois deux secondes en serie couteraient plus que
+    // le temps gagne sur un petit passage.
+    $migrations[] = proc_open(
+        '"' . $php . '" artisan migrate:fresh --force --env=testing',
+        [1 => ['file', $racine . '/storage/framework/testing/migrate-' . $jeton . '.log', 'w'], 2 => ['file', $racine . '/storage/framework/testing/migrate-' . $jeton . '.log', 'a']],
+        $tuyaux,
+        $racine,
+        ['OGAMEX_SUITE_LOCK_HELD' => '1', 'DB_DATABASE' => $fichier] + getenv()
+    );
+}
+
+$code = 0;
+
+foreach ($migrations as $migration) {
+    if (!is_resource($migration)) {
+        $code = 1;
+
+        continue;
+    }
+
+    $code = proc_close($migration) === 0 ? $code : 1;
+}
+
+fwrite(STDOUT, '  > migrate:fresh sur ' . $processus . " base(s)\n");
 
 if ($code !== 0) {
     flock($verrou, LOCK_UN);
 
-    $arret('La remise a zero de la base a echoue : les tests ne sont pas lances.');
+    $arret('La remise a zero d une base a echoue : les tests ne sont pas lances.');
 }
 
-$arguments = array_slice($argv, 1);
+// ---------------------------------------------------------------------------------------------
+// 6. Les tests.
+// ---------------------------------------------------------------------------------------------
 
-$commande = [$php, '-d', 'memory_limit=2G', 'vendor/bin/phpunit', '--no-coverage', ...$arguments];
+$commande = $processus === 1
+    ? [$php, '-d', 'memory_limit=2G', 'vendor/bin/phpunit', '--no-coverage', ...$arguments]
+    : [$php, '-d', 'memory_limit=2G', 'vendor/bin/paratest', '--processes=' . $processus, '--no-coverage', ...$arguments];
 
 $code = $executer($commande);
 
