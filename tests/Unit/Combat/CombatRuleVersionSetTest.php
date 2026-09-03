@@ -5,6 +5,7 @@ namespace Tests\Unit\Combat;
 use OGame\Combat\Causality\CausalEventOrder;
 use OGame\Combat\Causality\CausalEventOrderRegistry;
 use OGame\Combat\Enums\CombatEventType;
+use OGame\Combat\Exceptions\CorruptedRuleVersionSet;
 use OGame\Combat\Exceptions\MismatchedRuleVersionSet;
 use OGame\Combat\Exceptions\UnknownCausalEventOrderVersion;
 use OGame\Combat\MoonDestruction\MoonDestructionRule;
@@ -162,6 +163,108 @@ class CombatRuleVersionSetTest extends UnitTestCase
             $v1->toStorage(),
             $v1->fingerprintFacts(),
             'The fingerprint carries something other than the persisted versions.'
+        );
+    }
+
+    /**
+     * Une clef manquante s'arrete, elle ne devient pas une chaine vide.
+     *
+     * ## Le defaut que ces essais ferment
+     *
+     * `fromStorage()` remplacait une clef absente ou mal typee par `''`. C'est le meme defaut que
+     * celui de la photographie d'alliance, applique aux regles : **une corruption de persistance
+     * serait devenue une regle indeterminee**, et cette chaine vide serait entree dans l'empreinte
+     * du combat — le rendant comparable a n'importe quel autre combat aussi corrompu.
+     *
+     * Ne pas savoir sous quelles regles un combat s'est ouvert n'est pas savoir qu'il n'en avait
+     * pas.
+     */
+    public function testAMissingKeyIsRefused(): void
+    {
+        $this->expectException(CorruptedRuleVersionSet::class);
+
+        CombatRuleVersionSet::fromStorage([
+            'causal_order' => 'causal_event_order_v1',
+            'loot_allocator' => 'a1',
+            'loot_policy' => 'p1',
+        ]);
+    }
+
+    /**
+     * Une clef inconnue signale que ce n'est pas cet ensemble qu'on relit.
+     */
+    public function testAnUnknownKeyIsRefused(): void
+    {
+        $this->expectException(CorruptedRuleVersionSet::class);
+
+        CombatRuleVersionSet::fromStorage([
+            'causal_order' => 'causal_event_order_v1',
+            'loot_allocator' => 'a1',
+            'loot_policy' => 'p1',
+            'moon_destruction' => 'm1',
+            'inconnue' => 'x',
+        ]);
+    }
+
+    /**
+     * Chacune des quatre versions est refusee si elle n'est pas une chaine.
+     */
+    public function testEachOfTheFourVersionsIsRefusedWhenItIsNotAString(): void
+    {
+        foreach (['causal_order', 'loot_allocator', 'loot_policy', 'moon_destruction'] as $clef) {
+            $stocke = [
+                'causal_order' => 'causal_event_order_v1',
+                'loot_allocator' => 'a1',
+                'loot_policy' => 'p1',
+                'moon_destruction' => 'm1',
+            ];
+
+            $stocke[$clef] = 42;
+
+            try {
+                CombatRuleVersionSet::fromStorage($stocke);
+
+                $this->fail('A non-string version was accepted for ' . $clef . '.');
+            } catch (CorruptedRuleVersionSet $arret) {
+                $this->assertStringContainsString($clef, $arret->defect);
+            }
+        }
+    }
+
+    /**
+     * Chacune des quatre versions est refusee si elle est vide.
+     *
+     * Y compris par `of()` : une version vide passee a la construction serait persistee telle
+     * quelle, et le defaut ne se verrait qu'a la relecture d'un combat deja ouvert.
+     */
+    public function testEachOfTheFourVersionsIsRefusedWhenItIsEmpty(): void
+    {
+        $completes = ['causal_event_order_v1', 'a1', 'p1', 'm1'];
+
+        foreach ([0, 1, 2, 3] as $rang) {
+            $versions = $completes;
+            $versions[$rang] = '';
+
+            try {
+                CombatRuleVersionSet::of(...$versions);
+
+                $this->fail('An empty version was accepted at position ' . $rang . '.');
+            } catch (CorruptedRuleVersionSet $arret) {
+                $this->addToAssertionCount(1);
+            }
+        }
+    }
+
+    /**
+     * Un ensemble complet fait l'aller-retour sans rien perdre.
+     */
+    public function testACompleteSetSurvivesTheRoundTrip(): void
+    {
+        $ensemble = CombatRuleVersionSet::of('causal_event_order_v1', 'a1', 'p1', 'm1');
+
+        $this->assertSame(
+            $ensemble->toStorage(),
+            CombatRuleVersionSet::fromStorage($ensemble->toStorage())->toStorage()
         );
     }
 

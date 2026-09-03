@@ -4,6 +4,7 @@ namespace OGame\Combat\Support;
 
 use OGame\Combat\Allocation\LootAllocatorRegistry;
 use OGame\Combat\Causality\CausalEventOrderRegistry;
+use OGame\Combat\Exceptions\CorruptedRuleVersionSet;
 use OGame\Combat\Exceptions\MismatchedRuleVersionSet;
 use OGame\Combat\MoonDestruction\MoonDestructionRuleRegistry;
 use OGame\Combat\Policies\LootPolicyRegistry;
@@ -43,6 +44,13 @@ use OGame\Combat\Policies\LootPolicyRegistry;
 final readonly class CombatRuleVersionSet
 {
     /**
+     * Les quatre clefs, et rien d'autre.
+     *
+     * @var array<int, string>
+     */
+    private const array KEYS = ['causal_order', 'loot_allocator', 'loot_policy', 'moon_destruction'];
+
+    /**
      * @param string $causalOrder La version de l'ordre causal des evenements.
      * @param string $lootAllocator La version de l'allocateur exact de butin.
      * @param string $lootPolicy La version de la politique de taux.
@@ -68,7 +76,10 @@ final readonly class CombatRuleVersionSet
         LootPolicyRegistry|null $policies = null,
         MoonDestructionRuleRegistry|null $moons = null,
     ): self {
-        return new self(
+        // **Par `of()`, pas par le constructeur.** Un registre qui rendrait une version vide
+        // ecrirait sinon cette chaine vide dans l empreinte du combat, et le defaut ne se verrait
+        // qu a la relecture, bien plus tard.
+        return self::of(
             ($causal ?? CausalEventOrderRegistry::default())->currentVersion(),
             ($allocators ?? LootAllocatorRegistry::default())->currentVersion(),
             ($policies ?? LootPolicyRegistry::default())->currentVersion(),
@@ -79,21 +90,54 @@ final readonly class CombatRuleVersionSet
     /**
      * L'ensemble tel qu'il a ete persiste avec le combat.
      *
+     * **Il refuse plutot que de completer.** Une clef absente devenait une chaine vide, qui ne
+     * resout aucun registre : le combat se serait rejoue sous une regle indeterminee, et cette
+     * chaine vide serait entree dans son empreinte.
+     *
      * @param array<string, mixed> $stored
-     * @return self
+     *
+     * @throws CorruptedRuleVersionSet Si la structure lue n'est pas celle qui a ete ecrite.
      */
     public static function fromStorage(array $stored): self
     {
-        return new self(
-            self::stringAt($stored, 'causal_order'),
-            self::stringAt($stored, 'loot_allocator'),
-            self::stringAt($stored, 'loot_policy'),
-            self::stringAt($stored, 'moon_destruction'),
-        );
+        $inconnues = array_diff(array_keys($stored), self::KEYS);
+
+        if ($inconnues !== []) {
+            throw new CorruptedRuleVersionSet(
+                'la structure porte des clefs inconnues (' . implode(', ', $inconnues) . ')',
+                $stored
+            );
+        }
+
+        $versions = [];
+
+        foreach (self::KEYS as $clef) {
+            if (!array_key_exists($clef, $stored)) {
+                throw new CorruptedRuleVersionSet('la clef « ' . $clef . ' » manque', $stored);
+            }
+
+            $valeur = $stored[$clef];
+
+            if (!is_string($valeur)) {
+                throw new CorruptedRuleVersionSet(
+                    'la version de « ' . $clef . ' » n est pas une chaine',
+                    $stored
+                );
+            }
+
+            $versions[] = $valeur;
+        }
+
+        return self::of(...$versions);
     }
 
     /**
      * Un ensemble explicite, pour les essais et les rejeux.
+     *
+     * **La meme exigence que la relecture.** Une version vide passee ici serait persistee telle
+     * quelle, et le defaut ne se verrait qu'a la relecture d'un combat deja ouvert — trop tard.
+     *
+     * @throws CorruptedRuleVersionSet Si l'une des quatre versions est vide.
      */
     public static function of(
         string $causalOrder,
@@ -101,6 +145,22 @@ final readonly class CombatRuleVersionSet
         string $lootPolicy,
         string $moonDestruction,
     ): self {
+        $fournies = [
+            'causal_order' => $causalOrder,
+            'loot_allocator' => $lootAllocator,
+            'loot_policy' => $lootPolicy,
+            'moon_destruction' => $moonDestruction,
+        ];
+
+        foreach ($fournies as $clef => $version) {
+            if ($version === '') {
+                throw new CorruptedRuleVersionSet(
+                    'la version de « ' . $clef . ' » est vide',
+                    $fournies
+                );
+            }
+        }
+
         return new self($causalOrder, $lootAllocator, $lootPolicy, $moonDestruction);
     }
 
@@ -145,17 +205,5 @@ final readonly class CombatRuleVersionSet
         }
 
         throw new MismatchedRuleVersionSet($this->toStorage(), $other->toStorage());
-    }
-
-    /**
-     * La valeur attendue, ou une chaine vide si le stockage ne la porte pas.
-     *
-     * @param array<string, mixed> $stored
-     */
-    private static function stringAt(array $stored, string $key): string
-    {
-        $valeur = $stored[$key] ?? '';
-
-        return is_string($valeur) ? $valeur : '';
     }
 }
