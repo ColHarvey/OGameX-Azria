@@ -5,6 +5,7 @@ namespace OGame\Services;
 use Exception;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Date;
+use OGame\Combat\Services\EngagedFleetCheck;
 use OGame\Enums\FleetSpeedType;
 use OGame\Factories\GameMissionFactory;
 use OGame\Factories\PlanetServiceFactory;
@@ -681,6 +682,13 @@ class FleetMissionService
     {
         // Planet relocation ship transfers (deployment to self) cannot be recalled.
         if ($mission->mission_type === 4 && $mission->planet_id_from === $mission->planet_id_to) {
+            return;
+        }
+
+        // Une flotte engagee dans un combat durable ne se rappelle plus : la bataille est calculee
+        // avec elle, et un rappel la ferait a la fois combattre et rentrer. Le filet est ici, dans
+        // le chemin que tout rappel emprunte — l'interface n'est jamais la protection.
+        if (resolve(EngagedFleetCheck::class)->isEngaged($mission)) {
             return;
         }
 
