@@ -136,7 +136,6 @@ class FrozenLootPotentialTest extends TestCase
         $potentiel = FrozenLootPotential::frozenFrom($issue, $versions);
 
         $this->assertSame(self::BEYOND_EXACT_FLOAT, $potentiel->amounts->metal);
-        $this->assertIsInt($potentiel->amounts->metal);
 
         $this->assertTrue($potentiel->diagnostics->any(), 'A degraded conversion went unreported.');
         $this->assertArrayHasKey(
