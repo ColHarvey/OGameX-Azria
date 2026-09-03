@@ -2,6 +2,7 @@
 
 namespace OGame\Combat\Services;
 
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Admission\AdmissionBudget;
 use OGame\Combat\Admission\AdmissionVerdict;
@@ -19,10 +20,12 @@ use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\LootReservationState;
 use OGame\Combat\Enums\SnapshotContribution;
+use OGame\Combat\Exceptions\ContradictorySnapshotInclusion;
 use OGame\Combat\Projection\SnapshotProjectionRegistry;
 use OGame\Combat\Support\ActorKindResolver;
 use OGame\Combat\Support\CombatEventIdentity;
 use OGame\Combat\Support\CombatParticipantKey;
+use OGame\Combat\Support\SnapshotContributionSet;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatLootReservation;
@@ -303,12 +306,17 @@ final class RallyClosureService
      * la photographie serait perdue pour la bataille ; comptee sans avoir ete appliquee, elle ferait
      * combattre des vaisseaux qui ne sont pas la.
      *
-     * ## La version vient de l'instance, jamais de la constante
+     * ## Creer, ou relire et comparer — jamais ecraser
      *
-     * L'unicite porte sur combat / evenement / version de projection. Lire `SnapshotProjection`
-     * courante ici ferait entrer le meme evenement une seconde fois apres une bascule — l'unicite ne
-     * verrait rien, puisqu'elle separe justement les versions. La colonne fait foi, et une version
-     * que ce code ne connait pas arrete la fermeture au lieu de deviner.
+     * `updateOrCreate()` etait le mauvais outil. Sur un rejeu, il aurait **ecrase en silence** une
+     * contribution differente : deux verites sur un meme fait, et c'est la derniere arrivee qui
+     * l'emporte, sans que rien ne le dise.
+     *
+     * Trois issues seulement, et elles sont exhaustives :
+     *
+     *     l evenement n existe pas          -> on l inscrit
+     *     il existe avec le meme ensemble   -> rien a faire, c est un rejeu
+     *     il existe avec autre chose        -> contradiction, et elle s arrete
      *
      * @param array<int, AttackCandidateGroup> $groups
      */
@@ -317,28 +325,105 @@ final class RallyClosureService
         array $groups,
         SnapshotContribution $contribution,
     ): void {
-        // **Par le registre, comme les quatre autres versions.** Une projection que ce code ne
-        // sait plus lire arrete la fermeture : ses inclusions signifieraient autre chose que ce
-        // qu'elles disent, et personne ne le verrait.
-        $projection = $this->projections->forVersion((string)$combat->projection_version)->version();
+        $projection = $this->frozenProjectionOf($combat);
+        $apport = SnapshotContributionSet::ofOne($contribution);
 
         foreach ($groups as $groupe) {
             foreach ($groupe->missions as $mission) {
-                CombatSnapshotInclusion::query()->updateOrCreate(
-                    [
-                        'combat_instance_id' => $combat->id,
-                        'event_identity' => CombatEventIdentity::forFleetArrival($mission->missionId),
-                        'projection_version' => $projection,
-                    ],
-                    [
-                        'contribution' => $contribution,
-                        // L'heure de l'ouverture, pas celle du worker : deux fermetures du meme
-                        // combat doivent ecrire la meme photographie.
-                        'included_at' => $combat->started_at ?? 0,
-                    ]
+                $this->includeOnce(
+                    $combat,
+                    CombatEventIdentity::forFleetArrival($mission->missionId),
+                    $apport,
+                    $projection
                 );
             }
         }
+    }
+
+    /**
+     * Inscrit cet evenement dans la photographie, ou verifie qu'il y figure a l'identique.
+     *
+     * L'unicite en base ferme la porte que la lecture laisserait entrouverte si deux transactions
+     * arrivaient ensemble : la seconde recoit une violation de contrainte, relit, et applique la
+     * meme comparaison. Un doublon devient alors soit un rejeu silencieux, soit une contradiction —
+     * jamais une seconde ligne.
+     */
+    private function includeOnce(
+        CombatInstance $combat,
+        string $eventIdentity,
+        SnapshotContributionSet $contributions,
+        string $projection,
+    ): void {
+        $existante = CombatSnapshotInclusion::query()
+            ->where('combat_instance_id', $combat->id)
+            ->where('event_identity', $eventIdentity)
+            ->first();
+
+        if ($existante !== null) {
+            $this->ensureSameInclusion($existante, $eventIdentity, $contributions);
+
+            return;
+        }
+
+        try {
+            CombatSnapshotInclusion::query()->create([
+                'combat_instance_id' => $combat->id,
+                'event_identity' => $eventIdentity,
+                'projection_version' => $projection,
+                'contributions' => $contributions->toStorage(),
+                // L'heure de l'ouverture, pas celle du worker : deux fermetures du meme combat
+                // doivent ecrire la meme photographie.
+                'included_at' => $combat->started_at ?? 0,
+            ]);
+        } catch (QueryException $course) {
+            $gagnante = CombatSnapshotInclusion::query()
+                ->where('combat_instance_id', $combat->id)
+                ->where('event_identity', $eventIdentity)
+                ->first();
+
+            if ($gagnante === null) {
+                throw $course;
+            }
+
+            $this->ensureSameInclusion($gagnante, $eventIdentity, $contributions);
+        }
+    }
+
+    /**
+     * Exige que l'inclusion deja inscrite dise exactement la meme chose.
+     *
+     * @throws ContradictorySnapshotInclusion Si elle dit autre chose.
+     */
+    private function ensureSameInclusion(
+        CombatSnapshotInclusion $existante,
+        string $eventIdentity,
+        SnapshotContributionSet $contributions,
+    ): void {
+        $inscrites = SnapshotContributionSet::fromStorage($existante->contributions);
+
+        if ($inscrites->equals($contributions)) {
+            return;
+        }
+
+        throw new ContradictorySnapshotInclusion(
+            $eventIdentity,
+            $inscrites->toStorage(),
+            $contributions->toStorage()
+        );
+    }
+
+    /**
+     * La projection gelee de ce combat, verifiee connue.
+     *
+     * **Verifiee avant toute ecriture, et non apres.** Une inclusion ecrite sous une projection que
+     * l'instance ne porte pas signifierait autre chose que ce qu'elle dit — et comme la projection
+     * ne fait plus partie de la clef d'unicite, rien d'autre ne l'attraperait.
+     */
+    private function frozenProjectionOf(CombatInstance $combat): string
+    {
+        // **Par le registre, comme les quatre autres versions.** Une projection que ce code ne sait
+        // plus lire arrete la fermeture au lieu de deviner.
+        return $this->projections->forVersion((string)$combat->projection_version)->version();
     }
 
     /**

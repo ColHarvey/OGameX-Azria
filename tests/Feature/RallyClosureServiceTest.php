@@ -9,6 +9,7 @@ use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\LootReservationState;
 use OGame\Combat\Enums\SnapshotContribution;
+use OGame\Combat\Exceptions\ContradictorySnapshotInclusion;
 use OGame\Combat\Exceptions\UnknownSnapshotProjection;
 use OGame\Combat\Projection\SnapshotProjectionV1;
 use OGame\Combat\Services\CombatOpeningService;
@@ -330,7 +331,11 @@ class RallyClosureServiceTest extends TestCase
             );
 
             $this->assertNotNull($ligne, 'An admitted fleet is missing from the snapshot.');
-            $this->assertSame(SnapshotContribution::AttackingFleet, $ligne->contribution);
+            $this->assertSame(
+                [SnapshotContribution::AttackingFleet->value],
+                $ligne->contributions,
+                'The inclusion does not carry the canonical set of what this event brought.'
+            );
         }
     }
 
@@ -730,6 +735,123 @@ class RallyClosureServiceTest extends TestCase
             'A settled reservation was sealed again: the loot would be handed over twice.'
         );
         $this->assertNull($reservation->sealed_at);
+    }
+
+    /**
+     * Le meme evenement avec un autre ensemble s'arrete : c'est deux verites sur un meme fait.
+     *
+     * ## Le defaut que cet essai ferme
+     *
+     * `updateOrCreate()` ecrasait en silence. Sur un rejeu qui aurait calcule autre chose — une
+     * regression, une projection mal lue — la derniere tentative l'emportait, et rien ne le disait.
+     *
+     * Rejouer a l'identique doit etre sans effet ; rejouer autre chose n'est pas un rejeu.
+     */
+    public function testTheSameEventWithADifferentSetIsRefused(): void
+    {
+        $joueur = $this->aPlayer();
+        $corps = $this->aBodyId();
+
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $joueur);
+        $combat = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
+
+        $this->fermeture->close($combat->id, self::OPENING + 1);
+
+        $inclusion = CombatSnapshotInclusion::where('combat_instance_id', $combat->id)->first();
+        $this->assertNotNull($inclusion);
+
+        // Quelqu'un a inscrit autre chose sous la meme identite.
+        $inclusion->contributions = [SnapshotContribution::DefendingFleet->value];
+        $inclusion->save();
+
+        // Le combat repasse en ralliement pour que la fermeture recommence son travail.
+        //
+        // **`refresh()` d abord.** L instance en memoire porte encore `Rallying` : lui reaffecter
+        // la meme valeur ne la rend pas modifiee, et `save()` n ecrit alors rien du tout.
+        $combat->refresh();
+        $combat->status = CombatState::Rallying;
+        $combat->save();
+
+        $this->expectException(ContradictorySnapshotInclusion::class);
+
+        $this->fermeture->close($combat->id, self::OPENING + 1);
+    }
+
+    /**
+     * Une projection etrangere a l'instance est refusee **avant** toute ecriture.
+     *
+     * La projection ne fait plus partie de la clef d'unicite — c'etait une erreur de l'y mettre,
+     * puisqu'une instance n'en a qu'une. Mais du coup, plus rien d'autre n'attraperait une inclusion
+     * ecrite sous une version que le combat ne porte pas : le controle doit venir en amont.
+     */
+    public function testAProjectionForeignToTheInstanceIsRefusedBeforeAnyWrite(): void
+    {
+        $joueur = $this->aPlayer();
+        $corps = $this->aBodyId();
+
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $joueur);
+        $combat = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
+
+        $combat->projection_version = 'projection_que_ce_code_ignore';
+        $combat->save();
+
+        try {
+            $this->fermeture->close($combat->id, self::OPENING + 1);
+
+            $this->fail('A combat under an unknown projection was closed anyway.');
+        } catch (UnknownSnapshotProjection $arret) {
+            $this->addToAssertionCount(1);
+        }
+
+        $this->assertSame(
+            0,
+            CombatSnapshotInclusion::where('combat_instance_id', $combat->id)->count(),
+            'An inclusion was written before the projection was checked.'
+        );
+    }
+
+    /**
+     * Deux combats peuvent inclure le meme evenement sans se confondre.
+     *
+     * L'unicite porte sur combat **et** evenement. Deux batailles successives sur la meme planete
+     * lisent toutes deux sa garnison : une unicite sur l'evenement seul aurait fait disparaitre la
+     * garnison de la seconde.
+     */
+    public function testTwoCombatsCanIncludeTheSameEventWithoutConfusion(): void
+    {
+        $joueur = $this->aPlayer();
+        $premierCorps = $this->aBodyId();
+        $secondCorps = $this->aBodyId();
+
+        $ouvreurA = $this->anAttackAt($premierCorps, self::OPENING, $joueur);
+        $ouvreurB = $this->anAttackAt($secondCorps, self::OPENING, $joueur);
+
+        $combatA = $this->ouverture->openOrJoin($ouvreurA, $premierCorps, self::OPENING);
+        $combatB = $this->ouverture->openOrJoin($ouvreurB, $secondCorps, self::OPENING);
+
+        $this->assertNotSame($combatA->id, $combatB->id);
+
+        $this->fermeture->close($combatA->id, self::OPENING + 1);
+        $this->fermeture->close($combatB->id, self::OPENING + 1);
+
+        // Le meme identifiant d'evenement, inscrit a la main dans les deux photographies.
+        $partage = CombatEventIdentity::forFleetArrival(999_001);
+
+        foreach ([$combatA, $combatB] as $combat) {
+            CombatSnapshotInclusion::query()->create([
+                'combat_instance_id' => $combat->id,
+                'event_identity' => $partage,
+                'projection_version' => $combat->projection_version,
+                'contributions' => [SnapshotContribution::DefendingFleet->value],
+                'included_at' => self::OPENING,
+            ]);
+        }
+
+        $this->assertSame(
+            2,
+            CombatSnapshotInclusion::where('event_identity', $partage)->count(),
+            'The same event could not enter two different snapshots.'
+        );
     }
 
     /**

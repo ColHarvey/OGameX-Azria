@@ -123,11 +123,13 @@ class CombatIdempotenceConstraintsTest extends TestCase
     }
 
     /**
-     * Le meme evenement entre dans deux combats differents, et c'est voulu.
+     * Le meme evenement entre dans deux combats differents, et une seule fois dans chacun.
      *
-     * **Le cas qu'une unicite naive aurait casse.** Deux combats successifs sur la meme planete
-     * lisent tous deux la garnison : une unicite sur le seul evenement aurait fait disparaitre la
-     * garnison du second.
+     * **Les deux moities comptent.** Une unicite sur le seul evenement aurait fait disparaitre
+     * la garnison du second combat ; une unicite qui inclut la projection aurait laisse le meme
+     * evenement entrer deux fois dans le meme combat, sous deux versions.
+     *
+     * C'est `combat_instance_id` qui separe les combats, et lui seul.
      */
     public function testTheSameEventEntersTwoDifferentCombats(): void
     {
@@ -144,20 +146,26 @@ class CombatIdempotenceConstraintsTest extends TestCase
             'The garrison could not be read by a second combat on the same planet.'
         );
 
-        // Et la version de projection separe elle aussi, sans quoi une bascule de version serait
-        // impossible : les deux formes doivent coexister le temps de la migration.
-        // **`+` sur deux tableaux garde la cle de gauche.** Ecrit ainsi, la version serait restee
-        // « v1 », l insertion aurait ete refusee, et l essai aurait prouve le contraire de ce qu il
-        // annonce. `array_merge` ecrase, et c est ce qu on veut ici.
-        CombatSnapshotInclusion::create(array_merge(
-            $this->inclusion($premier->id, $identite),
-            ['projection_version' => 'v2']
-        ));
+        // **Deux projections du meme evenement dans un meme combat sont refusees**, et cet essai
+        // affirmait autrefois le contraire.
+        //
+        // Le raisonnement d'alors : « les deux formes doivent coexister le temps d'une bascule ».
+        // Il etait faux, parce qu'une **instance** n'a qu'une projection gelee. Les versions
+        // coexistent entre deux combats, grace a `combat_instance_id` — jamais a l'interieur
+        // d'une meme photographie. Avec l'ancienne clef, un defaut qui aurait ecrit v2 dans un
+        // combat v1 aurait insere l'evenement une seconde fois sans que rien ne s'y oppose.
+        $this->assertRefused(
+            fn () => CombatSnapshotInclusion::create(array_merge(
+                $this->inclusion($premier->id, $identite),
+                ['projection_version' => 'v2']
+            )),
+            'A second projection of the same event slipped into one snapshot.'
+        );
 
         $this->assertSame(
-            2,
+            1,
             CombatSnapshotInclusion::where('combat_instance_id', $premier->id)->count(),
-            'Two projection versions of one event could not coexist during a switch-over.'
+            'One combat holds more than one inclusion for the same event.'
         );
     }
 
@@ -295,7 +303,7 @@ class CombatIdempotenceConstraintsTest extends TestCase
     }
 
     /**
-     * @return array<string, string|int>
+     * @return array<string, string|int|array<int, string>>
      */
     private function inclusion(int $combatId, string $identity): array
     {
@@ -303,7 +311,7 @@ class CombatIdempotenceConstraintsTest extends TestCase
             'combat_instance_id' => $combatId,
             'event_identity' => $identity,
             'projection_version' => 'v1',
-            'contribution' => SnapshotContribution::DefendingFleet->value,
+            'contributions' => [SnapshotContribution::DefendingFleet->value],
             'included_at' => 1_000,
         ];
     }

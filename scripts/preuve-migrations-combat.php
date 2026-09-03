@@ -168,6 +168,7 @@ $migrations = [
     '2026_09_02_210400_create_combat_outbox_table',
     '2026_09_02_210500_add_frozen_alliance_membership_to_combat_instances',
     '2026_09_03_060000_add_projection_version_to_combat_instances',
+    '2026_09_03_120000_make_snapshot_inclusions_one_row_per_event',
 ];
 
 $nouvellesTables = [
@@ -240,7 +241,7 @@ $temoin = static function (bool $obtenu, string $enonce) use (&$echecs): void {
 
 chdir($racine);
 
-fwrite(STDOUT, "\n  Les sept migrations de combat : appliquer, defaire, reappliquer\n");
+fwrite(STDOUT, "\n  Les huit migrations de combat : appliquer, defaire, reappliquer\n");
 fwrite(STDOUT, '  ' . str_repeat('-', 66) . "\n\n");
 
 $artisan('base remise a zero', ['migrate:fresh', '--force', '--env=testing']);
@@ -275,7 +276,7 @@ if (!is_array($dernieres) || array_values($dernieres) !== $attendues) {
     flock($verrou, LOCK_UN);
 
     $arret(
-        "Les sept dernieres migrations ne sont pas celles attendues : defaire sept pas toucherait\n"
+        "Les huit dernieres migrations ne sont pas celles attendues : defaire huit pas toucherait\n"
         . "  toucherait autre chose. Mettre a jour la liste dans ce script."
     );
 }
@@ -309,7 +310,7 @@ flock($verrou, LOCK_UN);
 fwrite(STDOUT, "\n  " . str_repeat('-', 66) . "\n");
 
 if ($echecs === 0) {
-    fwrite(STDOUT, "  Les sept migrations s appliquent, se defont et se reappliquent.\n");
+    fwrite(STDOUT, "  Les huit migrations s appliquent, se defont et se reappliquent.\n");
 
     if ($connexion === null) {
         fwrite(STDOUT, "  Connexion de test. L epreuve MariaDB reste a faire : elle refuse des index,\n");
