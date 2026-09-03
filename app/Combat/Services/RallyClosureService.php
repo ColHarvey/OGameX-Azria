@@ -144,7 +144,7 @@ final class RallyClosureService
         $corps = $combat->target_planet_id ?? 0;
 
         // **Tout vient de l'ouverture.** Relire l'alliance ou les budgets dans le monde courant
-        // ferait deriver une bataille engagee il y a deux heures.
+        // ferait deriver une bataille deja engagee.
         $appartenances = FrozenAllianceMembership::fromStorage($combat->frozen_alliance_membership);
         $budget = new AdmissionBudget($combat->max_fleets, $combat->max_players);
 

@@ -20,7 +20,7 @@ use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
  * ou il tournait. C'est juste tant que la bataille est instantanee : l'observation et le calcul se
  * suivent d'un cheveu.
  *
- * Un combat persistant dure jusqu'a deux heures. Pendant ce temps, la cible peut se connecter — elle
+ * Un combat persistant dure. Pendant ce temps, la cible peut se connecter — elle
  * cesserait d'etre inactive —, un attaquant peut changer de classe, une recherche d'hyperespace peut
  * s'achever et grossir un fret. Si le moteur relisait ces donnees a la resolution, deux combats
  * partis du meme etat rendraient deux resultats differents, et le taux annonce dans le rapport ne

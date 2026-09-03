@@ -27,7 +27,7 @@ use OGame\Combat\Exceptions\ContradictoryOpeningProvenance;
  *
  * Tout ce qui est produit ou acquis apres l'ouverture reste un solde libre, hors butin du combat
  * courant. Reconstruire les ressources pillables depuis le solde vivant a la fermeture reviendrait a
- * offrir a l'attaquant deux heures de production.
+ * offrir a l'attaquant toute la production du combat.
  */
 final readonly class ProtectedOpeningState
 {

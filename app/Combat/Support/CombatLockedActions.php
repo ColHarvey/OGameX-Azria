@@ -141,7 +141,7 @@ class CombatLockedActions
      * 1. **Rejoindre un combat en cours.** Il faudrait rouvrir une photo deja prise, ce qui
      *    defait la garantie centrale du systeme.
      * 2. **Attendre la fin, puis ouvrir un nouveau combat.** Techniquement propre, mais une
-     *    seconde vague lancee cinq secondes apres la premiere n'attaquerait que deux heures plus
+     *    seconde vague lancee cinq secondes apres la premiere n'attaquerait qu'apres la fin du
      *    tard : la mecanique des vagues disparait. La fenetre garde cette idee pour les arrivees
      *    tardives, ou elle est le moindre mal, et l'evite pour les vagues rapprochees.
      * 3. **Refuser l'arrivee et renvoyer la flotte.** Le plus simple, et le plus brutal.

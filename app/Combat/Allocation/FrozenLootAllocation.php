@@ -22,7 +22,7 @@ use OGame\Models\Resources;
  * ## Deux frontieres, et une seule est autoritaire pour un combat durable
  *
  * `fromFrozenSet()` sert le combat persistant : la version vient des faits ecrits avec l'instance,
- * deux heures plus tot.
+ * a son ouverture.
  *
  * `atOperationStart()` sert le combat instantane, qui se resout a la seconde ou la flotte arrive.
  * Y lire la version courante est correct **parce que l'operation commence maintenant** — mais elle

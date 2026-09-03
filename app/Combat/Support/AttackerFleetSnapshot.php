@@ -17,7 +17,7 @@ use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
  *
  * **Les faits geles** — genre d'acteur, classe Decouvreur — ne doivent surtout pas etre recalcules.
  * Les relire reviendrait a interroger les modeles vivants a la resolution, c'est-a-dire a defaire
- * ce que le gel garantit : un joueur qui change de classe pendant les deux heures d'un combat ne
+ * ce que le gel garantit : un joueur qui change de classe pendant un combat ne
  * doit rien y changer. Ils viennent donc du contexte, et de lui seul.
  */
 final readonly class AttackerFleetSnapshot
@@ -94,7 +94,7 @@ final readonly class AttackerFleetSnapshot
      * La part que le moteur peut recalculer et confronter a la photographie.
      *
      * **Le fret libre n en fait pas partie**, et c est delibere : il depend du niveau
-     * d hyperespace du proprietaire, qui peut monter pendant les deux heures d un combat
+     * d hyperespace du proprietaire, qui peut monter pendant un combat
      * persistant. Le comparer ferait echouer un combat parfaitement legitime au motif qu un joueur
      * a termine une recherche. Il reste dans la photographie — c est un fait gele — mais il n est
      * pas confronte.

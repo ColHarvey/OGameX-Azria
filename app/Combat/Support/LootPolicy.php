@@ -18,7 +18,7 @@ use OGame\Combat\Policies\NpcBaseV1;
  * engage, part des Decouvreurs, honneur — et **l'identifiant de la regle** sous laquelle ce combat
  * a ete ouvert. Le calcul appartient a l'implementation choisie par le registre.
  *
- * La raison en est la duree : un combat persistant vit jusqu'a deux heures, et sa regle peut avoir
+ * La raison en est la duree : un combat persistant vit longtemps, et sa regle peut avoir
  * ete remplacee entre son ouverture et sa resolution. Une formule ecrite ici changerait le resultat
  * de tous les combats deja ouverts sans que leur version ne bouge — c'est-a-dire sans que rien ne
  * le signale.
@@ -35,7 +35,7 @@ final readonly class LootPolicy
 {
     /**
      * @param bool $targetIsInactive L'inactivite de la cible, **figee a l'ouverture**. Un changement
-     *                               pendant les deux heures de combat ne doit rien modifier
+     *                               pendant le combat ne doit rien modifier
      *                               retroactivement.
      * @param AttackerCargoShare $cargo Le fret offensif engage et la part des Decouvreurs.
      * @param HonorPolicy $honor L'etat du systeme d'honneur. Desactive aujourd'hui.

@@ -17,7 +17,7 @@ use OGame\Combat\Projection\SnapshotProjectionRegistry;
  *
  * Cinq mecanismes sont versionnes : l'ordre causal des evenements, l'allocateur de butin, la
  * politique de taux, la regle de destruction de lune, et **la projection de photographie**.
- * Chacun peut evoluer entre l'ouverture d'un combat et sa resolution, deux heures plus tard.
+ * Chacun peut evoluer entre l'ouverture d'un combat et sa resolution.
  *
  * La projection a d'abord vecu a part, sous une constante de classe, au motif qu'elle dit comment
  * une inclusion **se lit** plutot que ce qu'un combat **decide**. La distinction est vraie et ne

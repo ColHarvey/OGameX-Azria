@@ -49,6 +49,11 @@ class CombatDurationEstimator
      * deux a cinq minutes, une grande bataille autour de vingt minutes, et deux armadas
      * equilibrees autour de deux heures.
      *
+     * **C'est une cible de reglage, pas un invariant du combat.** Aucune regle ne depend de cette
+     * valeur : la duree vient des rounds reels, et il n'existe aucun plafond. L'ecrire dans un
+     * contrat — de butin, de gel ou de fenetre — en ferait une regle enfouie que personne
+     * n'aurait decidee.
+     *
      * Les deux voisins examines et ecartes : 1500 rendait un combat courant trop long, 3000
      * rendait les tres grandes batailles trop courtes pour etre impressionnantes.
      *

@@ -8,11 +8,11 @@ namespace OGame\Combat\Support;
  * ## Le probleme qu'elle resout
  *
  * Dans OGame, on lance plusieurs attaques a quelques secondes d'intervalle sur la meme cible.
- * C'est un pilier du jeu. Un combat qui dure deux heures rend cette mecanique impossible : quand
+ * C'est un pilier du jeu. Un combat qui dure rend cette mecanique impossible : quand
  * la seconde vague arrive, la photo du champ de bataille est prise et le calcul fige.
  *
  * Quatre issues avaient ete envisagees, toutes mauvaises a leur facon — rouvrir la photo defait
- * la garantie centrale ; faire attendre deux heures supprime les vagues ; renvoyer toute flotte
+ * la garantie centrale ; faire attendre toute la bataille supprime les vagues ; renvoyer toute flotte
  * est brutal ; resoudre round par round exige de rendre les deux moteurs reprenables, ce qui est
  * un autre projet.
  *
@@ -71,7 +71,7 @@ final class CombatRallyWindow
      *
      * Soixante secondes couvrent les vagues telles qu'elles se lancent reellement — a quelques
      * secondes d'intervalle — sans faire attendre le premier attaquant de facon perceptible :
-     * une minute face a une bataille de deux heures.
+     * une minute face a une bataille qui dure.
      *
      * C'est un plafond, pas une duree garantie : voir `closesAt()`, ou la fenetre se ferme des
      * que la derniere flotte admissible attendue est arrivee.

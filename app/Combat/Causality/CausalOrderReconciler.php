@@ -11,7 +11,7 @@ use InvalidArgumentException;
  *
  * Ni base, ni horloge, ni journal, ni verrou. Elle recoit des faits **deja relus sous verrou** par
  * `RallyClosureService`, et rend un plan. Deux appels avec les memes entrees donnent le meme plan,
- * qu'ils aient lieu a une seconde d'intervalle ou deux heures plus tard — c'est ce qui rend un
+ * qu'ils aient lieu a une seconde d'intervalle ou tout au long du combat — c'est ce qui rend un
  * worker en retard inoffensif.
  *
  * Elle **n'applique rien non plus**. Refaire ici la livraison d'un transport, l'impact d'un missile

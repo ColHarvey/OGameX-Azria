@@ -17,7 +17,7 @@ namespace OGame\Combat\Enums;
  * ou le resultat etait fige des l'arrivee.
  *
  * Cette fenetre existe pour les vagues. Dans OGame, on lance plusieurs attaques a quelques
- * secondes d'intervalle sur la meme cible ; un combat qui dure deux heures et une vague qui
+ * secondes d'intervalle sur la meme cible ; un combat qui dure et une vague qui
  * arrive cinq secondes plus tard sont en conflit direct. La fenetre les reconcilie : les
  * flottes qui arrivent pendant ces soixante secondes rejoignent **la meme bataille**, et la
  * photo n'est prise qu'a la fermeture. Un instantane, un calcul, un resultat — la garantie

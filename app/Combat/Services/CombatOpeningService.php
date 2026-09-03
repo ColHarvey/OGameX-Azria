@@ -31,7 +31,7 @@ use OGame\Models\User;
 /**
  * L'ouverture durable d'un combat : l'instant ou tout se fige.
  *
- * ## Ce que l'ouverture decide, et pour deux heures
+ * ## Ce que l'ouverture decide, et pour toute la duree du combat
  *
  * Un combat qui dure traverse des changements — un reglage ajuste, une regle versionnee, un joueur
  * qui quitte son alliance. **Aucun ne doit changer l'issue d'une bataille deja engagee.** Ce qui
