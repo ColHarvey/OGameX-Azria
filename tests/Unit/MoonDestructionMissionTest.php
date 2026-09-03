@@ -7,6 +7,8 @@ use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameMissions\MoonDestructionMission;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Models\Enums\PlanetType;
+use OGame\Models\Planet;
 use OGame\Models\Planet\Coordinate;
 use OGame\Services\FleetMissionService;
 use OGame\Services\MessageService;
@@ -178,6 +180,16 @@ class MoonDestructionMissionTest extends UnitTestCase
 
         // Create a mock target moon
         $targetCoordinate = new Coordinate(1, 1, 5);
+
+        // **Ces coordonnees doivent etre vides, et l'essai l'etablit au lieu de l'esperer.** Toute
+        // la suite du test repose sur l'absence de lune ici : un essai voisin qui en cree une rend
+        // la mission possible, et l'assertion « impossible car la lune n'existe pas » tombe pour une
+        // raison qui n'a rien a voir avec ce qu'elle mesure.
+        Planet::where('galaxy', $targetCoordinate->galaxy)
+            ->where('system', $targetCoordinate->system)
+            ->where('planet', $targetCoordinate->position)
+            ->where('planet_type', PlanetType::Moon->value)
+            ->delete();
 
         // Test 1: Fleet with Deathstars should be possible (if moon exists)
         $unitsWithDeathstar = new UnitCollection();

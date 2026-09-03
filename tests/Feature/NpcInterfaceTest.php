@@ -249,6 +249,14 @@ class NpcInterfaceTest extends AccountTestCase
         try {
             // Base neuve, score nul : elle se situe sous le dernier joueur de la page.
             resolve(NpcBaseService::class)->createBase();
+
+            // **Les rangs se recalculent apres la creation, pas avant.** Une base creee apres le
+            // dernier passage ne porte aucun rang, et la page l'affiche alors en queue a zero
+            // point : l'essai echouait sur son propre barème, qui etait pourtant intact.
+            //
+            // En production le planificateur repasse de lui-meme. Ici, c'est a l'essai de le dire —
+            // et l'ordre compte autant que le contenu.
+            Artisan::call('ogamex:scheduler:generate-highscore-ranks');
             Cache::flush();
 
             $highscore = resolve(HighscoreService::class);
@@ -295,6 +303,46 @@ class NpcInterfaceTest extends AccountTestCase
     }
 
     /**
+     * Tous ceux a qui la commande de rangs donnera un rang.
+     *
+     * ## Pourquoi cette liste est plus large que les joueurs affichables
+     *
+     * `rankablePlayerIds()` decrit ce que la **page** sait afficher : une fiche technique et une
+     * planete. La commande de rangs, elle, classe tout joueur non-PNJ, non-Legor, **qui porte une
+     * ligne de classement** — sans rien exiger d'autre.
+     *
+     * Un joueur laisse par un essai voisin avec une ligne a zero et sans planete recevait donc un
+     * rang sans figurer au barème, et finissait la page a zero point. L'essai echouait alors sur une
+     * condition qu'il croyait avoir etablie.
+     *
+     * C'est la meme lecon que deux fois deja dans ce fichier : **un essai etablit ce qu'il exige, il
+     * ne l'espere pas.** Il fallait l'appliquer a la population que la commande classe, pas a celle
+     * que la page affiche.
+     *
+     * @return array<int, int>
+     */
+    private function everyPlayerTheRankingCommandWillRank(): array
+    {
+        $dejaNotes = DB::table('highscores')
+            ->join('users', 'users.id', '=', 'highscores.player_id')
+            ->where('users.is_npc', false)
+            ->where('users.username', '!=', User::SYSTEM_ACCOUNT_USERNAME)
+            ->pluck('users.id')
+            ->all();
+
+        $tous = array_unique(array_merge(
+            $this->rankablePlayerIds(),
+            array_map(static fn (mixed $id): int => (int)$id, $dejaNotes)
+        ));
+
+        // Trie, parce que le barème decroissant depend du rang dans cette liste : deux passages
+        // doivent poser exactement les memes scores.
+        sort($tous);
+
+        return $tous;
+    }
+
+    /**
      * Les joueurs que la page du classement peut afficher.
      *
      * @return array<int, int>
@@ -305,7 +353,7 @@ class NpcInterfaceTest extends AccountTestCase
             ->join('users_tech', 'users_tech.user_id', '=', 'users.id')
             ->join('planets', 'planets.user_id', '=', 'users.id')
             ->where('users.is_npc', false)
-            ->where('users.username', '!=', 'Legor')
+            ->where('users.username', '!=', User::SYSTEM_ACCOUNT_USERNAME)
             ->distinct()
             ->orderBy('users.id')
             ->pluck('users.id')
@@ -331,7 +379,7 @@ class NpcInterfaceTest extends AccountTestCase
         // suite tournait en un seul processus, faux des qu'elle se partage entre plusieurs bases.
         $this->ensureTheUniverseHoldsRankablePlayers(101);
 
-        $ids = $this->rankablePlayerIds();
+        $ids = $this->everyPlayerTheRankingCommandWillRank();
 
         $touches = [];
 
