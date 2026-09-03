@@ -276,9 +276,10 @@ class NpcInterfaceTest extends AccountTestCase
     }
 
     /**
-     * Give enough human players a descending score for the first page to end above zero.
+     * Complete l univers jusqu au nombre de joueurs classables voulu.
      *
-     * @return array<int, int> Les joueurs touches, a remettre a zero ensuite.
+     * L essai etablit ce qu il exige plutot que de l esperer : les chercher revenait a dependre de
+     * ce que les essais precedents avaient laisse dans la base.
      */
     private function ensureTheUniverseHoldsRankablePlayers(int $wanted): void
     {
@@ -314,6 +315,11 @@ class NpcInterfaceTest extends AccountTestCase
         return array_map(static fn (mixed $id): int => (int)$id, $ids);
     }
 
+    /**
+     * Give enough human players a descending score for the first page to end above zero.
+     *
+     * @return array<int, int> Les joueurs touches, a remettre a zero ensuite.
+     */
     private function giveHumanPlayersAScoreLadder(): array
     {
         // Des joueurs reellement classables, et non les premiers venus : la page du classement
