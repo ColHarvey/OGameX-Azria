@@ -6,13 +6,11 @@ use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Admission\AdmissionBudget;
 use OGame\Combat\Admission\AttackAdmissionSelector;
-use OGame\Combat\Admission\AttackCandidateGroup;
-use OGame\Combat\Admission\CandidateMission;
 use OGame\Combat\Admission\FoundingGroup;
 use OGame\Combat\Admission\FrozenAllianceMembership;
+use OGame\Combat\Admission\RallyGrouping;
 use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\Enums\CombatState;
-use OGame\Combat\Enums\FlightLeg;
 use OGame\Combat\Support\ActorKindResolver;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\CombatRallyWindow;
@@ -68,6 +66,7 @@ final class CombatOpeningService
     public function __construct(
         private RallyCandidateReader $reader = new RallyCandidateReader(),
         private AttackAdmissionSelector $selector = new AttackAdmissionSelector(),
+        private RallyGrouping $grouping = new RallyGrouping(),
     ) {
     }
 
@@ -241,12 +240,9 @@ final class CombatOpeningService
         // arrive ici serait une entree contradictoire, et le selecteur leve — a juste titre. Ce
         // filtre-ci n'est pas une regle d'admission : c'est l'aiguillage que la matrice fait dans le
         // flux reel.
-        $combattantes = array_values(array_filter(
-            $candidates,
-            static fn (CandidateMission $c): bool => $c->leg === FlightLeg::Outbound && $c->mission->opensCombat()
-        ));
+        $combattantes = $this->grouping->fightingShapesOnly($candidates);
 
-        [$fondatrices, $autres] = $this->splitFoundingGroup($combattantes, $opener, $union);
+        [$fondatrices, $autres] = $this->grouping->splitFounding($combattantes, $opener->id, $union?->id);
 
         if ($fondatrices === []) {
             // L'ouvreur n'est pas parmi les candidates lues : sa forme ne rallie rien. Il n'y a donc
@@ -259,7 +255,7 @@ final class CombatOpeningService
             $targetBodyId,
             $this->actorHolding($targetBodyId),
             $openedAt,
-            $this->groupsOf($autres)
+            $this->grouping->intoGroups($autres)
         );
 
         $arrivees = [];
@@ -269,68 +265,6 @@ final class CombatOpeningService
         }
 
         return CombatRallyWindow::closesAt($openedAt, $arrivees);
-    }
-
-    /**
-     * Separe le groupe fondateur du reste des candidates.
-     *
-     * L'union de l'ouvreur gouverne : ses missions forment le groupe fondateur. Sans union, c'est la
-     * seule mission de l'ouvreur — **jamais la premiere ligne lue**, qui dependrait de l'ordre de la
-     * base.
-     *
-     * @param array<int, CandidateMission> $candidates
-     * @return array{0: array<int, CandidateMission>, 1: array<int, CandidateMission>}
-     */
-    private function splitFoundingGroup(array $candidates, FleetMission $opener, FleetUnion|null $union): array
-    {
-        $fondatrices = [];
-        $autres = [];
-
-        foreach ($candidates as $candidate) {
-            $estFondatrice = $union === null
-                ? $candidate->missionId === $opener->id
-                : $candidate->unionId === $union->id;
-
-            if ($estFondatrice) {
-                $fondatrices[] = $candidate;
-
-                continue;
-            }
-
-            $autres[] = $candidate;
-        }
-
-        return [$fondatrices, $autres];
-    }
-
-    /**
-     * Les candidates regroupees : une attaque groupee deja en vol arrive ensemble.
-     *
-     * @param array<int, CandidateMission> $candidates
-     * @return array<int, AttackCandidateGroup>
-     */
-    private function groupsOf(array $candidates): array
-    {
-        $parUnion = [];
-        $seules = [];
-
-        foreach ($candidates as $candidate) {
-            if ($candidate->unionId === null) {
-                $seules[] = AttackCandidateGroup::ofASingleFleet($candidate);
-
-                continue;
-            }
-
-            $parUnion[$candidate->unionId][] = $candidate;
-        }
-
-        $groupes = $seules;
-
-        foreach ($parUnion as $unionId => $missions) {
-            $groupes[] = new AttackCandidateGroup('union:' . $unionId, $missions);
-        }
-
-        return $groupes;
     }
 
     /**
