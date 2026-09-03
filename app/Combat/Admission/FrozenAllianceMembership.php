@@ -2,6 +2,8 @@
 
 namespace OGame\Combat\Admission;
 
+use OGame\Combat\Exceptions\CorruptedFrozenMembership;
+
 /**
  * Qui appartenait a l'alliance gouvernante **au moment de l'ouverture**.
  *
@@ -40,23 +42,58 @@ final readonly class FrozenAllianceMembership
     /**
      * La photographie prise a l'ouverture.
      *
-     * @param int|null $allianceId
-     * @param array<int, int> $memberUserIds
-     * @return self
+     * **Elle refuse plutot que de corriger.** Une liste de membres sans alliance qui gouverne, un
+     * identifiant negatif, un doublon : chacun signale que l'appelant ne dit pas ce qu'il croit
+     * dire. Les accepter en les nettoyant rendrait une photographie plausible et fausse, que plus
+     * personne ne pourrait distinguer d'une vraie.
+     *
+     * @param int|null $allianceId L'alliance gouvernante, ou null si l'ouvreur n'en avait pas.
+     * @param array<int, int> $memberUserIds Les proprietaires membres a la seconde de l'ouverture.
+     *
+     * @throws CorruptedFrozenMembership Si les deux faits se contredisent.
      */
     public static function of(int|null $allianceId, array $memberUserIds): self
     {
         if ($allianceId === null) {
-            // Sans alliance qui gouverne, personne d'autre que le createur ne rejoint : une liste
-            // de membres n'aurait aucun sens, et en accepter une laisserait croire le contraire.
+            if ($memberUserIds !== []) {
+                // Membres sans alliance : l'un des deux faits est faux, et rien ne dit lequel.
+                // Effacer la liste — ce que faisait cette methode — choisissait le silence.
+                throw new CorruptedFrozenMembership(
+                    'des membres ont ete photographies sans alliance qui gouverne',
+                    $memberUserIds
+                );
+            }
+
             return new self(null, []);
+        }
+
+        if ($allianceId <= 0) {
+            throw new CorruptedFrozenMembership(
+                'l identifiant d alliance n est pas strictement positif',
+                $allianceId
+            );
         }
 
         $indexes = [];
 
         foreach ($memberUserIds as $userId) {
+            if (!is_int($userId) || $userId <= 0) {
+                throw new CorruptedFrozenMembership(
+                    'un membre n est pas un identifiant strictement positif',
+                    $userId
+                );
+            }
+
+            if (isset($indexes[$userId])) {
+                // Un doublon ne change pas qui est admissible, mais il change l'empreinte des faits
+                // geles : deux photographies du meme instant cesseraient d'etre comparables.
+                throw new CorruptedFrozenMembership('un membre apparait deux fois', $userId);
+            }
+
             $indexes[$userId] = true;
         }
+
+        ksort($indexes);
 
         return new self($allianceId, $indexes);
     }
@@ -72,34 +109,64 @@ final readonly class FrozenAllianceMembership
     /**
      * La photographie telle qu'elle a ete persistee.
      *
+     * **Colonne nulle veut dire « aucune alliance ne gouverne »**, et c'est la seule facon de le
+     * dire : un JSON portant `alliance_id: null` serait une seconde representation du meme etat, et
+     * deux formes pour un meme fait finissent par diverger.
+     *
      * @param array<string, mixed>|null $stored
-     * @return self
+     *
+     * @throws CorruptedFrozenMembership Si la structure lue n'est pas celle qui a ete ecrite.
      */
     public static function fromStorage(array|null $stored): self
     {
-        if ($stored === null || !isset($stored['alliance_id'])) {
+        if ($stored === null) {
             return self::none();
         }
 
-        $allianceId = $stored['alliance_id'];
-        $membres = $stored['members'] ?? [];
+        $inconnues = array_diff(array_keys($stored), ['alliance_id', 'members']);
 
-        return self::of(
-            is_int($allianceId) ? $allianceId : null,
-            is_array($membres) ? array_values(array_filter($membres, 'is_int')) : []
-        );
+        if ($inconnues !== []) {
+            throw new CorruptedFrozenMembership(
+                'la structure porte des cles inconnues (' . implode(', ', $inconnues) . ')',
+                $stored
+            );
+        }
+
+        if (!array_key_exists('alliance_id', $stored) || !array_key_exists('members', $stored)) {
+            throw new CorruptedFrozenMembership('la structure est incomplete', $stored);
+        }
+
+        $allianceId = $stored['alliance_id'];
+        $membres = $stored['members'];
+
+        if (!is_int($allianceId)) {
+            throw new CorruptedFrozenMembership('l identifiant d alliance n est pas un entier', $stored);
+        }
+
+        if (!is_array($membres) || array_keys($membres) !== range(0, count($membres) - 1)) {
+            throw new CorruptedFrozenMembership('les membres ne forment pas une liste', $stored);
+        }
+
+        return self::of($allianceId, array_values($membres));
     }
 
     /**
      * Ce qu'il faut ecrire avec le combat.
      *
-     * @return array<string, mixed>
+     * Les identifiants sont **tries** : la meme photographie doit produire le meme JSON, sinon
+     * l'empreinte des faits geles dependrait de l'ordre dans lequel la base a rendu les lignes.
+     *
+     * @return array<string, mixed>|null Nul quand aucune alliance ne gouverne.
      */
-    public function toStorage(): array
+    public function toStorage(): array|null
     {
+        if ($this->allianceId === null) {
+            return null;
+        }
+
         return [
             'alliance_id' => $this->allianceId,
-            'members' => array_keys($this->members),
+            'members' => $this->memberUserIds(),
         ];
     }
 
