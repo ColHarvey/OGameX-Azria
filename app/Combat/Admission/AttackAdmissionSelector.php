@@ -5,6 +5,7 @@ namespace OGame\Combat\Admission;
 use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\FlightLeg;
+use OGame\Combat\Exceptions\ContradictoryAdmissionInput;
 use OGame\Combat\Support\CombatRallyWindow;
 
 /**
@@ -25,12 +26,24 @@ use OGame\Combat\Support\CombatRallyWindow;
  * un joueur etranger a l'alliance doit lire « pas allie », pas « limite atteinte » — la seconde
  * laisserait croire qu'il aurait pu entrer en arrivant plus tot.
  *
- *     1. corps exact, sens de vol, acteur autorise
- *     2. deja en vol a l'ouverture, non rappelee
- *     3. plafond temporel
- *     4. combat contre une faction pilotee par le serveur
- *     5. createur ayant rappele, puis meme joueur ou alliance figee
- *     6. budgets, dans l'ordre deterministe
+ *     1. le corps vise
+ *     2. l'etat de la candidate : deja en vol, puis rappelee
+ *     3. la cible ou la candidate pilotee par le serveur
+ *     4. le groupe fondateur ferme
+ *     5. l'alliance figee
+ *     6. le plafond temporel
+ *     7. les budgets, flottes avant joueurs
+ *
+ * **Les impossibilites permanentes passent avant les limites circonstancielles.** Le plafond
+ * temporel etait teste avant la cible non renforcable et avant l'alliance : un allie econduit
+ * lisait « trop tard » alors qu'il n'aurait jamais pu entrer, quel que fut son horaire.
+ *
+ * ## La raison ne depend pas de l'ordre des lignes
+ *
+ * Rendre le premier defaut rencontre en parcourant les missions du groupe faisait dependre le
+ * message de l'ordre dans lequel la base avait rendu les lignes : deux permutations du meme groupe
+ * ACS donnaient deux raisons. Chaque categorie est donc evaluee sur **tout le groupe**, et la
+ * premiere categorie presente dans l'ordre ci-dessus l'emporte.
  *
  * ## Un combat contre le serveur ne se rejoint pas
  *
@@ -130,7 +143,9 @@ final class AttackAdmissionSelector
     /**
      * Pourquoi ce groupe ne peut pas rejoindre, ou `null` s'il le peut.
      *
-     * Le premier refus rencontre gagne : l'ordre des controles decide la raison que le joueur lira.
+     * La premiere categorie presente l'emporte, dans l'ordre de priorite documente en tete de
+     * classe. Chaque categorie est evaluee sur **tout le groupe** : un groupe ACS ne doit pas
+     * changer de message selon l'ordre dans lequel ses missions ont ete lues.
      *
      * @param AttackCandidateGroup $group
      * @param FoundingGroup $founding
@@ -148,63 +163,105 @@ final class AttackAdmissionSelector
         int $openedAt,
         int $ceiling,
     ): CombatReasonCode|null {
-        foreach ($group->missions as $mission) {
-            // Une planete et sa lune partagent leurs coordonnees : viser l'une n'est pas viser
-            // l'autre.
-            if ($mission->targetBodyId !== $targetBodyId) {
-                return CombatReasonCode::WrongTargetBody;
-            }
+        $this->refuseContradictoryInput($group);
 
-            // Un pirate ouvre seul et n'est pas renforcable, dans un sens comme dans l'autre.
-            if ($mission->actor !== ActorKind::Player) {
-                return CombatReasonCode::NpcSideNotReinforceable;
-            }
+        $categories = [
+            // 1. Une planete et sa lune partagent leurs coordonnees : viser l'une n'est pas viser
+            //    l'autre.
+            [CombatReasonCode::WrongTargetBody, $this->anyMission(
+                $group,
+                static fn (CandidateMission $m): bool => $m->targetBodyId !== $targetBodyId
+            )],
 
-            // Un retour n'a rien a rallier : il rentre chez lui.
-            if ($mission->leg !== FlightLeg::Outbound || !$mission->mission->opensCombat()) {
-                return CombatReasonCode::NoCombatEffect;
-            }
+            // 2. Le ralliement rassemble ce qui volait deja ; il n'ouvre pas une fenetre de
+            //    lancement. Puis : une candidate rappelee ne rejoint plus rien.
+            [CombatReasonCode::NotAlreadyInFlight, $this->anyMission(
+                $group,
+                static fn (CandidateMission $m): bool => !$m->inFlightAtOpening
+            )],
+            [CombatReasonCode::CandidateRecalled, $this->anyMission(
+                $group,
+                static fn (CandidateMission $m): bool => $m->recalled
+            )],
 
-            // Le ralliement rassemble ce qui volait deja ; il n'ouvre pas une fenetre de lancement.
-            if (!$mission->inFlightAtOpening) {
-                return CombatReasonCode::NotAlreadyInFlight;
-            }
+            // 3. Un combat pilote par le serveur ne se rassemble pas, dans un sens comme dans
+            //    l'autre : ni une candidate pilotee par le serveur, ni un renfort exterieur sur une
+            //    cible qui l'est.
+            [CombatReasonCode::NpcSideNotReinforceable, $this->anyMission(
+                $group,
+                static fn (CandidateMission $m): bool => $m->actor !== ActorKind::Player
+            ) || ($targetActor !== ActorKind::Player && $this->anyMission(
+                $group,
+                static fn (CandidateMission $m): bool => $m->userId !== $founding->creatorUserId
+            ))],
 
-            if ($mission->recalled) {
-                return CombatReasonCode::CandidateRecalled;
-            }
-        }
+            // 4. Le createur a rappele sa flotte : les membres deja lances continuent, personne
+            //    d'autre n'entre.
+            [CombatReasonCode::RallyClosed, !$founding->stillAcceptsNewMembers],
 
-        // **Une egalite avec le plafond compte pour apres**, comme partout ailleurs.
-        if ($group->scheduledArrivalAt() >= $ceiling || $group->scheduledArrivalAt() < $openedAt) {
-            return CombatReasonCode::RallyWindowLimit;
-        }
+            // 5. L'alliance figee a l'ouverture est le seul titre d'un tiers.
+            [CombatReasonCode::AllianceNotEligible, $this->anyMission(
+                $group,
+                static fn (CandidateMission $m): bool => !$founding->admitsAutomatically($m)
+            )],
 
-        // **Une cible pilotee par le serveur ne se rassemble pas.** L'ouvreur continue seul, ses
-        // propres vagues comprises : ce sont ses flottes, pas un renfort. Le controle passe avant
-        // celui de l'alliance parce qu'il est structurel — l'allie econduit doit lire qu'il n'y
-        // avait rien a rejoindre, et non qu'il s'y est pris trop tard.
-        if ($targetActor !== ActorKind::Player) {
-            foreach ($group->missions as $mission) {
-                if ($mission->userId !== $founding->creatorUserId) {
-                    return CombatReasonCode::NpcSideNotReinforceable;
-                }
-            }
-        }
+            // 6. **Une egalite avec le plafond compte pour apres**, comme partout ailleurs.
+            [CombatReasonCode::RallyWindowLimit,
+                $group->scheduledArrivalAt() >= $ceiling || $group->scheduledArrivalAt() < $openedAt],
+        ];
 
-        // Le createur a rappele sa flotte : les membres deja lances continuent, personne d'autre
-        // n'entre.
-        if (!$founding->stillAcceptsNewMembers) {
-            return CombatReasonCode::RallyClosed;
-        }
-
-        foreach ($group->missions as $mission) {
-            if (!$founding->admitsAutomatically($mission)) {
-                return CombatReasonCode::AllianceNotEligible;
+        foreach ($categories as [$raison, $presente]) {
+            if ($presente) {
+                return $raison;
             }
         }
 
         return null;
+    }
+
+    /**
+     * Arrete une entree que la matrice n'aurait jamais du deleguer ici.
+     *
+     * La matrice ne delegue au selecteur attaquant que les allers `Attack`, `AcsAttack` et
+     * `MoonDestruction`. Un retour, ou un genre qui n'ouvre pas de combat, ne peut donc pas arriver
+     * sur un chemin sain.
+     *
+     * **Ce n'est pas un refus a montrer au joueur.** Le rendre sous `NoCombatEffect` masquerait un
+     * defaut d'integration derriere un message anodin, et la flotte repartirait avec une raison
+     * plausible pendant que la cause resterait invisible.
+     *
+     * @param AttackCandidateGroup $group
+     * @return void
+     */
+    private function refuseContradictoryInput(AttackCandidateGroup $group): void
+    {
+        foreach ($group->missions as $mission) {
+            if ($mission->leg !== FlightLeg::Outbound || !$mission->mission->opensCombat()) {
+                throw new ContradictoryAdmissionInput(
+                    'selecteur d admission attaquante',
+                    $mission->mission->value . ' / ' . $mission->leg->value,
+                    'mission ' . $mission->missionId
+                );
+            }
+        }
+    }
+
+    /**
+     * Si au moins une mission du groupe presente ce defaut.
+     *
+     * @param AttackCandidateGroup $group
+     * @param callable(CandidateMission): bool $predicate
+     * @return bool
+     */
+    private function anyMission(AttackCandidateGroup $group, callable $predicate): bool
+    {
+        foreach ($group->missions as $mission) {
+            if ($predicate($mission)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

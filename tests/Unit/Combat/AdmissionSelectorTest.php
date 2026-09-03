@@ -14,6 +14,7 @@ use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\FlightLeg;
+use OGame\Combat\Exceptions\ContradictoryAdmissionInput;
 use OGame\Combat\Support\CombatRallyWindow;
 use Tests\UnitTestCase;
 
@@ -310,8 +311,6 @@ class AdmissionSelectorTest extends UnitTestCase
         $cas = [
             'mauvais corps' => [$this->aCandidate(missionId: 801, userId: 21, arrivesAt: self::OPENING + 5, targetBodyId: self::TARGET_BODY + 1), CombatReasonCode::WrongTargetBody],
             'pirate' => [$this->aCandidate(missionId: 802, userId: 21, arrivesAt: self::OPENING + 5, actor: ActorKind::Npc), CombatReasonCode::NpcSideNotReinforceable],
-            'retour' => [$this->aCandidate(missionId: 803, userId: 21, arrivesAt: self::OPENING + 5, leg: FlightLeg::Return), CombatReasonCode::NoCombatEffect],
-            'transport' => [$this->aCandidate(missionId: 804, userId: 21, arrivesAt: self::OPENING + 5, mission: CombatMissionKind::Transport), CombatReasonCode::NoCombatEffect],
             'pas en vol' => [$this->aCandidate(missionId: 805, userId: 21, arrivesAt: self::OPENING + 5, inFlightAtOpening: false), CombatReasonCode::NotAlreadyInFlight],
             'rappelee' => [$this->aCandidate(missionId: 806, userId: 21, arrivesAt: self::OPENING + 5, recalled: true), CombatReasonCode::CandidateRecalled],
             'trop tard' => [$this->aCandidate(missionId: 807, userId: 21, arrivesAt: self::OPENING + AttackAdmissionSelector::MAX_WINDOW_SECONDS), CombatReasonCode::RallyWindowLimit],
@@ -549,6 +548,113 @@ class AdmissionSelectorTest extends UnitTestCase
     {
         $this->assertSame(16, AdmissionBudget::canonical()->maxFleets);
         $this->assertSame(5, AdmissionBudget::canonical()->maxPlayers);
+    }
+
+    /**
+     * Un retour ou un genre non combattant n'est pas un refus : c'est une contradiction.
+     *
+     * La matrice ne delegue au selecteur attaquant que les allers `Attack`, `AcsAttack` et
+     * `MoonDestruction`. Une autre forme ne peut donc pas arriver ici sur un chemin sain.
+     *
+     * **La rendre sous `NoCombatEffect` etait tentant** — la phrase est vraie, le joueur lirait
+     * quelque chose de sense, sa flotte repartirait. C'est precisement ce qui la rendait dangereuse :
+     * un defaut d'integration aurait disparu derriere un message anodin.
+     */
+    public function testAContradictoryShapeIsStoppedRatherThanRefused(): void
+    {
+        $formes = [
+            'retour' => $this->aCandidate(missionId: 803, userId: 21, arrivesAt: self::OPENING + 5, leg: FlightLeg::Return),
+            'transport' => $this->aCandidate(missionId: 804, userId: 21, arrivesAt: self::OPENING + 5, mission: CombatMissionKind::Transport),
+        ];
+
+        foreach ($formes as $quoi => $candidate) {
+            try {
+                $this->selectAttack(
+                    [AttackCandidateGroup::ofASingleFleet($candidate)],
+                    $this->aFoundingGroup()
+                );
+
+                $this->fail("A « {$quoi} » was refused with a player-facing reason instead of stopping the run.");
+            } catch (ContradictoryAdmissionInput $arret) {
+                $this->assertStringContainsString(
+                    'selecteur d admission attaquante',
+                    $arret->getMessage(),
+                    'The contradiction does not name the mechanism that received it.'
+                );
+            }
+        }
+    }
+
+    /**
+     * Le meme groupe rend toujours la meme raison, quel que soit l'ordre de ses missions.
+     *
+     * ## Le defaut que cet essai ferme
+     *
+     * `whyItCannotJoin()` rendait le **premier defaut rencontre** en parcourant les missions du
+     * groupe. `AttackCandidateGroup` ne canonise pas cet ordre : deux permutations du meme groupe
+     * ACS donnaient donc deux messages differents au joueur, selon l'ordre dans lequel la base avait
+     * rendu les lignes.
+     *
+     * Le groupe porte ici **deux defauts simultanes** — une candidate rappelee, une autre hors
+     * alliance — precisement pour que l'ordre puisse departager. La priorite documentee tranche :
+     * l'etat de la candidate passe avant l'alliance.
+     */
+    public function testTheSameGroupAlwaysReadsTheSameReason(): void
+    {
+        $rappelee = $this->aCandidate(missionId: 901, userId: 21, arrivesAt: self::OPENING + 5, recalled: true);
+        $etrangere = $this->aCandidate(missionId: 902, userId: 99, arrivesAt: self::OPENING + 5, allianceId: 999);
+
+        $raisons = [];
+
+        foreach ([[$rappelee, $etrangere], [$etrangere, $rappelee]] as $ordre) {
+            $verdict = $this->selectAttack(
+                [new AttackCandidateGroup('union:7', $ordre)],
+                $this->aFoundingGroup()
+            );
+
+            $raisons[] = $verdict->refused()[0]->refusal;
+        }
+
+        $this->assertSame(
+            $raisons[0],
+            $raisons[1],
+            'Two permutations of one ACS group produced two different reasons for the same player.'
+        );
+
+        $this->assertSame(
+            CombatReasonCode::CandidateRecalled,
+            $raisons[0],
+            'The priority order changed: the state of a candidate must come before her alliance.'
+        );
+    }
+
+    /**
+     * Une impossibilite permanente passe avant une limite circonstancielle.
+     *
+     * Un allie qui n'aurait **jamais** pu entrer ne doit pas lire « trop tard » : il aurait cru
+     * qu'un depart plus tot aurait suffi. L'ordre etait fautif — le plafond temporel etait teste
+     * avant la cible non renforcable et avant l'alliance.
+     */
+    public function testAPermanentImpossibilityIsReadBeforeATimingOne(): void
+    {
+        // Hors alliance **et** arrivee au plafond : deux defauts, et c'est l'alliance qui compte.
+        $candidate = $this->aCandidate(
+            missionId: 903,
+            userId: 99,
+            arrivesAt: self::OPENING + AttackAdmissionSelector::MAX_WINDOW_SECONDS,
+            allianceId: 999
+        );
+
+        $verdict = $this->selectAttack(
+            [AttackCandidateGroup::ofASingleFleet($candidate)],
+            $this->aFoundingGroup()
+        );
+
+        $this->assertSame(
+            CombatReasonCode::AllianceNotEligible,
+            $verdict->refused()[0]->refusal,
+            'A player who could never have joined was told he was too late.'
+        );
     }
 
     /**

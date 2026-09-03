@@ -496,6 +496,10 @@ class RallyArrivalCoverageTest extends UnitTestCase
      * `CombatArrivalOutcome::RecalledToOrigin` couvrait sept refus differents sous un seul mot. Un
      * joueur econduit lisait « rappele » sans savoir s'il etait arrive trop tard, hors alliance, de
      * trop, ou sur le mauvais corps — et l'interface n'avait aucun moyen de le lui dire.
+     *
+     * **Le retour a quitte cette table**, et c'est un progres du meme ordre : il n'est pas un refus
+     * a montrer, mais une entree que la matrice ne delegue jamais au selecteur attaquant. Il est
+     * arrete et audite — voir `AdmissionSelectorTest::testAContradictoryShapeIsStoppedRatherThanRefused`.
      */
     public function testEachRefusalNowCarriesTheReasonTheOldOutcomeCouldNotExpress(): void
     {
@@ -525,10 +529,6 @@ class RallyArrivalCoverageTest extends UnitTestCase
             'hors alliance' => [
                 $this->aCandidateGroup(userId: 21, allianceId: self::ALLIANCE + 1),
                 CombatReasonCode::AllianceNotEligible,
-            ],
-            'sans effet de combat' => [
-                $this->aCandidateGroup(userId: 21, allianceId: self::ALLIANCE, leg: FlightLeg::Return),
-                CombatReasonCode::NoCombatEffect,
             ],
         ];
 
