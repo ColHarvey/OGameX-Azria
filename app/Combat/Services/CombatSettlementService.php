@@ -52,9 +52,14 @@ use RuntimeException;
  *
  * ## L'ordre des verrous
  *
- * Celui que la migration de barriere fixe : corps -> combat -> union -> missions par identifiant
- * croissant -> la cible, prise en dernier parce que c'est elle qu'on debite. Une jointure ou une
- * fermeture qui le suit ne peut pas nous attendre pendant que nous l'attendons.
+ * Celui que la migration de barriere fixe : barriere -> instance -> union -> missions par
+ * identifiant croissant -> **tous les corps celestes touches**, par identifiant croissant. Une
+ * jointure ou une fermeture qui le suit ne peut pas nous attendre pendant que nous l'attendons.
+ *
+ * La derniere famille n'est pas seulement la cible : les retours creditent les corps d'origine, un
+ * champ d'epaves peut s'y deposer. Deux combats reciproques — A qui attaque B et B qui attaque A —
+ * tenaient chacun sa cible puis attendaient l'origine de l'autre. Les prendre tous dans un ordre
+ * total ferme cette porte.
  *
  * ## L'idempotence
  *
@@ -167,10 +172,30 @@ final class CombatSettlementService
 
             $this->lockMissionsOf($combat);
 
-            // 4. La cible, en dernier : c'est elle qu'on debite.
-            $ligneCible = Planet::query()->whereKey($combat->target_planet_id)->lockForUpdate()->first();
+            // 4. **Tous les corps celestes de cette application, par identifiant croissant.**
+            //
+            // La cible n'est pas la seule ligne de `planets` que l'application touche : les retours
+            // creditent les corps d'origine, un champ d'epaves s'y depose. Ne verrouiller que la
+            // cible laissait un interblocage reel — deux combats reciproques, A qui attaque B et B
+            // qui attaque A : chacun tient sa cible, puis attend l'origine de l'autre, qui est la
+            // cible du premier.
+            //
+            // L'ordre croissant est ce qui ferme cette porte : deux transactions qui prennent les
+            // memes lignes dans le meme ordre ne peuvent pas s'attendre mutuellement. La cible n'est
+            // donc plus « en dernier » — elle est a sa place dans l'ordre, et c'est cette place qui
+            // compte.
+            $corps = $this->celestialBodyIdsOf($combat);
 
-            if ($ligneCible === null) {
+            $lignes = Planet::query()
+                ->whereIn('id', $corps)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('id');
+
+            $ligneCible = $lignes->get((int)$combat->target_planet_id);
+
+            if (!$ligneCible instanceof Planet) {
                 throw new RuntimeException('Le combat ' . $combat->id . ' vise un corps ' . $combat->target_planet_id . ' qui n existe plus.');
             }
 
@@ -268,6 +293,37 @@ final class CombatSettlementService
                 $potentiel->diagnostics->mergedWith($restant->diagnostics)->mergedWith($issue->diagnostics)
             );
         });
+    }
+
+    /**
+     * Les corps celestes que l'application de ce combat touche, par identifiant croissant.
+     *
+     * La cible, qu'on debite, et les corps d'ou les flottes sont parties : les retours les
+     * crediteront, un champ d'epaves peut s'y deposer. Les lire ici, avant tout verrou de ligne,
+     * evite l'oeuf et la poule — l'effectif complet ne se charge qu'apres.
+     *
+     * @return array<int, int>
+     */
+    private function celestialBodyIdsOf(CombatInstance $combat): array
+    {
+        $missions = array_merge(
+            $this->roster->missionIdsOf($combat, CombatParticipant::SIDE_ATTACKER),
+            $this->roster->missionIdsOf($combat, CombatParticipant::SIDE_DEFENDER)
+        );
+
+        $corps = FleetMission::query()
+            ->whereIn('id', $missions)
+            ->whereNotNull('planet_id_from')
+            ->pluck('planet_id_from')
+            ->map(static fn (mixed $id): int => (int)$id)
+            ->all();
+
+        $corps[] = (int)$combat->target_planet_id;
+
+        $corps = array_values(array_unique($corps));
+        sort($corps);
+
+        return $corps;
     }
 
     /**

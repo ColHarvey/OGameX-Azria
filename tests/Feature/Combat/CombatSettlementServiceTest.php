@@ -324,6 +324,55 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
     }
 
     /**
+     * Tout corps que l'application touche entre dans le meme verrou, par identifiant croissant.
+     *
+     * ## L'interblocage que cet ordre ferme
+     *
+     * La cible n'est pas la seule ligne de `planets` que l'application ecrit : les retours creditent
+     * les corps d'origine, un champ d'epaves peut s'y deposer. Deux combats reciproques — A qui
+     * attaque B et B qui attaque A — tenaient chacun sa cible, puis attendaient l'origine de
+     * l'autre, qui etait la cible du premier.
+     *
+     * SQLite ne verrouille rien, donc l'attente elle-meme ne s'observe pas ici. **La requete, si.**
+     * Cet essai lit quelles lignes sont demandees, et dans quel ordre : c'est exactement ce que
+     * MariaDB verrouillera.
+     */
+    public function testEveryBodyTheApplicationTouchesEntersTheSameLock(): void
+    {
+        [$combat, $missions, $cible] = $this->anEngagedCombat();
+
+        $origine = (int)$missions[0]->planet_id_from;
+        $this->assertNotSame($cible->getPlanetId(), $origine, 'The fleet left from its own target: nothing would distinguish the two bodies.');
+
+        $demandes = null;
+
+        // SQLite compile `lockForUpdate()` a rien : la requete ne porte pas « for update ». Ce qui
+        // se reconnait, c'est sa forme — les lignes demandees ensemble, dans l'ordre des
+        // identifiants — et c'est elle que MariaDB verrouillera.
+        DB::listen(function (QueryExecuted $requete) use (&$demandes): void {
+            if ($demandes === null
+                && str_contains($requete->sql, 'from "planets"')
+                && str_contains($requete->sql, '"id" in (')
+                && str_contains($requete->sql, 'order by "id" asc')) {
+                $demandes = $requete->bindings;
+            }
+        });
+
+        $this->settleIt($combat, (int)$combat->ends_at);
+
+        $this->assertNotNull($demandes, 'No body was locked at all.');
+
+        $attendus = [$cible->getPlanetId(), $origine];
+        sort($attendus);
+
+        $this->assertSame(
+            $attendus,
+            array_map('intval', $demandes),
+            'The settlement locks the target alone, or in an order that is not the ascending one two reciprocal combats would both follow.'
+        );
+    }
+
+    /**
      * Les verrous sont declares la ou SQLite ne peut pas les montrer.
      *
      * `lockForUpdate()` ne compile a rien sous SQLite : une mutation qui retire le verrou des
@@ -344,9 +393,11 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
             'instance' => 'CombatInstance::query()->whereKey($combatInstanceId)->lockForUpdate()',
             'union' => 'FleetUnion::query()->whereKey($combat->union_id)->lockForUpdate()',
             'missions' => "->orderBy('id') ->lockForUpdate()",
+            // **Tous les corps touches, par identifiant croissant** — la cible et les origines. Ne
+            // verrouiller que la cible laissait deux combats reciproques s'attendre mutuellement.
             // Le nom de classe vient de la reflexion : ecrit d'un trait entre guillemets, il
             // ressemblerait a une cle de participant pour la garde qui traque celles ecrites a la main.
-            'cible' => (new ReflectionClass(Planet::class))->getShortName() . '::query()->whereKey($combat->target_planet_id)->lockForUpdate()',
+            'corps' => (new ReflectionClass(Planet::class))->getShortName() . "::query() ->whereIn('id', \$corps) ->orderBy('id') ->lockForUpdate()",
         ];
 
         foreach ($verrous as $quoi => $declaration) {
@@ -359,8 +410,8 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
         // les deux ordres a l'execution : seule la source le montre.
         $this->assertLessThan(
             strpos($source, '$this->roster->forCombat($combat)'),
-            strpos($source, $verrous['cible']),
-            'The settlement reads its roster before locking the target: a concurrent spend could be resurrected.'
+            strpos($source, $verrous['corps']),
+            'The settlement reads its roster before locking the bodies: a concurrent spend could be resurrected.'
         );
     }
 
