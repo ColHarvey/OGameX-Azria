@@ -20,6 +20,15 @@ use OGame\Combat\Enums\CombatState;
  * Le modele de duree — rythme, amortissement, plancher — est ecrit avec le combat, pas lu dans
  * les reglages a la resolution. Ajuster un reglage ne touche donc que les combats suivants.
  *
+ * Les **faits geles** etendent ce principe a tout le reste : les cinq versions de regle,
+ * l'alliance qui gouverne, les budgets, les reglages de champ d'epave, le plan de destruction
+ * de lune. Un combat qui dure deux heures traverse des changements, et aucun ne doit changer
+ * l'issue d'une bataille deja engagee.
+ *
+ * **Une colonne oubliee ici serait invisible.** Eloquent ignore silencieusement ce qui n'est pas
+ * assignable : le fait cense etre fige ne le serait jamais, et personne ne s'en apercevrait
+ * avant la resolution. C'est pourquoi un essai compare cette liste au schema.
+ *
  * @property int $id
  * @property CombatState $status
  * @property CombatCancellationCause|null $cancellation_cause
@@ -41,6 +50,25 @@ use OGame\Combat\Enums\CombatState;
  * @property array<mixed>|null $battle_snapshot
  * @property array<mixed>|null $battle_result
  * @property int|null $battle_report_id
+ * @property string|null $causal_order_version
+ * @property string|null $loot_allocator_version
+ * @property string|null $loot_policy_version
+ * @property string|null $moon_destruction_rule_version
+ * @property string|null $fingerprint_schema_version
+ * @property string|null $opener_identity
+ * @property int|null $founding_creator_id
+ * @property int|null $governing_alliance_id
+ * @property int|null $authoritative_arrival_at
+ * @property string|null $schedule_version
+ * @property int $max_fleets
+ * @property int $max_players
+ * @property int $fleets_admitted
+ * @property int $players_admitted
+ * @property array<mixed>|null $frozen_settings
+ * @property array<mixed>|null $frozen_moon_identity
+ * @property array<mixed>|null $moon_destruction_plan
+ * @property string|null $frozen_facts_fingerprint
+ * @property bool $result_published
  * @property Carbon $created_at
  * @property Carbon $updated_at
  * @method static Builder|CombatInstance newModelQuery()
@@ -69,6 +97,25 @@ use OGame\Combat\Enums\CombatState;
     'battle_snapshot',
     'battle_result',
     'battle_report_id',
+    'causal_order_version',
+    'loot_allocator_version',
+    'loot_policy_version',
+    'moon_destruction_rule_version',
+    'fingerprint_schema_version',
+    'opener_identity',
+    'founding_creator_id',
+    'governing_alliance_id',
+    'authoritative_arrival_at',
+    'schedule_version',
+    'max_fleets',
+    'max_players',
+    'fleets_admitted',
+    'players_admitted',
+    'frozen_settings',
+    'frozen_moon_identity',
+    'moon_destruction_plan',
+    'frozen_facts_fingerprint',
+    'result_published',
 ])]
 class CombatInstance extends Model
 {
@@ -86,6 +133,10 @@ class CombatInstance extends Model
             'round_schedule' => 'array',
             'battle_snapshot' => 'array',
             'battle_result' => 'array',
+            'frozen_settings' => 'array',
+            'frozen_moon_identity' => 'array',
+            'moon_destruction_plan' => 'array',
+            'result_published' => 'boolean',
         ];
     }
 
