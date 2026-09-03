@@ -40,7 +40,9 @@ use OGame\Services\PlayerService;
  */
 final readonly class FrozenCombatApplicationContext implements CombatApplicationContext
 {
-    private const array KEYS = ['schema', 'players', 'space_docks', 'wreck_field'];
+    private const array KEYS = ['schema', 'players', 'space_docks', 'wreck_field', 'npc_narrative'];
+
+    private const array NARRATIVE_KEYS = ['motive', 'variation'];
 
     private const array PLAYER_KEYS = ['is_general', 'reaper_debris_percentage', 'character_class'];
 
@@ -57,6 +59,8 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
         private array $spaceDocks,
         private int $minResourcesLoss,
         private int $minFleetPercentage,
+        private string|null $npcMotive,
+        private int $npcVariation,
     ) {
     }
 
@@ -67,7 +71,7 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
      * flottes attaquantes. Un fait demande plus tard pour quelqu'un d'absent est un refus, pas un
      * repli sur le monde vivant : c'est ce qui rend la photographie complete par construction.
      */
-    public static function photograph(CombatRoster $roster, CombatApplicationContext $live): self
+    public static function photograph(CombatRoster $roster, CombatApplicationContext $live, int $narrativeVariations): self
     {
         $joueurs = [];
         $chantiers = [];
@@ -101,7 +105,13 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
             $joueurs,
             $chantiers,
             $live->wreckFieldMinResourcesLoss(),
-            $live->wreckFieldMinFleetPercentage()
+            $live->wreckFieldMinFleetPercentage(),
+            // **Le recit se fige ici aussi.** Le motif lu a l'echeance expliquerait un raid par une
+            // provocation survenue pendant la bataille ; la variante tiree a l'echeance donnerait
+            // une histoire differente a chaque rejeu. Ils sont photographies meme quand l'attaquant
+            // n'est pas une faction : le rapport ne les lira simplement pas.
+            $live->npcMotiveAgainst($roster->targetOwner),
+            $live->npcNarrativeVariation($narrativeVariations)
         );
     }
 
@@ -117,6 +127,10 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
             'wreck_field' => [
                 'min_resources_loss' => $this->minResourcesLoss,
                 'min_fleet_percentage' => $this->minFleetPercentage,
+            ],
+            'npc_narrative' => [
+                'motive' => $this->npcMotive,
+                'variation' => $this->npcVariation,
             ],
         ];
     }
@@ -178,11 +192,22 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
         $epaves = self::structure($stored, 'wreck_field', 'contexte');
         self::refuseUnknownKeys($epaves, self::WRECK_FIELD_KEYS, 'contexte.wreck_field');
 
+        $recit = self::structure($stored, 'npc_narrative', 'contexte');
+        self::refuseUnknownKeys($recit, self::NARRATIVE_KEYS, 'contexte.npc_narrative');
+
+        $motif = self::present($recit, 'motive', 'contexte.npc_narrative');
+
+        if ($motif !== null && !is_string($motif)) {
+            throw new CorruptedFrozenApplicationContext('« contexte.npc_narrative.motive » est un ' . get_debug_type($motif) . ' et non un texte ni null', $stored);
+        }
+
         return new self(
             $joueurs,
             $chantiers,
             self::int($epaves, 'min_resources_loss', 'contexte.wreck_field'),
-            self::int($epaves, 'min_fleet_percentage', 'contexte.wreck_field')
+            self::int($epaves, 'min_fleet_percentage', 'contexte.wreck_field'),
+            $motif,
+            self::int($recit, 'variation', 'contexte.npc_narrative')
         );
     }
 
@@ -227,6 +252,23 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
     public function wreckFieldMinFleetPercentage(): int
     {
         return $this->minFleetPercentage;
+    }
+
+    public function npcMotiveAgainst(PlayerService $defender): string|null
+    {
+        return $this->npcMotive;
+    }
+
+    /**
+     * La variante tiree a la cloture.
+     *
+     * Le nombre de variantes est celui de l'applicateur ; si un deploiement en ajoute pendant qu'une
+     * bataille dure, la variante figee reste dans l'ancienne plage — et c'est voulu : le rapport
+     * raconte l'histoire qui a ete tiree, pas une autre.
+     */
+    public function npcNarrativeVariation(int $variations): int
+    {
+        return $this->npcVariation;
     }
 
     /**

@@ -4,6 +4,7 @@ namespace OGame\Combat\Application;
 
 use OGame\Enums\CharacterClass;
 use OGame\Services\CharacterClassService;
+use OGame\Services\Npc\NpcThreatService;
 use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
@@ -56,5 +57,18 @@ final class LiveCombatApplicationContext implements CombatApplicationContext
     public function wreckFieldMinFleetPercentage(): int
     {
         return $this->settings->wreckFieldMinFleetPercentage();
+    }
+
+    public function npcMotiveAgainst(PlayerService $defender): string|null
+    {
+        // Lu a l'arrivee et non au depart : il ne peut avoir change entre-temps que si le joueur
+        // a de nouveau provoque la faction pendant le vol, auquel cas le motif recent est le plus
+        // juste des deux.
+        return resolve(NpcThreatService::class)->lastMotiveOf($defender);
+    }
+
+    public function npcNarrativeVariation(int $variations): int
+    {
+        return random_int(1, $variations);
     }
 }

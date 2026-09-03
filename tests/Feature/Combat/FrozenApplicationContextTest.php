@@ -61,7 +61,23 @@ class FrozenApplicationContextTest extends FleetDispatchTestCase
         $settingsService->set('fleet_speed_peaceful', 1);
         $settingsService->set('attack_block_until', 0);
 
+        // **Aucun seuil de champ d'epaves.** Ces essais portent sur le niveau de chantier spatial,
+        // pas sur le seuil : laisser les seuils par defaut ferait dependre le champ d'epaves de
+        // l'ampleur des pertes, que le moteur tire au sort. Ils sont remis au demontage — les
+        // reglages vivent en base et survivent a l'essai.
+        $settingsService->set('wreck_field_min_resources_loss', 0);
+        $settingsService->set('wreck_field_min_fleet_percentage', 0);
+
         $this->planetAddResources(new Resources(0, 0, 1_000_000, 0));
+    }
+
+    protected function tearDown(): void
+    {
+        $reglages = resolve(SettingsService::class);
+        $reglages->set('wreck_field_min_resources_loss', 150000);
+        $reglages->set('wreck_field_min_fleet_percentage', 5);
+
+        parent::tearDown();
     }
 
     protected function messageCheckMissionArrival(): void
@@ -132,6 +148,7 @@ class FrozenApplicationContextTest extends FleetDispatchTestCase
         $auNiveauGele = $this->asReportShape($epaves->calculateShipsForWreckField($perdus, 1));
         $auNiveauCourant = $this->asReportShape($epaves->calculateShipsForWreckField($perdus, 12));
 
+        $this->assertNotSame([], $auNiveauGele, 'The frozen space dock level recovers nothing from these losses: the test would compare two absences.');
         $this->assertNotSame($auNiveauGele, $auNiveauCourant, 'Both space dock levels give the same wreck field: the test would prove nothing.');
 
         $this->assertSame(

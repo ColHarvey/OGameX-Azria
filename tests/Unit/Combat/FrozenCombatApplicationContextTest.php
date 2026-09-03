@@ -93,6 +93,25 @@ class FrozenCombatApplicationContextTest extends UnitTestCase
         $this->assertRefused($document, 'schema 9');
     }
 
+    /**
+     * Le recit se relit tel qu'il a ete tire : le motif, et la variante.
+     */
+    public function testTheNarrativeIsReadBackAsItWasDrawn(): void
+    {
+        $contexte = FrozenCombatApplicationContext::fromStorage($this->aSnapshot());
+
+        $this->assertSame(3, $contexte->npcNarrativeVariation(5), 'The frozen variation was redrawn instead of read back.');
+        $this->assertSame(3, $contexte->npcNarrativeVariation(99), 'A deployment that adds variations changed the story of a battle already fought.');
+    }
+
+    public function testANarrativeVariationGivenAsAStringIsRefused(): void
+    {
+        $document = $this->aSnapshot();
+        $document['npc_narrative']['variation'] = '3';
+
+        $this->assertRefused($document, 'variation');
+    }
+
     public function testADocumentThatIsNotAStructureIsRefused(): void
     {
         $this->assertRefused('{"schema":1}', 'structure');
@@ -121,6 +140,7 @@ class FrozenCombatApplicationContextTest extends UnitTestCase
             ],
             'space_docks' => [7 => 4, 9 => 1],
             'wreck_field' => ['min_resources_loss' => 150_000, 'min_fleet_percentage' => 5],
+            'npc_narrative' => ['motive' => 'retaliation', 'variation' => 3],
         ];
     }
 }

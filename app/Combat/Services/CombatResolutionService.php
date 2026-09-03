@@ -60,7 +60,7 @@ class CombatResolutionService
      * chaque fichier de langue. Augmenter ce nombre sans ajouter les traductions afficherait
      * une cle brute au joueur.
      */
-    private const int NPC_MOTIVE_VARIATIONS = 5;
+    public const int NPC_MOTIVE_VARIATIONS = 5;
 
     /**
      * Get whether this attack was launched by a server-driven faction.
@@ -454,7 +454,7 @@ class CombatResolutionService
         // qu'il n'a pas eu lieu. L'explication arrive une fois que tout est joue, la ou le
         // joueur va de toute facon analyser ce qui vient de se passer, et un recit qui
         // n'influence plus aucune decision ne desequilibre rien.
-        $this->attachNpcMotive($reportId, $mission, $defenderPlayer);
+        $this->attachNpcMotive($reportId, $mission, $defenderPlayer, $context);
 
         if ($attackerDestroyedFirstRound) {
             // La force d'attaque a ete aneantie avant d'avoir pu transmettre quoi que ce soit :
@@ -824,7 +824,7 @@ class CombatResolutionService
      * demande aucune migration. La cle n'est ecrite que pour un raid de faction, donc le
      * gabarit reste muet pour tous les combats entre joueurs.
      */
-    private function attachNpcMotive(int $reportId, FleetMission $mission, PlayerService $defenderPlayer): void
+    private function attachNpcMotive(int $reportId, FleetMission $mission, PlayerService $defenderPlayer, CombatApplicationContext $context): void
     {
         if (!self::isNpcAttack($mission)) {
             return;
@@ -842,19 +842,22 @@ class CombatResolutionService
             return;
         }
 
-        // Le motif est lu a l'arrivee et non au depart. Il ne peut avoir change entre-temps
-        // que si le joueur a de nouveau provoque la faction pendant le vol — auquel cas le
-        // motif recent est le plus juste des deux.
-        $motive = resolve(NpcThreatService::class)->lastMotiveOf($defenderPlayer);
+        // **Le motif vient du contexte.** Sur le chemin instantane, c'est celui de l'arrivee — il
+        // ne peut avoir change depuis le depart que si le joueur a de nouveau provoque la
+        // faction pendant le vol, auquel cas le recent est le plus juste. Sur le chemin durable,
+        // c'est celui de la cloture : un motif inscrit **pendant** la bataille expliquerait un
+        // raid decide avant lui.
+        $motive = $context->npcMotiveAgainst($defenderPlayer);
 
         $general = $report->general ?? [];
         $general['npc_motive'] = $motive ?? 'first_contact';
         $general['npc_faction'] = $attacker->npc_type;
         $general['npc_crew'] = $attacker->username;
-        // La variante est tiree une seule fois, ici, et conservee avec le rapport. La tirer
-        // a l'affichage donnerait un texte different a chaque ouverture du meme rapport, et
-        // un joueur qui relit un combat verrait son histoire changer sous ses yeux.
-        $general['npc_variation'] = random_int(1, self::NPC_MOTIVE_VARIATIONS);
+        // La variante est tiree une seule fois et conservee avec le rapport. La tirer a
+        // l'affichage donnerait un texte different a chaque ouverture du meme rapport, et un
+        // joueur qui relit un combat verrait son histoire changer sous ses yeux. Sur le chemin
+        // durable, elle est tiree a la cloture, avec le reste de ce qui decide du rapport.
+        $general['npc_variation'] = $context->npcNarrativeVariation(self::NPC_MOTIVE_VARIATIONS);
         $report->general = $general;
         $report->save();
     }

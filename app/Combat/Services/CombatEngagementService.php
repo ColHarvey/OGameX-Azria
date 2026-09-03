@@ -111,7 +111,8 @@ final class CombatEngagementService
         // pendant les heures que dure le combat, et chacun changerait ce que l'application ecrit.
         $combat->frozen_settings = FrozenCombatApplicationContext::photograph(
             $effectif,
-            new LiveCombatApplicationContext(resolve(CharacterClassService::class), $this->settings())
+            new LiveCombatApplicationContext(resolve(CharacterClassService::class), $this->settings()),
+            CombatResolutionService::NPC_MOTIVE_VARIATIONS
         )->toStorage();
 
         $combat->battle_result = BattleResultCodec::toStorage($resultat);
