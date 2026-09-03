@@ -3,32 +3,27 @@
 namespace OGame\Combat\Services;
 
 use Closure;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Allocation\AppliedLootShares;
-use OGame\Combat\Allocation\ExactLootAmounts;
 use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Allocation\FrozenLootPotential;
 use OGame\Combat\Allocation\LootAllocatorRegistry;
 use OGame\Combat\Allocation\LootSettlement;
 use OGame\Combat\Allocation\RemainingTargetStock;
+use OGame\Combat\Allocation\SettledBattleResult;
 use OGame\Combat\Allocation\SurvivingFleetCapacity;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Replay\BattleResultCodec;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\FrozenCombatVersionSet;
 use OGame\GameMissions\Abstracts\GameMission;
-use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleetResult;
-use OGame\GameMissions\BattleEngine\Models\BattleResult;
-use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
+use OGame\Models\CombatParticipant;
 use OGame\Models\FleetMission;
 use OGame\Models\FleetUnion;
 use OGame\Models\Planet;
-use OGame\Models\Resources;
-use OGame\Services\PlanetService;
-use OGame\Services\PlayerService;
 use RuntimeException;
 
 /**
@@ -36,17 +31,18 @@ use RuntimeException;
  *
  * ## Ce que ce service fait, et ce qu'il ne refait pas
  *
- * Il ne recalcule rien et n'applique rien lui-meme. Le moteur a deja calcule le resultat ; la
- * resolution existante sait deja retirer les unites perdues, deposer les debris, creer les retours,
- * ecrire le rapport et prevenir chacun. Ecrire une seconde application du resultat aurait ete un
- * second moteur de decision, avec ses propres ecarts a decouvrir un par un.
+ * Il ne recalcule rien et n'applique rien lui-meme. Le moteur a calcule le resultat a la cloture ;
+ * la resolution existante sait deja retirer les unites perdues, deposer les debris, creer les
+ * retours, ecrire le rapport et prevenir chacun. Ecrire une seconde application du resultat aurait
+ * ete un second moteur de decision, avec ses propres ecarts a decouvrir un par un.
  *
  * Ce service fait donc la seule chose que le chemin instantane ne sait pas faire : **regler le butin
- * sur ce qui reste**, des heures apres la photographie. Il fige le potentiel, relit le restant sous
- * verrou, en tire l'applique et sa repartition, **ecrit ces nombres avant tout debit**, puis remet a
- * la resolution une copie du resultat dont le butin est l'applique et dont chaque part est celle
- * qu'il a calculee. La resolution debite alors exactement l'applique, embarque exactement les parts,
- * et fige le rapport sur ces memes nombres — sans savoir qu'elle regle une bataille ancienne.
+ * sur ce qui reste**, des heures apres la photographie. Il relit le resultat fige, gele le potentiel,
+ * relit le restant sous verrou, en tire l'applique et sa repartition, **ecrit ces nombres avant tout
+ * debit**, puis remet a la resolution une copie du resultat dont le butin est l'applique et dont
+ * chaque part est celle qu'il a calculee. La resolution debite alors exactement l'applique, embarque
+ * exactement les parts, et fige le rapport sur ces memes nombres — sans savoir qu'elle regle une
+ * bataille ancienne.
  *
  * ## L'ordre des verrous
  *
@@ -72,6 +68,7 @@ final class CombatSettlementService
 {
     public function __construct(
         private CombatResolutionService $resolution,
+        private CombatRosterReader $roster = new CombatRosterReader(),
         private LootAllocatorRegistry|null $allocators = null,
     ) {
     }
@@ -80,40 +77,13 @@ final class CombatSettlementService
      * Regle le combat, ou explique pourquoi il n'y avait rien a regler.
      *
      * @param int $combatInstanceId
-     * @param BattleResult $result Resultat calcule par le moteur sur la photographie, jamais modifie ici.
-     * @param PlanetService $defenderPlanet
-     * @param PlayerService $defenderPlayer
-     * @param array<int, AttackerFleet> $attackerFleets
-     * @param PlayerService $attackerPlayer Proprietaire de la flotte initiatrice.
-     * @param array<int, DefenderFleet> $defenders
      * @param GameMission $missionDeJeu Porte le type de vitesse qui determine la duree des retours.
      * @param Closure $creerRetour Cree une mission retour ; delegue a GameMission::startReturn().
      * @param int $now L'instant du reglement, ecrit sur l'instance.
      */
-    public function settle(
-        int $combatInstanceId,
-        BattleResult $result,
-        PlanetService $defenderPlanet,
-        PlayerService $defenderPlayer,
-        array $attackerFleets,
-        PlayerService $attackerPlayer,
-        array $defenders,
-        GameMission $missionDeJeu,
-        Closure $creerRetour,
-        int $now,
-    ): CombatSettlementOutcome {
-        return DB::transaction(function () use (
-            $combatInstanceId,
-            $result,
-            $defenderPlanet,
-            $defenderPlayer,
-            $attackerFleets,
-            $attackerPlayer,
-            $defenders,
-            $missionDeJeu,
-            $creerRetour,
-            $now,
-        ): CombatSettlementOutcome {
+    public function settle(int $combatInstanceId, GameMission $missionDeJeu, Closure $creerRetour, int $now): CombatSettlementOutcome
+    {
+        return DB::transaction(function () use ($combatInstanceId, $missionDeJeu, $creerRetour, $now): CombatSettlementOutcome {
             // 1. La barriere, par l'identifiant de combat. Elle peut manquer — un combat purge —
             // et ce n'est pas a elle de dire si le combat existe : c'est l'instance qui le dit.
             CelestialBodyCombatBarrier::query()
@@ -139,32 +109,35 @@ final class CombatSettlementService
                     break;
             }
 
+            // **Le combat dure jusqu'a son echeance.** La regler avant la couperait court : le
+            // defenseur perdrait le temps qu'on lui avait promis pour depenser ou renforcer.
+            if ($combat->ends_at === null || $now < $combat->ends_at) {
+                return CombatSettlementOutcome::stillFighting();
+            }
+
+            if ($combat->battle_result === null) {
+                throw new RuntimeException('Le combat ' . $combat->id . ' est actif sans resultat : il n a jamais ete engage.');
+            }
+
             // 3. L'union, puis les missions par identifiant croissant.
             if ($combat->union_id !== null) {
                 FleetUnion::query()->whereKey($combat->union_id)->lockForUpdate()->first();
             }
 
-            $missions = $this->lockedMissionsOf($combat);
-            $initiatrice = $missions->get($combat->mission_id);
-
-            if (!$initiatrice instanceof FleetMission) {
-                throw new RuntimeException('Le combat ' . $combat->id . ' n a plus sa mission initiatrice ' . $combat->mission_id . '.');
-            }
-
-            if ($initiatrice->planet_id_from === null) {
-                throw new RuntimeException('La mission initiatrice ' . $initiatrice->id . ' n a pas de planete d origine.');
-            }
+            $this->lockMissionsOf($combat);
 
             // 4. La cible, en dernier : c'est elle qu'on debite.
-            $cible = Planet::query()->whereKey($combat->target_planet_id)->lockForUpdate()->first();
+            $ligneCible = Planet::query()->whereKey($combat->target_planet_id)->lockForUpdate()->first();
 
-            if ($cible === null) {
+            if ($ligneCible === null) {
                 throw new RuntimeException('Le combat ' . $combat->id . ' vise un corps ' . $combat->target_planet_id . ' qui n existe plus.');
             }
 
-            // Le service de planete relit la ligne verrouillee : ce qu'il retire, sauve et raconte
-            // doit partir du meme etat que celui sur lequel le restant est lu.
-            $defenderPlanet->reloadPlanet();
+            // **Apres le verrou, jamais avant.** Le lecteur charge le corps a neuf : un service
+            // charge avant le verrou porterait un solde d'avant une depense concurrente, et la
+            // resolution le sauverait tel quel apres le debit — rendant au defenseur ce qu il a paye.
+            $effectif = $this->roster->forCombat($combat);
+            $result = BattleResultCodec::fromStorage($combat->battle_result);
 
             // **Tout vient du combat**, jamais des courantes : un reglement sous une autre version
             // que celle de l'ouverture serait une autre bataille.
@@ -174,7 +147,7 @@ final class CombatSettlementService
             // sous d'autres versions est refuse avant qu'on cherche l'allocateur qu'il faudrait.
             $potentiel = FrozenLootPotential::frozenFrom($result, $versions);
             $allocation = FrozenLootAllocation::fromFrozenSet($versions, $this->allocators);
-            $restant = RemainingTargetStock::readFrom($cible, CombatParticipantKey::forPlanet($cible->id));
+            $restant = RemainingTargetStock::readFrom($ligneCible, CombatParticipantKey::forPlanet($ligneCible->id));
             $reglement = LootSettlement::of($potentiel->amounts, $restant->amounts);
 
             $capacites = array_map(
@@ -194,14 +167,14 @@ final class CombatSettlementService
             $combat->save();
 
             $issue = $this->resolution->resolve(
-                $initiatrice,
-                $this->settledCopyOf($result, $reglement->applied, $parts),
-                $defenderPlanet,
-                $defenderPlayer,
-                $attackerFleets,
-                $attackerPlayer,
-                $defenders,
-                $initiatrice->planet_id_from,
+                $effectif->initiator,
+                SettledBattleResult::of($result, $reglement->applied, $parts),
+                $effectif->target,
+                $effectif->targetOwner,
+                $effectif->attackers,
+                $effectif->initiatorOwner,
+                $effectif->defenders,
+                (int)$effectif->initiator->planet_id_from,
                 $missionDeJeu,
                 $creerRetour,
                 $allocation,
@@ -222,59 +195,25 @@ final class CombatSettlementService
     }
 
     /**
-     * Les missions du combat, verrouillees par identifiant croissant, indexees par identifiant.
+     * Verrouille les missions du combat par identifiant croissant.
      *
-     * L'initiatrice en fait partie meme si aucun participant ne la porte : elle est la mission
-     * que la resolution marque traitee et dont elle cree le retour.
-     *
-     * @return Collection<int, FleetMission>
+     * L'initiatrice en fait partie : c'est elle que la resolution marque traitee et dont elle cree
+     * le retour. Le lecteur d'effectif la trouve inscrite parmi les attaquants.
      */
-    private function lockedMissionsOf(CombatInstance $combat): Collection
+    private function lockMissionsOf(CombatInstance $combat): void
     {
-        $identifiants = $combat->participants()
-            ->whereNotNull('fleet_mission_id')
-            ->pluck('fleet_mission_id')
-            ->map(static fn (mixed $id): int => (int)$id)
-            ->push($combat->mission_id)
-            ->unique()
-            ->sort()
-            ->values()
-            ->all();
-
-        return FleetMission::query()
-            ->whereIn('id', $identifiants)
-            ->orderBy('id')
-            ->lockForUpdate()
-            ->get()
-            ->keyBy('id');
-    }
-
-    /**
-     * Le resultat tel que la resolution doit l'appliquer : butin a l'applique, parts a la repartition.
-     *
-     * **Le resultat recu n'est pas touche.** Il est la trace figee de ce que le moteur a calcule,
-     * et le rejeu doit le retrouver tel quel. La copie est superficielle, deliberement : la
-     * resolution ne modifie rien de ce qu'elle recoit — un essai le prouve — et les unites, les
-     * manches et les debris sont les memes dans les deux batailles. Seuls le butin et les parts
-     * different, et ce sont eux qu'on remplace.
-     */
-    private function settledCopyOf(BattleResult $result, ExactLootAmounts $applied, AppliedLootShares $shares): BattleResult
-    {
-        $copie = clone $result;
-        $copie->loot = new Resources($applied->metal, $applied->crystal, $applied->deuterium, 0);
-        $copie->attackerFleetResults = array_map(
-            static function (AttackerFleetResult $flotte) use ($shares): AttackerFleetResult {
-                $part = $shares->forFleet($flotte->fleetMissionId);
-
-                $reglee = clone $flotte;
-                $reglee->lootShare = new Resources($part->metal, $part->crystal, $part->deuterium, 0);
-
-                return $reglee;
-            },
-            $result->attackerFleetResults
+        $identifiants = array_merge(
+            $this->roster->missionIdsOf($combat, CombatParticipant::SIDE_ATTACKER),
+            $this->roster->missionIdsOf($combat, CombatParticipant::SIDE_DEFENDER)
         );
 
-        return $copie;
+        sort($identifiants);
+
+        FleetMission::query()
+            ->whereIn('id', array_values(array_unique($identifiants)))
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get();
     }
 
     /**

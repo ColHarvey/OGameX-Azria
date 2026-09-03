@@ -8,24 +8,20 @@ use Illuminate\Support\Facades\DB;
 use LogicException;
 use OGame\Combat\Allocation\CappedLoot;
 use OGame\Combat\Allocation\ExactLootAllocationV1;
-use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Allocation\LootAllocator;
 use OGame\Combat\Allocation\LootAllocatorRegistry;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Exceptions\MismatchedRuleVersionSet;
+use OGame\Combat\Replay\BattleResultCodec;
 use OGame\Combat\Services\CombatOpeningService;
 use OGame\Combat\Services\CombatResolutionService;
+use OGame\Combat\Services\CombatRosterReader;
 use OGame\Combat\Services\CombatSettlementOutcome;
 use OGame\Combat\Services\CombatSettlementService;
 use OGame\Combat\Services\RallyClosureService;
-use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\Combat\Support\ResourceNormalizationDiagnostics;
-use OGame\Factories\PlayerServiceFactory;
+use OGame\Factories\PlanetServiceFactory;
 use OGame\GameMissions\AttackMission;
-use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
-use OGame\GameMissions\BattleEngine\Models\BattleResult;
-use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
-use OGame\GameMissions\BattleEngine\PhpBattleEngine;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\BattleReport;
 use OGame\Models\CelestialBodyCombatBarrier;
@@ -33,7 +29,6 @@ use OGame\Models\CombatInstance;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet;
 use OGame\Models\Resources;
-use OGame\Services\FleetMissionService;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
 use OGame\Services\SettingsService;
@@ -45,6 +40,12 @@ use Throwable;
 /**
  * Le reglement d'un combat durable : les huit scenarios du contrat, sur une vraie bataille.
  *
+ * ## Le cycle entier, a chaque essai
+ *
+ * Flotte envoyee par la route, combat ouvert, ralliement clos — la cloture calcule la bataille et
+ * l'ecrit — puis reglement a l'echeance. Aucun essai ne fabrique de resultat : celui qui est
+ * regle est celui que la cloture a fige, relu depuis sa colonne.
+ *
  * ## Ce que chaque scenario observe
  *
  * Jamais une valeur de retour seule. Ce qui compte est ce qui reste ecrit : le solde de la cible,
@@ -55,8 +56,8 @@ use Throwable;
  * ## Ce que SQLite ne peut pas prouver ici
  *
  * Qu'une depense concurrente **attend** le verrou. SQLite n'a pas de verrou de ligne, et une seule
- * connexion ne peut pas en tenir deux. L'essai prouve ce qui en depend et se laisse observer : la
- * cible est relue **dans** la transaction, apres la barriere, l'instance et les missions, et une
+ * connexion ne peut pas en tenir deux. Les essais prouvent ce qui en depend et se laisse observer :
+ * la cible est relue **dans** la transaction, apres la barriere, l'instance et les missions, et une
  * depense qui a gagne la course avant le verrou est honoree. Le blocage lui-meme est une preuve
  * MariaDB, a rejouer avant la candidature.
  */
@@ -95,17 +96,17 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
      */
     public function testAnUnchangedBalancePaysThePotentialInFull(): void
     {
-        [$combat, $missions, $cible, $resultat, $flottes, $defenseurs] = $this->aRealBattle();
+        [$combat, $missions, $cible] = $this->anEngagedCombat();
 
-        $potentiel = $this->lootOf($resultat);
+        $potentiel = $this->potentialOf($combat);
         $this->assertGreaterThan(0, array_sum($potentiel), 'The battle produced no loot: nothing would be settled.');
 
         $avant = $this->stockOf($cible);
-        $instant = (int)$missions[0]->time_arrival + 1;
+        $instant = (int)$combat->ends_at;
 
-        $issue = $this->settleIt($combat, $cible, $resultat, $flottes, $defenseurs, $instant);
+        $issue = $this->settleIt($combat, $instant);
 
-        $this->assertTrue($issue->settled);
+        $this->assertTrue($issue->settled, 'The settlement did nothing: ' . $issue->reason);
         $this->assertNotNull($issue->loot);
         $this->assertTrue($issue->loot->wasPaidInFull());
 
@@ -128,9 +129,22 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
         $this->assertSame($issue->battleReportId, $rapport->id);
         $this->assertSame($potentiel['metal'], $this->lootMetalOf($rapport));
 
+        // La garnison a perdu ce que la bataille figee lui a fait perdre : le camp defenseur a bien
+        // ete applique, et pas seulement le butin. **Les defenses reparees ne comptent pas** — une
+        // part des ruines se releve, et c'est la resolution qui en tient compte.
+        $bataille = BattleResultCodec::fromStorage($combat->battle_result);
+        $perdus = $bataille->defenderUnitsLost->toArray();
+        $reparees = $bataille->repairedDefenses->toArray();
+        $this->assertArrayHasKey('rocket_launcher', $perdus, 'The garrison lost nothing in the frozen battle.');
+        $this->assertSame(
+            20 - $perdus['rocket_launcher'] + ($reparees['rocket_launcher'] ?? 0),
+            (int)Planet::query()->whereKey($cible->getPlanetId())->value('rocket_launcher'),
+            'The defences destroyed by the battle are still standing.'
+        );
+
         // Le retour embarque ce que la flotte portait deja — le moteur y compte le carburant a bord —
         // plus sa part, et sa part est l'applique tout entier : il n'y a qu'une flotte.
-        $cargaison = $this->cargoOf($resultat, 0);
+        $cargaison = $this->cargoOf($combat, 0);
         $retour = $this->returnOf($missions[0]);
         $this->assertSame($cargaison['metal'] + $potentiel['metal'], (int)$retour->metal, 'The return does not carry exactly its cargo plus the applied loot.');
         $this->assertSame($cargaison['crystal'] + $potentiel['crystal'], (int)$retour->crystal);
@@ -140,19 +154,19 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
     /**
      * Scenario 2 — le defenseur a depense une composante : l'applique est plafonne la, et la seulement.
      *
-     * Le resultat fige n'est pas touche : c'est lui que le rejeu doit retrouver.
+     * Le resultat fige n'est pas touche : c'est lui qu'un rejeu doit retrouver.
      */
     public function testALowerBalanceOnOneComponentIsCappedThere(): void
     {
-        [$combat, $missions, $cible, $resultat, $flottes, $defenseurs] = $this->aRealBattle();
+        [$combat, $missions, $cible] = $this->anEngagedCombat();
 
-        $potentiel = $this->lootOf($resultat);
+        $potentiel = $this->potentialOf($combat);
         $this->assertGreaterThan(1_000, $potentiel['metal'], 'Not enough metal loot to leave a shortfall of a thousand.');
 
+        $fige = $combat->battle_result;
         $this->setStockOf($cible, ['metal' => $potentiel['metal'] - 1_000]);
-        $instant = (int)$missions[0]->time_arrival + 1;
 
-        $issue = $this->settleIt($combat, $cible, $resultat, $flottes, $defenseurs, $instant);
+        $issue = $this->settleIt($combat, (int)$combat->ends_at);
 
         $this->assertTrue($issue->settled);
         $this->assertNotNull($issue->loot);
@@ -169,15 +183,14 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
         $combat->refresh();
         $this->assertSame($potentiel['metal'], $combat->potential_loot_metal, 'The potential was overwritten by the applied.');
         $this->assertSame($potentiel['metal'] - 1_000, $combat->applied_loot_metal);
+        $this->assertSame($fige, $combat->battle_result, 'The frozen battle result was rewritten by the settlement.');
 
         $retour = $this->returnOf($missions[0]);
-        $this->assertSame($this->cargoOf($resultat, 0)['metal'] + $potentiel['metal'] - 1_000, (int)$retour->metal);
+        $this->assertSame($this->cargoOf($combat, 0)['metal'] + $potentiel['metal'] - 1_000, (int)$retour->metal);
 
         $rapport = BattleReport::query()->find($combat->battle_report_id);
         $this->assertNotNull($rapport);
         $this->assertSame($potentiel['metal'] - 1_000, $this->lootMetalOf($rapport), 'The report tells the potential, not what was taken.');
-
-        $this->assertSame($potentiel, $this->lootOf($resultat), 'The frozen result was mutated by the settlement.');
     }
 
     /**
@@ -185,13 +198,12 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
      */
     public function testAnEmptiedTargetYieldsNothing(): void
     {
-        [$combat, $missions, $cible, $resultat, $flottes, $defenseurs] = $this->aRealBattle();
+        [$combat, $missions, $cible] = $this->anEngagedCombat();
 
-        $potentiel = $this->lootOf($resultat);
+        $potentiel = $this->potentialOf($combat);
         $this->setStockOf($cible, ['metal' => 0, 'crystal' => 0, 'deuterium' => 0]);
-        $instant = (int)$missions[0]->time_arrival + 1;
 
-        $issue = $this->settleIt($combat, $cible, $resultat, $flottes, $defenseurs, $instant);
+        $issue = $this->settleIt($combat, (int)$combat->ends_at);
 
         $this->assertTrue($issue->settled);
         $this->assertNotNull($issue->loot);
@@ -205,7 +217,7 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
         $this->assertSame(0, $combat->applied_loot_deuterium);
 
         // Le retour part avec ce que la flotte portait, et rien de plus.
-        $cargaison = $this->cargoOf($resultat, 0);
+        $cargaison = $this->cargoOf($combat, 0);
         $retour = $this->returnOf($missions[0]);
         $this->assertSame($cargaison, ['metal' => (int)$retour->metal, 'crystal' => (int)$retour->crystal, 'deuterium' => (int)$retour->deuterium], 'The return carries loot that was never taken.');
 
@@ -219,13 +231,12 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
      */
     public function testProductionSinceTheSnapshotNeverRaisesTheApplied(): void
     {
-        [$combat, $missions, $cible, $resultat, $flottes, $defenseurs] = $this->aRealBattle();
+        [$combat, , $cible] = $this->anEngagedCombat();
 
-        $potentiel = $this->lootOf($resultat);
+        $potentiel = $this->potentialOf($combat);
         $this->setStockOf($cible, ['metal' => $potentiel['metal'] + 123_456]);
-        $instant = (int)$missions[0]->time_arrival + 1;
 
-        $issue = $this->settleIt($combat, $cible, $resultat, $flottes, $defenseurs, $instant);
+        $issue = $this->settleIt($combat, (int)$combat->ends_at);
 
         $this->assertTrue($issue->settled);
         $this->assertNotNull($issue->loot);
@@ -238,18 +249,17 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
      * Scenario 5 — une depense qui a gagne la course avant le verrou est honoree.
      *
      * Elle passe par le vrai debit de production, pas par une ecriture directe : c'est le chemin
-     * qu'une construction ou un envoi de flotte emprunterait entre la photographie et le reglement.
+     * qu'une construction ou un envoi de flotte emprunterait entre la cloture et l'echeance.
      */
     public function testASpendThatWonTheRaceBeforeTheLockIsHonoured(): void
     {
-        [$combat, $missions, $cible, $resultat, $flottes, $defenseurs] = $this->aRealBattle();
+        [$combat, , $cible] = $this->anEngagedCombat();
 
-        $potentiel = $this->lootOf($resultat);
+        $potentiel = $this->potentialOf($combat);
         $avant = $this->stockOf($cible);
         $cible->deductResources(new Resources($avant['metal'], 0, 0, 0));
-        $instant = (int)$missions[0]->time_arrival + 1;
 
-        $issue = $this->settleIt($combat, $cible, $resultat, $flottes, $defenseurs, $instant);
+        $issue = $this->settleIt($combat, (int)$combat->ends_at);
 
         $this->assertTrue($issue->settled);
         $this->assertNotNull($issue->loot);
@@ -259,24 +269,26 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
     }
 
     /**
-     * Une depense passee derriere le service de planete n'est pas ressuscitee par le reglement.
+     * Une depense passee derriere un service de planete deja charge n'est pas ressuscitee.
      *
-     * Le travail qui regle charge le service de planete avant de prendre le verrou ; entre les
-     * deux, le defenseur peut avoir depense. Le debit est atomique, mais la resolution **sauve
-     * ensuite le modele en memoire** : s'il n'avait pas ete relu sous le verrou, il reecrirait un
-     * solde d'avant la depense, moins le butin — et rendrait au defenseur ce qu'il a paye.
+     * La fabrique de planetes est partagee et garde ses instances. Un travailleur qui a deja touche
+     * ce corps dans la meme execution en garde un service en memoire ; si le reglement le
+     * reutilisait, il debiterait bien la ligne, puis la resolution **sauverait ce modele** apres le
+     * retrait des unites — reecrivant un solde d'avant la depense, moins le butin, et rendant au
+     * defenseur ce qu'il a paye.
      */
-    public function testASpendBehindThePlanetServiceIsNotResurrected(): void
+    public function testASpendBehindAnAlreadyLoadedPlanetServiceIsNotResurrected(): void
     {
-        [$combat, $missions, $cible, $resultat, $flottes, $defenseurs] = $this->aRealBattle();
+        [$combat, , $cible] = $this->anEngagedCombat();
 
-        $potentiel = $this->lootOf($resultat);
+        $potentiel = $this->potentialOf($combat);
         $avant = $this->stockOf($cible);
 
-        // Derriere le service, sans le relire : la ligne change, sa memoire non.
+        // Le service est charge, puis la ligne change derriere lui.
+        resolve(PlanetServiceFactory::class)->make($cible->getPlanetId(), true);
         DB::table('planets')->where('id', $cible->getPlanetId())->update(['metal' => $avant['metal'] - 50_000]);
 
-        $issue = $this->settleIt($combat, $cible, $resultat, $flottes, $defenseurs, (int)$missions[0]->time_arrival + 1);
+        $issue = $this->settleIt($combat, (int)$combat->ends_at);
 
         $this->assertTrue($issue->settled);
         $this->assertSame($avant['metal'] - 50_000 - $potentiel['metal'], $this->stockOf($cible)['metal'], 'The settlement wrote back a balance from before the spend.');
@@ -290,7 +302,7 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
      */
     public function testTheTargetIsReadLastUnderTheFixedLockOrder(): void
     {
-        [$combat, $missions, $cible, $resultat, $flottes, $defenseurs] = $this->aRealBattle();
+        [$combat] = $this->anEngagedCombat();
 
         $tables = [];
         $suivies = ['celestial_body_combat_barriers', 'combat_instances', 'fleet_missions', 'planets'];
@@ -303,7 +315,7 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
             }
         });
 
-        $this->settleIt($combat, $cible, $resultat, $flottes, $defenseurs, (int)$missions[0]->time_arrival + 1);
+        $this->settleIt($combat, (int)$combat->ends_at);
 
         $this->assertSame($suivies, array_slice($tables, 0, 4), 'The settlement does not take its locks in the order the barrier migration fixes.');
     }
@@ -337,6 +349,38 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
         foreach ($verrous as $quoi => $declaration) {
             $this->assertStringContainsString($declaration, $source, "The settlement no longer declares the lock on the {$quoi}.");
         }
+
+        // **L'effectif se lit apres le verrou de la cible.** Le lecteur charge le corps a neuf ;
+        // le charger avant le verrou donnerait un service d'avant une depense concurrente, que la
+        // resolution sauverait apres le debit. SQLite ne verrouille rien, donc rien ne separerait
+        // les deux ordres a l'execution : seule la source le montre.
+        $this->assertLessThan(
+            strpos($source, '$this->roster->forCombat($combat)'),
+            strpos($source, $verrous['cible']),
+            'The settlement reads its roster before locking the target: a concurrent spend could be resurrected.'
+        );
+    }
+
+    /**
+     * L'initiatrice mene le camp attaquant.
+     *
+     * Le moteur traite la premiere flotte comme celle qui mene — c'est elle qui donne le joueur
+     * attaquant et la flotte principale, et c'est son repli qui gouverne. Un effectif range par
+     * identifiant sans egard pour elle changerait la bataille des que l'initiatrice n'est pas la
+     * plus ancienne : une union ou un rappel suffit.
+     */
+    public function testTheInitiatorLeadsTheAttackingSide(): void
+    {
+        [$combat] = $this->anEngagedCombat(2);
+
+        $resultat = BattleResultCodec::fromStorage($combat->battle_result);
+
+        $this->assertCount(2, $resultat->attackerFleetResults, 'Only one fleet fought: leading would mean nothing.');
+        $this->assertSame(
+            $combat->mission_id,
+            $resultat->attackerFleetResults[0]->fleetMissionId,
+            'The initiating fleet does not lead the attacking side.'
+        );
     }
 
     /**
@@ -344,8 +388,9 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
      */
     public function testAFailureAtTheSecondReturnRollsEverythingBack(): void
     {
-        [$combat, $missions, $cible, $resultat, $flottes, $defenseurs] = $this->aRealBattle(2);
+        [$combat, $missions, $cible] = $this->anEngagedCombat(2);
 
+        $resultat = BattleResultCodec::fromStorage($combat->battle_result);
         $this->assertCount(2, $resultat->attackerFleetResults, 'The battle does not involve two fleets: no second return can fail.');
 
         $avant = $this->stockOf($cible);
@@ -360,7 +405,7 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
         };
 
         try {
-            $this->settleIt($combat, $cible, $resultat, $flottes, $defenseurs, (int)$missions[0]->time_arrival + 1, $retourEnPanne);
+            $this->settleIt($combat, (int)$combat->ends_at, $retourEnPanne);
             $this->fail('The injected failure did not propagate.');
         } catch (RuntimeException $panne) {
             $this->assertSame('panne injectee au second retour', $panne->getMessage());
@@ -388,18 +433,17 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
      */
     public function testRedeliveryAfterCommitChangesNothing(): void
     {
-        [$combat, $missions, $cible, $resultat, $flottes, $defenseurs] = $this->aRealBattle();
+        [$combat, $missions, $cible] = $this->anEngagedCombat();
 
-        $instant = (int)$missions[0]->time_arrival + 1;
-        $premiere = $this->settleIt($combat, $cible, $resultat, $flottes, $defenseurs, $instant);
+        $instant = (int)$combat->ends_at;
+        $premiere = $this->settleIt($combat, $instant);
         $this->assertTrue($premiere->settled);
 
         $stock = $this->stockOf($cible);
         $rapports = BattleReport::query()->count();
-        $retours = FleetMission::query()->where('parent_id', $missions[0]->id)->count();
-        $this->assertSame(1, $retours);
+        $this->assertSame(1, FleetMission::query()->where('parent_id', $missions[0]->id)->count());
 
-        $seconde = $this->settleIt($combat, $cible, $resultat, $flottes, $defenseurs, $instant + 60);
+        $seconde = $this->settleIt($combat, $instant + 60);
 
         $this->assertFalse($seconde->settled);
         $this->assertSame(CombatSettlementOutcome::REASON_ALREADY_SETTLED, $seconde->reason);
@@ -420,15 +464,15 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
      */
     public function testAV1CombatSettlesUnderV1WhenV2IsCurrent(): void
     {
-        [$combat, $missions, $cible, $resultat, $flottes, $defenseurs] = $this->aRealBattle(2);
+        [$combat, $missions] = $this->anEngagedCombat(2);
 
         $v1 = new ExactLootAllocationV1();
         $v2 = $v1->version() . '_but_newer';
         $registre = LootAllocatorRegistry::of([$v1, $this->anAllocatorThatRefusesToWork($v2)], $v2);
         $this->assertSame($v2, $registre->currentVersion(), 'The fake V2 is not current: the test would prove nothing.');
 
-        $service = new CombatSettlementService(resolve(CombatResolutionService::class), $registre);
-        $issue = $this->settleWith($service, $combat, $cible, $resultat, $flottes, $defenseurs, (int)$missions[0]->time_arrival + 1);
+        $service = new CombatSettlementService(resolve(CombatResolutionService::class), new CombatRosterReader(), $registre);
+        $issue = $this->settleWith($service, $combat, (int)$combat->ends_at);
 
         $this->assertTrue($issue->settled);
         $this->assertNotNull($issue->shares);
@@ -437,7 +481,7 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
         // La part de chaque retour est ce qu'il embarque au-dela de sa cargaison ; les parts font l'applique.
         $total = 0;
         foreach ($missions as $rang => $mission) {
-            $total += (int)$this->returnOf($mission)->metal - $this->cargoOf($resultat, $rang)['metal'];
+            $total += (int)$this->returnOf($mission)->metal - $this->cargoOf($combat, $rang)['metal'];
         }
         $this->assertSame($issue->loot->applied->metal, $total, 'The returns do not carry exactly the applied metal between them.');
 
@@ -453,13 +497,13 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
      */
     public function testAMismatchedFrozenVersionIsARefusalThatWritesNothing(): void
     {
-        [$combat, $missions, $cible, $resultat, $flottes, $defenseurs] = $this->aRealBattle();
+        [$combat, $missions, $cible] = $this->anEngagedCombat();
 
         DB::table('combat_instances')->where('id', $combat->id)->update(['loot_allocator_version' => 'exact_loot_allocation_v9']);
         $avant = $this->stockOf($cible);
 
         try {
-            $this->settleIt($combat, $cible, $resultat, $flottes, $defenseurs, (int)$missions[0]->time_arrival + 1);
+            $this->settleIt($combat, (int)$combat->ends_at);
             $this->fail('A result computed under another allocator version was settled anyway.');
         } catch (Throwable $refus) {
             $this->assertInstanceOf(MismatchedRuleVersionSet::class, $refus);
@@ -474,26 +518,46 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
     }
 
     /**
+     * Avant l'echeance, le combat dure : le regler le couperait court.
+     */
+    public function testACombatStillFightingIsNotSettled(): void
+    {
+        [$combat, $missions, $cible] = $this->anEngagedCombat();
+
+        $avant = $this->stockOf($cible);
+
+        $issue = $this->settleIt($combat, (int)$combat->ends_at - 1);
+
+        $this->assertFalse($issue->settled);
+        $this->assertSame(CombatSettlementOutcome::REASON_STILL_FIGHTING, $issue->reason);
+        $this->assertSame($avant, $this->stockOf($cible), 'A combat still under way was looted.');
+        $this->assertSame(0, FleetMission::query()->where('parent_id', $missions[0]->id)->count());
+
+        $combat->refresh();
+        $this->assertSame(CombatState::Active, $combat->status);
+    }
+
+    /**
      * Un combat inconnu ne leve pas : un travail relivre apres une purge se journalise, il ne casse pas.
      */
     public function testAnUnknownCombatIsReportedNotThrown(): void
     {
-        [, , $cible, $resultat, $flottes, $defenseurs] = $this->aRealBattle();
+        $this->anEngagedCombat();
 
         $service = new CombatSettlementService(resolve(CombatResolutionService::class));
-        $issue = $this->settleWith($service, null, $cible, $resultat, $flottes, $defenseurs, 1);
+        $issue = $this->settleWith($service, null, 1);
 
         $this->assertFalse($issue->settled);
         $this->assertSame(CombatSettlementOutcome::REASON_UNKNOWN_COMBAT, $issue->reason);
     }
 
     /**
-     * Une vraie bataille, ouverte et close, prete a etre reglee.
+     * Une vraie bataille, ouverte, close et engagee, prete a etre reglee.
      *
      * @param int $fleets Le nombre de flottes attaquantes, toutes du meme joueur, vers la meme cible.
-     * @return array{0: CombatInstance, 1: array<int, FleetMission>, 2: PlanetService, 3: BattleResult, 4: array<int, AttackerFleet>, 5: array<int, DefenderFleet>}
+     * @return array{0: CombatInstance, 1: array<int, FleetMission>, 2: PlanetService}
      */
-    private function aRealBattle(int $fleets = 1): array
+    private function anEngagedCombat(int $fleets = 1): array
     {
         for ($i = 0; $i < 6; $i++) {
             $this->createAndLoginUser();
@@ -530,12 +594,12 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
 
         $this->assertCount($fleets, $missions, 'Not every dispatched fleet became a mission.');
 
-        // Un stock connu, et une derniere mise a jour dans le futur : sans elle, la production
-        // recalculee depuis la derniere tique ecraserait la valeur posee.
-        $this->setStockOf($cible, ['metal' => 500_000, 'crystal' => 300_000, 'deuterium' => 100_000]);
+        // Un stock connu **avant la cloture** : c'est elle qui calcule la bataille, donc le butin.
+        // Et une garnison : sans defense, la cible ne perd rien et le camp defenseur ne prouverait
+        // rien. Vingt lanceurs tombent devant trois cent cinquante chasseurs sans changer l'issue.
+        $this->setStockOf($cible, ['metal' => 500_000, 'crystal' => 300_000, 'deuterium' => 100_000, 'rocket_launcher' => 20]);
 
-        $ouverture = new CombatOpeningService();
-        $combat = $ouverture->openOrJoin($missions[0], $cible->getPlanetId(), (int)$missions[0]->time_arrival);
+        $combat = (new CombatOpeningService())->openOrJoin($missions[0], $cible->getPlanetId(), (int)$missions[0]->time_arrival);
 
         $barriere = CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->first();
         $this->assertNotNull($barriere, 'The opening left no barrier.');
@@ -545,84 +609,34 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
 
         $combat->refresh();
         $this->assertSame(CombatState::Active, $combat->status);
+        $this->assertNotNull($combat->battle_result, 'The closure left no battle to settle.');
+        $this->assertNotNull($combat->ends_at);
 
-        $flottes = [];
-        foreach ($missions as $rang => $mission) {
-            $flottes[] = AttackerFleet::fromFleetMission(
-                $mission,
-                resolve(FleetMissionService::class),
-                resolve(PlayerServiceFactory::class),
-                $rang === 0
-            );
-        }
+        $bataille = BattleResultCodec::fromStorage($combat->battle_result);
+        $this->assertNotSame([], $bataille->defenderUnitsLost->toArray(), 'The garrison lost nothing: the defending side would prove nothing.');
 
-        $defenseurs = [DefenderFleet::fromPlanet($cible)];
-
-        $moteur = new PhpBattleEngine(
-            $flottes,
-            $cible,
-            $defenseurs,
-            resolve(SettingsService::class),
-            LiveLootContextFactory::forBattle($flottes, $cible, FrozenLootAllocation::atOperationStart())
-        );
-
-        $resultat = $moteur->simulateBattle();
-        $resultat->attackerPlanetId = (int)$missions[0]->planet_id_from;
-
-        return [$combat, $missions, $cible, $resultat, $flottes, $defenseurs];
+        return [$combat, $missions, $cible];
     }
 
     /**
      * Regle par le service construit sur les dependances de production.
-     *
-     * @param array<int, AttackerFleet> $flottes
-     * @param array<int, DefenderFleet> $defenseurs
      */
-    private function settleIt(
-        CombatInstance $combat,
-        PlanetService $cible,
-        BattleResult $resultat,
-        array $flottes,
-        array $defenseurs,
-        int $instant,
-        Closure|null $retour = null,
-    ): CombatSettlementOutcome {
+    private function settleIt(CombatInstance $combat, int $instant, Closure|null $retour = null): CombatSettlementOutcome
+    {
         $service = new CombatSettlementService(resolve(CombatResolutionService::class));
 
-        return $this->settleWith($service, $combat, $cible, $resultat, $flottes, $defenseurs, $instant, $retour);
+        return $this->settleWith($service, $combat, $instant, $retour);
     }
 
     /**
-     * @param array<int, AttackerFleet> $flottes
-     * @param array<int, DefenderFleet> $defenseurs
      * @param Closure|null $retour Remplace la creation reelle des retours, pour y injecter une panne.
      */
-    private function settleWith(
-        CombatSettlementService $service,
-        CombatInstance|null $combat,
-        PlanetService $cible,
-        BattleResult $resultat,
-        array $flottes,
-        array $defenseurs,
-        int $instant,
-        Closure|null $retour = null,
-    ): CombatSettlementOutcome {
-        $proprietaireCible = $cible->getPlayer();
-
-        if ($proprietaireCible === null) {
-            $this->fail('The target planet has no owner.');
-        }
-
+    private function settleWith(CombatSettlementService $service, CombatInstance|null $combat, int $instant, Closure|null $retour = null): CombatSettlementOutcome
+    {
         $mission = resolve(ReturningAttackMission::class);
 
         return $service->settle(
             $combat->id ?? 0,
-            $resultat,
-            $cible,
-            $proprietaireCible,
-            $flottes,
-            $flottes[0]->player,
-            $defenseurs,
             $mission,
             $retour ?? function (FleetMission $retourDe, Resources $ressources, UnitCollection $unites, int $tempsSupplementaire = 0, array|null $epaves = null, int|null $dureeImposee = null) use ($mission): void {
                 $mission->returnFor($retourDe, $ressources, $unites, $tempsSupplementaire, $epaves, $dureeImposee);
@@ -632,12 +646,14 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
     }
 
     /**
-     * Le butin fige du resultat, en entiers.
+     * Le butin potentiel de la bataille figee, en entiers.
      *
      * @return array{metal: int, crystal: int, deuterium: int}
      */
-    private function lootOf(BattleResult $resultat): array
+    private function potentialOf(CombatInstance $combat): array
     {
+        $resultat = BattleResultCodec::fromStorage($combat->battle_result);
+
         return [
             'metal' => (int)$resultat->loot->metal->get(),
             'crystal' => (int)$resultat->loot->crystal->get(),
@@ -646,7 +662,7 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
     }
 
     /**
-     * Ce qu'une flotte portait deja en sortant du combat, tel que le moteur l'a fige.
+     * Ce qu'une flotte portait deja en sortant du combat, tel que la bataille figee l'a inscrit.
      *
      * Les flottes partent sans ressources, et la cargaison n'est pourtant pas nulle : le moteur y
      * compte le carburant a bord. C'est un fait du moteur, le meme sur le chemin instantane, et
@@ -654,9 +670,9 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
      *
      * @return array{metal: int, crystal: int, deuterium: int}
      */
-    private function cargoOf(BattleResult $resultat, int $rang): array
+    private function cargoOf(CombatInstance $combat, int $rang): array
     {
-        $flotte = $resultat->attackerFleetResults[$rang];
+        $flotte = BattleResultCodec::fromStorage($combat->battle_result)->attackerFleetResults[$rang];
 
         return [
             'metal' => (int)$flotte->survivingCargo->metal->get(),

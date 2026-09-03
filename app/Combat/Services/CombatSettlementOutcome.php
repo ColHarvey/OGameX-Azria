@@ -24,6 +24,8 @@ final readonly class CombatSettlementOutcome
 
     public const string REASON_STILL_RALLYING = 'still_rallying';
 
+    public const string REASON_STILL_FIGHTING = 'still_fighting';
+
     public const string REASON_UNKNOWN_COMBAT = 'unknown_combat';
 
     private function __construct(
@@ -67,6 +69,14 @@ final readonly class CombatSettlementOutcome
     public static function stillRallying(): self
     {
         return new self(false, self::REASON_STILL_RALLYING);
+    }
+
+    /**
+     * L'echeance n'est pas atteinte : le combat dure encore, et le regler le couperait court.
+     */
+    public static function stillFighting(): self
+    {
+        return new self(false, self::REASON_STILL_FIGHTING);
     }
 
     public static function unknownCombat(): self
