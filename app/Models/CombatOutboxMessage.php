@@ -3,6 +3,7 @@
 namespace OGame\Models;
 
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -55,16 +56,12 @@ use Illuminate\Support\Carbon;
     'attempts',
     'last_error',
 ])]
+// **Le nom de la table ne se deduit pas du nom de la classe.** Eloquent en ferait
+// `combat_outbox_messages` ; la table s appelle `combat_outbox`, parce que c est une boite, pas
+// une collection de messages.
+#[Table(name: 'combat_outbox')]
 class CombatOutboxMessage extends Model
 {
-    /**
-     * Le nom de la table ne se deduit pas du nom de la classe.
-     *
-     * Eloquent en ferait `combat_outbox_messages` ; la table s'appelle `combat_outbox`, parce que
-     * c'est une boite, pas une collection de messages.
-     */
-    protected $table = 'combat_outbox';
-
     /**
      * @return array<string, string>
      */
