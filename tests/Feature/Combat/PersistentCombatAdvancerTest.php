@@ -13,6 +13,7 @@ use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\BattleReport;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
+use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet;
 use OGame\Models\Resources;
@@ -314,11 +315,31 @@ class PersistentCombatAdvancerTest extends FleetDispatchTestCase
 
         $cible = $this->sendMissionToOtherPlayerPlanet($units, new Resources(0, 0, 0, 0));
 
+        // **Une seconde vague, attendue plus tard.** Sans personne a attendre, l'ouverture
+        // fermerait le ralliement elle-meme — et le sujet de ces essais est justement le passage
+        // planifie qui le ferme a l'echeance. Deux flottes parties ensemble arrivent ensemble :
+        // l'arrivee de la seconde est repoussee a la main, c'est le seul moyen d'ouvrir une
+        // fenetre par cette route.
+        $renfort = new UnitCollection();
+        $renfort->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 20);
+        $this->dispatchFleet($cible->getPlanetCoordinates(), $renfort, new Resources(0, 0, 0, 0), PlanetType::Planet);
+
+        // La plus ancienne est l'ouvreuse ; la plus recente est le renfort, repousse.
         $mission = FleetMission::query()
+            ->where('processed', 0)
+            ->where('user_id', $this->currentUserId)
+            ->orderBy('id')
+            ->first();
+
+        $dernier = FleetMission::query()
             ->where('processed', 0)
             ->where('user_id', $this->currentUserId)
             ->orderByDesc('id')
             ->first();
+
+        if ($mission !== null && $dernier !== null && $dernier->id !== $mission->id) {
+            DB::table('fleet_missions')->where('id', $dernier->id)->update(['time_arrival' => (int)$mission->time_arrival + 30]);
+        }
 
         if ($mission === null) {
             $this->fail('No fleet mission was dispatched.');

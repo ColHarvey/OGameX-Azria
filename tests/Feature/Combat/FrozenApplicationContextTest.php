@@ -10,7 +10,6 @@ use OGame\Combat\Replay\BattleResultCodec;
 use OGame\Combat\Services\CombatOpeningService;
 use OGame\Combat\Services\CombatResolutionService;
 use OGame\Combat\Services\CombatSettlementService;
-use OGame\Combat\Services\RallyClosureService;
 use OGame\Enums\CharacterClass;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameMissions\AttackMission;
@@ -244,11 +243,11 @@ class FrozenApplicationContextTest extends FleetDispatchTestCase
 
         $combat = (new CombatOpeningService())->openOrJoin($mission, $cible->getPlanetId(), (int)$mission->time_arrival);
 
-        $barriere = CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->first();
-        $this->assertNotNull($barriere);
+        $this->assertNotNull(CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->first());
 
-        $this->assertTrue((new RallyClosureService())->close($combat->id, (int)$barriere->owned_through_effect_at)->closed);
-
+        // **L'ouverture a ferme le ralliement elle-meme.** Personne n'etait attendu : la fenetre
+        // est nulle, et la protection contre le harcelement veut qu'elle ne fasse pas attendre le
+        // corps une minute de plus. La bataille est donc deja calculee.
         $combat->refresh();
         $this->assertSame(CombatState::Active, $combat->status);
 

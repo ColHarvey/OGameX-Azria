@@ -285,6 +285,10 @@ class FrozenLootPotentialTest extends TestCase
 
         $ouvreur = FleetMission::forceCreate([
             'user_id' => $joueur->id,
+            // L'engagement, qui suit desormais une fenetre nulle, exige une planete d'origine :
+            // le retour y revient, et le moteur la nomme.
+            'planet_id_from' => $this->aPlanetIdOf($joueur),
+            'type_from' => 1,
             'planet_id_to' => $corps,
             'mission_type' => 1,
             'time_departure' => self::OPENING - 600,
@@ -324,5 +328,19 @@ class FrozenLootPotentialTest extends TestCase
             'system' => 300 + intdiv($this->bodies, 15),
             'planet' => ($this->bodies % 15) + 1,
         ]);
+    }
+
+    /**
+     * La planete d'un joueur cree par ces fixtures.
+     */
+    private function aPlanetIdOf(User $owner): int
+    {
+        $id = Planet::query()->where('user_id', $owner->id)->value('id');
+
+        if (!is_int($id)) {
+            $this->fail('The player ' . $owner->id . ' owns no planet: no attack could leave from anywhere.');
+        }
+
+        return $id;
     }
 }

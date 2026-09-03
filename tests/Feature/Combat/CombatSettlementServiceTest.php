@@ -780,10 +780,16 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
         $barriere = CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->first();
         $this->assertNotNull($barriere, 'The opening left no barrier.');
 
-        $fermeture = (new RallyClosureService())->close($combat->id, (int)$barriere->owned_through_effect_at);
-        $this->assertTrue($fermeture->closed, 'The rally did not close: ' . $fermeture->reason);
-
+        // **Une flotte seule ferme son ralliement des l'ouverture** : la fenetre est nulle, et la
+        // protection contre le harcelement veut qu'elle ne fasse pas attendre le corps une minute
+        // de plus. Avec deux flottes, la fenetre existe et il faut atteindre son echeance.
         $combat->refresh();
+
+        if ($combat->status === CombatState::Rallying) {
+            $fermeture = (new RallyClosureService())->close($combat->id, (int)$barriere->owned_through_effect_at);
+            $this->assertTrue($fermeture->closed, 'The rally did not close: ' . $fermeture->reason);
+            $combat->refresh();
+        }
         $this->assertSame(CombatState::Active, $combat->status);
         $this->assertNotNull($combat->battle_result, 'The closure left no battle to settle.');
         $this->assertNotNull($combat->ends_at);

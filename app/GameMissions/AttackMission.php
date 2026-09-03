@@ -3,6 +3,8 @@
 namespace OGame\GameMissions;
 
 use OGame\Combat\Allocation\FrozenLootAllocation;
+use OGame\Combat\Enums\CombatOutboxKind;
+use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Services\CombatOpeningService;
 use OGame\Combat\Services\CombatResolutionService;
@@ -19,6 +21,9 @@ use OGame\GameMissions\Abstracts\GameMission;
 use OGame\GameMissions\BattleEngine\BattleEngineFactory;
 use OGame\GameMissions\Models\MissionPossibleStatus;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Models\CombatInstance;
+use OGame\Models\CombatOutboxMessage;
+use OGame\Models\CombatParticipant;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet\Coordinate;
@@ -109,6 +114,67 @@ class AttackMission extends GameMission
     }
 
     /**
+     * Cette flotte a-t-elle ete inscrite a ce combat par l'admission ?
+     *
+     * C'est la photographie qui fait foi, pas l'heure a laquelle le travail passe : une candidate
+     * admise dont l'evenement est traite en retard appartient au combat.
+     */
+    private function belongsToCombat(FleetMission $mission, CombatInstance $combat): bool
+    {
+        return CombatParticipant::query()
+            ->where('combat_instance_id', $combat->id)
+            ->where('fleet_mission_id', $mission->id)
+            ->exists();
+    }
+
+    /**
+     * La flotte fait demi-tour parce qu'elle est arrivee apres la fermeture du ralliement.
+     *
+     * ## Pourquoi elle ne peut ni entrer, ni attendre
+     *
+     * Entrer : la photographie est prise, les budgets consommes, la bataille calculee — l'admission
+     * ne la jugera jamais, et le reglement ne la connaitrait pas. Elle serait perdue.
+     *
+     * Attendre que le corps se libere : cela lui ouvrirait un second combat, contre une cible qui
+     * vient d'en subir un. La regle arretee est le demi-tour immediat.
+     *
+     * ## Le joueur apprend pourquoi, par le canal qui existe deja
+     *
+     * La meme boite d'envoi que les refus d'admission, le meme genre, la meme raison : une flotte
+     * qui rentre sans explication ressemble a une panne.
+     */
+    private function sendItHomeAfterTheRallyClosed(FleetMission $mission, CombatInstance $combat): void
+    {
+        CombatOutboxMessage::query()->updateOrCreate(
+            [
+                'combat_instance_id' => $combat->id,
+                'participant_key' => CombatParticipantKey::forFleet($mission->id),
+                'kind' => CombatOutboxKind::RallyRefused->value,
+            ],
+            [
+                'payload' => [
+                    'reason' => CombatReasonCode::RallyClosed->value,
+                    'target_body_id' => $combat->target_planet_id,
+                    'galaxy' => $combat->galaxy,
+                    'system' => $combat->system,
+                    'position' => $combat->position,
+                    'group_fleets' => 1,
+                ],
+                'available_at' => $mission->time_arrival,
+            ]
+        );
+
+        $mission->processed = 1;
+        $mission->save();
+
+        $this->startReturn(
+            $mission,
+            $this->fleetMissionService->getResources($mission),
+            $this->fleetMissionService->getFleetUnits($mission)
+        );
+    }
+
+    /**
      * @inheritdoc
      * @throws Throwable
      */
@@ -173,21 +239,27 @@ class AttackMission extends GameMission
                 (int)$mission->time_arrival
             );
 
-            // **Les rangs de ce combat sont deja figes.** La flotte est arrivee apres la fermeture
-            // du ralliement : elle ne peut pas y entrer — la photographie est prise, les budgets
-            // consommes, la bataille calculee — et elle ne peut pas non plus attaquer un corps que
-            // ce combat tient. Elle attend donc, sans etre rattachee : quand la bataille sera
-            // reglee et le corps libre, la tique suivante ouvrira **son** combat.
+            // **Qui appartient a ce combat, et qui arrive trop tard.**
             //
-            // Le traitement des arrivees repasse sur elle a chaque tique tant qu'elle n'est pas
-            // traitee ; `openOrJoin()` rend le combat qui tient le corps sans jamais en creer un
-            // second, et c'est ce qui rend ce chemin repetable.
-            if ($combat->status !== CombatState::Rallying) {
+            // La distinction est causale, pas horaire. Une candidate dont l'arrivee planifiee
+            // precede la fermeture a ete jugee par l'admission et **inscrite dans la photographie** :
+            // elle appartient au combat, meme si son evenement est traite en retard. Une flotte
+            // planifiee a la fermeture ou apres n'a jamais ete jugee : la photographie est prise,
+            // les budgets consommes, la bataille calculee — personne ne l'admettrait, et elle ne
+            // serait jamais reglee.
+            //
+            // Tant que le ralliement est ouvert, toute arrivee le rejoint : c'est l'admission, a la
+            // fermeture, qui tranchera.
+            if ($combat->status === CombatState::Rallying || $this->belongsToCombat($mission, $combat)) {
+                $mission->combat_instance_id = $combat->id;
+                $mission->save();
+
                 return;
             }
 
-            $mission->combat_instance_id = $combat->id;
-            $mission->save();
+            // **Elle repart, tout de suite.** Ni file d'attente, ni second combat quand le corps se
+            // libere : la regle arretee est le demi-tour immediat, avec sa raison.
+            $this->sendItHomeAfterTheRallyClosed($mission, $combat);
 
             return;
         }

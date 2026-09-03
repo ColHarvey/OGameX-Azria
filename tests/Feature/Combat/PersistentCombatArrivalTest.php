@@ -4,11 +4,16 @@ namespace Tests\Feature\Combat;
 
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use OGame\Combat\Enums\CombatOutboxKind;
+use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Services\PersistentCombatAdvancer;
+use OGame\Combat\Support\CombatParticipantKey;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
+use OGame\Models\CombatOutboxMessage;
+use OGame\Models\CombatParticipant;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet;
@@ -128,8 +133,15 @@ class PersistentCombatArrivalTest extends FleetDispatchTestCase
 
         $combat = CombatInstance::query()->whereKey($mission->combat_instance_id)->first();
         $this->assertNotNull($combat, 'The mission points at a combat that does not exist.');
-        $this->assertSame(CombatState::Rallying, $combat->status);
         $this->assertSame($mission->id, $combat->mission_id, 'The combat was not opened by the arriving fleet.');
+
+        // **Personne n'est attendu : le ralliement se ferme des l'ouverture.** C'est la protection
+        // contre le harcelement — une fenetre nulle ne doit pas immobiliser le corps une minute de
+        // plus en attendant un travail planifie. La bataille est calculee, et rien n'est encore pris.
+        $this->assertSame(CombatState::Active, $combat->status, 'A rally nobody was expected at stayed open.');
+        $this->assertNotNull($combat->battle_result, 'The battle was not computed when the rally closed.');
+        $this->assertNotNull($combat->ends_at);
+        $this->assertGreaterThan((int)$mission->time_arrival, $combat->ends_at, 'The combat ends before it began.');
 
         // **L'heure d'ouverture est l'arrivee, pas l'horloge du travailleur.** La page qui declenche
         // le traitement est visitee dix secondes apres l'arrivee ; le combat commence a l'arrivee.
@@ -163,49 +175,80 @@ class PersistentCombatArrivalTest extends FleetDispatchTestCase
     }
 
     /**
-     * Une flotte qui arrive apres la fermeture du ralliement attend, sans etre rattachee.
+     * Une flotte arrivee apres la fermeture du ralliement repart tout de suite.
      *
-     * ## Un trou reel, trouve par une mutation qui survivait
+     * ## La regle, et les deux voies qu'elle ferme
      *
-     * Les rangs d'un combat sont figes a la fermeture : photographie prise, budgets consommes,
-     * bataille calculee. Une flotte arrivee apres ne peut pas y entrer — personne ne l'admettrait,
-     * et elle ne serait jamais reglee : la flotte serait perdue. Elle ne peut pas non plus attaquer
-     * un corps que ce combat tient. Elle attend donc, et ouvrira **son** combat quand le corps sera
-     * libre.
+     * Entrer dans le combat : impossible. La photographie est prise, les budgets consommes, la
+     * bataille calculee — l'admission ne la jugera jamais, et le reglement ne la connaitrait pas.
+     * La flotte serait perdue.
      *
-     * **C'est une regle de jeu nouvelle**, remontee comme telle : elle decrit ce qu'un joueur voit
-     * quand sa flotte arrive une seconde trop tard.
+     * Attendre que le corps se libere : ce serait lui ouvrir un second combat contre une cible qui
+     * vient d'en subir un, et immobiliser sa flotte sans qu'elle le sache. La regle arretee est le
+     * demi-tour immediat, avec sa raison.
+     *
+     * La distinction est **causale** : une candidate planifiee avant la fermeture et retenue dans la
+     * photographie appartient au combat, meme si son evenement est traite en retard. C'est ce que
+     * `testALateProcessedParticipantStillBelongsToItsCombat` etablit.
      */
-    public function testAFleetArrivingAfterTheRallyClosedWaitsForTheBodyToBeFree(): void
+    public function testAFleetArrivingAfterTheRallyClosedGoesStraightHome(): void
     {
-        [$premier] = $this->anAttackArriving('1');
+        [$premier, $cible] = $this->anAttackArriving('1');
 
         $combat = CombatInstance::query()->firstOrFail();
-        $barriere = CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->firstOrFail();
+        $this->assertSame(CombatState::Active, $combat->status, 'The rally is still open: nothing would arrive too late.');
 
-        (new PersistentCombatAdvancer())->advance((int)$barriere->owned_through_effect_at);
-        $combat->refresh();
-        $this->assertSame(CombatState::Active, $combat->status, 'The rally did not close: nothing would arrive too late.');
+        $avant = $this->metalOf($cible);
 
         // Une seconde flotte, du meme joueur, vers le meme corps — elle arrive trop tard.
         $retardataire = $this->aSecondAttackAgainst($premier);
 
         $this->assertSame(1, CombatInstance::query()->count(), 'A second combat was opened on a body already fighting.');
         $this->assertNull($retardataire->combat_instance_id, 'A fleet that arrived too late was attached to a combat whose ranks are frozen.');
-        $this->assertSame(0, (int)$retardataire->processed, 'A fleet that arrived too late resolved against a body under combat.');
-        $this->assertSame(0, FleetMission::query()->where('parent_id', $retardataire->id)->count());
+        $this->assertSame(1, (int)$retardataire->processed, 'A fleet that arrived too late is still waiting instead of going home.');
+        $this->assertSame(1, FleetMission::query()->where('parent_id', $retardataire->id)->count(), 'The late fleet never turned around.');
+        $this->assertSame($avant, $this->metalOf($cible), 'A fleet that arrived too late looted the target anyway.');
 
-        // Le combat se regle ; le corps est libre ; la tique suivante ouvre le combat de la retardataire.
-        (new PersistentCombatAdvancer())->advance((int)$combat->ends_at);
-        $combat->refresh();
-        $this->assertSame(CombatState::Resolved, $combat->status);
+        // Et le joueur apprend pourquoi, par le canal des refus d'admission.
+        $avis = CombatOutboxMessage::query()
+            ->where('combat_instance_id', $combat->id)
+            ->where('participant_key', CombatParticipantKey::forFleet($retardataire->id))
+            ->first();
+
+        $this->assertNotNull($avis, 'The fleet went home without being told why.');
+        $this->assertSame(CombatOutboxKind::RallyRefused->value, $avis->kind);
+        $this->assertSame(CombatReasonCode::RallyClosed->value, $avis->payload['reason'] ?? null);
+    }
+
+    /**
+     * Une flotte admise dont l'evenement est traite en retard appartient toujours a son combat.
+     *
+     * C'est l'autre moitie de la regle : la distinction est causale, pas horaire. Une candidate
+     * planifiee avant la fermeture a ete jugee par l'admission et inscrite dans la photographie ;
+     * un travail en retard ne doit pas la renvoyer chez elle.
+     */
+    public function testALateProcessedParticipantStillBelongsToItsCombat(): void
+    {
+        [$mission] = $this->anAttackArriving('1');
+
+        $combat = CombatInstance::query()->firstOrFail();
+        $this->assertSame(CombatState::Active, $combat->status);
+
+        // Le rattachement est efface : c'est l'etat d'une flotte admise dont l'arrivee n'a pas
+        // encore ete traitee. Seule la photographie dit qu'elle appartient au combat.
+        DB::table('fleet_missions')->where('id', $mission->id)->update(['combat_instance_id' => null]);
+        $this->assertSame(
+            1,
+            CombatParticipant::query()->where('combat_instance_id', $combat->id)->where('fleet_mission_id', $mission->id)->count(),
+            'The fleet is not a participant: the test would prove nothing.'
+        );
 
         $this->get('/overview')->assertStatus(200);
 
-        $retardataire->refresh();
-        $this->assertSame(2, CombatInstance::query()->count(), 'The waiting fleet never got its own combat.');
-        $this->assertNotNull($retardataire->combat_instance_id);
-        $this->assertNotSame($combat->id, $retardataire->combat_instance_id, 'The waiting fleet joined the battle that was already over.');
+        $mission->refresh();
+        $this->assertSame(0, (int)$mission->processed, 'An admitted fleet was sent home because its arrival was processed late.');
+        $this->assertSame($combat->id, $mission->combat_instance_id, 'An admitted fleet was not reattached to its combat.');
+        $this->assertSame(0, FleetMission::query()->where('parent_id', $mission->id)->count());
     }
 
     /**

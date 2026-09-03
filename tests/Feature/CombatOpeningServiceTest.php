@@ -66,7 +66,12 @@ class CombatOpeningServiceTest extends TestCase
 
         $combat = $this->service->openOrJoin($mission, $corps, self::OPENING);
 
-        $this->assertSame(CombatState::Rallying, $combat->status);
+        // **Un attaquant isole n'attend personne : son ralliement se ferme dans la meme
+        // transaction.** C'est la protection contre le harcelement — laisser la fermeture au travail
+        // planifie immobiliserait le corps jusqu'a une minute pour une fenetre de zero seconde.
+        // `testALoneAttackerGetsNoWindowAtAll` porte la fenetre elle-meme ; ici on constate que
+        // l'ouverture a bien pose l'instance et sa barriere.
+        $this->assertSame(CombatState::Active, $combat->status);
         $this->assertSame($corps, $combat->target_planet_id);
 
         $barriere = CelestialBodyCombatBarrier::where('target_body_id', $corps)->first();
@@ -316,6 +321,10 @@ class CombatOpeningServiceTest extends TestCase
 
         return FleetMission::forceCreate([
             'user_id' => $proprietaire->id,
+            // L'engagement, qui suit desormais une fenetre nulle, exige une planete d'origine :
+            // le retour y revient, et le moteur la nomme.
+            'planet_id_from' => $this->aPlanetIdOf($proprietaire),
+            'type_from' => 1,
             'planet_id_to' => $targetBodyId,
             'mission_type' => 1,
             'time_departure' => self::OPENING - 600,
@@ -361,5 +370,19 @@ class CombatOpeningServiceTest extends TestCase
             'system' => 400 + intdiv($this->bodies, 15),
             'planet' => ($this->bodies % 15) + 1,
         ]);
+    }
+
+    /**
+     * La planete d'un joueur cree par ces fixtures.
+     */
+    private function aPlanetIdOf(User $owner): int
+    {
+        $id = Planet::query()->where('user_id', $owner->id)->value('id');
+
+        if (!is_int($id)) {
+            $this->fail('The player ' . $owner->id . ' owns no planet: no attack could leave from anywhere.');
+        }
+
+        return $id;
     }
 }

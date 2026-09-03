@@ -291,10 +291,12 @@ class RallyClosureServiceTest extends TestCase
 
         $ouvreur = $this->anAttackAt($corps, self::OPENING, $joueur);
 
+        // **Personne n'est attendu : l'ouverture ferme le ralliement elle-meme.** C'est la
+        // protection contre le harcelement — une fenetre nulle ne fait pas attendre le corps.
         $combat = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
-        $issue = $this->fermeture->close($combat->id, self::OPENING + 1);
 
-        $this->assertTrue($issue->closed);
+        $combat->refresh();
+        $this->assertSame(CombatState::Active, $combat->status, 'A rally nobody was expected at stayed open.');
 
         $this->assertContains(
             CombatParticipantKey::forFleet($ouvreur->id),
@@ -398,6 +400,10 @@ class RallyClosureServiceTest extends TestCase
         $corps = $this->aBodyId();
 
         $ouvreur = $this->anAttackAt($corps, self::OPENING, $joueur);
+        // **Une seconde vague, pour que la fenetre ne soit pas nulle.** Sans personne a
+        // attendre, l'ouverture ferme le ralliement dans sa propre transaction : cet essai
+        // n'aurait plus de cloture a gouverner.
+        $this->anAttackAt($corps, self::OPENING + 18, $joueur);
 
         $combat = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
         $combat->projection_version = 'v-inconnue';
@@ -405,7 +411,7 @@ class RallyClosureServiceTest extends TestCase
 
         $this->expectException(UnknownSnapshotProjection::class);
 
-        $this->fermeture->close($combat->id, self::OPENING + 1);
+        $this->fermeture->close($combat->id, self::OPENING + 19);
     }
 
     /**
@@ -454,8 +460,11 @@ class RallyClosureServiceTest extends TestCase
 
         $ouvreur = $this->anAttackAt($corps, self::OPENING, $ouvreurJoueur);
 
-        // Sans alliance gouvernante, un joueur exterieur ne rejoint pas le groupe fondateur.
+        // Sans alliance gouvernante, un joueur exterieur ne rejoint pas le groupe fondateur —
+        // et n'est donc pas attendu : c'est la seconde vague de l'ouvreur qui tient la fenetre
+        // ouverte assez longtemps pour que l'intruse arrive et soit jugee.
         $intruse = $this->anAttackAt($corps, self::OPENING + 10, $etranger);
+        $this->anAttackAt($corps, self::OPENING + 18, $ouvreurJoueur);
 
         $combat = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
         $issue = $this->fermeture->close($combat->id, self::OPENING + 60);
@@ -744,13 +753,17 @@ class RallyClosureServiceTest extends TestCase
         $corps = $this->aBodyId();
 
         $ouvreur = $this->anAttackAt($corps, self::OPENING, $joueur);
+        // **Une seconde vague, pour que la fenetre ne soit pas nulle.** Sans personne a
+        // attendre, l'ouverture ferme le ralliement dans sa propre transaction : cet essai
+        // n'aurait plus de cloture a gouverner.
+        $this->anAttackAt($corps, self::OPENING + 18, $joueur);
         $combat = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
 
         $combat->projection_version = 'projection_que_ce_code_ignore';
         $combat->save();
 
         try {
-            $this->fermeture->close($combat->id, self::OPENING + 1);
+            $this->fermeture->close($combat->id, self::OPENING + 19);
 
             $this->fail('A combat under an unknown projection was closed anyway.');
         } catch (UnknownSnapshotProjection $arret) {
@@ -966,6 +979,10 @@ class RallyClosureServiceTest extends TestCase
         DB::table('planets')->where('id', $corps)->update(['rocket_launcher' => 20]);
 
         $ouvreur = $this->anAttackAt($corps, self::OPENING, $joueur);
+        // **Une seconde vague, pour que la fenetre ne soit pas nulle.** Sans personne a
+        // attendre, l'ouverture ferme le ralliement dans sa propre transaction : cet essai
+        // n'aurait plus de cloture a gouverner.
+        $this->anAttackAt($corps, self::OPENING + 18, $joueur);
         $combat = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
 
         $this->assertNull($combat->battle_result, 'The opening already wrote a result: nothing was computed at closure.');
@@ -982,7 +999,8 @@ class RallyClosureServiceTest extends TestCase
         $this->assertNotNull($combat->battle_result, 'The closure wrote no battle result.');
         $resultat = BattleResultCodec::fromStorage($combat->battle_result);
         $this->assertSame((int)$ouvreur->planet_id_from, $resultat->attackerPlanetId);
-        $this->assertCount(1, $resultat->attackerFleetResults);
+        // Deux flottes : l'ouvreur et la vague qui tient la fenetre ouverte. L'initiatrice mene.
+        $this->assertCount(2, $resultat->attackerFleetResults);
         $this->assertSame($ouvreur->id, $resultat->attackerFleetResults[0]->fleetMissionId);
         $this->assertNotSame([], $resultat->rounds, 'The battle had no round: the duration would prove nothing.');
 
@@ -1005,6 +1023,10 @@ class RallyClosureServiceTest extends TestCase
         $corps = $this->aBodyId();
 
         $ouvreur = $this->anAttackAt($corps, self::OPENING, $joueur);
+        // **Une seconde vague, pour que la fenetre ne soit pas nulle.** Sans personne a
+        // attendre, l'ouverture ferme le ralliement dans sa propre transaction : cet essai
+        // n'aurait plus de cloture a gouverner.
+        $this->anAttackAt($corps, self::OPENING + 18, $joueur);
         $combat = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
 
         // La panne frappe tard : la bataille est deja calculee quand l'estimation de duree leve.
@@ -1047,6 +1069,9 @@ class RallyClosureServiceTest extends TestCase
         $corps = $this->aBodyId();
 
         $ouvreur = $this->anAttackAt($corps, self::OPENING, $joueur);
+        // Une seconde vague, sans quoi l'ouverture fermerait le ralliement elle-meme et cet
+        // essai n'aurait plus de cloture a gouverner.
+        $this->anAttackAt($corps, self::OPENING + 18, $joueur);
         $combat = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
 
         $v1 = new ExactLootAllocationV1();

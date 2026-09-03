@@ -90,6 +90,7 @@ final class CombatOpeningService
         private LootPolicyRegistry|null $policies = null,
         private MoonDestructionRuleRegistry|null $moonRules = null,
         private SnapshotProjectionRegistry|null $projections = null,
+        private RallyClosureService|null $closure = null,
     ) {
     }
 
@@ -224,7 +225,35 @@ final class CombatOpeningService
             'revision' => 0,
         ]);
 
+        // **Une fenetre nulle se ferme ici, pas a la minute suivante.**
+        //
+        // Quand personne n'est attendu, l'echeance du ralliement vaut l'instant d'ouverture : la
+        // fenetre dynamique existe precisement pour qu'un attaquant isole n'immobilise pas une
+        // planete. Laisser la fermeture au travail planifie reintroduirait l'attente qu'elle
+        // supprime — jusqu'a une minute de verrou pour une fenetre de zero seconde, et autant apres
+        // la fin du combat.
+        //
+        // La fermeture prend la barriere puis l'instance, dans le meme ordre que partout ailleurs,
+        // et sa transaction s'imbrique dans celle-ci : si elle echoue, l'ouverture disparait avec
+        // elle. Un combat a demi ouvert ne s'ecrit pas.
+        if ($this->closure()->close($combat->id, $openedAt)->closed) {
+            $combat->refresh();
+        }
+
         return $combat;
+    }
+
+    /**
+     * La fermeture qui ferme une fenetre nulle, **avec les registres de cette ouverture**.
+     *
+     * Une fermeture construite par defaut lirait les projections courantes : un combat ouvert sous
+     * un registre injecte se fermerait alors sous un autre, et le rejeu ne prouverait plus rien.
+     * La resoudre ici, et non dans la signature, est ce qui permet de lui passer ce que l'ouverture
+     * a recu — une valeur par defaut de parametre ne peut pas lire une autre propriete.
+     */
+    private function closure(): RallyClosureService
+    {
+        return $this->closure ??= new RallyClosureService(projections: $this->projections);
     }
 
     /**
