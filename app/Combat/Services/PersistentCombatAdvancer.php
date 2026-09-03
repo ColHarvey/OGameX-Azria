@@ -69,6 +69,7 @@ final class PersistentCombatAdvancer
             try {
                 if ($this->closure->close($id, $now)->closed) {
                     $fermes++;
+                    $this->recordRecovery($id);
                 }
             } catch (Throwable $panne) {
                 $echecs[$id] = $this->recordFailure($id, $panne);
@@ -79,6 +80,7 @@ final class PersistentCombatAdvancer
             try {
                 if ($this->mission()->settlePersistentCombat($id, $now)->settled) {
                     $regles++;
+                    $this->recordRecovery($id);
                 }
             } catch (Throwable $panne) {
                 $echecs[$id] = $this->recordFailure($id, $panne);
@@ -146,6 +148,31 @@ final class PersistentCombatAdvancer
         ]);
 
         return $raison;
+    }
+
+    /**
+     * Une phase reussie efface les echecs qui l'ont precedee.
+     *
+     * **Le compteur sert aux deux phases, et c'est ce qui exige la remise a zero.** Quatre
+     * fermetures ratees puis une reussie ne laisseraient qu'un seul essai au reglement, qui n'a
+     * encore rien rate. Et la derniere raison d'un incident gueri ne doit pas rester affichee a
+     * l'exploitation comme s'il durait encore.
+     *
+     * Ecrit apres le commit de la phase, en dehors d'elle : un compteur remis a zero dans la
+     * transaction qui reussit est equivalent, mais celui-ci reste visible meme si la phase suivante
+     * echoue aussitot.
+     */
+    private function recordRecovery(int $combatInstanceId): void
+    {
+        CombatInstance::query()
+            ->whereKey($combatInstanceId)
+            ->where(static function ($requete): void {
+                $requete->where('advance_attempts', '>', 0)->orWhereNotNull('advance_last_error');
+            })
+            ->update([
+                'advance_attempts' => 0,
+                'advance_last_error' => null,
+            ]);
     }
 
     /**

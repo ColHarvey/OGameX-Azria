@@ -49,4 +49,12 @@ enum CombatOutboxKind: string
      * distingue une regle d'un bogue.
      */
     case RallyRefused = 'rally_refused';
+
+    /**
+     * Le combat a ete annule par le serveur, et la flotte rentre sans avoir combattu.
+     *
+     * Ecrit par `CombatCancellationService`, dans la transaction qui annule : la flotte, la cause et
+     * le corps. Jamais par un joueur — aucune cause d'annulation n'est a sa portee.
+     */
+    case CombatCancelled = 'combat_cancelled';
 }

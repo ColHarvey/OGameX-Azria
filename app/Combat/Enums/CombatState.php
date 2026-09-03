@@ -79,7 +79,12 @@ enum CombatState: string
     {
         return match ($this) {
             self::Rallying => [self::Active, self::Cancelled],
-            self::Active => [self::Resolving],
+            // **Un combat actif s'annule aussi — jamais par un joueur.** `canBeCancelledFor()` refuse
+            // toute cause qu'un joueur pourrait provoquer ; ce qui reste est la sortie
+            // d'exploitation : un combat que le reglement ne sait plus appliquer et qui, laisse tel
+            // quel, tiendrait son corps pour toujours. L'annulation rend les flottes et libere le
+            // corps ; la bataille calculee n'est jamais appliquee.
+            self::Active => [self::Resolving, self::Cancelled],
             self::Resolving => [self::Resolved],
             // Deux etats terminaux : rien n'en sort, et c'est ce qui rend la resolution
             // idempotente. Un job relance retrouve un combat deja `Resolved` et n'a rien a

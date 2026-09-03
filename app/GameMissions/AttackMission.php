@@ -3,9 +3,12 @@
 namespace OGame\GameMissions;
 
 use OGame\Combat\Allocation\FrozenLootAllocation;
+use OGame\Combat\Enums\CombatCancellationCause;
 use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Services\CombatCancellationOutcome;
+use OGame\Combat\Services\CombatCancellationService;
 use OGame\Combat\Services\CombatOpeningService;
 use OGame\Combat\Services\CombatResolutionService;
 use OGame\Combat\Services\CombatSettlementOutcome;
@@ -108,6 +111,25 @@ class AttackMission extends GameMission
             $this,
             function (FleetMission $retourDe, Resources $ressources, UnitCollection $unites, int $tempsSupplementaire = 0, array|null $epaves = null, int|null $dureeImposee = null): void {
                 $this->startReturn($retourDe, $ressources, $unites, $tempsSupplementaire, $epaves, $dureeImposee);
+            },
+            $now,
+        );
+    }
+
+    /**
+     * Annule un combat durable et rend ses flottes, sans rien appliquer.
+     *
+     * Meme raison qu'au reglement : `startReturn()` est protegee et doit le rester. La mission prete
+     * sa fermeture a l'annulation comme elle la prete au reglement, et rien d'autre ne cree de
+     * retour en son nom.
+     */
+    public function cancelPersistentCombat(int $combatInstanceId, CombatCancellationCause $cause, int $now): CombatCancellationOutcome
+    {
+        return resolve(CombatCancellationService::class)->cancel(
+            $combatInstanceId,
+            $cause,
+            function (FleetMission $retourDe, Resources $ressources, UnitCollection $unites): void {
+                $this->startReturn($retourDe, $ressources, $unites);
             },
             $now,
         );

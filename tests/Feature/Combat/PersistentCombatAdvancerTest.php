@@ -258,6 +258,54 @@ class PersistentCombatAdvancerTest extends FleetDispatchTestCase
     }
 
     /**
+     * Une phase reussie remet le compteur a zero : le reglement ne paie pas les echecs de la fermeture.
+     *
+     * Le compteur est partage entre les deux phases. Sans remise a zero, quatre fermetures ratees
+     * puis une reussie ne laisseraient qu'un essai au reglement — qui n'a encore rien rate — et la
+     * derniere raison d'un incident gueri resterait affichee a l'exploitation.
+     */
+    public function testASuccessfulPhaseResetsTheCounterAndClearsTheReason(): void
+    {
+        [$combat, , , $barriere] = $this->anOpenedCombat();
+        $avanceur = new PersistentCombatAdvancer();
+        $echeanceDuRalliement = (int)$barriere->owned_through_effect_at;
+
+        // Quatre fermetures ratees : la photographie d'alliance est corrompue.
+        $saine = $combat->frozen_alliance_membership;
+        DB::table('combat_instances')->where('id', $combat->id)->update(['frozen_alliance_membership' => '{"alliance_id":"douze"}']);
+
+        for ($essai = 1; $essai <= PersistentCombatAdvancer::MAX_ATTEMPTS - 1; $essai++) {
+            $this->assertArrayHasKey($combat->id, $avanceur->advance($echeanceDuRalliement)->failures, "The closure did not fail on pass {$essai}.");
+        }
+
+        $combat->refresh();
+        $this->assertSame(PersistentCombatAdvancer::MAX_ATTEMPTS - 1, $combat->advance_attempts);
+        $this->assertNotNull($combat->advance_last_error);
+
+        // Gueri, la fermeture reussit — et efface ce qui l'a precedee.
+        DB::table('combat_instances')->where('id', $combat->id)->update(['frozen_alliance_membership' => json_encode($saine)]);
+        $this->assertSame(1, $avanceur->advance($echeanceDuRalliement)->closed, 'The healed rally did not close.');
+
+        $combat->refresh();
+        $this->assertSame(CombatState::Active, $combat->status);
+        $this->assertSame(0, $combat->advance_attempts, 'A successful closure left the failures of its predecessors on the counter.');
+        $this->assertNull($combat->advance_last_error, 'A healed incident is still reported as the last error.');
+
+        // Le reglement part de zero : quatre echecs ne le mettent pas de cote.
+        DB::table('combat_instances')->where('id', $combat->id)->update(['battle_result' => '{"schema":99}']);
+        $echeance = (int)$combat->ends_at;
+
+        for ($essai = 1; $essai <= PersistentCombatAdvancer::MAX_ATTEMPTS - 1; $essai++) {
+            $avance = $avanceur->advance($echeance);
+            $this->assertArrayHasKey($combat->id, $avance->failures, "The settlement was not attempted on pass {$essai}: it inherited the closure's failures.");
+            $this->assertSame(0, $avance->quarantined, "The combat was set aside on settlement pass {$essai}.");
+        }
+
+        $combat->refresh();
+        $this->assertSame(PersistentCombatAdvancer::MAX_ATTEMPTS - 1, $combat->advance_attempts, 'The settlement counter did not start from zero.');
+    }
+
+    /**
      * La commande passe l'instant qu'on lui donne, et rend toujours un succes.
      *
      * Un echec de combat n'est pas un echec du passage : les autres ont ete traites, et le compteur

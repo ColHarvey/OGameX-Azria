@@ -40,21 +40,27 @@ class CombatStateTest extends UnitTestCase
     }
 
     /**
-     * Assert that a combat already under way can no longer be cancelled.
+     * Assert that a combat being applied, or applied, can no longer be cancelled.
      *
-     * C'est la contrepartie de la regle « un combat engage ne se rappelle pas ». Une annulation
-     * n'est concevable que pendant le ralliement, tant que rien n'est calcule. Des que la photo
-     * est prise, le resultat existe : si `Active` pouvait revenir a `Cancelled`, un attaquant
-     * effacerait une bataille dont il connait deja l'issue defavorable.
+     * C'est la contrepartie de la regle « un combat engage ne se rappelle pas ». Des que la photo
+     * est prise, le resultat existe : si un **joueur** pouvait annuler, un attaquant effacerait une
+     * bataille dont il connait deja l'issue defavorable. Cette protection tient par les causes —
+     * aucune n'est a la portee d'un joueur, voir l'essai suivant — et non plus par l'etat seul.
+     *
+     * `Active` s'annule donc, mais jamais par un joueur : c'est la sortie d'exploitation d'un
+     * combat que le reglement ne sait plus appliquer et qui, laisse tel quel, tiendrait son corps
+     * pour toujours. Un combat en cours d'application ou applique, lui, ne se defait plus : ce qui
+     * a ete ecrit l'a ete.
      */
-    public function testACombatUnderWayCanNoLongerBeCancelled(): void
+    public function testACombatBeingAppliedCanNoLongerBeCancelled(): void
     {
         $this->assertTrue(CombatState::Rallying->canTransitionTo(CombatState::Cancelled), 'A combat that has not started cannot be cancelled.');
+        $this->assertTrue(CombatState::Active->canTransitionTo(CombatState::Cancelled), 'A stuck active combat has no way out: its body would stay locked forever.');
 
-        foreach ([CombatState::Active, CombatState::Resolving, CombatState::Resolved] as $etat) {
+        foreach ([CombatState::Resolving, CombatState::Resolved] as $etat) {
             $this->assertFalse(
                 $etat->canTransitionTo(CombatState::Cancelled),
-                "A combat in state {$etat->value} can still be cancelled, so its outcome could be erased once known."
+                "A combat in state {$etat->value} can still be cancelled, so what was written could be erased."
             );
         }
     }
@@ -77,12 +83,14 @@ class CombatStateTest extends UnitTestCase
                 "The cancellation cause « {$cause->value} » is within a player's reach: they could erase a battle whose outcome is already computed."
             );
 
-            $this->assertTrue(
-                CombatState::Rallying->canBeCancelledFor($cause),
-                "A pending combat cannot be cancelled for « {$cause->value} », so a system cancellation has no way through."
-            );
+            foreach ([CombatState::Rallying, CombatState::Active] as $etat) {
+                $this->assertTrue(
+                    $etat->canBeCancelledFor($cause),
+                    "A combat in state {$etat->value} cannot be cancelled for « {$cause->value} », so a system cancellation has no way through."
+                );
+            }
 
-            foreach ([CombatState::Active, CombatState::Resolving, CombatState::Resolved] as $etat) {
+            foreach ([CombatState::Resolving, CombatState::Resolved] as $etat) {
                 $this->assertFalse(
                     $etat->canBeCancelledFor($cause),
                     "A combat in state {$etat->value} can still be cancelled for « {$cause->value} »."
