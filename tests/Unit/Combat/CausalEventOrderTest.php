@@ -266,33 +266,60 @@ class CausalEventOrderTest extends UnitTestCase
      */
     public function testTheCurrentVersionIsOnlyChosenWhereTheOpeningIsFixed(): void
     {
-        $autorises = [];
+        // **La frontiere autoritaire, et les deux inscriptions provisoires.**
+        //
+        // `CombatRuleVersionSet` est faite pour cela : choisir les quatre versions courantes une
+        // seule fois, a l'ouverture durable.
+        //
+        // Les deux autres appartiennent au combat **instantane**, qui se resout a la seconde ou la
+        // flotte arrive. Y lire la version courante est correct tant qu'aucun combat ne dure ; elles
+        // sortiront de cette liste le jour ou le combat persistant leur passera l'ensemble gele.
+        $autorises = [
+            'Combat/Support/CombatRuleVersionSet.php',
+            'Combat/Support/LiveLootContextFactory.php',
+            'GameMissions/BattleEngine/Services/LootService.php',
+        ];
+
+        // Les quatre mecanismes versionnes. En surveiller un seul laissait les trois autres deriver.
+        $registres = [
+            'CausalEventOrderRegistry',
+            'LootAllocatorRegistry',
+            'LootPolicyRegistry',
+            'MoonDestructionRuleRegistry',
+        ];
 
         $appelants = [];
 
         foreach ($this->phpFilesOf(app_path()) as $fichier) {
             $source = file_get_contents($fichier);
 
-            if ($source === false || !str_contains($source, '->current()')) {
+            if ($source === false) {
                 continue;
             }
 
-            if (!str_contains($source, 'CausalEventOrderRegistry')) {
+            // **`currentVersion()` autant que `current()`.** Les deux choisissent la version
+            // courante ; ne surveiller que la premiere laissait passer exactement l'appel que le
+            // service d'ouverture s'appretait a faire.
+            if (!str_contains($source, '->current()') && !str_contains($source, '->currentVersion()')) {
                 continue;
             }
 
-            $appelants[] = str_replace('\\', '/', substr($fichier, strlen(app_path()) + 1));
+            foreach ($registres as $registre) {
+                if (str_contains($source, $registre)) {
+                    $appelants[] = str_replace('\\', '/', substr($fichier, strlen(app_path()) + 1));
+
+                    break;
+                }
+            }
         }
 
         sort($appelants);
 
-        // La liste blanche est comparee telle quelle : vide aujourd hui, elle grandira d un seul
-        // fichier — celui de l ouverture — et l ecart se lira ligne a ligne.
         $this->assertSame(
             $autorises,
             $appelants,
-            'A path outside the durable opening picks the current causal order. A late worker would then '
-            . 'reorder a combat that was already fixed under another version.'
+            'A path outside the durable opening picks a current rule version. A late worker would then '
+            . 'resolve under a rule that the combat never began with.'
         );
     }
 
