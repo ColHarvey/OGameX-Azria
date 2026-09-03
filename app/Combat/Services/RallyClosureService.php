@@ -84,20 +84,26 @@ final class RallyClosureService
     public function close(int $combatInstanceId, int $now): RallyClosureOutcome
     {
         return DB::transaction(function () use ($combatInstanceId, $now): RallyClosureOutcome {
-            $combat = CombatInstance::query()->whereKey($combatInstanceId)->lockForUpdate()->first();
-
-            if ($combat === null) {
-                return RallyClosureOutcome::unknownCombat();
-            }
-
-            // **La barriere d'abord.** L'ordre des verrous commence par elle ; le combat ne se
-            // verrouille qu'ensuite. L'inverse ferait s'attendre deux fermetures concurrentes.
+            // **La barriere d'abord, et par l'identifiant de combat** — pas apres avoir verrouille
+            // l'instance pour en tirer la cle.
+            //
+            // Ce code faisait l'inverse pendant que le commentaire affirmait cet ordre-ci. Le
+            // desaccord n'etait pas documentaire : l'ordre global fixe par la migration de barriere
+            // est corps -> combat -> union -> missions, et une jointure ou une resolution qui le
+            // suivrait aurait attendu la barriere pendant que la fermeture attendait l'instance.
+            // Deux transactions, deux verrous, chacune tenant celui que l'autre demande.
             $barriere = CelestialBodyCombatBarrier::query()
-                ->where('combat_instance_id', $combat->id)
+                ->where('combat_instance_id', $combatInstanceId)
                 ->lockForUpdate()
                 ->first();
 
             if ($barriere === null) {
+                return RallyClosureOutcome::unknownCombat();
+            }
+
+            $combat = CombatInstance::query()->whereKey($combatInstanceId)->lockForUpdate()->first();
+
+            if ($combat === null) {
                 return RallyClosureOutcome::unknownCombat();
             }
 

@@ -130,7 +130,24 @@ final class RallyCandidateReader
     }
 
     /**
-     * Les missions qui visent ce corps dans la fenetre, dans un ordre deterministe.
+     * Les missions qui visent ce corps dans la fenetre, verrouillees, dans un ordre deterministe.
+     *
+     * ## Deux ordres, et ils ne servent pas a la meme chose
+     *
+     * **Les verrous se prennent par identifiant croissant**, parce que c'est l'ordre global fixe par
+     * la migration de barriere : corps, combat, union, puis missions par identifiant trie. Deux
+     * transactions qui verrouillent les memes lignes dans le meme ordre ne s'attendent jamais en
+     * rond.
+     *
+     * **Le traitement, lui, suit l'heure d'arrivee** : c'est elle qui decide qui occupe la derniere
+     * place d'un budget. Trier en PHP apres la lecture donne les deux sans les opposer.
+     *
+     * ## Pourquoi verrouiller, alors que la fermeture tient deja la barriere
+     *
+     * La fermeture relit deliberement deux faits dans le monde courant : l'existence des missions et
+     * les rappels survenus depuis l'ouverture. Sans verrou, un rappel concurrent peut se glisser
+     * entre cette lecture et l'inscription des participants — la flotte serait inscrite au combat
+     * alors qu'elle a fait demi-tour.
      *
      * @param int $targetBodyId
      * @param int $openedAt
@@ -147,10 +164,16 @@ final class RallyCandidateReader
             ->where('id', '!=', $excludedMissionId)
             ->where('time_arrival', '>=', $openedAt)
             ->where('time_arrival', '<', $plafond)
-            ->orderBy('time_arrival')
             ->orderBy('id')
+            ->lockForUpdate()
             ->get()
             ->all();
+
+        usort(
+            $missions,
+            static fn (FleetMission $a, FleetMission $b): int
+                => [$a->time_arrival, $a->id] <=> [$b->time_arrival, $b->id]
+        );
 
         return $missions;
     }

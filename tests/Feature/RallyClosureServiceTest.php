@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\SnapshotContribution;
@@ -182,6 +183,67 @@ class RallyClosureServiceTest extends TestCase
             1,
             $combat->players_admitted,
             'Several waves of one player were counted as several players.'
+        );
+    }
+
+    /**
+     * Les verrous se prennent dans l'ordre fixe par la migration de barriere.
+     *
+     * ## Le defaut que cet essai ferme
+     *
+     * L'ordre global est ecrit dans la migration : **corps, puis combat, puis union, puis missions
+     * par identifiant trie**. La fermeture verrouillait l'instance en premier et la barriere ensuite,
+     * pendant que son propre commentaire affirmait l'inverse.
+     *
+     * Le desaccord n'etait pas documentaire. Une jointure ou une resolution qui suivrait l'ordre
+     * ecrit aurait attendu la barriere pendant que la fermeture attendait l'instance : deux
+     * transactions, deux verrous, chacune tenant celui que l'autre demande.
+     *
+     * ## Ce que cet essai prouve, et ce qu'il ne prouve pas
+     *
+     * Il observe l'ordre reel des requetes, pas le texte du commentaire — c'est pour cela qu'il
+     * ecoute la connexion au lieu de lire le source.
+     *
+     * **Il ne prouve pas l'absence d'interblocage.** SQLite ignore `for update` : seul MariaDB
+     * pose de vrais verrous de ligne, et l'epreuve a deux connexions reste a faire. Ce qu'il
+     * garantit, c'est que l'ordre d'acquisition ne repartira pas a l'envers sans que rien ne le
+     * dise.
+     */
+    public function testTheLocksAreTakenInTheOrderTheBarrierMigrationFixes(): void
+    {
+        $joueur = $this->aPlayer();
+        $corps = $this->aBodyId();
+
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $joueur);
+        $combat = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
+
+        $tables = [];
+
+        DB::listen(function (QueryExecuted $requete) use (&$tables): void {
+            foreach (['celestial_body_combat_barriers', 'combat_instances', 'fleet_missions'] as $table) {
+                if (str_contains($requete->sql, '"' . $table . '"') && !in_array($table, $tables, true)) {
+                    $tables[] = $table;
+                }
+            }
+        });
+
+        $this->fermeture->close($combat->id, self::OPENING + 1);
+
+        $rangs = array_flip($tables);
+
+        $this->assertArrayHasKey('celestial_body_combat_barriers', $rangs, 'The closure never touched the barrier.');
+        $this->assertArrayHasKey('combat_instances', $rangs, 'The closure never touched the instance.');
+
+        $this->assertLessThan(
+            $rangs['combat_instances'],
+            $rangs['celestial_body_combat_barriers'],
+            'The instance is locked before the barrier: the reverse of the order the migration fixes.'
+        );
+
+        $this->assertLessThan(
+            $rangs['fleet_missions'] ?? PHP_INT_MAX,
+            $rangs['combat_instances'],
+            'Candidate missions are read before the instance is held.'
         );
     }
 
