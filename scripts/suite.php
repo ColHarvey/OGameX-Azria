@@ -47,6 +47,7 @@
  *
  *     php scripts/suite.php                      la suite complete, sur tous les coeurs
  *     php scripts/suite.php --sequentiel         un seul processus, l'ancien chemin
+ *     php scripts/suite.php --officiel           `php artisan test`, la commande d'AGENTS.md
  *     php scripts/suite.php --processus=4        un nombre choisi
  *     php scripts/suite.php tests/Unit/Combat/   une partie, avec la meme securite
  */
@@ -183,10 +184,18 @@ $php = PHP_BINARY;
 
 $arguments = [];
 $sequentiel = false;
+$officiel = false;
 $processus = null;
 
 foreach (array_slice($argv, 1) as $argument) {
     if ($argument === '--sequentiel') {
+        $sequentiel = true;
+
+        continue;
+    }
+
+    if ($argument === '--officiel') {
+        $officiel = true;
         $sequentiel = true;
 
         continue;
@@ -283,9 +292,19 @@ if ($code !== 0) {
 // 6. Les tests.
 // ---------------------------------------------------------------------------------------------
 
-$commande = $processus === 1
-    ? [$php, '-d', 'memory_limit=2G', 'vendor/bin/phpunit', '--no-coverage', ...$arguments]
-    : [$php, '-d', 'memory_limit=2G', 'vendor/bin/paratest', '--processes=' . $processus, '--no-coverage', ...$arguments];
+// **`--officiel` lance la commande exacte d'`AGENTS.md`, sous le meme verrou.**
+//
+// Elle doit passer au moins une fois avant un candidat : c'est elle que la chaine de
+// contribution nomme, et un lanceur maison ne la remplace pas. Mais la lancer a la main hors du
+// verrou reviendrait a poser une remise a zero concurrente — exactement la faute que ce script
+// existe pour rendre impossible.
+//
+// Le verdict doit distinguer les deux passages : le parallele protege, et la commande officielle.
+$commande = match (true) {
+    $officiel => [$php, 'artisan', 'test'],
+    $processus === 1 => [$php, '-d', 'memory_limit=2G', 'vendor/bin/phpunit', '--no-coverage', ...$arguments],
+    default => [$php, '-d', 'memory_limit=2G', 'vendor/bin/paratest', '--processes=' . $processus, '--no-coverage', ...$arguments],
+};
 
 $code = $executer($commande);
 
