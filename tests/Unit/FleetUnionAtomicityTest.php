@@ -257,6 +257,7 @@ class FleetUnionAtomicityTest extends TestCase
             'error_mission_not_found',
             'error_not_buddy_or_ally',
             'error_returning_fleet',
+            'error_technical',
             'error_not_found',
         ];
 

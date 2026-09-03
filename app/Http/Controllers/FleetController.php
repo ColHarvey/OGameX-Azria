@@ -3,6 +3,7 @@
 namespace OGame\Http\Controllers;
 
 use Exception;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -1138,6 +1139,17 @@ class FleetController extends OGameController
                 'time_arrival' => $refreshedUnion->time_arrival,
                 'newAjaxToken' => csrf_token(),
             ]);
+        } catch (QueryException $panne) {
+            // **Une panne de base ne s'affiche pas.** `getMessage()` porte le moteur, la connexion,
+            // le chemin du fichier et la requete complete ; une epreuve de concurrence a montre un
+            // joueur recevant « SQLSTATE[HY000] ... database is locked ». Le detail reste au
+            // serveur, le joueur lit une phrase.
+            report($panne);
+
+            return response()->json([
+                'error' => __('t_acs.error_technical'),
+                'newAjaxToken' => csrf_token(),
+            ], 500);
         } catch (Exception $e) {
             return response()->json([
                 'error' => $e->getMessage(),

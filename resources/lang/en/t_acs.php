@@ -20,5 +20,6 @@ return [
     'error_mission_not_found' => 'Fleet not found.',
     'error_returning_fleet' => 'A fleet on its way home cannot join a union.',
     'error_not_buddy_or_ally' => 'You can only join a union created by a buddy or by a member of your alliance.',
+    'error_technical' => 'The union could not be joined right now. Please try again in a moment.',
     'error_not_found' => 'This union no longer exists.',
 ];

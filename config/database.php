@@ -37,6 +37,14 @@ return [
             'database' => env('DB_DATABASE', database_path('database.sqlite')),
             'prefix' => '',
             'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
+
+            // SQLite verrouille le fichier entier a l'ecriture. Sans delai d'attente, deux
+            // processus concurrents ne se serialisent pas : le second echoue aussitot sur
+            // « database is locked », et la suite fabrique ainsi des pannes que MariaDB n'a pas.
+            //
+            // Sans effet en production, qui tourne sur MariaDB.
+            'busy_timeout' => env('DB_BUSY_TIMEOUT', 10000),
+            'journal_mode' => env('DB_JOURNAL_MODE', 'wal'),
         ],
 
         'mysql' => [
