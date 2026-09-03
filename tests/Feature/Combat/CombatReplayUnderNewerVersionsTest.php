@@ -10,13 +10,17 @@ use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Allocation\LootAllocator;
 use OGame\Combat\Allocation\LootAllocatorRegistry;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Models\CombatDurationEstimate;
 use OGame\Combat\Projection\SnapshotProjectionRegistry;
 use OGame\Combat\Projection\SnapshotProjectionRule;
 use OGame\Combat\Projection\SnapshotProjectionV1;
+use OGame\Combat\Services\CombatDurationEstimator;
+use OGame\Combat\Services\CombatEngagementService;
 use OGame\Combat\Services\CombatOpeningService;
 use OGame\Combat\Services\RallyClosureService;
 use OGame\Combat\Support\FrozenCombatVersionSet;
 use OGame\Combat\Support\ResourceNormalizationDiagnostics;
+use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatParticipant;
 use OGame\Models\CombatSnapshotInclusion;
@@ -112,21 +116,48 @@ class CombatReplayUnderNewerVersionsTest extends TestCase
     {
         $combat = $this->anOpenedCombat();
 
-        (new RallyClosureService())->close($combat->id, self::OPENING + 60);
+        // **La bataille se calcule une fois.** Le moteur tire au sort : un rejeu qui la recalculerait
+        // ecrirait un autre resultat. L'estimateur compte ses appels — il n'est appele qu'apres un
+        // calcul — et le rejeu ne doit pas l'appeler une seconde fois.
+        $estimations = 0;
+        $estimateurCompteur = new class ($estimations) extends CombatDurationEstimator {
+            public function __construct(private int &$appels)
+            {
+            }
+
+            public function estimate(
+                BattleResult $result,
+                float $rate = self::DEFAULT_RATE,
+                int $minimumSeconds = self::DEFAULT_MINIMUM_SECONDS,
+                float $damping = self::DEFAULT_DAMPING,
+            ): CombatDurationEstimate {
+                $this->appels++;
+
+                return parent::estimate($result, $rate, $minimumSeconds, $damping);
+            }
+        };
+
+        (new RallyClosureService(engagement: new CombatEngagementService(estimator: $estimateurCompteur)))->close($combat->id, self::OPENING + 60);
 
         $premiere = $this->snapshotOf($combat);
 
         $this->assertNotSame([], $premiere['participants'], 'The first closure registered nobody.');
         $this->assertNotSame([], $premiere['inclusions'], 'The first closure included nothing.');
+        $this->assertSame(1, $estimations, 'The first closure did not compute the battle exactly once.');
+
+        $combat->refresh();
+        $resultatEcrit = $combat->battle_result;
+        $echeanceEcrite = $combat->ends_at;
+        $this->assertNotNull($resultatEcrit, 'The first closure wrote no battle result.');
 
         // Le combat repasse en ralliement. `refresh()` d'abord : l'instance en memoire porte encore
         // l'ancien statut, et lui reaffecter la meme valeur ne la rendrait pas modifiee.
-        $combat->refresh();
         $combat->status = CombatState::Rallying;
         $combat->save();
 
         $sousV2 = new RallyClosureService(
-            projections: $this->aProjectionRegistryWhereV2IsCurrent()
+            projections: $this->aProjectionRegistryWhereV2IsCurrent(),
+            engagement: new CombatEngagementService(estimator: $estimateurCompteur),
         );
 
         $sousV2->close($combat->id, self::OPENING + 120);
@@ -136,6 +167,11 @@ class CombatReplayUnderNewerVersionsTest extends TestCase
             $this->snapshotOf($combat),
             'A replay under newer current versions wrote a different snapshot.'
         );
+
+        $combat->refresh();
+        $this->assertSame(1, $estimations, 'The replayed closure computed the battle again.');
+        $this->assertSame($resultatEcrit, $combat->battle_result, 'The replayed closure overwrote the battle result.');
+        $this->assertSame($echeanceEcrite, $combat->ends_at, 'The replayed closure moved the end of the combat.');
     }
 
     /**
@@ -372,6 +408,9 @@ class CombatReplayUnderNewerVersionsTest extends TestCase
     {
         return FleetMission::forceCreate([
             'user_id' => $owner->id,
+            // L'engagement exige une planete d'origine : le retour y revient, et le moteur la nomme.
+            'planet_id_from' => $this->aPlanetIdOf($owner),
+            'type_from' => 1,
             'planet_id_to' => $targetBodyId,
             'mission_type' => 1,
             'time_departure' => self::OPENING - 600,
@@ -382,6 +421,20 @@ class CombatReplayUnderNewerVersionsTest extends TestCase
             'type_to' => 1,
             'light_fighter' => 10,
         ]);
+    }
+
+    /**
+     * La planete d'un joueur cree par ces fixtures.
+     */
+    private function aPlanetIdOf(User $owner): int
+    {
+        $id = Planet::query()->where('user_id', $owner->id)->value('id');
+
+        if (!is_int($id)) {
+            $this->fail('The player ' . $owner->id . ' owns no planet: no attack could leave from anywhere.');
+        }
+
+        return $id;
     }
 
     /**

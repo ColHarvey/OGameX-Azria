@@ -38,6 +38,10 @@ class LootPolicyUsageTest extends UnitTestCase
         return [
             // Une attaque pille : c'est le cas nominal, applique par CombatResolutionService.
             'app/GameMissions/AttackMission.php' => null,
+            // Un combat durable pille aussi : c'est la meme attaque, calculee a la cloture du
+            // ralliement au lieu de l'arrivee. Le butin reellement pris se decide plus tard, sur
+            // ce qui reste, mais le potentiel se photographie ici comme sur le chemin instantane.
+            'app/Combat/Services/CombatEngagementService.php' => null,
 
             // Une destruction de lune pille aussi : le butin est preleve par deductResources().
             'app/GameMissions/MoonDestructionMission.php' => null,

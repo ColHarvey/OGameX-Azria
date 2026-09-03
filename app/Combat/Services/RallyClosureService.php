@@ -85,6 +85,7 @@ final class RallyClosureService
         private DefensiveAdmissionSelector $defenceSelector = new DefensiveAdmissionSelector(),
         private RallyGrouping $grouping = new RallyGrouping(),
         SnapshotProjectionRegistry|null $projections = null,
+        private CombatEngagementService $engagement = new CombatEngagementService(),
     ) {
         $this->projections = $projections ?? SnapshotProjectionRegistry::default();
     }
@@ -182,6 +183,18 @@ final class RallyClosureService
         // l arrivee, et rien ne s est passe.
         $this->announceRefusals($combat, $attaquants, $closedAt);
         $this->announceRefusals($combat, $defenseurs, $closedAt);
+
+        // **La bataille se calcule ici, sous les memes verrous, et part avec la photographie.** Le
+        // moteur tire au sort : un calcul fait a l'echeance ne redonnerait pas celui-ci, et la
+        // duree, le rapport et le butin regle doivent venir du meme resultat. Si l'engagement
+        // echoue, la transaction efface les participants avec lui : un combat sans bataille ne
+        // s'ecrit pas.
+        $this->engagement->engage(
+            $combat,
+            $this->missionIdsOf($cotesAttaquants),
+            $this->missionIdsOf($defenseurs->admitted()),
+            $closedAt
+        );
 
         $combat->status = CombatState::Active;
         $combat->fleets_admitted = $this->countFleets($cotesAttaquants)
@@ -518,6 +531,27 @@ final class RallyClosureService
         }
 
         return $total;
+    }
+
+    /**
+     * Les missions que ces groupes reunissent, par identifiant croissant.
+     *
+     * @param array<int, AttackCandidateGroup> $groups
+     * @return array<int, int>
+     */
+    private function missionIdsOf(array $groups): array
+    {
+        $identifiants = [];
+
+        foreach ($groups as $groupe) {
+            foreach ($groupe->missions as $mission) {
+                $identifiants[] = $mission->missionId;
+            }
+        }
+
+        sort($identifiants);
+
+        return array_values(array_unique($identifiants));
     }
 
     /**

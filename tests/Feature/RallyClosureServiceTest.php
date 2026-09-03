@@ -4,17 +4,28 @@ namespace Tests\Feature;
 
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
+use LogicException;
+use OGame\Combat\Allocation\CappedLoot;
+use OGame\Combat\Allocation\ExactLootAllocationV1;
+use OGame\Combat\Allocation\LootAllocator;
+use OGame\Combat\Allocation\LootAllocatorRegistry;
 use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\SnapshotContribution;
 use OGame\Combat\Exceptions\ContradictorySnapshotInclusion;
 use OGame\Combat\Exceptions\UnknownSnapshotProjection;
+use OGame\Combat\Models\CombatDurationEstimate;
 use OGame\Combat\Projection\SnapshotProjectionV1;
+use OGame\Combat\Replay\BattleResultCodec;
+use OGame\Combat\Services\CombatDurationEstimator;
+use OGame\Combat\Services\CombatEngagementService;
 use OGame\Combat\Services\CombatOpeningService;
 use OGame\Combat\Services\RallyClosureService;
 use OGame\Combat\Support\CombatEventIdentity;
 use OGame\Combat\Support\CombatParticipantKey;
+use OGame\Combat\Support\ResourceNormalizationDiagnostics;
+use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatLootReservation;
 use OGame\Models\CombatOutboxMessage;
@@ -22,7 +33,9 @@ use OGame\Models\CombatParticipant;
 use OGame\Models\CombatSnapshotInclusion;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet;
+use OGame\Models\Resources;
 use OGame\Models\User;
+use RuntimeException;
 use Tests\TestCase;
 
 /**
@@ -938,6 +951,165 @@ class RallyClosureServiceTest extends TestCase
     }
 
     /**
+     * La cloture calcule la bataille et fixe l'echeance, dans la meme transaction que la photographie.
+     *
+     * Le resultat ecrit se relit par le codec ; l'echeance se compte depuis l'instant de cloture,
+     * pas depuis l'horloge du travailleur ; les parametres de duree sont figes avec elle.
+     */
+    public function testTheClosureComputesTheBattleAndFixesItsEnd(): void
+    {
+        $joueur = $this->aPlayer();
+        $corps = $this->aBodyId();
+
+        // Une defense sur la cible : sans elle la bataille n'a aucun round, dure zero seconde, et
+        // l'echeance se confondrait avec l'instant de cloture.
+        DB::table('planets')->where('id', $corps)->update(['rocket_launcher' => 20]);
+
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $joueur);
+        $combat = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
+
+        $this->assertNull($combat->battle_result, 'The opening already wrote a result: nothing was computed at closure.');
+
+        $barriere = CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->first();
+        $this->assertNotNull($barriere);
+
+        // Le travailleur passe bien apres l'echeance : le combat doit quand meme commencer a l'echeance.
+        $issue = $this->fermeture->close($combat->id, (int)$barriere->owned_through_effect_at + 19);
+        $this->assertTrue($issue->closed);
+
+        $combat->refresh();
+
+        $this->assertNotNull($combat->battle_result, 'The closure wrote no battle result.');
+        $resultat = BattleResultCodec::fromStorage($combat->battle_result);
+        $this->assertSame((int)$ouvreur->planet_id_from, $resultat->attackerPlanetId);
+        $this->assertCount(1, $resultat->attackerFleetResults);
+        $this->assertSame($ouvreur->id, $resultat->attackerFleetResults[0]->fleetMissionId);
+        $this->assertNotSame([], $resultat->rounds, 'The battle had no round: the duration would prove nothing.');
+
+        $this->assertNotNull($combat->duration_seconds);
+        $this->assertGreaterThan(0, $combat->duration_seconds);
+        $this->assertNotNull($combat->ends_at);
+        $this->assertSame((int)$barriere->owned_through_effect_at + $combat->duration_seconds, $combat->ends_at, 'The end is not counted from the rally deadline.');
+        $this->assertSame(CombatDurationEstimator::DEFAULT_RATE, $combat->duration_rate);
+        $this->assertSame(CombatDurationEstimator::DEFAULT_MINIMUM_SECONDS, $combat->duration_minimum_seconds);
+        $this->assertIsArray($combat->round_schedule);
+        $this->assertCount(count($resultat->rounds), $combat->round_schedule, 'The round schedule does not follow the rounds of the result.');
+    }
+
+    /**
+     * Un engagement qui echoue annule la cloture entiere : ni participants, ni resultat, ni `Active`.
+     */
+    public function testAFailedEngagementRollsTheWholeClosureBack(): void
+    {
+        $joueur = $this->aPlayer();
+        $corps = $this->aBodyId();
+
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $joueur);
+        $combat = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
+
+        // La panne frappe tard : la bataille est deja calculee quand l'estimation de duree leve.
+        // C'est le pire moment — tout le travail est fait, rien ne doit pourtant rester.
+        $estimateurEnPanne = new class () extends CombatDurationEstimator {
+            public function estimate(
+                BattleResult $result,
+                float $rate = self::DEFAULT_RATE,
+                int $minimumSeconds = self::DEFAULT_MINIMUM_SECONDS,
+                float $damping = self::DEFAULT_DAMPING,
+            ): CombatDurationEstimate {
+                throw new RuntimeException('panne injectee dans l engagement');
+            }
+        };
+
+        $enPanne = new RallyClosureService(engagement: new CombatEngagementService(estimator: $estimateurEnPanne));
+
+        try {
+            $enPanne->close($combat->id, self::OPENING + 19);
+            $this->fail('The injected failure did not propagate.');
+        } catch (RuntimeException $panne) {
+            $this->assertSame('panne injectee dans l engagement', $panne->getMessage());
+        }
+
+        $combat->refresh();
+        $this->assertSame(CombatState::Rallying, $combat->status, 'The combat became active without a battle.');
+        $this->assertNull($combat->battle_result);
+        $this->assertSame(0, CombatParticipant::query()->where('combat_instance_id', $combat->id)->count(), 'Participants survived the rolled-back closure.');
+    }
+
+    /**
+     * Un combat ouvert sous V1 s'engage sous V1, meme quand une V2 est devenue courante.
+     *
+     * Le registre injecte porte une V2 courante qui leve des qu'on lui demande quoi que ce soit :
+     * si l'engagement la choisissait, la cloture s'arreterait la.
+     */
+    public function testAV1CombatIsEngagedUnderV1WhenV2IsCurrent(): void
+    {
+        $joueur = $this->aPlayer();
+        $corps = $this->aBodyId();
+
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $joueur);
+        $combat = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
+
+        $v1 = new ExactLootAllocationV1();
+        $v2 = $v1->version() . '_but_newer';
+        $registre = LootAllocatorRegistry::of([$v1, $this->anAllocatorThatRefusesToWork($v2)], $v2);
+        $this->assertSame($v2, $registre->currentVersion(), 'The fake V2 is not current: the test would prove nothing.');
+
+        $sousV2 = new RallyClosureService(engagement: new CombatEngagementService(allocators: $registre));
+        $issue = $sousV2->close($combat->id, self::OPENING + 19);
+
+        $this->assertTrue($issue->closed);
+
+        $combat->refresh();
+        $this->assertNotNull($combat->battle_result);
+        $this->assertSame($v1->version(), BattleResultCodec::fromStorage($combat->battle_result)->lootAllocatorVersion, 'The battle was computed under an allocator the combat never began with.');
+    }
+
+    /**
+     * Un allocateur qui ne sait que dire sa version : l'appeler est la preuve qu'on l'a choisi.
+     */
+    private function anAllocatorThatRefusesToWork(string $version): LootAllocator
+    {
+        return new class ($version) implements LootAllocator {
+            public function __construct(private string $version)
+            {
+            }
+
+            public function version(): string
+            {
+                return $this->version;
+            }
+
+            public function lootableAmount(
+                float $inStock,
+                int $rateInBasisPoints,
+                string $phase,
+                ResourceNormalizationDiagnostics &$diagnostics,
+            ): int {
+                throw new LogicException('La V2 courante a ete choisie a la place de la V1 gelee.');
+            }
+
+            public function capByCargo(Resources $loot, int $totalCargoCapacity, string $phase = ExactLootAllocationV1::PHASE_TARGET_LOOT, string $subject = ''): CappedLoot
+            {
+                throw new LogicException('La V2 courante a ete choisie a la place de la V1 gelee.');
+            }
+
+            /**
+             * @param array<int, int> $weights
+             * @param array<int, int> $remainingCapacity
+             * @return array<int, int>
+             */
+            public function shareBetweenFleets(
+                int $amount,
+                array $weights,
+                array $remainingCapacity,
+                int $initiatorFleetMissionId,
+            ): array {
+                throw new LogicException('La V2 courante a ete choisie a la place de la V1 gelee.');
+            }
+        };
+    }
+
+    /**
      * Un combat inconnu ne fait pas lever la fermeture.
      */
     public function testAnUnknownCombatIsReportedRatherThanThrown(): void
@@ -957,6 +1129,9 @@ class RallyClosureServiceTest extends TestCase
 
         return FleetMission::forceCreate([
             'user_id' => $proprietaire->id,
+            // L'engagement exige une planete d'origine : le retour y revient, et le moteur la nomme.
+            'planet_id_from' => $this->aPlanetIdOf($proprietaire),
+            'type_from' => 1,
             'planet_id_to' => $targetBodyId,
             'mission_type' => 1,
             'time_departure' => self::OPENING - 600,
@@ -967,6 +1142,20 @@ class RallyClosureServiceTest extends TestCase
             'type_to' => 1,
             'light_fighter' => 10,
         ]);
+    }
+
+    /**
+     * La planete d'un joueur cree par ces fixtures.
+     */
+    private function aPlanetIdOf(User $owner): int
+    {
+        $id = Planet::query()->where('user_id', $owner->id)->value('id');
+
+        if (!is_int($id)) {
+            $this->fail('The player ' . $owner->id . ' owns no planet: no attack could leave from anywhere.');
+        }
+
+        return $id;
     }
 
     /**
