@@ -9,6 +9,7 @@ use OGame\Combat\Enums\FlightLeg;
 use OGame\Combat\Services\RallyCandidateReader;
 use OGame\Models\AllianceMember;
 use OGame\Models\FleetMission;
+use OGame\Models\FleetUnion;
 use OGame\Models\Planet;
 use OGame\Models\User;
 use OGame\Services\AllianceService;
@@ -267,6 +268,42 @@ class RallyCandidateReaderTest extends TestCase
     }
 
     /**
+     * L union sous laquelle vole la candidate est relue avec le reste.
+     *
+     * **Une attaque ACS deja en vol arrive ensemble.** Sans ce fait, l ouverture ne pourrait pas la
+     * regrouper, et la decouperait — trois flottes admises, deux renvoyees — en brisant une attaque
+     * coordonnee que ses joueurs ont organisee et payee.
+     */
+    public function testTheUnionIsReadWithTheRest(): void
+    {
+        $cible = $this->aBodyId();
+        $joueur = $this->aPlayer();
+
+        $seule = $this->aMission($joueur, $cible, self::OPENING + 10);
+
+        // **Une vraie union.** `fleet_missions.union_id` porte une cle etrangere : un identifiant
+        // invente est refuse par la base, comme pour le corps vise.
+        $union = $this->aUnionOwnedBy($joueur);
+
+        $groupee = $this->aMission($joueur, $cible, self::OPENING + 20);
+        $groupee->union_id = $union->id;
+        $groupee->save();
+
+        $parIdentifiant = [];
+
+        foreach ($this->read($cible) as $candidate) {
+            $parIdentifiant[$candidate->missionId] = $candidate->unionId;
+        }
+
+        $this->assertNull($parIdentifiant[$seule->id], 'A fleet flying alone was given a union.');
+        $this->assertSame(
+            $union->id,
+            $parIdentifiant[$groupee->id],
+            'The union was lost in the reading, so an in-flight ACS attack could be cut in half.'
+        );
+    }
+
+    /**
      * L'ordre est deterministe : arrivee planifiee, puis identifiant.
      */
     public function testTheOrderIsDeterministic(): void
@@ -372,6 +409,23 @@ class RallyCandidateReaderTest extends TestCase
         $fondateur = $this->aPlayer();
 
         return app(AllianceService::class)->createAlliance($fondateur->id, "RCR", "Lecteur")->id;
+    }
+
+    /**
+     * Une union de flottes appartenant a ce joueur.
+     */
+    private function aUnionOwnedBy(User $owner): FleetUnion
+    {
+        return FleetUnion::create([
+            'user_id' => $owner->id,
+            'galaxy_to' => 4,
+            'system_to' => 1,
+            'position_to' => 1,
+            'planet_type_to' => 1,
+            'time_arrival' => self::OPENING + 20,
+            'max_fleets' => 16,
+            'max_players' => 5,
+        ]);
     }
 
     /**

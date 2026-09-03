@@ -35,6 +35,10 @@ final readonly class CandidateMission
      * @param int $scheduledArrivalAt Son arrivee planifiee, en secondes.
      * @param bool $inFlightAtOpening Si elle volait deja quand le combat s'est ouvert.
      * @param bool $recalled Si elle a ete rappelee depuis.
+     * @param int|null $unionId L'union sous laquelle elle vole, ou null si elle vole seule.
+     *                          Une attaque ACS deja en vol arrive **ensemble** : c'est ce fait qui
+     *                          permet de la regrouper, et donc de l'admettre ou de la renvoyer
+     *                          entiere plutot que de couper une attaque coordonnee en deux.
      */
     public function __construct(
         public int $missionId,
@@ -47,6 +51,7 @@ final readonly class CandidateMission
         public int $scheduledArrivalAt,
         public bool $inFlightAtOpening,
         public bool $recalled,
+        public int|null $unionId = null,
     ) {
         if ($missionId < 1 || $userId < 1) {
             throw new InvalidArgumentException(

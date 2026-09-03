@@ -109,6 +109,7 @@ final class RallyCandidateReader
                 // avec une barriere compte pour « apres », ici comme partout ailleurs.
                 $mission->time_departure < $openedAt,
                 $mission->canceled === 1,
+                $mission->union_id,
             );
         }
 
