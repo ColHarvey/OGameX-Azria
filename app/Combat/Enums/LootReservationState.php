@@ -3,6 +3,20 @@
 namespace OGame\Combat\Enums;
 
 /**
+ * ⚠ **MECANISME EXPLORATOIRE — INACTIF EN PREMIERE VERSION.**
+ *
+ * Rien dans le chemin de jeu n'ecrit ni ne lit cette table. Le texte qui suit decrit un mecanisme
+ * qui **n'est pas celui du jeu** : il a ete concu, raccorde, puis retire.
+ *
+ * La regle de premiere version est l'inverse : **aucune ressource n'est immobilisee**. Le defenseur
+ * depense librement pendant le combat, et le reglement se fait a la resolution, composante par
+ * composante :
+ *
+ *     butin applique = min(butin potentiel gele, ressources reellement restantes)
+ *
+ * `LootReservationHasNoWriterTest` interdit tout appelant. Si ce mecanisme est repris un jour, ce
+ * sera **une nouvelle decision de jeu**, pas la reprise d'une decision deja prise.
+ * *
  * Les etats d'une reservation de butin, et les seuls passages permis entre eux.
  *
  *     OPEN ──→ SEALED ──→ SETTLED

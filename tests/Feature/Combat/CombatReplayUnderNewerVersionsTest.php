@@ -18,7 +18,6 @@ use OGame\Combat\Services\RallyClosureService;
 use OGame\Combat\Support\FrozenCombatVersionSet;
 use OGame\Combat\Support\ResourceNormalizationDiagnostics;
 use OGame\Models\CombatInstance;
-use OGame\Models\CombatLootReservation;
 use OGame\Models\CombatParticipant;
 use OGame\Models\CombatSnapshotInclusion;
 use OGame\Models\FleetMission;
@@ -40,7 +39,7 @@ use Tests\TestCase;
  *
  * Les cinq versions persistees a l'ouverture ne bougent pas, l'empreinte des faits geles non plus,
  * et une fermeture rejouee alors que les courantes ont change ecrit **exactement la meme
- * photographie** : memes participants, memes inclusions, memes budgets, meme reservation.
+ * photographie** : memes participants, memes inclusions, memes budgets.
  *
  * ## Ce qu'il ne prouve pas encore
  *
@@ -289,6 +288,11 @@ class CombatReplayUnderNewerVersionsTest extends TestCase
     /**
      * Tout ce que la fermeture a ecrit, sous une forme comparable.
      *
+     * **La reservation de butin n'y figure pas**, et son absence est deliberee : elle n'a aucun
+     * ecrivain en premiere version. Une valeur toujours nulle ne prouverait rien sur la regle
+     * active, et laisserait croire que le rejeu la surveille. C'est
+     * `LootReservationHasNoWriterTest` qui porte cette decision, seul et explicitement.
+     *
      * **L'ordre est fixe explicitement.** Comparer deux lectures dont l'ordre depend de la base
      * ferait echouer l'essai pour une raison qui n'a rien a voir avec le rejeu.
      *
@@ -297,8 +301,6 @@ class CombatReplayUnderNewerVersionsTest extends TestCase
     private function snapshotOf(CombatInstance $combat): array
     {
         $combat->refresh();
-
-        $reservation = CombatLootReservation::where('combat_instance_id', $combat->id)->first();
 
         return [
             'status' => $combat->status->value,
@@ -320,13 +322,6 @@ class CombatReplayUnderNewerVersionsTest extends TestCase
                     'included_at' => $ligne->included_at,
                 ])
                 ->all(),
-            'reservation' => $reservation === null ? null : [
-                'state' => $reservation->state->value,
-                'metal' => $reservation->metal,
-                'crystal' => $reservation->crystal,
-                'deuterium' => $reservation->deuterium,
-                'sealed_at' => $reservation->sealed_at,
-            ],
         ];
     }
 

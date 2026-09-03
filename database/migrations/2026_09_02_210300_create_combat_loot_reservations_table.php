@@ -6,7 +6,26 @@ use Illuminate\Support\Facades\Schema;
 use OGame\Combat\Enums\LootReservationState;
 
 /*
- * Ce que le defenseur ne peut plus mettre a l'abri.
+ * Ce que le defenseur ne pourrait plus mettre a l'abri, si ce mecanisme etait actif.
+ *
+ * ⚠ **MECANISME EXPLORATOIRE — INACTIF EN PREMIERE VERSION.**
+ *
+ * Rien dans le chemin de jeu n'ecrit ni ne lit cette table. Le texte qui suit decrit un mecanisme
+ * qui **n'est pas celui du jeu** : il a ete concu, raccorde, puis retire.
+ *
+ * La regle de premiere version est l'inverse : **aucune ressource n'est immobilisee**. Le defenseur
+ * depense librement pendant le combat, et le reglement se fait a la resolution, composante par
+ * composante :
+ *
+ *     butin applique = min(butin potentiel gele, ressources reellement restantes)
+ *
+ * `LootReservationHasNoWriterTest` interdit tout appelant. Si ce mecanisme est repris un jour, ce
+ * sera **une nouvelle decision de jeu**, pas la reprise d'une decision deja prise.
+ * * La table est creee et reste vide : la branche n'est pas candidate au deploiement, et une
+ * migration de retrait attendrait de savoir si le mecanisme revient. Aucun ecran, message,
+ * solde disponible, verrou ni ordre transactionnel de V1 n'en depend.
+ *
+ * ## Ce que le mecanisme decrivait
  *
  * ## Le probleme
  *

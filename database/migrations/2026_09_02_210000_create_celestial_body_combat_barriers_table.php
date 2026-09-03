@@ -20,17 +20,25 @@ use Illuminate\Support\Facades\Schema;
  *
  * ## La premiere prise du verrou global
  *
- * Plusieurs verrous seront pris pendant une fermeture de ralliement : cette barriere, l'union, les
- * missions candidates, les ressources de la cible. **Deux transactions qui les prennent dans un
- * ordre different se bloquent mutuellement.** L'ordre est donc fixe, et celui-ci vient en premier :
+ * Plusieurs verrous sont pris pendant une fermeture de ralliement : cette barriere, l'instance,
+ * l'union, les missions candidates. **Deux transactions qui les prennent dans un ordre different se
+ * bloquent mutuellement.** L'ordre est donc fixe, et celui-ci vient en premier :
  *
  *     1. barriere du corps celeste
  *     2. instance de combat
  *     3. union, puis missions par identifiant croissant
- *     4. reservation de butin
+ *     4. la cible, quand la resolution debite son solde
  *
  * Cet ordre est une decision, pas une observation. Il est ecrit ici parce que c'est le premier
  * maillon, et tout code qui prend ces verrous doit le suivre.
+ *
+ * **Le quatrieme maillon a change de nature.** Il designait une reservation de butin, mecanisme
+ * retire de la premiere version : aucune ressource n'est immobilisee, et le reglement se fait a la
+ * resolution par `min(butin potentiel, ressources restantes)`. C'est donc la cible elle-meme qui se
+ * verrouille, au moment du debit, et rien avant.
+ *
+ * Un ordre de verrous qui nomme un maillon inexistant est pire qu'un ordre incomplet : il invite a
+ * verrouiller quelque chose qui n'est jamais pris, et donc a s'attendre pour rien.
  *
  * ## `owned_through_effect_at`
  *
