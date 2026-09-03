@@ -50,11 +50,20 @@ use OGame\Models\User;
  * Le `catch` distingue la course d'une vraie panne : il relit la barriere. Si elle existe, quelqu'un
  * a gagne et le combat est le sien ; sinon l'erreur est reelle et remonte.
  *
- * ## Ce que ce service ne fait pas encore
+ * ## Ce que ce service fait desormais, et que ce commentaire a longtemps nie
  *
- * Il ne photographie pas les appartenances d'alliance, ne lit pas les candidates et ne calcule pas
- * l'echeance de ralliement : `owned_through_effect_at` prend le plafond, faute de savoir quelles
- * flottes sont attendues. Ces trois-la demandent le selecteur, et viennent ensuite.
+ * Il photographie les appartenances d'alliance, lit les candidates et calcule l'echeance reelle du
+ * ralliement sur les flottes qui seraient admises. **Ce paragraphe affirmait le contraire alors que
+ * le code le faisait deja** — une documentation inversee sur la frontiere d'ouverture est plus
+ * dangereuse qu'une documentation absente : elle invite a rajouter une garantie qui existe, ou pire,
+ * a supprimer celle qu'on croit manquante.
+ *
+ * ## Ce qu'il ne fait toujours pas
+ *
+ * Il ne transmet pas encore l'ensemble de versions gele a `LiveLootContextFactory` ni a
+ * `LootService` : ces deux-la choisissent encore les versions courantes au moment de la resolution.
+ * C'est une dette declaree, inscrite en liste blanche dans la garde architecturale, pas une
+ * garantie.
  *
  * Le dire evite de croire l'ouverture terminee.
  */

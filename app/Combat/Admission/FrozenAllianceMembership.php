@@ -26,6 +26,18 @@ use OGame\Combat\Exceptions\CorruptedFrozenMembership;
  *
  * C'est le meme principe que le reste du systeme : les faits qui gouvernent un combat sont ecrits
  * avec lui, jamais relus dans un monde qui a change depuis.
+ *
+ * ## Ce que la liste contient, et ce qu'elle ne contient pas
+ *
+ * **Elle ne represente pas tous les membres de l'alliance.** Elle ne porte que les proprietaires
+ * exterieurs qui visaient deja ce corps dans la fenetre, au moment de l'ouverture — ceux dont
+ * l'appartenance aura une consequence a la fermeture. L'ouvreur, lui, est connu separement par le
+ * groupe fondateur ; il n'a pas besoin d'y figurer.
+ *
+ * Consequence directe, et elle est voulue : **une alliance gouvernante avec zero membre photographie
+ * est une photographie correcte**, pas une lecture ratee. Elle dit « une alliance gouverne, et
+ * personne d'autre ne visait la cible ». La refuser ferait echouer une ouverture parfaitement
+ * legitime — le cas le plus courant, celui d'une attaque solitaire lancee par un joueur allie.
  */
 final readonly class FrozenAllianceMembership
 {
@@ -143,11 +155,15 @@ final readonly class FrozenAllianceMembership
             throw new CorruptedFrozenMembership('l identifiant d alliance n est pas un entier', $stored);
         }
 
-        if (!is_array($membres) || array_keys($membres) !== range(0, count($membres) - 1)) {
+        // `array_is_list()`, et non une comparaison a `range()` : sur une liste vide, `range(0, -1)`
+        // rend `[0, -1]`, et cette photographie parfaitement legitime — une alliance qui gouverne
+        // sans autre pretendant a la cible — etait refusee.
+        if (!is_array($membres) || !array_is_list($membres)) {
             throw new CorruptedFrozenMembership('les membres ne forment pas une liste', $stored);
         }
 
-        return self::of($allianceId, array_values($membres));
+        // Pas de `array_values()` : `array_is_list()` vient de garantir que c en est une.
+        return self::of($allianceId, $membres);
     }
 
     /**

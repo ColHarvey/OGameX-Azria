@@ -72,6 +72,35 @@ class FrozenAllianceMembershipTest extends TestCase
     }
 
     /**
+     * Une alliance qui gouverne sans aucun membre photographie est une photographie correcte.
+     *
+     * ## Pourquoi ce n'est pas une lecture ratee
+     *
+     * La liste ne represente pas tous les membres de l'alliance : elle ne porte que les
+     * proprietaires **exterieurs** qui visaient deja ce corps dans la fenetre. L'ouvreur est connu
+     * separement par le groupe fondateur.
+     *
+     * Le cas le plus courant du jeu produit donc exactement cette forme : un joueur allie lance une
+     * attaque solitaire, personne d'autre ne vise la cible. Refuser cette photographie ferait
+     * echouer l'ouverture la plus banale qui soit.
+     */
+    public function testAGoverningAllianceWithNoPhotographedMemberIsValid(): void
+    {
+        $prise = FrozenAllianceMembership::of(12, []);
+
+        $this->assertSame(12, $prise->allianceId);
+        $this->assertSame([], $prise->memberUserIds());
+
+        $relue = FrozenAllianceMembership::fromStorage($prise->toStorage());
+
+        $this->assertSame(['alliance_id' => 12, 'members' => []], $relue->toStorage());
+        $this->assertSame($prise->toStorage(), $relue->toStorage());
+
+        // Elle gouverne, mais elle n'admet personne d'autre : c'est bien ce que la photographie dit.
+        $this->assertNull($relue->allianceFor(3));
+    }
+
+    /**
      * Des membres sans alliance qui gouverne : les deux faits se contredisent.
      */
     public function testMembersWithoutAGoverningAllianceAreRefused(): void
