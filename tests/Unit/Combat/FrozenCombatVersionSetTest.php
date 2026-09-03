@@ -17,19 +17,22 @@ use OGame\Combat\MoonDestruction\MoonDestructionRule;
 use OGame\Combat\MoonDestruction\MoonDestructionRuleRegistry;
 use OGame\Combat\Policies\LootPolicyRegistry;
 use OGame\Combat\Policies\LootRateRule;
-use OGame\Combat\Support\CombatRuleVersionSet;
+use OGame\Combat\Projection\SnapshotProjectionRegistry;
+use OGame\Combat\Projection\SnapshotProjectionRule;
+use OGame\Combat\Support\FrozenCombatVersionSet;
 use OGame\Combat\Support\LootPolicy;
 use OGame\Combat\Support\ResourceNormalizationDiagnostics;
 use OGame\Models\Resources;
 use Tests\UnitTestCase;
 
 /**
- * Les quatre versions d'un combat, choisies une fois et jamais relues.
+ * Les cinq versions d'un combat, choisies une fois et jamais relues.
  *
  * ## Ce que cet ensemble empeche
  *
  * Un combat dure deux heures. Pendant ce temps, une regle peut etre versionnee : l'ordre causal,
- * l'allocateur de butin, la politique de taux, la destruction de lune. Un service qui lirait « la
+ * l'allocateur de butin, la politique de taux, la destruction de lune, la projection de
+ * photographie. Un service qui lirait « la
  * version courante » au milieu d'une resolution ferait deriver retroactivement une bataille deja
  * engagee — photographiee sous une regle, reglee sous une autre, et impossible a reproduire.
  *
@@ -43,24 +46,24 @@ use Tests\UnitTestCase;
  *
  * Ils ne prouvent **pas** encore que les decisions, la photographie, le pillage et le plan lunaire
  * d'un combat rejoue sont identiques : cela demande `CombatOpeningService`, qui n'existe pas. Ils
- * couvrent desormais **les quatre** registres, allocateur compris : son double ne porte qu'une
- * version, et ses trois autres methodes levent — ce qui se prouve ici est la selection d'une
- * version, pas un algorithme d'allocation.
+ * couvrent desormais **les cinq** registres, allocateur et projection compris : leurs doubles ne
+ * portent qu'une version, et leurs autres methodes levent — ce qui se prouve ici est la
+ * selection d'une version, pas un algorithme.
  *
  * Le dire evite de compter ces preuves-la comme acquises.
  */
-class CombatRuleVersionSetTest extends UnitTestCase
+class FrozenCombatVersionSetTest extends UnitTestCase
 {
     /**
      * L'ensemble persiste se relit a l'identique.
      */
     public function testTheSetSurvivesItsOwnStorage(): void
     {
-        $choisi = CombatRuleVersionSet::chosenAtOpening();
+        $choisi = FrozenCombatVersionSet::chosenAtOpening();
 
         $this->assertSame(
             $choisi->toStorage(),
-            CombatRuleVersionSet::fromStorage($choisi->toStorage())->toStorage(),
+            FrozenCombatVersionSet::fromStorage($choisi->toStorage())->toStorage(),
             'The version set did not survive a round trip through storage.'
         );
     }
@@ -73,33 +76,34 @@ class CombatRuleVersionSetTest extends UnitTestCase
      */
     public function testAV1CombatStaysV1WhenTheCurrentSetMovesToV2(): void
     {
-        $v1 = CombatRuleVersionSet::chosenAtOpening();
+        $v1 = FrozenCombatVersionSet::chosenAtOpening();
         $persiste = $v1->toStorage();
 
-        // Quatre V2 factices deviennent les valeurs courantes.
+        // Cinq V2 factices deviennent les valeurs courantes.
         //
-        // **Les quatre bougent, l'allocateur compris.** Le laisser en V1 laissait un quart de
-        // l'ensemble hors de la preuve : un combat aurait pu changer d'allocateur sans que rien
-        // ici ne s'en apercoive.
-        $v2 = CombatRuleVersionSet::chosenAtOpening(
+        // **Les cinq bougent, la projection comprise.** En laisser une seule en V1 laisserait un
+        // cinquieme de l'ensemble hors de la preuve : un combat aurait pu changer de regle sans
+        // que rien ici ne s'en apercoive.
+        $v2 = FrozenCombatVersionSet::chosenAtOpening(
             $this->aCausalRegistryOn('causal_event_order_v2'),
             $this->anAllocatorRegistryOn('exact_loot_allocation_v2'),
             $this->aPolicyRegistryOn('cargo_weighted_v2'),
             $this->aMoonRegistryOn('moon_destruction_v2'),
+            $this->aProjectionRegistryOn('projection_v2'),
         );
 
         // **Champ par champ, et non l'ensemble entier.** Comparer les deux ensembles d'un bloc
-        // restait vrai avec trois changements sur quatre : une mutation qui rendait l'allocateur a
-        // sa V1 survivait a cet essai, et le quart manquant serait reste hors de la preuve.
+        // restait vrai avec quatre changements sur cinq : une mutation qui rendait l'allocateur a
+        // sa V1 survivait a cet essai, et la part manquante serait restee hors de la preuve.
         foreach ($v1->toStorage() as $regle => $version) {
             $this->assertNotSame(
                 $version,
                 $v2->toStorage()[$regle],
-                'The fake V2 registry for ' . $regle . ' was not actually different: a quarter of the set stays unproven.'
+                'The fake V2 registry for ' . $regle . ' was not actually different: part of the set stays unproven.'
             );
         }
 
-        $recharge = CombatRuleVersionSet::fromStorage($persiste);
+        $recharge = FrozenCombatVersionSet::fromStorage($persiste);
 
         $this->assertSame(
             $v1->toStorage(),
@@ -113,7 +117,7 @@ class CombatRuleVersionSetTest extends UnitTestCase
      */
     public function testTheRuleIsRehydratedFromTheStoredVersion(): void
     {
-        $v1 = CombatRuleVersionSet::chosenAtOpening();
+        $v1 = FrozenCombatVersionSet::chosenAtOpening();
 
         // Un registre qui connait V1 **et** une V2 courante.
         $registre = CausalEventOrderRegistry::default();
@@ -143,11 +147,11 @@ class CombatRuleVersionSetTest extends UnitTestCase
      */
     public function testTwoDifferentSetsRefuseToBeCompared(): void
     {
-        $v1 = CombatRuleVersionSet::chosenAtOpening();
-        $autre = CombatRuleVersionSet::of('causal_event_order_v2', 'a', 'b', 'c');
+        $v1 = FrozenCombatVersionSet::chosenAtOpening();
+        $autre = FrozenCombatVersionSet::of('causal_event_order_v2', 'a', 'b', 'c', 'proj_v1');
 
         // Le meme ensemble se compare a lui-meme sans rien dire.
-        $v1->ensureSameAs(CombatRuleVersionSet::fromStorage($v1->toStorage()));
+        $v1->ensureSameAs(FrozenCombatVersionSet::fromStorage($v1->toStorage()));
 
         $this->expectException(MismatchedRuleVersionSet::class);
 
@@ -162,8 +166,8 @@ class CombatRuleVersionSetTest extends UnitTestCase
      */
     public function testTheVersionsBelongToTheFingerprint(): void
     {
-        $v1 = CombatRuleVersionSet::chosenAtOpening();
-        $v2 = CombatRuleVersionSet::of('causal_event_order_v2', 'x', 'y', 'z');
+        $v1 = FrozenCombatVersionSet::chosenAtOpening();
+        $v2 = FrozenCombatVersionSet::of('causal_event_order_v2', 'x', 'y', 'z', 'proj_v1');
 
         $this->assertNotSame(
             $v1->fingerprintFacts(),
@@ -195,7 +199,7 @@ class CombatRuleVersionSetTest extends UnitTestCase
     {
         $this->expectException(CorruptedRuleVersionSet::class);
 
-        CombatRuleVersionSet::fromStorage([
+        FrozenCombatVersionSet::fromStorage([
             'causal_order' => 'causal_event_order_v1',
             'loot_allocator' => 'a1',
             'loot_policy' => 'p1',
@@ -209,7 +213,7 @@ class CombatRuleVersionSetTest extends UnitTestCase
     {
         $this->expectException(CorruptedRuleVersionSet::class);
 
-        CombatRuleVersionSet::fromStorage([
+        FrozenCombatVersionSet::fromStorage([
             'causal_order' => 'causal_event_order_v1',
             'loot_allocator' => 'a1',
             'loot_policy' => 'p1',
@@ -221,20 +225,21 @@ class CombatRuleVersionSetTest extends UnitTestCase
     /**
      * Chacune des quatre versions est refusee si elle n'est pas une chaine.
      */
-    public function testEachOfTheFourVersionsIsRefusedWhenItIsNotAString(): void
+    public function testEachOfTheFiveVersionsIsRefusedWhenItIsNotAString(): void
     {
-        foreach (['causal_order', 'loot_allocator', 'loot_policy', 'moon_destruction'] as $clef) {
+        foreach (['causal_order', 'loot_allocator', 'loot_policy', 'moon_destruction', 'projection'] as $clef) {
             $stocke = [
                 'causal_order' => 'causal_event_order_v1',
                 'loot_allocator' => 'a1',
                 'loot_policy' => 'p1',
                 'moon_destruction' => 'm1',
+                'projection' => 'proj_v1',
             ];
 
             $stocke[$clef] = 42;
 
             try {
-                CombatRuleVersionSet::fromStorage($stocke);
+                FrozenCombatVersionSet::fromStorage($stocke);
 
                 $this->fail('A non-string version was accepted for ' . $clef . '.');
             } catch (CorruptedRuleVersionSet $arret) {
@@ -249,16 +254,16 @@ class CombatRuleVersionSetTest extends UnitTestCase
      * Y compris par `of()` : une version vide passee a la construction serait persistee telle
      * quelle, et le defaut ne se verrait qu'a la relecture d'un combat deja ouvert.
      */
-    public function testEachOfTheFourVersionsIsRefusedWhenItIsEmpty(): void
+    public function testEachOfTheFiveVersionsIsRefusedWhenItIsEmpty(): void
     {
-        $completes = ['causal_event_order_v1', 'a1', 'p1', 'm1'];
+        $completes = ['causal_event_order_v1', 'a1', 'p1', 'm1', 'proj_v1'];
 
-        foreach ([0, 1, 2, 3] as $rang) {
+        foreach ([0, 1, 2, 3, 4] as $rang) {
             $versions = $completes;
             $versions[$rang] = '';
 
             try {
-                CombatRuleVersionSet::of(...$versions);
+                FrozenCombatVersionSet::of(...$versions);
 
                 $this->fail('An empty version was accepted at position ' . $rang . '.');
             } catch (CorruptedRuleVersionSet $arret) {
@@ -272,11 +277,11 @@ class CombatRuleVersionSetTest extends UnitTestCase
      */
     public function testACompleteSetSurvivesTheRoundTrip(): void
     {
-        $ensemble = CombatRuleVersionSet::of('causal_event_order_v1', 'a1', 'p1', 'm1');
+        $ensemble = FrozenCombatVersionSet::of('causal_event_order_v1', 'a1', 'p1', 'm1', 'proj_v1');
 
         $this->assertSame(
             $ensemble->toStorage(),
-            CombatRuleVersionSet::fromStorage($ensemble->toStorage())->toStorage()
+            FrozenCombatVersionSet::fromStorage($ensemble->toStorage())->toStorage()
         );
     }
 
@@ -337,6 +342,28 @@ class CombatRuleVersionSetTest extends UnitTestCase
         };
 
         return LootAllocatorRegistry::of([$allocateur], $version);
+    }
+
+    /**
+     * Un registre de projection pose sur cette version.
+     *
+     * Comme les autres doubles : seule `version()` est reelle. Ce qui se prouve ici est la selection
+     * d'une version, pas la facon dont une photographie se lit.
+     */
+    private function aProjectionRegistryOn(string $version): SnapshotProjectionRegistry
+    {
+        $regle = new class ($version) implements SnapshotProjectionRule {
+            public function __construct(private string $version)
+            {
+            }
+
+            public function version(): string
+            {
+                return $this->version;
+            }
+        };
+
+        return SnapshotProjectionRegistry::of([$regle], $version);
     }
 
     /**

@@ -14,9 +14,8 @@ use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Support\ActorKindResolver;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\CombatRallyWindow;
-use OGame\Combat\Support\CombatRuleVersionSet;
+use OGame\Combat\Support\FrozenCombatVersionSet;
 use OGame\Combat\Support\SnapshotFingerprint;
-use OGame\Combat\Support\SnapshotProjection;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
 use OGame\Models\FleetMission;
@@ -34,7 +33,7 @@ use OGame\Models\User;
  * gouverne le combat est donc choisi ici, une seule fois, et ecrit avec lui.
  *
  * C'est aussi le seul endroit du chemin persistant qui a le droit de demander les versions
- * courantes — voir `CombatRuleVersionSet::chosenAtOpening()`, et la garde architecturale qui le
+ * courantes — voir `FrozenCombatVersionSet::chosenAtOpening()`, et la garde architecturale qui le
  * verifie.
  *
  * ## La course est arbitree par la base, pas par l'ordre des workers
@@ -129,7 +128,7 @@ final class CombatOpeningService
      */
     private function open(FleetMission $opener, int $targetBodyId, int $openedAt): CombatInstance
     {
-        $versions = CombatRuleVersionSet::chosenAtOpening();
+        $versions = FrozenCombatVersionSet::chosenAtOpening();
         // **Charge par requete typee, pas par la relation.** `$opener->union` rend un modele
         // generique : le budget et le createur se liraient alors sur un type que rien ne verifie.
         $union = $opener->union_id === null ? null : FleetUnion::find($opener->union_id);
@@ -175,10 +174,10 @@ final class CombatOpeningService
             'loot_policy_version' => $versions->lootPolicy,
             'moon_destruction_rule_version' => $versions->moonDestruction,
             'fingerprint_schema_version' => (string)SnapshotFingerprint::SCHEMA,
-            // **Le seul endroit qui a le droit de lire `CURRENT`.** Deux heures plus tard, la
-            // fermeture relit cette colonne : une bascule de projection entre les deux ferait
-            // entrer le meme evenement une seconde fois, l unicite portant sur la version.
-            'projection_version' => SnapshotProjection::CURRENT,
+            // **Depuis l'ensemble gele, comme les quatre autres.** La projection a d'abord vecu
+            // sous une constante de classe : c'etait un second mecanisme de gel pour un besoin
+            // que le premier couvrait deja.
+            'projection_version' => $versions->projection,
             'frozen_alliance_membership' => $appartenances->toStorage(),
             ...$this->frozenColumns($faits),
             // L'empreinte porte les versions **et** les faits : deux combats sous deux regles

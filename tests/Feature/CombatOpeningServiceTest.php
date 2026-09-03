@@ -7,7 +7,7 @@ use OGame\Combat\Admission\FrozenAllianceMembership;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Services\CombatOpeningService;
 use OGame\Combat\Support\CombatParticipantKey;
-use OGame\Combat\Support\CombatRuleVersionSet;
+use OGame\Combat\Support\FrozenCombatVersionSet;
 use OGame\Models\AllianceMember;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
@@ -87,7 +87,7 @@ class CombatOpeningServiceTest extends TestCase
         [$mission, $corps] = $this->anArrivingAttack();
 
         $combat = $this->service->openOrJoin($mission, $corps, self::OPENING);
-        $attendues = CombatRuleVersionSet::chosenAtOpening()->toStorage();
+        $attendues = FrozenCombatVersionSet::chosenAtOpening()->toStorage();
 
         $this->assertSame($attendues['causal_order'], $combat->causal_order_version);
         $this->assertSame($attendues['loot_allocator'], $combat->loot_allocator_version);

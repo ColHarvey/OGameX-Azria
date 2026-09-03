@@ -8,18 +8,24 @@ use OGame\Combat\Exceptions\CorruptedRuleVersionSet;
 use OGame\Combat\Exceptions\MismatchedRuleVersionSet;
 use OGame\Combat\MoonDestruction\MoonDestructionRuleRegistry;
 use OGame\Combat\Policies\LootPolicyRegistry;
+use OGame\Combat\Projection\SnapshotProjectionRegistry;
 
 /**
- * Les quatre versions de regle qui gouvernent un combat, choisies une fois et jamais relues.
+ * Les cinq versions qui gouvernent un combat, choisies une fois et jamais relues.
  *
  * ## La frontiere autoritaire, et elle est unique
  *
- * Quatre mecanismes sont versionnes : l'ordre causal des evenements, l'allocateur de butin, la
- * politique de taux, et la regle de destruction de lune. Chacun peut evoluer entre l'ouverture d'un
- * combat et sa resolution, deux heures plus tard.
+ * Cinq mecanismes sont versionnes : l'ordre causal des evenements, l'allocateur de butin, la
+ * politique de taux, la regle de destruction de lune, et **la projection de photographie**.
+ * Chacun peut evoluer entre l'ouverture d'un combat et sa resolution, deux heures plus tard.
  *
- * **`chosenAtOpening()` est le seul endroit du chemin persistant qui a le droit de demander la
- * version courante.** Le nom le dit : ailleurs, il n'y a pas de « courante », il y a celle du
+ * La projection a d'abord vecu a part, sous une constante de classe, au motif qu'elle dit comment
+ * une inclusion **se lit** plutot que ce qu'un combat **decide**. La distinction est vraie et ne
+ * justifiait rien : une projection modifie la photographie, donc l'idempotence, donc le resultat
+ * persistant. Deux mecanismes de gel pour un meme besoin en font un de trop.
+ *
+ * **`chosenAtOpening()` est le seul endroit du chemin persistant qui a le droit de demander les
+ * versions courantes.** Le nom le dit : ailleurs, il n'y a pas de « courante », il y a celle du
  * combat. Une garde architecturale verifie que personne d'autre n'appelle `current()` ni
  * `currentVersion()` sur ces registres.
  *
@@ -41,14 +47,20 @@ use OGame\Combat\Policies\LootPolicyRegistry;
  * reponse juste : ce ne sont pas deux valeurs d'une meme chose, ce sont deux choses. Rendre `false`
  * laisserait un appelant conclure « ils different » et continuer.
  */
-final readonly class CombatRuleVersionSet
+final readonly class FrozenCombatVersionSet
 {
     /**
      * Les quatre clefs, et rien d'autre.
      *
      * @var array<int, string>
      */
-    private const array KEYS = ['causal_order', 'loot_allocator', 'loot_policy', 'moon_destruction'];
+    private const array KEYS = [
+        'causal_order',
+        'loot_allocator',
+        'loot_policy',
+        'moon_destruction',
+        'projection',
+    ];
 
     /**
      * @param string $causalOrder La version de l'ordre causal des evenements.
@@ -61,6 +73,7 @@ final readonly class CombatRuleVersionSet
         public string $lootAllocator,
         public string $lootPolicy,
         public string $moonDestruction,
+        public string $projection,
     ) {
     }
 
@@ -75,6 +88,7 @@ final readonly class CombatRuleVersionSet
         LootAllocatorRegistry|null $allocators = null,
         LootPolicyRegistry|null $policies = null,
         MoonDestructionRuleRegistry|null $moons = null,
+        SnapshotProjectionRegistry|null $projections = null,
     ): self {
         // **Par `of()`, pas par le constructeur.** Un registre qui rendrait une version vide
         // ecrirait sinon cette chaine vide dans l empreinte du combat, et le defaut ne se verrait
@@ -84,6 +98,7 @@ final readonly class CombatRuleVersionSet
             ($allocators ?? LootAllocatorRegistry::default())->currentVersion(),
             ($policies ?? LootPolicyRegistry::default())->currentVersion(),
             ($moons ?? MoonDestructionRuleRegistry::default())->currentVersion(),
+            ($projections ?? SnapshotProjectionRegistry::default())->currentVersion(),
         );
     }
 
@@ -144,12 +159,14 @@ final readonly class CombatRuleVersionSet
         string $lootAllocator,
         string $lootPolicy,
         string $moonDestruction,
+        string $projection,
     ): self {
         $fournies = [
             'causal_order' => $causalOrder,
             'loot_allocator' => $lootAllocator,
             'loot_policy' => $lootPolicy,
             'moon_destruction' => $moonDestruction,
+            'projection' => $projection,
         ];
 
         foreach ($fournies as $clef => $version) {
@@ -161,7 +178,7 @@ final readonly class CombatRuleVersionSet
             }
         }
 
-        return new self($causalOrder, $lootAllocator, $lootPolicy, $moonDestruction);
+        return new self($causalOrder, $lootAllocator, $lootPolicy, $moonDestruction, $projection);
     }
 
     /**
@@ -176,6 +193,7 @@ final readonly class CombatRuleVersionSet
             'loot_allocator' => $this->lootAllocator,
             'loot_policy' => $this->lootPolicy,
             'moon_destruction' => $this->moonDestruction,
+            'projection' => $this->projection,
         ];
     }
 

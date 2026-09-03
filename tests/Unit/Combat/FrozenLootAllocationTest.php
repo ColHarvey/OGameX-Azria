@@ -9,7 +9,7 @@ use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Allocation\LootAllocator;
 use OGame\Combat\Allocation\LootAllocatorRegistry;
 use OGame\Combat\Exceptions\UnknownLootAllocatorVersion;
-use OGame\Combat\Support\CombatRuleVersionSet;
+use OGame\Combat\Support\FrozenCombatVersionSet;
 use OGame\Combat\Support\ResourceNormalizationDiagnostics;
 use OGame\Models\Resources;
 use Tests\UnitTestCase;
@@ -42,7 +42,7 @@ class FrozenLootAllocationTest extends UnitTestCase
             'alloc_v2'
         );
 
-        $geles = CombatRuleVersionSet::of('causal_event_order_v1', 'alloc_v1', 'p1', 'm1');
+        $geles = FrozenCombatVersionSet::of('causal_event_order_v1', 'alloc_v1', 'p1', 'm1', 'proj_v1');
 
         $allocation = FrozenLootAllocation::fromFrozenSet($geles, $registre);
 
@@ -65,7 +65,7 @@ class FrozenLootAllocationTest extends UnitTestCase
     {
         $registre = LootAllocatorRegistry::of([$this->anAllocatorOn('alloc_v2')], 'alloc_v2');
 
-        $geles = CombatRuleVersionSet::of('causal_event_order_v1', 'alloc_disparue', 'p1', 'm1');
+        $geles = FrozenCombatVersionSet::of('causal_event_order_v1', 'alloc_disparue', 'p1', 'm1', 'proj_v1');
 
         $this->expectException(UnknownLootAllocatorVersion::class);
 

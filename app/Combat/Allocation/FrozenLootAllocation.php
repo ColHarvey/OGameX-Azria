@@ -2,7 +2,7 @@
 
 namespace OGame\Combat\Allocation;
 
-use OGame\Combat\Support\CombatRuleVersionSet;
+use OGame\Combat\Support\FrozenCombatVersionSet;
 use OGame\Models\Resources;
 
 /**
@@ -43,7 +43,7 @@ final readonly class FrozenLootAllocation
      * Une version que le registre ne connait plus leve : un rejeu vaut mieux arrete que menteur.
      */
     public static function fromFrozenSet(
-        CombatRuleVersionSet $versions,
+        FrozenCombatVersionSet $versions,
         LootAllocatorRegistry|null $registry = null,
     ): self {
         $registre = $registry ?? LootAllocatorRegistry::default();

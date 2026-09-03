@@ -268,7 +268,7 @@ class CausalEventOrderTest extends UnitTestCase
     {
         // **Les deux frontieres autoritaires, et elles sont nommees.**
         //
-        // `CombatRuleVersionSet` choisit les quatre versions du combat durable, une seule fois, a
+        // `FrozenCombatVersionSet` choisit les quatre versions du combat durable, une seule fois, a
         // l ouverture. `FrozenLootAllocation` choisit celle du combat instantane, au debut de
         // l operation.
         //
@@ -278,15 +278,20 @@ class CausalEventOrderTest extends UnitTestCase
         // recoivent desormais l allocation, et ne choisissent plus rien.
         $autorises = [
             'Combat/Allocation/FrozenLootAllocation.php',
-            'Combat/Support/CombatRuleVersionSet.php',
+            'Combat/Support/FrozenCombatVersionSet.php',
         ];
 
-        // Les quatre mecanismes versionnes. En surveiller un seul laissait les trois autres deriver.
+        // Les cinq mecanismes versionnes. En surveiller un seul laissait les autres deriver.
+        //
+        // La projection a rejoint cette liste en meme temps qu elle a rejoint l ensemble gele :
+        // elle vivait sous une constante de classe, avec sa propre garde. Une seule garde pour
+        // cinq registres vaut mieux que quatre plus un cas particulier.
         $registres = [
             'CausalEventOrderRegistry',
             'LootAllocatorRegistry',
             'LootPolicyRegistry',
             'MoonDestructionRuleRegistry',
+            'SnapshotProjectionRegistry',
         ];
 
         $appelants = [];

@@ -19,10 +19,10 @@ use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\LootReservationState;
 use OGame\Combat\Enums\SnapshotContribution;
+use OGame\Combat\Projection\SnapshotProjectionRegistry;
 use OGame\Combat\Support\ActorKindResolver;
 use OGame\Combat\Support\CombatEventIdentity;
 use OGame\Combat\Support\CombatParticipantKey;
-use OGame\Combat\Support\SnapshotProjection;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatLootReservation;
@@ -70,12 +70,23 @@ use OGame\Models\User;
  */
 final class RallyClosureService
 {
+    /**
+     * Le registre des projections connues.
+     *
+     * Resolu dans le corps plutot que dans la signature : une valeur par defaut de parametre ne peut
+     * pas appeler une methode. Le registre reste injectable — un essai en fournit un qui ne connait
+     * pas la version d'un combat, pour prouver que le rejeu s'arrete au lieu de deviner.
+     */
+    private SnapshotProjectionRegistry $projections;
+
     public function __construct(
         private RallyCandidateReader $reader = new RallyCandidateReader(),
         private AttackAdmissionSelector $attackSelector = new AttackAdmissionSelector(),
         private DefensiveAdmissionSelector $defenceSelector = new DefensiveAdmissionSelector(),
         private RallyGrouping $grouping = new RallyGrouping(),
+        SnapshotProjectionRegistry|null $projections = null,
     ) {
+        $this->projections = $projections ?? SnapshotProjectionRegistry::default();
     }
 
     /**
@@ -306,7 +317,10 @@ final class RallyClosureService
         array $groups,
         SnapshotContribution $contribution,
     ): void {
-        $projection = SnapshotProjection::ensureKnown((string)$combat->projection_version);
+        // **Par le registre, comme les quatre autres versions.** Une projection que ce code ne
+        // sait plus lire arrete la fermeture : ses inclusions signifieraient autre chose que ce
+        // qu'elles disent, et personne ne le verrait.
+        $projection = $this->projections->forVersion((string)$combat->projection_version)->version();
 
         foreach ($groups as $groupe) {
             foreach ($groupe->missions as $mission) {

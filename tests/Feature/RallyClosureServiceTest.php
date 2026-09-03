@@ -10,11 +10,11 @@ use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\LootReservationState;
 use OGame\Combat\Enums\SnapshotContribution;
 use OGame\Combat\Exceptions\UnknownSnapshotProjection;
+use OGame\Combat\Projection\SnapshotProjectionV1;
 use OGame\Combat\Services\CombatOpeningService;
 use OGame\Combat\Services\RallyClosureService;
 use OGame\Combat\Support\CombatEventIdentity;
 use OGame\Combat\Support\CombatParticipantKey;
-use OGame\Combat\Support\SnapshotProjection;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatLootReservation;
 use OGame\Models\CombatOutboxMessage;
@@ -351,7 +351,7 @@ class RallyClosureServiceTest extends TestCase
         $combat = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
 
         $this->assertSame(
-            SnapshotProjection::CURRENT,
+            SnapshotProjectionV1::VERSION,
             $combat->projection_version,
             'The opening did not freeze the projection version with the instance.'
         );
