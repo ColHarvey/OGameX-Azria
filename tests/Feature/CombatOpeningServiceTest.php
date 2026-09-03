@@ -3,16 +3,19 @@
 namespace Tests\Feature;
 
 use Illuminate\Support\Facades\DB;
+use OGame\Combat\Admission\FrozenAllianceMembership;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Services\CombatOpeningService;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\CombatRallyWindow;
 use OGame\Combat\Support\CombatRuleVersionSet;
+use OGame\Models\AllianceMember;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet;
 use OGame\Models\User;
+use OGame\Services\AllianceService;
 use Tests\TestCase;
 
 /**
@@ -110,6 +113,60 @@ class CombatOpeningServiceTest extends TestCase
         $this->assertSame(CombatParticipantKey::forFleet($mission->id), $combat->opener_identity);
         $this->assertSame($joueur->id, $combat->founding_creator_id);
         $this->assertSame($mission->time_arrival, $combat->authoritative_arrival_at);
+    }
+
+    /**
+     * L appartenance a l alliance est photographiee a l ouverture.
+     *
+     * ## Ce que cet essai ferme
+     *
+     * `FrozenAllianceMembership` existait et le lecteur savait la relire, mais personne ne la
+     * prenait : la fermeture attendait un fait que l ouverture n ecrivait pas.
+     *
+     * Lire `alliance_members` est exact **ici, et seulement ici** : l ouverture est l instant
+     * present. Deux heures plus tard, une sortie aura supprime la ligne sans laisser de trace.
+     */
+    public function testTheAllianceMembershipIsPhotographedAtTheOpening(): void
+    {
+        $createur = $this->aPlayer();
+        $allie = $this->aPlayer();
+        $etranger = $this->aPlayer();
+
+        $alliance = app(AllianceService::class)->createAlliance($createur->id, 'PHO', 'Photographie');
+
+        // `createAlliance()` inscrit deja son fondateur et lui pose son `alliance_id` : le refaire
+        // ici doublerait le travail du service et masquerait un jour un changement de sa part.
+
+        AllianceMember::create([
+            'alliance_id' => $alliance->id,
+            'user_id' => $allie->id,
+            'rank_id' => null,
+            'joined_at' => now(),
+        ]);
+
+        $corps = $this->aBodyId();
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $createur);
+
+        // Les deux autres visent le meme corps dans la fenetre.
+        $this->anAttackAt($corps, self::OPENING + 10, $allie);
+        $this->anAttackAt($corps, self::OPENING + 20, $etranger);
+
+        $combat = $this->service->openOrJoin($ouvreur, $corps, self::OPENING);
+
+        $photographie = FrozenAllianceMembership::fromStorage($combat->frozen_alliance_membership);
+
+        $this->assertSame($alliance->id, $photographie->allianceId);
+
+        $this->assertSame(
+            $alliance->id,
+            $photographie->allianceFor($allie->id),
+            'A member of the governing alliance was not photographed at the opening.'
+        );
+
+        $this->assertNull(
+            $photographie->allianceFor($etranger->id),
+            'A player outside the alliance was photographed as one of its members.'
+        );
     }
 
     /**

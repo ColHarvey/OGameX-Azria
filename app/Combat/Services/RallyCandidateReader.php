@@ -69,18 +69,7 @@ final class RallyCandidateReader
         FrozenAllianceMembership $membership,
         int $openerMissionId,
     ): array {
-        $plafond = $openedAt + CombatRallyWindow::WINDOW_SECONDS;
-
-        /** @var array<int, FleetMission> $missions */
-        $missions = FleetMission::query()
-            ->where('planet_id_to', $targetBodyId)
-            ->where('id', '!=', $openerMissionId)
-            ->where('time_arrival', '>=', $openedAt)
-            ->where('time_arrival', '<', $plafond)
-            ->orderBy('time_arrival')
-            ->orderBy('id')
-            ->get()
-            ->all();
+        $missions = $this->missionsAimingAt($targetBodyId, $openedAt, $openerMissionId);
 
         if ($missions === []) {
             return [];
@@ -116,6 +105,54 @@ final class RallyCandidateReader
         }
 
         return $candidates;
+    }
+
+    /**
+     * Les proprietaires des missions qui visent ce corps dans la fenetre.
+     *
+     * L'ouverture en a besoin **avant** de pouvoir lire les candidates : la photographie d'alliance
+     * se prend sur eux, et le lecteur exige ensuite cette photographie. Les deux etapes partagent la
+     * meme requete plutot que d'en avoir chacune une — deux filtres « ce corps, cette fenetre »
+     * finiraient par ne plus dire pareil.
+     *
+     * @param int $targetBodyId
+     * @param int $openedAt
+     * @return array<int, int>
+     */
+    public function ownersAimingAt(int $targetBodyId, int $openedAt): array
+    {
+        $proprietaires = $this->missionsAimingAt($targetBodyId, $openedAt, 0);
+
+        return array_values(array_unique(array_map(
+            static fn (FleetMission $mission): int => $mission->user_id,
+            $proprietaires
+        )));
+    }
+
+    /**
+     * Les missions qui visent ce corps dans la fenetre, dans un ordre deterministe.
+     *
+     * @param int $targetBodyId
+     * @param int $openedAt
+     * @param int $excludedMissionId
+     * @return array<int, FleetMission>
+     */
+    private function missionsAimingAt(int $targetBodyId, int $openedAt, int $excludedMissionId): array
+    {
+        $plafond = $openedAt + CombatRallyWindow::WINDOW_SECONDS;
+
+        /** @var array<int, FleetMission> $missions */
+        $missions = FleetMission::query()
+            ->where('planet_id_to', $targetBodyId)
+            ->where('id', '!=', $excludedMissionId)
+            ->where('time_arrival', '>=', $openedAt)
+            ->where('time_arrival', '<', $plafond)
+            ->orderBy('time_arrival')
+            ->orderBy('id')
+            ->get()
+            ->all();
+
+        return $missions;
     }
 
     /**

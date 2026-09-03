@@ -5,6 +5,7 @@ namespace OGame\Combat\Services;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Admission\AdmissionBudget;
+use OGame\Combat\Admission\FrozenAllianceMembership;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\CombatRallyWindow;
@@ -51,6 +52,14 @@ use OGame\Models\FleetUnion;
  */
 final class CombatOpeningService
 {
+    /**
+     * @param RallyCandidateReader $reader Le lecteur des candidates, qui porte la requete « ce corps,
+     *                                     cette fenetre ». La dupliquer ici en ferait deux.
+     */
+    public function __construct(private RallyCandidateReader $reader = new RallyCandidateReader())
+    {
+    }
+
     /**
      * Ouvre un combat sur ce corps, ou rend celui qui le tient deja.
      *
@@ -112,11 +121,17 @@ final class CombatOpeningService
 
         // Le createur de l union gouverne ; sans union, c est l ouvreur lui-meme.
         $createur = $union === null ? $opener->user_id : $union->user_id;
+        $allianceGouvernante = $this->allianceOf($createur);
+
+        // **La photographie, prise ici et nulle part ailleurs.** La fermeture la relira ; elle ne
+        // reconstruira rien depuis la table vivante, ou la trace d'un depart aura disparu.
+        $appartenances = $this->photographMembership($allianceGouvernante, $targetBodyId, $openedAt);
 
         $faits = [
             'opener_identity' => CombatParticipantKey::forFleet($opener->id),
             'founding_creator_id' => $createur,
-            'governing_alliance_id' => $this->allianceOf($createur),
+            'governing_alliance_id' => $allianceGouvernante,
+            'alliance_members_at_opening' => $appartenances->memberUserIds(),
             'authoritative_arrival_at' => $opener->time_arrival,
             'max_fleets' => $budget->maxFleets,
             'max_players' => $budget->maxPlayers,
@@ -139,6 +154,7 @@ final class CombatOpeningService
             'loot_policy_version' => $versions->lootPolicy,
             'moon_destruction_rule_version' => $versions->moonDestruction,
             'fingerprint_schema_version' => (string)SnapshotFingerprint::SCHEMA,
+            'frozen_alliance_membership' => $appartenances->toStorage(),
             ...$this->frozenColumns($faits),
             // L'empreinte porte les versions **et** les faits : deux combats sous deux regles
             // differentes ne doivent jamais partager une empreinte, sans quoi un rejeu passerait
@@ -177,6 +193,42 @@ final class CombatOpeningService
             'max_fleets' => $facts['max_fleets'],
             'max_players' => $facts['max_players'],
         ];
+    }
+
+    /**
+     * Qui appartient a l'alliance gouvernante, a cette seconde.
+     *
+     * **Lire l'etat courant est exact ici, et seulement ici.** L'ouverture *est* l'instant present :
+     * la question « qui est membre ? » y a une reponse juste. Deux heures plus tard, la meme
+     * question n'en a plus — une sortie supprime la ligne, et rien ne dit qu'elle a existe.
+     */
+    private function photographMembership(
+        int|null $allianceId,
+        int $targetBodyId,
+        int $openedAt,
+    ): FrozenAllianceMembership {
+        if ($allianceId === null) {
+            // Sans alliance qui gouverne, personne d'autre que le createur ne rejoint : il n'y a
+            // rien a photographier.
+            return FrozenAllianceMembership::none();
+        }
+
+        $proprietaires = $this->reader->ownersAimingAt($targetBodyId, $openedAt);
+
+        if ($proprietaires === []) {
+            return FrozenAllianceMembership::of($allianceId, []);
+        }
+
+        $membres = DB::table('alliance_members')
+            ->where('alliance_id', $allianceId)
+            ->whereIn('user_id', $proprietaires)
+            ->pluck('user_id')
+            ->all();
+
+        return FrozenAllianceMembership::of(
+            $allianceId,
+            array_map(static fn (mixed $id): int => (int)$id, $membres)
+        );
     }
 
     /**
