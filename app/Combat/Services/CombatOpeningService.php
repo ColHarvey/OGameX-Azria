@@ -77,6 +77,7 @@ final class CombatOpeningService
         private RallyCandidateReader $reader = new RallyCandidateReader(),
         private AttackAdmissionSelector $selector = new AttackAdmissionSelector(),
         private RallyGrouping $grouping = new RallyGrouping(),
+        private LootReservationOpener $reservations = new LootReservationOpener(),
     ) {
     }
 
@@ -185,6 +186,16 @@ final class CombatOpeningService
             // pour un doublon deja applique.
             'frozen_facts_fingerprint' => SnapshotFingerprint::of($faits + $versions->fingerprintFacts()),
         ]);
+
+        // **Des l'ouverture, pas a la photographie.** Soixante secondes de ralliement suffisent a
+        // lancer un transport : attendre la fermeture laisserait au defenseur le temps de mettre a
+        // l abri exactement ce qui allait etre photographie.
+        $this->reservations->openFor(
+            $combat->id,
+            $targetBodyId,
+            $versions->lootPolicy,
+            $openedAt
+        );
 
         CelestialBodyCombatBarrier::create([
             'target_body_id' => $targetBodyId,

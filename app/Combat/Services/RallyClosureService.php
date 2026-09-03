@@ -17,6 +17,7 @@ use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Enums\LootReservationState;
 use OGame\Combat\Enums\SnapshotContribution;
 use OGame\Combat\Support\ActorKindResolver;
 use OGame\Combat\Support\CombatEventIdentity;
@@ -24,6 +25,7 @@ use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\SnapshotProjection;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
+use OGame\Models\CombatLootReservation;
 use OGame\Models\CombatOutboxMessage;
 use OGame\Models\CombatParticipant;
 use OGame\Models\CombatSnapshotInclusion;
@@ -169,6 +171,8 @@ final class RallyClosureService
         // l arrivee, et rien ne s est passe.
         $this->announceRefusals($combat, $attaquants, $closedAt);
         $this->announceRefusals($combat, $defenseurs, $closedAt);
+
+        $this->sealReservation($combat, $closedAt);
 
         $combat->status = CombatState::Active;
         $combat->fleets_admitted = $this->countFleets($cotesAttaquants)
@@ -388,6 +392,53 @@ final class RallyClosureService
                 );
             }
         }
+    }
+
+    /**
+     * La reservation passe de « ouverte » a « scellee ».
+     *
+     * ## Ce que le scellement veut dire
+     *
+     * Tant que le ralliement court, la borne peut encore monter : une cargaison livree, un
+     * Decouvreur admis. A la fermeture, la photographie est prise et **la borne ne bouge plus** —
+     * c'est ce que le scellement enregistre.
+     *
+     * ## Pourquoi la transition est demandee a l'enumeration
+     *
+     * `OPEN → SEALED` est permise, `SETTLED → SEALED` ne l'est pas. Ecrire l'etat sans le demander
+     * laisserait une reprise scellera une reservation deja reglee — le butin preleve, puis la borne
+     * refigee sur des ressources qui ont deja change de mains.
+     *
+     * Une reservation deja scellee n'est pas une faute : la fermeture peut etre rejouee, et la
+     * seconde tentative constate au lieu de lever.
+     *
+     * ## L'heure est celle de l'echeance
+     *
+     * Comme pour les avis de refus : prendre l'instant du worker ferait dependre le scellement du
+     * moment de son reveil, et deux fermetures du meme combat ecriraient deux heures.
+     */
+    private function sealReservation(CombatInstance $combat, int $closedAt): void
+    {
+        $reservation = CombatLootReservation::query()
+            ->where('combat_instance_id', $combat->id)
+            ->lockForUpdate()
+            ->first();
+
+        if ($reservation === null) {
+            // Un combat ouvert avant que la reservation n'existe. La fermeture n'invente pas une
+            // borne apres coup : elle serait calculee sur un stock qui a deja bouge.
+            return;
+        }
+
+        $etat = $reservation->state;
+
+        if ($etat === LootReservationState::Sealed || !$etat->canTransitionTo(LootReservationState::Sealed)) {
+            return;
+        }
+
+        $reservation->state = LootReservationState::Sealed;
+        $reservation->sealed_at = $closedAt;
+        $reservation->save();
     }
 
     /**

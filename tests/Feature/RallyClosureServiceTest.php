@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\DB;
 use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Enums\LootReservationState;
 use OGame\Combat\Enums\SnapshotContribution;
 use OGame\Combat\Exceptions\UnknownSnapshotProjection;
 use OGame\Combat\Services\CombatOpeningService;
@@ -15,6 +16,7 @@ use OGame\Combat\Support\CombatEventIdentity;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\SnapshotProjection;
 use OGame\Models\CelestialBodyCombatBarrier;
+use OGame\Models\CombatLootReservation;
 use OGame\Models\CombatOutboxMessage;
 use OGame\Models\CombatParticipant;
 use OGame\Models\CombatSnapshotInclusion;
@@ -37,7 +39,8 @@ use Tests\TestCase;
  *
  * ## Ce qu'ils ne prouvent pas encore
  *
- * La reservation de butin : elle vient apres. Le dire evite de croire la fermeture terminee.
+ * Ce qui reste : la borne de reservation ne se releve pas encore pour les Decouvreurs admis ni
+ * pour une cargaison livree pendant le ralliement. Le dire evite de croire la fermeture terminee.
  *
  * Les inclusions sont desormais prouvees — y compris qu'elles portent la projection **de
  * l instance** et non la version courante. Les avis de refus le sont aussi : leur presence pour
@@ -601,6 +604,132 @@ class RallyClosureServiceTest extends TestCase
             CombatReasonCode::NotAlreadyInFlight->value,
             $avis->payload['reason'] ?? null
         );
+    }
+
+    /**
+     * L'ouverture immobilise la part pillable, et rien de plus.
+     *
+     * ## Les deux exces que cet essai encadre
+     *
+     * Ne rien immobiliser laisserait le defenseur vider ses caisses pendant les deux heures de
+     * bataille : l'attaquant repartirait avec un butin calcule sur des ressources qui n'existent
+     * plus.
+     *
+     * Tout immobiliser le punirait d'avoir ete attaque : il ne pourrait plus rien construire, pas
+     * meme des defenses. **Ce qui est produit pendant la bataille lui appartient.**
+     */
+    public function testTheOpeningImmobilisesTheLootableShareAndNoMore(): void
+    {
+        $joueur = $this->aPlayer();
+        $corps = $this->aBodyId();
+
+        $planete = Planet::find($corps);
+        $this->assertNotNull($planete);
+
+        $planete->metal = 100_000;
+        $planete->crystal = 50_000;
+        $planete->deuterium = 20_000;
+        $planete->save();
+
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $joueur);
+        $combat = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
+
+        $reservation = CombatLootReservation::where('combat_instance_id', $combat->id)->first();
+
+        $this->assertNotNull($reservation, 'The opening immobilised nothing: the defender can empty his vaults.');
+        $this->assertSame(LootReservationState::Open, $reservation->state);
+        $this->assertSame($corps, $reservation->target_body_id);
+        $this->assertSame(self::OPENING, $reservation->opened_at);
+
+        // La moitie, taux de base : ni rien, ni tout.
+        $this->assertSame(50_000, $reservation->metal);
+        $this->assertSame(25_000, $reservation->crystal);
+        $this->assertSame(10_000, $reservation->deuterium);
+    }
+
+    /**
+     * Une seconde ouverture n'immobilise pas deux fois les memes ressources.
+     *
+     * Deux reservations sur un meme combat feraient distribuer le double a la resolution.
+     */
+    public function testASecondOpeningDoesNotImmobiliseTwice(): void
+    {
+        $joueur = $this->aPlayer();
+        $corps = $this->aBodyId();
+
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $joueur);
+
+        $premier = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
+        $second = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
+
+        $this->assertSame($premier->id, $second->id, 'A second opening created a second combat.');
+
+        $this->assertSame(
+            1,
+            CombatLootReservation::where('combat_instance_id', $premier->id)->count(),
+            'The same resources were immobilised twice.'
+        );
+    }
+
+    /**
+     * La fermeture scelle la reservation : la borne ne bouge plus.
+     */
+    public function testTheClosureSealsTheReservation(): void
+    {
+        $joueur = $this->aPlayer();
+        $corps = $this->aBodyId();
+
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $joueur);
+        $combat = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
+
+        $barriere = CelestialBodyCombatBarrier::where('combat_instance_id', $combat->id)->first();
+        $this->assertNotNull($barriere);
+
+        $this->fermeture->close($combat->id, self::OPENING + 500);
+
+        $reservation = CombatLootReservation::where('combat_instance_id', $combat->id)->first();
+
+        $this->assertNotNull($reservation);
+        $this->assertSame(LootReservationState::Sealed, $reservation->state);
+        $this->assertSame(
+            $barriere->owned_through_effect_at,
+            $reservation->sealed_at,
+            'The seal took the worker clock instead of the deadline that governs the combat.'
+        );
+    }
+
+    /**
+     * Une reservation deja reglee ne se refait pas sceller.
+     *
+     * `SETTLED → SEALED` n'existe pas : le butin a ete preleve, et refiger la borne porterait sur
+     * des ressources qui ont deja change de mains. Une reprise de la fermeture ne doit pas
+     * l'ecraser.
+     */
+    public function testASettledReservationIsNotResealed(): void
+    {
+        $joueur = $this->aPlayer();
+        $corps = $this->aBodyId();
+
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $joueur);
+        $combat = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
+
+        $reservation = CombatLootReservation::where('combat_instance_id', $combat->id)->first();
+        $this->assertNotNull($reservation);
+
+        $reservation->state = LootReservationState::Settled;
+        $reservation->settled_at = self::OPENING + 10;
+        $reservation->save();
+
+        $this->fermeture->close($combat->id, self::OPENING + 500);
+
+        $reservation->refresh();
+
+        $this->assertSame(
+            LootReservationState::Settled,
+            $reservation->state,
+            'A settled reservation was sealed again: the loot would be handed over twice.'
+        );
+        $this->assertNull($reservation->sealed_at);
     }
 
     /**
