@@ -4,6 +4,8 @@ namespace OGame\Combat\MoonDestruction;
 
 use InvalidArgumentException;
 use LogicException;
+use OGame\Combat\Exceptions\CorruptedFrozenMoonPlan;
+use OGame\Combat\Support\FrozenFact;
 
 /**
  * Le plan immuable des tentatives de destruction, produit a la fermeture du ralliement.
@@ -237,30 +239,28 @@ final readonly class FrozenMoonDestructionPlan
      */
     public static function fromFrozenFacts(array $facts): self
     {
-        $schema = (int)($facts['schema'] ?? 0);
+        // **Le schema se lit strictement, lui aussi.** `(int)($facts['schema'] ?? 0)` acceptait
+        // une chaine « 1 » et laissait passer un plan qui n'avait pas ete ecrit par ce code.
+        $schema = FrozenFact::int($facts, 'schema');
 
         if ($schema !== self::SCHEMA) {
-            throw new InvalidArgumentException(
-                'Ce plan se reclame du schema ' . $schema . ', et celui qui est connu est le '
-                . self::SCHEMA . '. Le relire au petit bonheur donnerait des champs manquants pour des '
-                . 'valeurs nulles, et un resultat different de celui qui a ete calcule.'
+            throw new CorruptedFrozenMoonPlan(
+                'ce plan se reclame du schema ' . $schema . ' et celui qui est connu est le ' . self::SCHEMA
+                . ' — le relire au petit bonheur donnerait des champs manquants pour des valeurs nulles',
+                $facts
             );
         }
 
-        /** @var array<string, int|string> $lune */
-        $lune = $facts['moon'];
-
-        /** @var array<int, array<string, int|float|string|null>> $tentatives */
-        $tentatives = $facts['attempts'];
+        $tentatives = FrozenFact::listOfArrays($facts, 'attempts');
 
         return new self(
-            (int)$facts['combat_instance_id'],
-            FrozenMoonIdentity::fromFrozenFacts($lune),
-            (string)$facts['rule_version'],
+            FrozenFact::int($facts, 'combat_instance_id'),
+            FrozenMoonIdentity::fromFrozenFacts(FrozenFact::array($facts, 'moon')),
+            FrozenFact::string($facts, 'rule_version'),
             array_map(
                 static fn (array $fait): FrozenMoonDestructionAttempt
                     => FrozenMoonDestructionAttempt::fromFrozenFacts($fait),
-                array_values($tentatives)
+                $tentatives
             )
         );
     }

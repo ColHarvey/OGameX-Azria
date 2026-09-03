@@ -4,6 +4,7 @@ namespace Tests\Unit\Combat;
 
 use InvalidArgumentException;
 use LogicException;
+use OGame\Combat\Exceptions\CorruptedFrozenMoonPlan;
 use OGame\Combat\Exceptions\UnknownMoonDestructionRuleVersion;
 use OGame\Combat\MoonDestruction\FrozenMoonDestructionAttempt;
 use OGame\Combat\MoonDestruction\FrozenMoonDestructionPlan;
@@ -337,7 +338,7 @@ class FrozenMoonDestructionPlanTest extends UnitTestCase
         $faits = $plan->toFrozenFacts();
         $faits['schema'] = FrozenMoonDestructionPlan::SCHEMA + 1;
 
-        $this->expectException(InvalidArgumentException::class);
+        $this->expectException(CorruptedFrozenMoonPlan::class);
 
         FrozenMoonDestructionPlan::fromFrozenFacts($faits);
     }
@@ -494,6 +495,81 @@ class FrozenMoonDestructionPlanTest extends UnitTestCase
         $this->assertSame(MoonDestructionOutcome::AttemptFailed, $plan->attempts[0]->outcome);
         $this->assertSame(0, $plan->attempts[0]->destructionThreshold);
         $this->assertFalse($plan->destroysTheMoon());
+    }
+
+    /**
+     * Une lune dont l'identifiant est une chaine numerique n'est pas relue.
+     *
+     * ## Le defaut que cet essai ferme
+     *
+     * `FrozenMoonIdentity::fromFrozenFacts()` faisait `(int)$facts['moon_id']` : la chaine « 12 »
+     * devenait 12, le flottant 12.7 devenait 12, `true` devenait 1. Le plan entre dans l'empreinte
+     * et les cles d'idempotence ; un fait relu autrement qu'ecrit rend un rejeu different de
+     * l'original, sans que rien ne le dise.
+     */
+    public function testAMoonWithANumericStringIdentifierIsRefused(): void
+    {
+        $faits = $this->freeze([new MoonDestructionCandidate(1, 100, 2)], tirages: [99, 99])->toFrozenFacts();
+        $faits['moon']['moon_id'] = (string)$faits['moon']['moon_id'];
+
+        $this->expectException(CorruptedFrozenMoonPlan::class);
+
+        FrozenMoonDestructionPlan::fromFrozenFacts($faits);
+    }
+
+    /**
+     * Un plan dont l'identifiant de combat est un flottant n'est pas relu.
+     */
+    public function testAPlanWithAFloatCombatIdentifierIsRefused(): void
+    {
+        $faits = $this->freeze([new MoonDestructionCandidate(1, 100, 2)], tirages: [99, 99])->toFrozenFacts();
+        $faits['combat_instance_id'] = (float)$faits['combat_instance_id'];
+
+        $this->expectException(CorruptedFrozenMoonPlan::class);
+
+        FrozenMoonDestructionPlan::fromFrozenFacts($faits);
+    }
+
+    /**
+     * Une tentative dont la chance est une chaine numerique n'est pas relue.
+     *
+     * Une chance ecrite `100` revient `100` du decodeur JSON, pas `100.0` : un entier est accepte.
+     * Une chaine « 0.5 », elle, ne vient pas du meme ecrivain.
+     */
+    public function testAnAttemptWithANumericStringChanceIsRefused(): void
+    {
+        $faits = $this->freeze([new MoonDestructionCandidate(1, 100, 2)], tirages: [99, 99])->toFrozenFacts();
+        $faits['attempts'][0]['destruction_chance'] = (string)$faits['attempts'][0]['destruction_chance'];
+
+        $this->expectException(CorruptedFrozenMoonPlan::class);
+
+        FrozenMoonDestructionPlan::fromFrozenFacts($faits);
+    }
+
+    /**
+     * Un tirage relu comme flottant n'est pas un tirage.
+     */
+    public function testAnAttemptWithAFloatRollIsRefused(): void
+    {
+        $faits = $this->freeze([new MoonDestructionCandidate(1, 100, 2)], tirages: [99, 99])->toFrozenFacts();
+        $faits['attempts'][0]['destruction_threshold'] = 42.0;
+
+        $this->expectException(CorruptedFrozenMoonPlan::class);
+
+        FrozenMoonDestructionPlan::fromFrozenFacts($faits);
+    }
+
+    /**
+     * Un schema ecrit en chaine n'est plus accepte par coercition.
+     */
+    public function testANumericStringSchemaIsRefused(): void
+    {
+        $faits = $this->freeze([new MoonDestructionCandidate(1, 100, 2)], tirages: [99, 99])->toFrozenFacts();
+        $faits['schema'] = (string)$faits['schema'];
+
+        $this->expectException(CorruptedFrozenMoonPlan::class);
+
+        FrozenMoonDestructionPlan::fromFrozenFacts($faits);
     }
 
     /**

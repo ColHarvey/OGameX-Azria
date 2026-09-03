@@ -161,6 +161,28 @@ class OperationKeyTest extends UnitTestCase
     }
 
     /**
+     * Un identifiant relu sous forme de chaine numerique ou de flottant est refuse.
+     *
+     * ## Le defaut que cet essai ferme
+     *
+     * `rehydrate(OperationKind $kind, int $identifier)` acceptait « 42 » et 42.0 : sans
+     * `strict_types` au site d'appel, PHP les convertit. Une cle d'idempotence relue depuis une
+     * colonne texte aurait ete reconstruite sans que personne ne sache d'ou venait le nombre.
+     */
+    public function testANumericStringIdentifierIsRefusedAtRehydration(): void
+    {
+        foreach (['42', 42.0, true] as $valeur) {
+            try {
+                OperationKey::rehydrate(OperationKind::ImmediateAttack, $valeur);
+
+                $this->fail('A ' . get_debug_type($valeur) . ' was accepted as a rehydrated identifier.');
+            } catch (InvalidArgumentException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+    }
+
+    /**
      * Une mission enregistree, d'un type donne.
      *
      * @param int $type

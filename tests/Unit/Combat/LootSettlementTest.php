@@ -35,6 +35,11 @@ use Throwable;
  *
  * Un stock de metal peut atteindre le premier sur un serveur ancien. Si le reglement passait par un
  * flottant, le butin annonce ne serait pas celui debite, et l'ecart n'apparaitrait nulle part.
+ *
+ * `PHP_INT_MAX`, lui, n'est pas une valeur qu'une colonne `double` produirait : il eprouve la
+ * **capacite du type entier** du reglement, rien d'autre. La frontiere vivante garde ses propres
+ * regles — refus a partir de 2^63, precision degradee dite au-dela de 2^53 — et c'est elle qui
+ * decide ce qui entre ici, pas cet essai.
  */
 class LootSettlementTest extends TestCase
 {

@@ -3,6 +3,8 @@
 namespace OGame\Combat\MoonDestruction;
 
 use InvalidArgumentException;
+use OGame\Combat\Exceptions\CorruptedFrozenMoonPlan;
+use OGame\Combat\Support\FrozenFact;
 
 /**
  * La lune visee, telle qu'elle etait a la fermeture du ralliement.
@@ -67,18 +69,24 @@ final readonly class FrozenMoonIdentity
     }
 
     /**
-     * L'identite relue.
+     * L'identite relue, sans conversion.
      *
-     * @param array<string, int|string> $facts
-     * @return self
+     * **Cette methode castait.** `(int)$facts['moon_id']` acceptait une chaine, un flottant, un
+     * booleen, et en faisait un identifiant plausible. Or l'identite de la lune entre dans
+     * l'empreinte du plan : relue autrement qu'ecrite, elle rend un rejeu different de l'original
+     * sans que rien ne le dise.
+     *
+     * @param array<string, mixed> $facts
+     *
+     * @throws CorruptedFrozenMoonPlan Si un fait n'a pas le type sous lequel il a ete ecrit.
      */
     public static function fromFrozenFacts(array $facts): self
     {
         return new self(
-            (int)$facts['moon_id'],
-            (string)$facts['coordinates'],
-            (string)$facts['name'],
-            (int)$facts['diameter'],
+            FrozenFact::int($facts, 'moon_id'),
+            FrozenFact::string($facts, 'coordinates'),
+            FrozenFact::string($facts, 'name'),
+            FrozenFact::int($facts, 'diameter'),
         );
     }
 }

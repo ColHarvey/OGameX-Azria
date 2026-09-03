@@ -129,12 +129,24 @@ final readonly class OperationKey
      * a disparu de la base : exiger le modele vivant rendrait l'audit dependant de donnees qui, par
      * nature, finissent par etre purgees.
      *
+     * **`mixed`, et non `int`.** Sans `strict_types` au site d'appel — aucun fichier du depot ne le
+     * declare — un parametre `int` accepte la chaine « 42 » et le flottant 42.0 en les
+     * convertissant. Une cle d'idempotence relue depuis une colonne texte serait alors
+     * reconstruite sans que personne ne sache d'ou venait le nombre.
+     *
      * @param OperationKind $kind
-     * @param int $identifier
+     * @param mixed $identifier
      * @return self
      */
-    public static function rehydrate(OperationKind $kind, int $identifier): self
+    public static function rehydrate(OperationKind $kind, mixed $identifier): self
     {
+        if (!is_int($identifier)) {
+            throw new InvalidArgumentException(
+                'Une cle d operation relue exige un identifiant entier ; « ' . get_debug_type($identifier)
+                . ' » n en est pas un, et le convertir cacherait d ou vient le nombre.'
+            );
+        }
+
         if ($identifier < 1) {
             throw new InvalidArgumentException(
                 'Une cle d operation relue exige un identifiant strictement positif ; « ' . $identifier

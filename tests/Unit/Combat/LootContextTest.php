@@ -271,6 +271,29 @@ class LootContextTest extends UnitTestCase
     }
 
     /**
+     * Un taux persiste sous forme de chaine numerique ou de flottant n'est pas relu.
+     *
+     * La relecture etait deja stricte — `is_int()` sur chaque fait entier. Cet essai le prouve
+     * plutot que de le supposer : c'est la garde des relectures persistantes qui l'exige, pour
+     * chaque porte qui entre dans l'empreinte.
+     */
+    public function testANumericStringRateIsRefused(): void
+    {
+        foreach (['5000', 5000.0] as $valeur) {
+            $faits = $this->contextFor(new LootPolicy(false, new AttackerCargoShare(0, 10)))->toFrozenFacts();
+            $faits['rate_in_basis_points'] = $valeur;
+
+            try {
+                LootContext::fromFrozenFacts($faits);
+
+                $this->fail('A ' . get_debug_type($valeur) . ' rate was accepted at rehydration.');
+            } catch (FalsifiedLootContext) {
+                $this->addToAssertionCount(1);
+            }
+        }
+    }
+
+    /**
      * Un contexte bati sur une composition de reference.
      *
      * @param LootPolicy $politique

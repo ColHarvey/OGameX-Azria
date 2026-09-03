@@ -3,6 +3,8 @@
 namespace OGame\Combat\MoonDestruction;
 
 use InvalidArgumentException;
+use OGame\Combat\Exceptions\CorruptedFrozenMoonPlan;
+use OGame\Combat\Support\FrozenFact;
 
 /**
  * Une tentative de destruction, entierement figee au moment de la fermeture du ralliement.
@@ -175,25 +177,37 @@ final readonly class FrozenMoonDestructionAttempt
     }
 
     /**
-     * La tentative relue, sans rien recalculer.
+     * La tentative relue, sans rien recalculer et sans rien convertir.
      *
-     * @param array<string, int|float|string|null> $facts
-     * @return self
+     * Les seuils, les tirages et les compteurs sont des entiers ; les chances sont des nombres —
+     * entier ou flottant, selon ce que le JSON a rendu — mais jamais des chaines. Un tirage
+     * absent est `null`, et seulement `null`.
+     *
+     * @param array<string, mixed> $facts
+     *
+     * @throws CorruptedFrozenMoonPlan Si un fait n'a pas le type sous lequel il a ete ecrit.
      */
     public static function fromFrozenFacts(array $facts): self
     {
+        $issue = FrozenFact::string($facts, 'outcome');
+        $resultat = MoonDestructionOutcome::tryFrom($issue);
+
+        if ($resultat === null) {
+            throw new CorruptedFrozenMoonPlan('l issue « ' . $issue . ' » n existe pas', $facts);
+        }
+
         return new self(
-            (int)$facts['fleet_mission_id'],
-            (int)$facts['order'],
-            (int)$facts['surviving_deathstars'],
-            (float)$facts['destruction_chance'],
-            (float)$facts['deathstar_loss_chance'],
-            (int)$facts['destruction_threshold'],
-            (int)$facts['deathstar_loss_threshold'],
-            $facts['destruction_roll'] === null ? null : (int)$facts['destruction_roll'],
-            $facts['deathstar_loss_roll'] === null ? null : (int)$facts['deathstar_loss_roll'],
-            MoonDestructionOutcome::from((string)$facts['outcome']),
-            (int)$facts['extra_deathstar_losses'],
+            FrozenFact::int($facts, 'fleet_mission_id'),
+            FrozenFact::int($facts, 'order'),
+            FrozenFact::int($facts, 'surviving_deathstars'),
+            FrozenFact::number($facts, 'destruction_chance'),
+            FrozenFact::number($facts, 'deathstar_loss_chance'),
+            FrozenFact::int($facts, 'destruction_threshold'),
+            FrozenFact::int($facts, 'deathstar_loss_threshold'),
+            FrozenFact::intOrNull($facts, 'destruction_roll'),
+            FrozenFact::intOrNull($facts, 'deathstar_loss_roll'),
+            $resultat,
+            FrozenFact::int($facts, 'extra_deathstar_losses'),
         );
     }
 }
