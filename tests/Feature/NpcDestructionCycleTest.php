@@ -21,6 +21,7 @@ use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
+use Tests\SpawnsNpcBases;
 
 /**
  * Le cycle complet de la chute d'une base, de bout en bout.
@@ -32,6 +33,8 @@ use Tests\AccountTestCase;
  */
 class NpcDestructionCycleTest extends AccountTestCase
 {
+    use SpawnsNpcBases;
+
     private SettingsService $settings;
 
     protected function setUp(): void
@@ -233,8 +236,7 @@ class NpcDestructionCycleTest extends AccountTestCase
         $this->assertNotNull($destroyedRow);
         $this->assertGreaterThan(0, (int)$destroyedRow->destroyed);
 
-        $second = resolve(NpcBaseService::class)->createBase();
-        $this->assertNotNull($second, 'No replacement base could be created.');
+        $second = $this->aSpawnedBase();
 
         $this->assertNotEquals(
             $firstCoordinate->asString(),

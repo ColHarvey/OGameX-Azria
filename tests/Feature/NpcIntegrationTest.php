@@ -12,7 +12,6 @@ use OGame\Models\Highscore;
 use OGame\Models\NpcBaseSnapshot;
 use OGame\Models\Resources;
 use OGame\Services\HighscoreService;
-use OGame\Services\Npc\NpcBaseService;
 use OGame\Services\Npc\NpcColonisationService;
 use OGame\Services\Npc\NpcGrowthService;
 use OGame\Services\Npc\NpcRaidService;
@@ -20,6 +19,7 @@ use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
+use Tests\SpawnsNpcBases;
 
 /**
  * Tout ce qui fait vivre une base tient-il ensemble ?
@@ -31,6 +31,8 @@ use Tests\AccountTestCase;
  */
 class NpcIntegrationTest extends AccountTestCase
 {
+    use SpawnsNpcBases;
+
     private SettingsService $settings;
 
     private NpcGrowthService $growth;
@@ -87,8 +89,7 @@ class NpcIntegrationTest extends AccountTestCase
      */
     public function testABaseInEnergyDeficitBuildsAPowerSource(): void
     {
-        $base = resolve(NpcBaseService::class)->createBase();
-        $this->assertNotNull($base);
+        $base = $this->aSpawnedBase();
 
         $planetId = $base->getPlanetId();
         $factory = resolve(PlanetServiceFactory::class);
@@ -129,8 +130,7 @@ class NpcIntegrationTest extends AccountTestCase
      */
     public function testABaseBuildsWhatItCanAffordInsteadOfIdling(): void
     {
-        $base = resolve(NpcBaseService::class)->createBase();
-        $this->assertNotNull($base);
+        $base = $this->aSpawnedBase();
 
         $planetId = $base->getPlanetId();
         $factory = resolve(PlanetServiceFactory::class);
@@ -190,8 +190,7 @@ class NpcIntegrationTest extends AccountTestCase
         $this->settings->set('npc_swarm_enabled', '1');
         $this->settings->set('npc_swarm_delay_days', '365');
 
-        $base = resolve(NpcBaseService::class)->createBase();
-        $this->assertNotNull($base);
+        $base = $this->aSpawnedBase();
 
         $base->addUnit('colony_ship', 1);
         $base->addResources(new Resources(200000, 200000, 200000, 0));
@@ -228,8 +227,7 @@ class NpcIntegrationTest extends AccountTestCase
      */
     public function testARaidOnlyCarriesShipsTheBaseReallyOwns(): void
     {
-        $base = resolve(NpcBaseService::class)->createBase();
-        $this->assertNotNull($base);
+        $base = $this->aSpawnedBase();
 
         $base->addUnit('small_cargo', 10);
         $base->addUnit('light_fighter', 30);
@@ -262,8 +260,7 @@ class NpcIntegrationTest extends AccountTestCase
      */
     public function testTheHighscoreFollowsAGrowingBase(): void
     {
-        $base = resolve(NpcBaseService::class)->createBase();
-        $this->assertNotNull($base);
+        $base = $this->aSpawnedBase();
 
         $userId = $base->getPlayer()?->getId();
         $this->assertNotNull($userId);
@@ -319,8 +316,7 @@ class NpcIntegrationTest extends AccountTestCase
      */
     public function testGrowthAdvancesAllThreeQueues(): void
     {
-        $base = resolve(NpcBaseService::class)->createBase();
-        $this->assertNotNull($base);
+        $base = $this->aSpawnedBase();
 
         $planet = $this->runGrowth($base->getPlanetId(), 60, 6);
         $player = resolve(PlayerServiceFactory::class)->make($planet->getPlayer()?->getId() ?? 0, true);

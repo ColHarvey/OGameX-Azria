@@ -6,11 +6,11 @@ use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use OGame\Models\NpcBaseSnapshot;
-use OGame\Services\Npc\NpcBaseService;
 use OGame\Services\Npc\NpcColonisationService;
 use OGame\Services\PlanetService;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
+use Tests\SpawnsNpcBases;
 
 /**
  * L'essaimage : une base qui a prospere finit par en fonder une autre.
@@ -24,6 +24,8 @@ use Tests\AccountTestCase;
  */
 class NpcSwarmTest extends AccountTestCase
 {
+    use SpawnsNpcBases;
+
     private SettingsService $settings;
 
     protected function setUp(): void
@@ -146,8 +148,7 @@ class NpcSwarmTest extends AccountTestCase
      */
     private function prepareMatureBase(): PlanetService
     {
-        $base = resolve(NpcBaseService::class)->createBase();
-        $this->assertNotNull($base, 'No pirate base could be created.');
+        $base = $this->aSpawnedBase();
 
         // De quoi voler : un vaisseau, l'astrophysique qui autorise une colonie, et du
         // carburant.

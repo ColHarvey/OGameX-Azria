@@ -10,11 +10,11 @@ use Illuminate\Support\Facades\Schema;
 use OGame\Models\User;
 use OGame\Services\HighscoreService;
 use OGame\Services\InitialUserDataService;
-use OGame\Services\Npc\NpcBaseService;
 use OGame\Services\Npc\NpcThreatService;
 use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
+use Tests\SpawnsNpcBases;
 
 /**
  * Les ajouts a l'interface s'affichent, et ils s'affichent avec le theme du jeu.
@@ -25,6 +25,8 @@ use Tests\AccountTestCase;
  */
 class NpcInterfaceTest extends AccountTestCase
 {
+    use SpawnsNpcBases;
+
     private SettingsService $settings;
 
     protected function setUp(): void
@@ -128,8 +130,7 @@ class NpcInterfaceTest extends AccountTestCase
      */
     public function testAPirateBaseIsVisibleAndLabelledInTheGalaxy(): void
     {
-        $base = resolve(NpcBaseService::class)->createBase();
-        $this->assertNotNull($base, 'No pirate base could be created.');
+        $base = $this->aSpawnedBase();
 
         $coordinate = $base->getPlanetCoordinates();
 
@@ -156,8 +157,7 @@ class NpcInterfaceTest extends AccountTestCase
      */
     public function testAPirateBaseIsNotOfferedThePlayerCourtesies(): void
     {
-        $base = resolve(NpcBaseService::class)->createBase();
-        $this->assertNotNull($base, 'No pirate base could be created.');
+        $base = $this->aSpawnedBase();
 
         $coordinate = $base->getPlanetCoordinates();
 
@@ -248,7 +248,7 @@ class NpcInterfaceTest extends AccountTestCase
 
         try {
             // Base neuve, score nul : elle se situe sous le dernier joueur de la page.
-            resolve(NpcBaseService::class)->createBase();
+            $this->aSpawnedBase();
 
             // **Les rangs se recalculent apres la creation, pas avant.** Une base creee apres le
             // dernier passage ne porte aucun rang, et la page l'affiche alors en queue a zero
@@ -419,8 +419,7 @@ class NpcInterfaceTest extends AccountTestCase
      */
     private function giveAPirateBaseAScoreOnTheFirstPage(): void
     {
-        $base = resolve(NpcBaseService::class)->createBase();
-        $this->assertNotNull($base, 'No pirate base could be created.');
+        $base = $this->aSpawnedBase();
 
         $highscore = resolve(HighscoreService::class);
         $highscore->setHighscoreType(0);

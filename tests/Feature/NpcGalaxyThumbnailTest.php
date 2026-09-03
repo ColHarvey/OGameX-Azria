@@ -4,9 +4,9 @@ namespace Tests\Feature;
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
-use OGame\Services\Npc\NpcBaseService;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
+use Tests\SpawnsNpcBases;
 
 /**
  * La vignette des bases hostiles en galaxie.
@@ -16,6 +16,8 @@ use Tests\AccountTestCase;
  */
 class NpcGalaxyThumbnailTest extends AccountTestCase
 {
+    use SpawnsNpcBases;
+
     private SettingsService $settings;
 
     protected function setUp(): void
@@ -56,8 +58,7 @@ class NpcGalaxyThumbnailTest extends AccountTestCase
      */
     public function testAPirateBaseGetsItsOwnThumbnail(): void
     {
-        $base = resolve(NpcBaseService::class)->createBase();
-        $this->assertNotNull($base, 'No pirate base could be created.');
+        $base = $this->aSpawnedBase();
 
         $coordinate = $base->getPlanetCoordinates();
 

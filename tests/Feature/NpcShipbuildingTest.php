@@ -8,11 +8,11 @@ use Illuminate\Support\Facades\Schema;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\Models\Resources;
-use OGame\Services\Npc\NpcBaseService;
 use OGame\Services\Npc\NpcGrowthService;
 use OGame\Services\PlanetService;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
+use Tests\SpawnsNpcBases;
 
 /**
  * Une base finit-elle vraiment par sortir des vaisseaux ?
@@ -32,6 +32,8 @@ use Tests\AccountTestCase;
  */
 class NpcShipbuildingTest extends AccountTestCase
 {
+    use SpawnsNpcBases;
+
     private SettingsService $settings;
 
     private NpcGrowthService $growth;
@@ -85,8 +87,7 @@ class NpcShipbuildingTest extends AccountTestCase
      */
     public function testABaseEventuallyBuildsRealShips(): void
     {
-        $base = resolve(NpcBaseService::class)->createBase();
-        $this->assertNotNull($base, 'No pirate base could be created.');
+        $base = $this->aSpawnedBase();
 
         $planetId = $base->getPlanetId();
         $userId = $base->getPlayer()?->getId();
@@ -142,8 +143,7 @@ class NpcShipbuildingTest extends AccountTestCase
      */
     public function testABaseArmsItsDefencesBeforeItsFleet(): void
     {
-        $base = resolve(NpcBaseService::class)->createBase();
-        $this->assertNotNull($base, 'No pirate base could be created.');
+        $base = $this->aSpawnedBase();
 
         $planet = $this->runGrowthFor($base->getPlanetId(), 60, 4);
 

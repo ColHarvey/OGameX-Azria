@@ -16,6 +16,7 @@ use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
 use RuntimeException;
 use Tests\AccountTestCase;
+use Tests\SpawnsNpcBases;
 
 /**
  * Garanties du systeme de factions hostiles.
@@ -26,6 +27,8 @@ use Tests\AccountTestCase;
  */
 class NpcFactionTest extends AccountTestCase
 {
+    use SpawnsNpcBases;
+
     private SettingsService $settings;
 
     protected function setUp(): void
@@ -97,8 +100,7 @@ class NpcFactionTest extends AccountTestCase
         $population = resolve(NpcPopulationService::class);
         $before = $population->activePlayerCount();
 
-        $base = resolve(NpcBaseService::class)->createBase();
-        $this->assertNotNull($base, 'No pirate base could be created.');
+        $base = $this->aSpawnedBase();
 
         DB::table('highscores')->insert([
             'player_id' => $base->getPlayer()?->getId(),
@@ -263,8 +265,7 @@ class NpcFactionTest extends AccountTestCase
         $this->settings->set('npc_seed_min_distance', '3');
         $this->settings->set('npc_seed_max_distance', '400');
 
-        $base = resolve(NpcBaseService::class)->createBase();
-        $this->assertNotNull($base, 'No base could be placed.');
+        $base = $this->aSpawnedBase();
 
         $baseCoordinate = $base->getPlanetCoordinates();
 
@@ -355,8 +356,7 @@ class NpcFactionTest extends AccountTestCase
      */
     public function testABaseThatCanStillFightIsNotDestroyed(): void
     {
-        $base = resolve(NpcBaseService::class)->createBase();
-        $this->assertNotNull($base);
+        $base = $this->aSpawnedBase();
 
         $base->addUnit('rocket_launcher', 3);
 

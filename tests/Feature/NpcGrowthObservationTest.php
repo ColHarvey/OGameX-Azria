@@ -9,10 +9,10 @@ use Illuminate\Support\Facades\Schema;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\Models\NpcBaseSnapshot;
 use OGame\Models\Resources;
-use OGame\Services\Npc\NpcBaseService;
 use OGame\Services\Npc\NpcGrowthService;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
+use Tests\SpawnsNpcBases;
 
 /**
  * La croissance des bases est mesurable, et pas seulement affichee.
@@ -24,6 +24,8 @@ use Tests\AccountTestCase;
  */
 class NpcGrowthObservationTest extends AccountTestCase
 {
+    use SpawnsNpcBases;
+
     private SettingsService $settings;
 
     /**
@@ -116,8 +118,7 @@ class NpcGrowthObservationTest extends AccountTestCase
      */
     public function testATickRecordsWhatEachBaseLooksLike(): void
     {
-        $base = resolve(NpcBaseService::class)->createBase();
-        $this->assertNotNull($base, 'No pirate base could be created.');
+        $base = $this->aSpawnedBase();
 
         Artisan::call('ogamex:npc:tick');
 
@@ -144,8 +145,7 @@ class NpcGrowthObservationTest extends AccountTestCase
      */
     public function testTheTraceIsHourlyAndNotPerTick(): void
     {
-        $base = resolve(NpcBaseService::class)->createBase();
-        $this->assertNotNull($base, 'No pirate base could be created.');
+        $base = $this->aSpawnedBase();
 
         Artisan::call('ogamex:npc:tick');
         Artisan::call('ogamex:npc:tick');
@@ -176,8 +176,7 @@ class NpcGrowthObservationTest extends AccountTestCase
      */
     public function testTheBasesCommandShowsStateAndProgress(): void
     {
-        $base = resolve(NpcBaseService::class)->createBase();
-        $this->assertNotNull($base, 'No pirate base could be created.');
+        $base = $this->aSpawnedBase();
 
         Artisan::call('ogamex:npc:tick');
 
@@ -222,8 +221,7 @@ class NpcGrowthObservationTest extends AccountTestCase
      */
     public function testTheCommandShowsWhatIsHappeningNow(): void
     {
-        $base = resolve(NpcBaseService::class)->createBase();
-        $this->assertNotNull($base, 'No pirate base could be created.');
+        $base = $this->aSpawnedBase();
 
         // Une trace ancienne et trompeuse, du genre de celle qui a induit en erreur.
         NpcBaseSnapshot::create([
@@ -273,8 +271,7 @@ class NpcGrowthObservationTest extends AccountTestCase
      */
     public function testOldTracesArePurged(): void
     {
-        $base = resolve(NpcBaseService::class)->createBase();
-        $this->assertNotNull($base, 'No pirate base could be created.');
+        $base = $this->aSpawnedBase();
 
         NpcBaseSnapshot::create([
             'user_id' => $base->getPlayer()?->getId(),
