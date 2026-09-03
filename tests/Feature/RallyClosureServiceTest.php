@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
+use OGame\Combat\Enums\CombatOutboxKind;
+use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\SnapshotContribution;
 use OGame\Combat\Exceptions\UnknownSnapshotProjection;
@@ -12,6 +14,8 @@ use OGame\Combat\Services\RallyClosureService;
 use OGame\Combat\Support\CombatEventIdentity;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\SnapshotProjection;
+use OGame\Models\CelestialBodyCombatBarrier;
+use OGame\Models\CombatOutboxMessage;
 use OGame\Models\CombatParticipant;
 use OGame\Models\CombatSnapshotInclusion;
 use OGame\Models\FleetMission;
@@ -33,11 +37,11 @@ use Tests\TestCase;
  *
  * ## Ce qu'ils ne prouvent pas encore
  *
- * Ni les messages aux joueurs, ni la reservation de butin : ces deux-la viennent apres. Le dire evite
- * de croire la fermeture terminee.
+ * La reservation de butin : elle vient apres. Le dire evite de croire la fermeture terminee.
  *
- * Les inclusions, elles, sont desormais prouvees — y compris qu'elles portent la projection **de
- * l instance** et non la version courante.
+ * Les inclusions sont desormais prouvees — y compris qu'elles portent la projection **de
+ * l instance** et non la version courante. Les avis de refus le sont aussi : leur presence pour
+ * une flotte renvoyee, et leur **absence** pour une flotte admise.
  */
 class RallyClosureServiceTest extends TestCase
 {
@@ -405,6 +409,197 @@ class RallyClosureServiceTest extends TestCase
             $avant,
             CombatSnapshotInclusion::where('combat_instance_id', $combat->id)->count(),
             'A second closure added the same events to the snapshot again.'
+        );
+    }
+
+    /**
+     * Une flotte renvoyee apprend pourquoi, et une seule fois.
+     *
+     * ## Ce que cet essai protege
+     *
+     * Une flotte qui rentre sans explication ressemble a une panne : le joueur a paye le carburant,
+     * attendu l'arrivee, et rien ne s'est passe. La raison d'admission est precisement ce qui
+     * distingue une regle d'un bogue, de son point de vue.
+     *
+     * Le message est ecrit dans la transaction de la fermeture, pas envoye depuis elle : si la
+     * transaction etait annulee, l'avis partirait avec elle plutot que d'annoncer un renvoi qui n'a
+     * pas eu lieu.
+     */
+    public function testARefusedFleetIsToldWhy(): void
+    {
+        $ouvreurJoueur = $this->aPlayer();
+        $etranger = $this->aPlayer();
+        $corps = $this->aBodyId();
+
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $ouvreurJoueur);
+
+        // Sans alliance gouvernante, un joueur exterieur ne rejoint pas le groupe fondateur.
+        $intruse = $this->anAttackAt($corps, self::OPENING + 10, $etranger);
+
+        $combat = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
+        $issue = $this->fermeture->close($combat->id, self::OPENING + 60);
+
+        $this->assertTrue($issue->closed);
+
+        $avis = CombatOutboxMessage::where('combat_instance_id', $combat->id)
+            ->where('participant_key', CombatParticipantKey::forFleet($intruse->id))
+            ->get();
+
+        $this->assertCount(1, $avis, 'The refused fleet was told nothing, or told twice.');
+
+        $message = $avis->first();
+
+        $this->assertNotNull($message);
+        $this->assertSame(CombatOutboxKind::RallyRefused->value, $message->kind);
+        $this->assertSame(
+            CombatReasonCode::AllianceNotEligible->value,
+            $message->payload['reason'] ?? null,
+            'The refusal reason did not reach the player.'
+        );
+        $this->assertSame($corps, $message->payload['target_body_id'] ?? null);
+        $this->assertNull($message->dispatched_at, 'The closure sent the message instead of queuing it.');
+    }
+
+    /**
+     * L'heure du message est celle de l'echeance, pas celle du worker.
+     *
+     * Prendre l'instant du traitement ferait dependre la boite du moment ou le worker s'est
+     * reveille : deux fermetures du meme combat ecriraient deux heures differentes, et l'unicite ne
+     * les distinguerait pas pour autant.
+     */
+    public function testTheMessageCarriesTheDeadlineAndNotTheWorkerClock(): void
+    {
+        $ouvreurJoueur = $this->aPlayer();
+        $etranger = $this->aPlayer();
+        $corps = $this->aBodyId();
+
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $ouvreurJoueur);
+        $intruse = $this->anAttackAt($corps, self::OPENING + 10, $etranger);
+
+        $combat = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
+
+        $barriere = CelestialBodyCombatBarrier::where('combat_instance_id', $combat->id)->first();
+        $this->assertNotNull($barriere);
+
+        // Le worker se reveille tres en retard.
+        $this->fermeture->close($combat->id, self::OPENING + 9_999);
+
+        $message = CombatOutboxMessage::where('combat_instance_id', $combat->id)
+            ->where('participant_key', CombatParticipantKey::forFleet($intruse->id))
+            ->first();
+
+        $this->assertNotNull($message);
+        $this->assertSame(
+            $barriere->owned_through_effect_at,
+            $message->available_at,
+            'The message took the worker clock instead of the deadline that governs the combat.'
+        );
+    }
+
+    /**
+     * Fermer deux fois n'ecrit pas deux avis.
+     */
+    public function testClosingTwiceDoesNotAnnounceTwice(): void
+    {
+        $ouvreurJoueur = $this->aPlayer();
+        $etranger = $this->aPlayer();
+        $corps = $this->aBodyId();
+
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $ouvreurJoueur);
+        $this->anAttackAt($corps, self::OPENING + 10, $etranger);
+
+        $combat = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
+
+        $this->fermeture->close($combat->id, self::OPENING + 60);
+        $avant = CombatOutboxMessage::where('combat_instance_id', $combat->id)->count();
+
+        $this->fermeture->close($combat->id, self::OPENING + 120);
+
+        $this->assertSame(1, $avant, 'Exactly one fleet was refused, so exactly one notice was due.');
+        $this->assertSame(
+            $avant,
+            CombatOutboxMessage::where('combat_instance_id', $combat->id)->count(),
+            'A second closure queued the same notice again.'
+        );
+    }
+
+    /**
+     * Une flotte admise ne recoit aucun avis de refus.
+     *
+     * **La contrepartie de l'essai precedent.** Ecrire un avis a tout le monde passerait le premier
+     * essai tout aussi bien, et annoncerait a des joueurs admis que leur flotte repart.
+     */
+    public function testAnAdmittedFleetReceivesNoRefusalNotice(): void
+    {
+        $joueur = $this->aPlayer();
+        $corps = $this->aBodyId();
+
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $joueur);
+        $vague = $this->anAttackAt($corps, self::OPENING + 18, $joueur);
+
+        $combat = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
+        $this->fermeture->close($combat->id, self::OPENING + 19);
+
+        $this->assertSame(
+            0,
+            CombatOutboxMessage::where('combat_instance_id', $combat->id)->count(),
+            'An admitted fleet was told it had been turned away.'
+        );
+
+        // Et la vague est bien admise : sans cela l'essai ci-dessus ne prouverait rien.
+        $this->assertContains(
+            CombatParticipantKey::forFleet($vague->id),
+            CombatParticipant::where('combat_instance_id', $combat->id)->pluck('participant_key')->all()
+        );
+    }
+
+    /**
+     * Un renfort defensif refuse est prevenu, lui aussi.
+     *
+     * ## La mutation qui a rendu cet essai necessaire
+     *
+     * Supprimer l'appel qui previent le **camp defenseur** a survecu a tous les autres essais : ils
+     * ne refusaient que des attaquants. Un allie venu defendre aurait donc vu sa flotte repartir
+     * sans un mot, et rien ne l'aurait signale.
+     *
+     * Le refus employe ici est `NotAlreadyInFlight` : une Defense ACS partie **a** l'instant de
+     * l'ouverture ne volait pas encore quand le combat s'est ouvert — l'egalite avec une barriere
+     * compte pour « apres », ici comme partout ailleurs.
+     */
+    public function testARefusedDefensiveReinforcementIsToldToo(): void
+    {
+        $defenseur = $this->aPlayer();
+        $corps = $this->aPlanetOwnedBy($defenseur)->id;
+        $attaquant = $this->aPlayer();
+        $allie = $this->aPlayer();
+
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $attaquant);
+
+        $renfort = FleetMission::forceCreate([
+            'user_id' => $allie->id,
+            'planet_id_to' => $corps,
+            'mission_type' => 5,
+            // **Partie a l'ouverture, pas avant.** Elle ne volait donc pas encore.
+            'time_departure' => self::OPENING,
+            'time_arrival' => self::OPENING + 20,
+            'galaxy_to' => 6,
+            'system_to' => 1,
+            'position_to' => 1,
+            'type_to' => 1,
+            'light_fighter' => 5,
+        ]);
+
+        $combat = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
+        $this->fermeture->close($combat->id, self::OPENING + 60);
+
+        $avis = CombatOutboxMessage::where('combat_instance_id', $combat->id)
+            ->where('participant_key', CombatParticipantKey::forFleet($renfort->id))
+            ->first();
+
+        $this->assertNotNull($avis, 'A refused defensive reinforcement was told nothing.');
+        $this->assertSame(
+            CombatReasonCode::NotAlreadyInFlight->value,
+            $avis->payload['reason'] ?? null
         );
     }
 

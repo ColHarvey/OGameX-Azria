@@ -15,6 +15,7 @@ use OGame\Combat\Admission\FrozenAllianceMembership;
 use OGame\Combat\Admission\RallyGrouping;
 use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\Enums\CombatMissionKind;
+use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\SnapshotContribution;
 use OGame\Combat\Support\ActorKindResolver;
@@ -23,6 +24,7 @@ use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\SnapshotProjection;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
+use OGame\Models\CombatOutboxMessage;
 use OGame\Models\CombatParticipant;
 use OGame\Models\CombatSnapshotInclusion;
 use OGame\Models\Planet;
@@ -117,14 +119,14 @@ final class RallyClosureService
                 return RallyClosureOutcome::tooEarly();
             }
 
-            return $this->closeUnderLock($combat, $barriere->opened_at);
+            return $this->closeUnderLock($combat, $barriere->opened_at, $barriere->owned_through_effect_at);
         });
     }
 
     /**
      * Prononce les admissions et fige la photographie, verrous en main.
      */
-    private function closeUnderLock(CombatInstance $combat, int $openedAt): RallyClosureOutcome
+    private function closeUnderLock(CombatInstance $combat, int $openedAt, int $closedAt): RallyClosureOutcome
     {
         $corps = $combat->target_planet_id ?? 0;
 
@@ -161,6 +163,12 @@ final class RallyClosureService
 
         $this->recordInclusions($combat, $cotesAttaquants, SnapshotContribution::AttackingFleet);
         $this->recordInclusions($combat, $defenseurs->admitted(), SnapshotContribution::DefendingFleet);
+
+        // **Dans la meme transaction que la photographie.** Une flotte renvoyee dont le message
+        // serait perdu ressemblerait a une panne : le joueur a paye le carburant, attendu
+        // l arrivee, et rien ne s est passe.
+        $this->announceRefusals($combat, $attaquants, $closedAt);
+        $this->announceRefusals($combat, $defenseurs, $closedAt);
 
         $combat->status = CombatState::Active;
         $combat->fleets_admitted = $this->countFleets($cotesAttaquants)
@@ -309,6 +317,73 @@ final class RallyClosureService
                         // L'heure de l'ouverture, pas celle du worker : deux fermetures du meme
                         // combat doivent ecrire la meme photographie.
                         'included_at' => $combat->started_at ?? 0,
+                    ]
+                );
+            }
+        }
+    }
+
+    /**
+     * Chaque flotte renvoyee apprend pourquoi.
+     *
+     * ## Pourquoi le message est ecrit ici, et pas envoye ici
+     *
+     * Resoudre un ralliement fait deux choses : figer la photographie, et en informer les joueurs.
+     * Les faire separement laisse deux pannes, mauvaises toutes les deux — une flotte renvoyee sans
+     * explication, ou une explication pour un renvoi qui n'a pas eu lieu.
+     *
+     * Le message est donc **ecrit dans la transaction de la fermeture** et envoye plus tard par un
+     * lecteur separe. Si la transaction est annulee, le message part avec elle ; si elle passe, il
+     * existe et finira par sortir, meme apres un redemarrage.
+     *
+     * ## Une ligne par flotte, et non par joueur
+     *
+     * Chaque mission est un mouvement distinct qui repart de son cote. Un joueur dont trois flottes
+     * d'une meme attaque coordonnee sont renvoyees recoit trois avis — comme pour trois retours
+     * ordinaires, parce que ce sont bien trois flottes qui rentrent.
+     *
+     * ## L'heure est celle de l'echeance, pas celle du worker
+     *
+     * `available_at` prend l'echeance de fermeture. Prendre l'instant du traitement ferait dependre
+     * la boite du moment ou le worker s'est reveille : deux fermetures du meme combat ecriraient
+     * deux heures differentes, et l'unicite ne les distinguerait pas pour autant.
+     *
+     * ## Le texte n'est pas ici
+     *
+     * La charge porte le **fait** — la raison, le corps, les coordonnees, la taille du groupe. Le
+     * texte se compose a l'envoi, depuis les cles de traduction : le figer maintenant le rendrait
+     * insensible a la langue du joueur.
+     */
+    private function announceRefusals(CombatInstance $combat, AdmissionVerdict $verdict, int $closedAt): void
+    {
+        foreach ($verdict->refused() as $admission) {
+            $raison = $admission->refusal;
+
+            if ($raison === null) {
+                // Un refus sans raison serait un refus qu'on ne sait pas raconter. Le selecteur en
+                // rend toujours une ; le verifier evite d'ecrire un message vide si cela changeait.
+                continue;
+            }
+
+            foreach ($admission->group->missions as $mission) {
+                CombatOutboxMessage::query()->updateOrCreate(
+                    [
+                        'combat_instance_id' => $combat->id,
+                        'participant_key' => CombatParticipantKey::forFleet($mission->missionId),
+                        'kind' => CombatOutboxKind::RallyRefused->value,
+                    ],
+                    [
+                        'payload' => [
+                            'reason' => $raison->value,
+                            'target_body_id' => $combat->target_planet_id,
+                            'galaxy' => $combat->galaxy,
+                            'system' => $combat->system,
+                            'position' => $combat->position,
+                            // La taille du groupe : « ta vague de cinq est repartie entiere » ne se
+                            // raconte pas comme « ta flotte est repartie ».
+                            'group_fleets' => count($admission->group->missions),
+                        ],
+                        'available_at' => $closedAt,
                     ]
                 );
             }
