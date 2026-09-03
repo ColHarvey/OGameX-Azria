@@ -170,6 +170,7 @@ $migrations = [
     '2026_09_03_060000_add_projection_version_to_combat_instances',
     '2026_09_03_120000_make_snapshot_inclusions_one_row_per_event',
     '2026_09_03_150000_add_loot_settlement_to_combat_instances',
+    '2026_09_03_180000_add_advance_attempts_to_combat_instances',
 ];
 
 $nouvellesTables = [
@@ -195,6 +196,8 @@ $nouvellesColonnes = [
     'loot_snapshot_fingerprint',
     'applied_loot_deuterium',
     'loot_settled_at',
+    'advance_attempts',
+    'advance_last_error',
 ];
 
 /**
@@ -247,7 +250,7 @@ $temoin = static function (bool $obtenu, string $enonce) use (&$echecs): void {
 
 chdir($racine);
 
-fwrite(STDOUT, "\n  Les neuf migrations de combat : appliquer, defaire, reappliquer\n");
+fwrite(STDOUT, "\n  Les " . count($migrations) . " migrations de combat : appliquer, defaire, reappliquer\n");
 fwrite(STDOUT, '  ' . str_repeat('-', 66) . "\n\n");
 
 $artisan('base remise a zero', ['migrate:fresh', '--force', '--env=testing']);
@@ -256,7 +259,7 @@ $apres = $schema();
 
 $temoin(
     $apres['tables'] !== [] && !in_array(false, $apres['tables'], true),
-    'Les cinq tables existent apres migrate'
+    'Les ' . count($nouvellesTables) . ' tables existent apres migrate'
 );
 
 $temoin(
@@ -282,7 +285,7 @@ if (!is_array($dernieres) || array_values($dernieres) !== $attendues) {
     flock($verrou, LOCK_UN);
 
     $arret(
-        "Les neuf dernieres migrations ne sont pas celles attendues : defaire neuf pas toucherait\n"
+        "Les " . count($migrations) . " dernieres migrations ne sont pas celles attendues : en defaire autant\n"
         . "  toucherait autre chose. Mettre a jour la liste dans ce script."
     );
 }
@@ -296,7 +299,7 @@ $defait = $schema();
 
 $temoin(
     !in_array(true, $defait['tables'], true),
-    'Aucune des cinq tables ne subsiste apres rollback'
+    'Aucune des ' . count($nouvellesTables) . ' tables ne subsiste apres rollback'
 );
 
 $temoin(
@@ -316,7 +319,7 @@ flock($verrou, LOCK_UN);
 fwrite(STDOUT, "\n  " . str_repeat('-', 66) . "\n");
 
 if ($echecs === 0) {
-    fwrite(STDOUT, "  Les neuf migrations s appliquent, se defont et se reappliquent.\n");
+    fwrite(STDOUT, "  Les " . count($migrations) . " migrations s appliquent, se defont et se reappliquent.\n");
 
     if ($connexion === null) {
         fwrite(STDOUT, "  Connexion de test. L epreuve MariaDB reste a faire : elle refuse des index,\n");

@@ -1,5 +1,6 @@
 <?php
 
+use OGame\Console\Commands\Combat\AdvancePersistentCombats;
 use OGame\Console\Commands\Npc\NpcTick;
 use OGame\Console\Commands\Scheduler\CleanupDestroyedPlanets;
 use OGame\Console\Commands\Scheduler\CleanupWreckFields;
@@ -41,6 +42,12 @@ Schedule::command(CleanupDestroyedPlanets::class)->dailyAt('03:00')->withoutOver
 
 // Process Dark Matter regeneration every 5 minutes
 Schedule::command(DarkMatterRegenerateCommand::class)->everyFiveMinutes()->withoutOverlapping();
+
+// Combats durables : fermer les ralliements echus, regler les combats termines.
+// Sans effet tant qu'aucune attaque n'ouvre de combat durable — la table reste vide, et le
+// passage ne fait rien. La minute est la granularite du systeme : une bataille se termine a
+// l'echeance calculee a sa cloture, et l'attente ne doit pas s'y ajouter.
+Schedule::command(AdvancePersistentCombats::class)->everyMinute()->withoutOverlapping();
 
 // Factions hostiles : croissance des bases, releve des bases detruites, decision de raid.
 // Sans effet tant que npc_enabled est a non, et n envoie aucune flotte tant que

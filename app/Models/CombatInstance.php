@@ -80,6 +80,8 @@ use OGame\Combat\Enums\CombatState;
  * @property int|null $applied_loot_crystal
  * @property int|null $applied_loot_deuterium
  * @property int|null $loot_settled_at
+ * @property int $advance_attempts
+ * @property string|null $advance_last_error
  * @property bool $result_published
  * @property Carbon $created_at
  * @property Carbon $updated_at
@@ -139,6 +141,8 @@ use OGame\Combat\Enums\CombatState;
     'applied_loot_crystal',
     'applied_loot_deuterium',
     'loot_settled_at',
+    'advance_attempts',
+    'advance_last_error',
     'result_published',
 ])]
 class CombatInstance extends Model

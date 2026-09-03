@@ -4,6 +4,8 @@ namespace OGame\GameMissions;
 
 use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Services\CombatResolutionService;
+use OGame\Combat\Services\CombatSettlementOutcome;
+use OGame\Combat\Services\CombatSettlementService;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\LootContextForMission;
 use OGame\Combat\Support\OperationKey;
@@ -76,6 +78,32 @@ class AttackMission extends GameMission
 
         // If all checks pass, the mission is possible.
         return new MissionPossibleStatus(true);
+    }
+
+    /**
+     * Regle un combat durable arrive a son echeance.
+     *
+     * ## Pourquoi la mission, et pas le travail planifie
+     *
+     * `startReturn()` est protegee, et doit le rester : creer une mission retour est le geste d'une
+     * mission, pas de n'importe quel appelant. Le chemin instantane passe deja une fermeture qui la
+     * rend accessible au service de resolution sans elargir sa visibilite ; le chemin durable fait
+     * exactement la meme chose, au meme endroit. Le travail planifie n'a donc rien a assembler : il
+     * nomme un combat et un instant.
+     *
+     * Ce qui est regle, c'est la bataille figee a la cloture du ralliement — jamais un calcul refait
+     * ici.
+     */
+    public function settlePersistentCombat(int $combatInstanceId, int $now): CombatSettlementOutcome
+    {
+        return resolve(CombatSettlementService::class)->settle(
+            $combatInstanceId,
+            $this,
+            function (FleetMission $retourDe, Resources $ressources, UnitCollection $unites, int $tempsSupplementaire = 0, array|null $epaves = null, int|null $dureeImposee = null): void {
+                $this->startReturn($retourDe, $ressources, $unites, $tempsSupplementaire, $epaves, $dureeImposee);
+            },
+            $now,
+        );
     }
 
     /**
