@@ -52,7 +52,13 @@ final readonly class CombatResolutionOutcome
     /**
      * @param ResourceNormalizationDiagnostics $diagnostics Ce que l'application a rencontre.
      */
-    public function __construct(public ResourceNormalizationDiagnostics $diagnostics)
-    {
+    /**
+     * @param ResourceNormalizationDiagnostics $diagnostics Ce que l application a rencontre.
+     * @param int $battleReportId Le rapport ecrit : le combat durable l accroche a son instance.
+     */
+    public function __construct(
+        public ResourceNormalizationDiagnostics $diagnostics,
+        public int $battleReportId,
+    ) {
     }
 }

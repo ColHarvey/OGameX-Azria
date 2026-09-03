@@ -173,7 +173,7 @@ class FrozenLootPotentialTest extends TestCase
     public function testThePotentialSurvivesPersistenceOnTheInstance(): void
     {
         $combat = $this->anOpenedCombat();
-        $versions = $this->frozenSetOf($combat);
+        $versions = FrozenCombatVersionSet::fromInstance($combat);
 
         // **Aucune composante a zero.** Un zero laisserait passer une colonne oubliee : ecrire 0 a la
         // place du deuterium rendrait exactement ce que l essai attendait.
@@ -221,7 +221,7 @@ class FrozenLootPotentialTest extends TestCase
     public function testACorruptedRateIsRefusedAtReading(): void
     {
         $combat = $this->anOpenedCombat();
-        $versions = $this->frozenSetOf($combat);
+        $versions = FrozenCombatVersionSet::fromInstance($combat);
 
         $potentiel = FrozenLootPotential::frozenFrom($this->anOutcomeOf(1_000.0, 500.0, 200.0, $versions), $versions);
         $combat->fill($potentiel->toColumns(self::OPENING + 600));
@@ -240,7 +240,7 @@ class FrozenLootPotentialTest extends TestCase
     public function testACorruptedColumnIsRefusedAtReading(): void
     {
         $combat = $this->anOpenedCombat();
-        $versions = $this->frozenSetOf($combat);
+        $versions = FrozenCombatVersionSet::fromInstance($combat);
 
         $potentiel = FrozenLootPotential::frozenFrom($this->anOutcomeOf(1_000.0, 500.0, 200.0, $versions), $versions);
         $combat->fill($potentiel->toColumns(self::OPENING + 600));
@@ -273,20 +273,6 @@ class FrozenLootPotentialTest extends TestCase
         $issue->lootSnapshotFingerprint = $fingerprint;
 
         return $issue;
-    }
-
-    /**
-     * L'ensemble gele d'un combat, relu depuis ses colonnes.
-     */
-    private function frozenSetOf(CombatInstance $combat): FrozenCombatVersionSet
-    {
-        return FrozenCombatVersionSet::of(
-            (string)$combat->causal_order_version,
-            (string)$combat->loot_allocator_version,
-            (string)$combat->loot_policy_version,
-            (string)$combat->moon_destruction_rule_version,
-            (string)$combat->projection_version,
-        );
     }
 
     /**

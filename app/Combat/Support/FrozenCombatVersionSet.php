@@ -9,6 +9,7 @@ use OGame\Combat\Exceptions\MismatchedRuleVersionSet;
 use OGame\Combat\MoonDestruction\MoonDestructionRuleRegistry;
 use OGame\Combat\Policies\LootPolicyRegistry;
 use OGame\Combat\Projection\SnapshotProjectionRegistry;
+use OGame\Models\CombatInstance;
 
 /**
  * Les cinq versions qui gouvernent un combat, choisies une fois et jamais relues.
@@ -113,6 +114,24 @@ final readonly class FrozenCombatVersionSet
      *
      * @throws CorruptedRuleVersionSet Si la structure lue n'est pas celle qui a ete ecrite.
      */
+    /**
+     * L'ensemble gele d'un combat, relu depuis ses cinq colonnes.
+     *
+     * Une colonne vide est une corruption, pas une version par defaut : l'ouverture ecrit les cinq
+     * en meme temps, et un combat qui n'en porterait que quatre n'a pas ete ouvert ici. Le refus
+     * est celui de `fromStorage()`, et il nomme la colonne.
+     */
+    public static function fromInstance(CombatInstance $combat): self
+    {
+        return self::fromStorage([
+            'causal_order' => $combat->causal_order_version,
+            'loot_allocator' => $combat->loot_allocator_version,
+            'loot_policy' => $combat->loot_policy_version,
+            'moon_destruction' => $combat->moon_destruction_rule_version,
+            'projection' => $combat->projection_version,
+        ]);
+    }
+
     public static function fromStorage(array $stored): self
     {
         $inconnues = array_diff(array_keys($stored), self::KEYS);

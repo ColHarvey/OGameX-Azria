@@ -64,6 +64,10 @@ class PersistedRehydrationGuardTest extends TestCase
             'tests/Unit/Combat/FrozenMoonDestructionPlanTest.php',
             'testAMoonWithANumericStringIdentifierIsRefused',
         ],
+        'Support/FrozenCombatVersionSet::fromInstance' => [
+            'tests/Unit/Combat/FrozenCombatVersionSetTest.php',
+            'testAnInstanceWithAMissingVersionIsRefused',
+        ],
         'Support/FrozenCombatVersionSet::fromStorage' => [
             'tests/Unit/Combat/FrozenCombatVersionSetTest.php',
             'testEachOfTheFiveVersionsIsRefusedWhenItIsNotAString',

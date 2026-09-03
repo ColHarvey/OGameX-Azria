@@ -96,6 +96,8 @@ class CombatResolutionService
      * @param int $originPlanetId
      * @param GameMission $missionDeJeu Porte le type de vitesse de flotte, qui determine la duree du retour.
      * @param Closure $creerRetour Cree une mission retour ; delegue a GameMission::startReturn().
+     * @param FrozenLootAllocation|null $allocation L allocation gelee du combat durable ; le chemin
+     *        instantane n en passe pas et la resolution choisit alors la courante, une fois.
      * @return CombatResolutionOutcome Ce que l application du resultat a rencontre — distinct du
      *         resultat lui-meme, qui reste fige tel que le moteur l a calcule.
      */
@@ -110,6 +112,7 @@ class CombatResolutionService
         int $originPlanetId,
         GameMission $missionDeJeu,
         Closure $creerRetour,
+        FrozenLootAllocation|null $allocation = null,
     ): CombatResolutionOutcome {
         // Ce que l'application du resultat rencontre lui appartient : le `BattleResult` reste tel
         // que le moteur l'a fige.
@@ -120,9 +123,10 @@ class CombatResolutionService
         // deux appels aurait plafonne la premiere moitie de cette bataille sous une regle et la
         // seconde sous une autre, sans que rien ne le signale.
         //
-        // C est la frontiere du chemin instantane. Le combat durable, lui, la lira dans ses
-        // faits geles par `FrozenLootAllocation::fromFrozenSet()`.
-        $allocation = FrozenLootAllocation::atOperationStart();
+        // C est la frontiere du chemin instantane. Le combat durable, lui, la lit dans ses faits
+        // geles par `FrozenLootAllocation::fromFrozenSet()` et la passe en parametre : la
+        // resolution ne choisit une version que si personne ne l a choisie avant elle.
+        $allocation ??= FrozenLootAllocation::atOperationStart();
 
         // Deduct loot from the target planet.
         $defenderPlanet->deductResources($battleResult->loot);
@@ -557,7 +561,7 @@ class CombatResolutionService
 
         // Ce que l application a rencontre repart avec son propre resultat : le `BattleResult` reste
         // celui que le moteur a fige.
-        return new CombatResolutionOutcome($diagnostics);
+        return new CombatResolutionOutcome($diagnostics, $reportId);
     }
 
     /**

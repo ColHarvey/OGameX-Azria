@@ -22,6 +22,7 @@ use OGame\Combat\Projection\SnapshotProjectionRule;
 use OGame\Combat\Support\FrozenCombatVersionSet;
 use OGame\Combat\Support\LootPolicy;
 use OGame\Combat\Support\ResourceNormalizationDiagnostics;
+use OGame\Models\CombatInstance;
 use OGame\Models\Resources;
 use Tests\UnitTestCase;
 
@@ -457,5 +458,51 @@ class FrozenCombatVersionSetTest extends UnitTestCase
         };
 
         return MoonDestructionRuleRegistry::of([$regle], $version);
+    }
+
+    /**
+     * Les cinq colonnes d'une instance se relisent en un ensemble, dans le bon ordre.
+     */
+    public function testAnInstanceIsReadFromItsFiveColumns(): void
+    {
+        $combat = new CombatInstance([
+            'causal_order_version' => 'causal_order_v1',
+            'loot_allocator_version' => 'exact_loot_allocation_v1',
+            'loot_policy_version' => 'loot_policy_v1',
+            'moon_destruction_rule_version' => 'moon_destruction_v1',
+            'projection_version' => 'projection_v1',
+        ]);
+
+        $versions = FrozenCombatVersionSet::fromInstance($combat);
+
+        $this->assertSame('causal_order_v1', $versions->causalOrder);
+        $this->assertSame('exact_loot_allocation_v1', $versions->lootAllocator);
+        $this->assertSame('loot_policy_v1', $versions->lootPolicy);
+        $this->assertSame('moon_destruction_v1', $versions->moonDestruction);
+        $this->assertSame('projection_v1', $versions->projection);
+    }
+
+    /**
+     * Une colonne vide est une corruption nommee, pas une version par defaut.
+     *
+     * L'ouverture ecrit les cinq colonnes en meme temps : un combat qui n'en porte que quatre n'a
+     * pas ete ouvert ici, et le regler sous une version devinee serait regler une autre bataille.
+     */
+    public function testAnInstanceWithAMissingVersionIsRefused(): void
+    {
+        $combat = new CombatInstance([
+            'causal_order_version' => 'causal_order_v1',
+            'loot_allocator_version' => 'exact_loot_allocation_v1',
+            'loot_policy_version' => 'loot_policy_v1',
+            'moon_destruction_rule_version' => 'moon_destruction_v1',
+            'projection_version' => null,
+        ]);
+
+        try {
+            FrozenCombatVersionSet::fromInstance($combat);
+            $this->fail('An instance with a missing version was read as a complete set.');
+        } catch (CorruptedRuleVersionSet $refus) {
+            $this->assertStringContainsString('projection', $refus->defect, 'The refusal does not name the missing column.');
+        }
     }
 }

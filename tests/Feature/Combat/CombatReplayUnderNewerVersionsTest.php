@@ -76,7 +76,7 @@ class CombatReplayUnderNewerVersionsTest extends TestCase
     {
         $combat = $this->anOpenedCombat();
 
-        $geles = $this->frozenSetOf($combat);
+        $geles = FrozenCombatVersionSet::fromInstance($combat);
         $empreinte = $combat->frozen_facts_fingerprint;
 
         // Les courantes passent en V2. Le combat n'en sait rien, et c'est le sujet.
@@ -94,7 +94,7 @@ class CombatReplayUnderNewerVersionsTest extends TestCase
 
         $this->assertSame(
             $geles->toStorage(),
-            $this->frozenSetOf($combat)->toStorage(),
+            FrozenCombatVersionSet::fromInstance($combat)->toStorage(),
             'A combat changed its rules because the world moved on.'
         );
 
@@ -220,7 +220,7 @@ class CombatReplayUnderNewerVersionsTest extends TestCase
     {
         $combat = $this->anOpenedCombat();
 
-        $geles = $this->frozenSetOf($combat);
+        $geles = FrozenCombatVersionSet::fromInstance($combat);
 
         // **Un registre ou une autre version est courante.** Sans cela, « gele » et « courant »
         // coincident, et l'essai passerait quoi qu'il arrive.
@@ -307,7 +307,7 @@ class CombatReplayUnderNewerVersionsTest extends TestCase
             'fleets_admitted' => $combat->fleets_admitted,
             'players_admitted' => $combat->players_admitted,
             'fingerprint' => $combat->frozen_facts_fingerprint,
-            'versions' => $this->frozenSetOf($combat)->toStorage(),
+            'versions' => FrozenCombatVersionSet::fromInstance($combat)->toStorage(),
             'participants' => CombatParticipant::where('combat_instance_id', $combat->id)
                 ->orderBy('participant_key')
                 ->pluck('participant_key')
@@ -323,20 +323,6 @@ class CombatReplayUnderNewerVersionsTest extends TestCase
                 ])
                 ->all(),
         ];
-    }
-
-    /**
-     * L'ensemble gele de ce combat, relu depuis ses colonnes.
-     */
-    private function frozenSetOf(CombatInstance $combat): FrozenCombatVersionSet
-    {
-        return FrozenCombatVersionSet::of(
-            (string)$combat->causal_order_version,
-            (string)$combat->loot_allocator_version,
-            (string)$combat->loot_policy_version,
-            (string)$combat->moon_destruction_rule_version,
-            (string)$combat->projection_version,
-        );
     }
 
     /**
