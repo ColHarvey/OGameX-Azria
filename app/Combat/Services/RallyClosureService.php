@@ -16,11 +16,15 @@ use OGame\Combat\Admission\RallyGrouping;
 use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Enums\SnapshotContribution;
 use OGame\Combat\Support\ActorKindResolver;
+use OGame\Combat\Support\CombatEventIdentity;
 use OGame\Combat\Support\CombatParticipantKey;
+use OGame\Combat\Support\SnapshotProjection;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatParticipant;
+use OGame\Models\CombatSnapshotInclusion;
 use OGame\Models\Planet;
 use OGame\Models\User;
 
@@ -125,33 +129,6 @@ final class RallyClosureService
 
         $candidates = $this->reader->read($corps, $openedAt, $appartenances, 0);
 
-        $attaquants = $this->admitAttackers($combat, $corps, $openedAt, $candidates, $appartenances, $budget);
-        $defenseurs = $this->admitDefenders($corps, $openedAt, $candidates);
-
-        $this->registerParticipants($combat, $attaquants->admitted(), CombatParticipant::SIDE_ATTACKER);
-        $this->registerParticipants($combat, $defenseurs->admitted(), CombatParticipant::SIDE_DEFENDER);
-
-        $combat->status = CombatState::Active;
-        $combat->fleets_admitted = $this->fleetsOf($attaquants) + $this->fleetsOf($defenseurs);
-        $combat->players_admitted = $this->playersOf($attaquants, $defenseurs);
-        $combat->save();
-
-        return RallyClosureOutcome::closed($attaquants, $defenseurs);
-    }
-
-    /**
-     * Le verdict du camp attaquant.
-     *
-     * @param array<int, CandidateMission> $candidates
-     */
-    private function admitAttackers(
-        CombatInstance $combat,
-        int $targetBodyId,
-        int $openedAt,
-        array $candidates,
-        FrozenAllianceMembership $membership,
-        AdmissionBudget $budget,
-    ): AdmissionVerdict {
         $combattantes = $this->grouping->fightingShapesOnly($candidates);
 
         [$fondatrices, $autres] = $this->grouping->splitFounding(
@@ -160,7 +137,53 @@ final class RallyClosureService
             $combat->union_id
         );
 
-        if ($fondatrices === []) {
+        // **Le groupe fondateur n'est pas « admis », il ouvre.** Le selecteur ne le juge donc pas et
+        // ne le rend pas dans son verdict — c'est juste de sa part, il n'a rien a decider sur lui.
+        //
+        // Mais la fermeture, elle, doit l'inscrire : sans cela l'attaquant qui a lance la bataille
+        // ne serait ni participant, ni dans la photographie, ni compte dans les budgets consommes.
+        // Le combat se serait ouvert sans son attaquant.
+        $groupesFondateurs = $fondatrices === [] ? [] : $this->grouping->intoGroups($fondatrices);
+
+        $attaquants = $this->admitAttackers($combat, $corps, $openedAt, $fondatrices, $autres, $appartenances, $budget);
+        $defenseurs = $this->admitDefenders($corps, $openedAt, $candidates);
+
+        $cotesAttaquants = array_merge($groupesFondateurs, $attaquants->admitted());
+
+        $this->registerParticipants($combat, $cotesAttaquants, CombatParticipant::SIDE_ATTACKER);
+        $this->registerParticipants($combat, $defenseurs->admitted(), CombatParticipant::SIDE_DEFENDER);
+
+        $this->recordInclusions($combat, $cotesAttaquants, SnapshotContribution::AttackingFleet);
+        $this->recordInclusions($combat, $defenseurs->admitted(), SnapshotContribution::DefendingFleet);
+
+        $combat->status = CombatState::Active;
+        $combat->fleets_admitted = $this->countFleets($cotesAttaquants)
+            + $this->countFleets($defenseurs->admitted());
+        $combat->players_admitted = $this->countPlayers($cotesAttaquants, $defenseurs->admitted());
+        $combat->save();
+
+        return RallyClosureOutcome::closed($attaquants, $defenseurs);
+    }
+
+    /**
+     * Le verdict du camp attaquant.
+     *
+     * Il ne porte que sur les **candidates** : le groupe fondateur lui est donne comme un fait, pas
+     * soumis a son jugement.
+     *
+     * @param array<int, CandidateMission> $founding
+     * @param array<int, CandidateMission> $others
+     */
+    private function admitAttackers(
+        CombatInstance $combat,
+        int $targetBodyId,
+        int $openedAt,
+        array $founding,
+        array $others,
+        FrozenAllianceMembership $membership,
+        AdmissionBudget $budget,
+    ): AdmissionVerdict {
+        if ($founding === []) {
             // L'ouvreur n'est plus la : sa mission a ete rappelee ou traitee. Le combat n'a plus de
             // groupe fondateur, et personne ne rejoint un camp qui n'existe pas.
             return new AdmissionVerdict($openedAt, $budget, []);
@@ -170,13 +193,13 @@ final class RallyClosureService
             new FoundingGroup(
                 $combat->founding_creator_id ?? 0,
                 $membership->allianceId,
-                $fondatrices,
+                $founding,
                 $budget
             ),
             $targetBodyId,
             $this->actorHolding($targetBodyId),
             $openedAt,
-            $this->grouping->intoGroups($autres)
+            $this->grouping->intoGroups($others)
         );
     }
 
@@ -241,6 +264,52 @@ final class RallyClosureService
     }
 
     /**
+     * Ce que chaque flotte admise apporte a la photographie.
+     *
+     * ## Pourquoi une seconde table, alors que les participants sont deja inscrits
+     *
+     * `combat_participants` dit **qui** se bat. Une inclusion dit **ce qu'un evenement a apporte**,
+     * et repond a une question differente : cet evenement figure-t-il deja dans cette photographie ?
+     * Les confondre coute cher dans les deux sens — une arrivee appliquee au monde mais absente de
+     * la photographie serait perdue pour la bataille ; comptee sans avoir ete appliquee, elle ferait
+     * combattre des vaisseaux qui ne sont pas la.
+     *
+     * ## La version vient de l'instance, jamais de la constante
+     *
+     * L'unicite porte sur combat / evenement / version de projection. Lire `SnapshotProjection`
+     * courante ici ferait entrer le meme evenement une seconde fois apres une bascule — l'unicite ne
+     * verrait rien, puisqu'elle separe justement les versions. La colonne fait foi, et une version
+     * que ce code ne connait pas arrete la fermeture au lieu de deviner.
+     *
+     * @param array<int, AttackCandidateGroup> $groups
+     */
+    private function recordInclusions(
+        CombatInstance $combat,
+        array $groups,
+        SnapshotContribution $contribution,
+    ): void {
+        $projection = SnapshotProjection::ensureKnown((string)$combat->projection_version);
+
+        foreach ($groups as $groupe) {
+            foreach ($groupe->missions as $mission) {
+                CombatSnapshotInclusion::query()->updateOrCreate(
+                    [
+                        'combat_instance_id' => $combat->id,
+                        'event_identity' => CombatEventIdentity::forFleetArrival($mission->missionId),
+                        'projection_version' => $projection,
+                    ],
+                    [
+                        'contribution' => $contribution,
+                        // L'heure de l'ouverture, pas celle du worker : deux fermetures du meme
+                        // combat doivent ecrire la meme photographie.
+                        'included_at' => $combat->started_at ?? 0,
+                    ]
+                );
+            }
+        }
+    }
+
+    /**
      * Le genre de participant que cette mission apporte.
      */
     private function participantTypeOf(CandidateMission $mission): string
@@ -253,13 +322,19 @@ final class RallyClosureService
     }
 
     /**
-     * Combien de flottes ce verdict admet.
+     * Combien de flottes ces groupes portent.
+     *
+     * **Des groupes, et non un verdict.** Le verdict ignore le groupe fondateur — il n'a rien a
+     * decider sur lui — et compter depuis lui sous-estimait donc les budgets consommes de toute la
+     * vague d'ouverture.
+     *
+     * @param array<int, AttackCandidateGroup> $groups
      */
-    private function fleetsOf(AdmissionVerdict $verdict): int
+    private function countFleets(array $groups): int
     {
         $total = 0;
 
-        foreach ($verdict->admitted() as $groupe) {
+        foreach ($groups as $groupe) {
             $total += $groupe->fleetCount();
         }
 
@@ -267,16 +342,17 @@ final class RallyClosureService
     }
 
     /**
-     * Combien de joueurs distincts les deux verdicts admettent.
+     * Combien de joueurs distincts ces groupes reunissent, les deux camps confondus.
+     *
+     * @param array<int, AttackCandidateGroup> $attackers
+     * @param array<int, AttackCandidateGroup> $defenders
      */
-    private function playersOf(
-        AdmissionVerdict $attackers,
-        AdmissionVerdict $defenders,
-    ): int {
+    private function countPlayers(array $attackers, array $defenders): int
+    {
         $joueurs = [];
 
-        foreach ([$attackers, $defenders] as $verdict) {
-            foreach ($verdict->admitted() as $groupe) {
+        foreach ([$attackers, $defenders] as $cote) {
+            foreach ($cote as $groupe) {
                 foreach ($groupe->distinctPlayers() as $joueur) {
                     $joueurs[$joueur] = true;
                 }
