@@ -5,8 +5,15 @@ namespace OGame\Combat\Services;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Admission\AdmissionBudget;
+use OGame\Combat\Admission\AttackAdmissionSelector;
+use OGame\Combat\Admission\AttackCandidateGroup;
+use OGame\Combat\Admission\CandidateMission;
+use OGame\Combat\Admission\FoundingGroup;
 use OGame\Combat\Admission\FrozenAllianceMembership;
+use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Enums\FlightLeg;
+use OGame\Combat\Support\ActorKindResolver;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\CombatRallyWindow;
 use OGame\Combat\Support\CombatRuleVersionSet;
@@ -15,6 +22,8 @@ use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
 use OGame\Models\FleetMission;
 use OGame\Models\FleetUnion;
+use OGame\Models\Planet;
+use OGame\Models\User;
 
 /**
  * L'ouverture durable d'un combat : l'instant ou tout se fige.
@@ -56,8 +65,10 @@ final class CombatOpeningService
      * @param RallyCandidateReader $reader Le lecteur des candidates, qui porte la requete « ce corps,
      *                                     cette fenetre ». La dupliquer ici en ferait deux.
      */
-    public function __construct(private RallyCandidateReader $reader = new RallyCandidateReader())
-    {
+    public function __construct(
+        private RallyCandidateReader $reader = new RallyCandidateReader(),
+        private AttackAdmissionSelector $selector = new AttackAdmissionSelector(),
+    ) {
     }
 
     /**
@@ -166,11 +177,15 @@ final class CombatOpeningService
             'target_body_id' => $targetBodyId,
             'combat_instance_id' => $combat->id,
             'opened_at' => $openedAt,
-            // **Le plafond, faute de mieux pour l'instant.** L'echeance reelle se raccourcit des que
-            // la derniere candidate attendue est arrivee ; la calculer demande le selecteur, qui
-            // vient ensuite. Prendre le plafond est le choix sur : il ne laisse echapper aucun
-            // evenement qui appartenait a ce combat.
-            'owned_through_effect_at' => $openedAt + CombatRallyWindow::WINDOW_SECONDS,
+            'owned_through_effect_at' => $this->closingTime(
+                $opener,
+                $targetBodyId,
+                $openedAt,
+                $appartenances,
+                $union,
+                $createur,
+                $budget
+            ),
             'revision' => 0,
         ]);
 
@@ -193,6 +208,147 @@ final class CombatOpeningService
             'max_fleets' => $facts['max_fleets'],
             'max_players' => $facts['max_players'],
         ];
+    }
+
+    /**
+     * L'instant ou le ralliement se fermera, calcule une fois et pour toutes.
+     *
+     * ## Le selecteur tranche, ici comme a la fermeture
+     *
+     * `closesAt()` veut les arrivees des flottes **qui seraient admises**. Un filtre maison a cote du
+     * selecteur creerait une seconde regle d'admission ; le selecteur etant pur, il tourne deux fois
+     * et rend deux fois la meme chose, les faits etant figes entre les deux.
+     *
+     * ## La protection contre le harcelement
+     *
+     * Sans ce calcul, la fenetre durait soixante secondes meme pour un attaquant isole : un unique
+     * chasseur leger, envoye en boucle, immobilisait une minute les departs et les ressources d'une
+     * planete pour un cout derisoire. Elle tombe desormais a l'ouverture s'il n'y a personne a
+     * attendre.
+     */
+    private function closingTime(
+        FleetMission $opener,
+        int $targetBodyId,
+        int $openedAt,
+        FrozenAllianceMembership $membership,
+        FleetUnion|null $union,
+        int $creatorUserId,
+        AdmissionBudget $budget,
+    ): int {
+        $candidates = $this->reader->read($targetBodyId, $openedAt, $membership, 0);
+
+        // **Seules les formes que la matrice delegue au selecteur.** Un retour ou un transport
+        // arrive ici serait une entree contradictoire, et le selecteur leve — a juste titre. Ce
+        // filtre-ci n'est pas une regle d'admission : c'est l'aiguillage que la matrice fait dans le
+        // flux reel.
+        $combattantes = array_values(array_filter(
+            $candidates,
+            static fn (CandidateMission $c): bool => $c->leg === FlightLeg::Outbound && $c->mission->opensCombat()
+        ));
+
+        [$fondatrices, $autres] = $this->splitFoundingGroup($combattantes, $opener, $union);
+
+        if ($fondatrices === []) {
+            // L'ouvreur n'est pas parmi les candidates lues : sa forme ne rallie rien. Il n'y a donc
+            // personne a attendre.
+            return $openedAt;
+        }
+
+        $verdict = $this->selector->select(
+            new FoundingGroup($creatorUserId, $membership->allianceId, $fondatrices, $budget),
+            $targetBodyId,
+            $this->actorHolding($targetBodyId),
+            $openedAt,
+            $this->groupsOf($autres)
+        );
+
+        $arrivees = [];
+
+        foreach ($verdict->admitted() as $groupe) {
+            $arrivees[] = $groupe->scheduledArrivalAt();
+        }
+
+        return CombatRallyWindow::closesAt($openedAt, $arrivees);
+    }
+
+    /**
+     * Separe le groupe fondateur du reste des candidates.
+     *
+     * L'union de l'ouvreur gouverne : ses missions forment le groupe fondateur. Sans union, c'est la
+     * seule mission de l'ouvreur — **jamais la premiere ligne lue**, qui dependrait de l'ordre de la
+     * base.
+     *
+     * @param array<int, CandidateMission> $candidates
+     * @return array{0: array<int, CandidateMission>, 1: array<int, CandidateMission>}
+     */
+    private function splitFoundingGroup(array $candidates, FleetMission $opener, FleetUnion|null $union): array
+    {
+        $fondatrices = [];
+        $autres = [];
+
+        foreach ($candidates as $candidate) {
+            $estFondatrice = $union === null
+                ? $candidate->missionId === $opener->id
+                : $candidate->unionId === $union->id;
+
+            if ($estFondatrice) {
+                $fondatrices[] = $candidate;
+
+                continue;
+            }
+
+            $autres[] = $candidate;
+        }
+
+        return [$fondatrices, $autres];
+    }
+
+    /**
+     * Les candidates regroupees : une attaque groupee deja en vol arrive ensemble.
+     *
+     * @param array<int, CandidateMission> $candidates
+     * @return array<int, AttackCandidateGroup>
+     */
+    private function groupsOf(array $candidates): array
+    {
+        $parUnion = [];
+        $seules = [];
+
+        foreach ($candidates as $candidate) {
+            if ($candidate->unionId === null) {
+                $seules[] = AttackCandidateGroup::ofASingleFleet($candidate);
+
+                continue;
+            }
+
+            $parUnion[$candidate->unionId][] = $candidate;
+        }
+
+        $groupes = $seules;
+
+        foreach ($parUnion as $unionId => $missions) {
+            $groupes[] = new AttackCandidateGroup('union:' . $unionId, $missions);
+        }
+
+        return $groupes;
+    }
+
+    /**
+     * Le genre d'acteur qui tient le corps vise.
+     *
+     * Un combat contre une faction pilotee par le serveur ne se rassemble pas : l'ouvreur y va seul.
+     */
+    private function actorHolding(int $targetBodyId): ActorKind
+    {
+        $planete = Planet::find($targetBodyId);
+
+        if ($planete === null) {
+            return ActorKind::Player;
+        }
+
+        $proprietaire = User::find($planete->user_id);
+
+        return $proprietaire === null ? ActorKind::Player : ActorKindResolver::of($proprietaire);
     }
 
     /**

@@ -7,7 +7,6 @@ use OGame\Combat\Admission\FrozenAllianceMembership;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Services\CombatOpeningService;
 use OGame\Combat\Support\CombatParticipantKey;
-use OGame\Combat\Support\CombatRallyWindow;
 use OGame\Combat\Support\CombatRuleVersionSet;
 use OGame\Models\AllianceMember;
 use OGame\Models\CelestialBodyCombatBarrier;
@@ -183,13 +182,18 @@ class CombatOpeningServiceTest extends TestCase
     }
 
     /**
-     * La barriere possede les effets jusqu'au plafond, faute d'echeance calculee.
+     * Un attaquant isole n'obtient aucune fenetre : le combat commence a l'instant meme.
      *
-     * Ce n'est pas l'echeance finale : elle se raccourcit des que la derniere candidate attendue est
-     * arrivee. Le plafond est le choix sur — il ne laisse echapper aucun evenement qui appartenait a
-     * ce combat.
+     * ## La protection contre le harcelement economique
+     *
+     * Le corps celeste est verrouille des la premiere arrivee. Une fenetre fixe de soixante secondes
+     * ferait donc d'un unique chasseur leger, envoye en boucle, un outil de blocus : une minute de
+     * departs et de ressources immobilises, indefiniment, pour un cout derisoire.
+     *
+     * L'echeance se calcule sur les flottes **qui seraient admises**. Il n'y en a aucune ici, donc il
+     * n'y a personne a attendre.
      */
-    public function testTheBarrierOwnsEffectsUpToTheCeilingForNow(): void
+    public function testALoneAttackerGetsNoWindowAtAll(): void
     {
         [$mission, $corps] = $this->anArrivingAttack();
 
@@ -198,13 +202,45 @@ class CombatOpeningServiceTest extends TestCase
         $barriere = CelestialBodyCombatBarrier::where('target_body_id', $corps)->firstOrFail();
 
         $this->assertSame(
-            self::OPENING + CombatRallyWindow::WINDOW_SECONDS,
-            $barriere->owned_through_effect_at
+            self::OPENING,
+            $barriere->owned_through_effect_at,
+            'A lone attacker still froze the target for a full minute, which turns a light fighter into a blockade tool.'
         );
 
-        // La borne est fermee du meme cote que partout ailleurs.
-        $this->assertTrue($barriere->ownsEffectAt($barriere->owned_through_effect_at - 1));
-        $this->assertFalse($barriere->ownsEffectAt($barriere->owned_through_effect_at));
+        // La borne est fermee du meme cote que partout ailleurs : une egalite compte pour « apres ».
+        $this->assertFalse($barriere->ownsEffectAt(self::OPENING));
+    }
+
+    /**
+     * Une vague attendue tient la fenetre ouverte, et pas une seconde de plus.
+     *
+     * L'echeance est la **plus petite** qui inclue la derniere candidate admissible : la fermer plus
+     * tard verrouillerait la cible pour rien, la fermer plus tot exclurait celle qui l'a fixee.
+     */
+    public function testAnExpectedWaveHoldsTheWindowAndNotOneSecondLonger(): void
+    {
+        $joueur = $this->aPlayer();
+        $corps = $this->aBodyId();
+
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $joueur);
+
+        // Une seconde vague du meme joueur : elle sera admise, donc elle compte.
+        $this->anAttackAt($corps, self::OPENING + 18, $joueur);
+
+        $this->service->openOrJoin($ouvreur, $corps, self::OPENING);
+
+        $barriere = CelestialBodyCombatBarrier::where('target_body_id', $corps)->firstOrFail();
+
+        $this->assertSame(
+            self::OPENING + 19,
+            $barriere->owned_through_effect_at,
+            'The window did not close one tick after the last expected fleet.'
+        );
+
+        $this->assertTrue(
+            $barriere->ownsEffectAt(self::OPENING + 18),
+            'The very fleet that set the deadline arrived too late for it.'
+        );
     }
 
     /**
