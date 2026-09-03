@@ -7,6 +7,16 @@ use InvalidArgumentException;
 /**
  * Une borne de butin, ressource par ressource.
  *
+ * ⚠ **MECANISME EXPLORATOIRE — INACTIF EN PREMIERE VERSION.**
+ *
+ * Cette classe appartient au chantier de reservation, qui n'a aucun ecrivain ni lecteur dans le
+ * chemin de jeu. Le reglement actif du butin passe par `ExactLootAmounts`, en **entiers exacts**.
+ *
+ * **Ses flottants ne sont pas anodins, meme dormants.** Une borne de reservation trop haute
+ * immobiliserait une unite de trop ; trop basse, elle en protegerait une de moins. Si ce chantier
+ * revenait un jour, il devrait lui aussi franchir une frontiere entiere exacte — l'approximation
+ * n'est pas plus acceptable pour une reservation que pour un debit.
+ *
  * **Un vecteur, jamais un total.** Metal, cristal et deuterium ne sont pas interchangeables : un
  * defenseur peut avoir vide son metal tout en gardant son deuterium, et une borne globale
  * autoriserait alors a prendre le deuterium en echange du metal manquant. Chaque composante a sa
