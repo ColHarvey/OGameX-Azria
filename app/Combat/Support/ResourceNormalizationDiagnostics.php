@@ -117,6 +117,24 @@ final readonly class ResourceNormalizationDiagnostics
     }
 
     /**
+     * Un incident de ce code a-t-il ete constate ?
+     *
+     * Sert la ou un code precis change ce qui est permis, et non seulement ce qui est raconte : le
+     * reglement d'un combat durable refuse de debiter un montant dont la frontiere a deja dit
+     * qu'elle n'en garantissait plus l'unite.
+     */
+    public function includes(string $code): bool
+    {
+        foreach ($this->occurrences as $diagnostic) {
+            if ($diagnostic->code === $code) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Le nombre d'occurrences distinctes.
      */
     public function count(): int

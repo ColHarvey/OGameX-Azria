@@ -14,9 +14,11 @@ use OGame\Combat\Allocation\SettledBattleResult;
 use OGame\Combat\Allocation\SurvivingFleetCapacity;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Exceptions\MismatchedCombatIdentity;
+use OGame\Combat\Exceptions\UnsettleableAtThisScale;
 use OGame\Combat\Replay\BattleResultCodec;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\FrozenCombatVersionSet;
+use OGame\Combat\Support\ResourceNormalizationDiagnostics;
 use OGame\GameMissions\Abstracts\GameMission;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleetResult;
@@ -60,12 +62,19 @@ use RuntimeException;
  * ne laisse rien — ni potentiel, ni debit, ni retour, ni rapport — et la relivraison recommence
  * depuis un combat encore `Active`.
  *
- * ## Une borne dite
+ * ## Une borne qui refuse, au lieu d'une borne qui se dit
  *
- * Le potentiel et l'applique sont persistes en entiers exacts sur l'instance. La copie remise a la
- * resolution passe par `Resources`, qui porte des flottants : au-dela de 2^53, la cargaison d'un
- * retour ou le debit pourraient perdre l'unite. C'est la borne du moteur lui-meme, pas une
- * regression de ce service, et la frontiere de conversion la signale deja.
+ * Le potentiel et l'applique sont persistes en entiers exacts sur l'instance. Mais les **soldes des
+ * corps et les cargaisons des missions vivent en colonnes flottantes** — une decision du depot
+ * amont, prise pour accepter de tres grandes fortunes. Au-dela de 2^53, deux montants voisins
+ * deviennent le meme nombre *dans la colonne* : aucun vecteur entier interne, aucun plan de
+ * repartition ne peut y changer quoi que ce soit.
+ *
+ * Ce service ne fait donc pas semblant : quand la frontiere de conversion a dit que la precision
+ * etait degradee, le reglement **s'arrete** (`UnsettleableAtThisScale`) et le combat part en
+ * quarantaine. Debiter « a peu pres » reviendrait a prendre a l'un ce qu'on rend a l'autre sans le
+ * dire. En deca de cette echelle, les entiers traversent `Resources` sans perte, et la comptabilite
+ * est exacte de bout en bout.
  */
 final class CombatSettlementService
 {
@@ -186,6 +195,22 @@ final class CombatSettlementService
             $potentiel = FrozenLootPotential::frozenFrom($result, $versions);
             $allocation = FrozenLootAllocation::fromFrozenSet($versions, $this->allocators);
             $restant = RemainingTargetStock::readFrom($ligneCible, CombatParticipantKey::forPlanet($ligneCible->id));
+            // **L'exactitude ne se promet que la ou le stockage la porte.** Les soldes et les
+            // cargaisons vivent en colonnes flottantes : au-dela de 2^53, deux montants voisins
+            // deviennent le meme nombre, et aucun vecteur entier interne n'y change quoi que ce
+            // soit — la perte est dans la colonne. Un combat a cette echelle s'arrete ici et part
+            // en quarantaine, plutot que de debiter un nombre qu'il ne saura pas rendre.
+            $constate = $potentiel->diagnostics->mergedWith($restant->diagnostics);
+
+            if ($constate->includes(ResourceNormalizationDiagnostics::PRECISION_DEGRADED)) {
+                throw new UnsettleableAtThisScale(
+                    $combat->id,
+                    $potentiel->diagnostics->includes(ResourceNormalizationDiagnostics::PRECISION_DEGRADED)
+                        ? 'le butin potentiel fige'
+                        : 'le solde restant de la cible'
+                );
+            }
+
             $reglement = LootSettlement::of($potentiel->amounts, $restant->amounts);
 
             $capacites = array_map(

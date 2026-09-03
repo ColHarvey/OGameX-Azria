@@ -13,6 +13,7 @@ use OGame\Combat\Allocation\LootAllocatorRegistry;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Exceptions\MismatchedCombatIdentity;
 use OGame\Combat\Exceptions\MismatchedRuleVersionSet;
+use OGame\Combat\Exceptions\UnsettleableAtThisScale;
 use OGame\Combat\Replay\BattleResultCodec;
 use OGame\Combat\Services\CombatOpeningService;
 use OGame\Combat\Services\CombatResolutionService;
@@ -626,6 +627,38 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
         }
 
         $this->assertSame($avant, $this->stockOf($cible), 'A combat stuck mid-application was debited again.');
+        $this->assertSame(0, FleetMission::query()->where('parent_id', $missions[0]->id)->count());
+    }
+
+    /**
+     * Une fortune que le stockage ne distingue plus arrete le reglement au lieu de l'approcher.
+     *
+     * Les soldes vivent en colonnes flottantes : au-dela de 2^53, debiter exactement ce qui est
+     * embarque n'est pas possible, et approcher reviendrait a prendre a l'un ce qu'on rend a
+     * l'autre sans le dire. `SettlementPrecisionLimitTest` etablit le fait de stockage ; ici on
+     * verifie que le reglement en tire la consequence.
+     */
+    public function testAFortuneTheStorageCannotTellApartStopsTheSettlement(): void
+    {
+        [$combat, $missions, $cible] = $this->anEngagedCombat();
+
+        // Deux puissance cinquante-cinq : reel, positif, et deja indistinct dans la colonne.
+        $this->setStockOf($cible, ['metal' => 36_028_797_018_963_968]);
+        $avant = $this->stockOf($cible);
+
+        try {
+            $this->settleIt($combat, (int)$combat->ends_at);
+            $this->fail('A settlement promised exactness at a scale the storage cannot hold.');
+        } catch (Throwable $refus) {
+            $this->assertInstanceOf(UnsettleableAtThisScale::class, $refus);
+            $this->assertSame($combat->id, $refus->combatInstanceId);
+        }
+
+        $this->assertSame($avant, $this->stockOf($cible), 'The target was debited despite the refusal.');
+
+        $combat->refresh();
+        $this->assertSame(CombatState::Active, $combat->status);
+        $this->assertNull($combat->potential_loot_frozen_at, 'Numbers were written before the refusal.');
         $this->assertSame(0, FleetMission::query()->where('parent_id', $missions[0]->id)->count());
     }
 
