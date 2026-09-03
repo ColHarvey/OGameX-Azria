@@ -855,6 +855,148 @@ class RallyClosureServiceTest extends TestCase
     }
 
     /**
+     * Un rappel termine avant la fermeture exclut la flotte.
+     *
+     * ## La premiere des deux issues admises
+     *
+     * La fermeture relit deliberement les rappels dans le monde courant — c'est l'un des deux seuls
+     * faits qu'elle ne prend pas de l'ouverture. Une flotte rappelee a fait demi-tour : elle
+     * n'arrive pas, elle ne se bat pas, elle n'entre pas dans la photographie.
+     */
+    public function testARecallFinishedBeforeTheClosureExcludesTheFleet(): void
+    {
+        $joueur = $this->aPlayer();
+        $corps = $this->aBodyId();
+
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $joueur);
+        $rappelee = $this->anAttackAt($corps, self::OPENING + 18, $joueur);
+
+        $combat = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
+
+        // Le rappel aboutit avant que la fermeture ne commence.
+        $rappelee->canceled = 1;
+        $rappelee->save();
+
+        $this->fermeture->close($combat->id, self::OPENING + 19);
+
+        $cles = CombatParticipant::where('combat_instance_id', $combat->id)
+            ->pluck('participant_key')
+            ->all();
+
+        $this->assertNotContains(
+            CombatParticipantKey::forFleet($rappelee->id),
+            $cles,
+            'A recalled fleet was registered as a participant: it turned back and never arrived.'
+        );
+
+        $this->assertSame(
+            0,
+            CombatSnapshotInclusion::where('combat_instance_id', $combat->id)
+                ->where('event_identity', CombatEventIdentity::forFleetArrival($rappelee->id))
+                ->count(),
+            'A recalled fleet entered the snapshot.'
+        );
+
+        // L'ouvreur, lui, reste : le rappel d'une vague ne dissout pas le combat.
+        $this->assertContains(CombatParticipantKey::forFleet($ouvreur->id), $cles);
+    }
+
+    /**
+     * Un rappel arrive apres la fermeture ne retire rien de la photographie.
+     *
+     * ## La seconde des deux issues admises
+     *
+     * La photographie est prise ; elle ne se reecrit pas. Laisser un rappel tardif retirer une
+     * flotte deja inscrite donnerait au joueur un moyen de defaire une bataille engagee, apres avoir
+     * vu qui y participait.
+     *
+     * **Il n'existe pas de troisieme resultat.** Une lecture qui verrait la mission a moitie
+     * rappelee — inscrite ici, absente la — n'est admise dans aucun des deux sens.
+     */
+    public function testARecallArrivingAfterTheClosureRemovesNothing(): void
+    {
+        $joueur = $this->aPlayer();
+        $corps = $this->aBodyId();
+
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $joueur);
+        $vague = $this->anAttackAt($corps, self::OPENING + 18, $joueur);
+
+        $combat = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
+        $this->fermeture->close($combat->id, self::OPENING + 19);
+
+        $avant = CombatParticipant::where('combat_instance_id', $combat->id)->count();
+
+        // Trop tard : la photographie est prise.
+        $vague->canceled = 1;
+        $vague->save();
+
+        $this->assertSame(
+            $avant,
+            CombatParticipant::where('combat_instance_id', $combat->id)->count(),
+            'A late recall unmade a snapshot that was already taken.'
+        );
+
+        $this->assertContains(
+            CombatParticipantKey::forFleet($vague->id),
+            CombatParticipant::where('combat_instance_id', $combat->id)->pluck('participant_key')->all(),
+            'A fleet recalled after the closure left the battle it had already joined.'
+        );
+    }
+
+    /**
+     * La lecture des candidates demande un verrou.
+     *
+     * ## Pourquoi une garde de source, et non une observation
+     *
+     * J'ai d'abord ecrit cet essai en ecoutant la connexion, pour voir passer un `for update`. Il a
+     * echoue — non parce que le verrou manquait, mais parce que **SQLite n'emet rien** : sa
+     * grammaire ignore `lockForUpdate()`, et la requete sort identique a une lecture ordinaire.
+     *
+     * L'essai ne pouvait donc pas distinguer un verrou pris d'un verrou oublie. Le garder sous cette
+     * forme aurait laisse croire a une preuve qu'il ne donnait pas.
+     *
+     * Cette garde lit le source, comme celles qui surveillent les versions courantes ou les cles de
+     * participant. Elle prouve qu'un futur passage n'enlevera pas le verrou sans que rien ne le
+     * dise. **Elle ne prouve pas que le verrou tient** : cela demande deux connexions MariaDB, et
+     * cette epreuve reste a faire.
+     *
+     * ## Ce que le verrou protege
+     *
+     * La fermeture relit les rappels dans le monde courant — c'est voulu. Sans verrou, un rappel
+     * concurrent peut se glisser entre cette lecture et l'inscription des participants : la flotte
+     * serait inscrite au combat alors qu'elle a fait demi-tour. C'est la troisieme issue, celle
+     * qu'aucun des deux sens n'admet.
+     */
+    public function testTheCandidateReaderAsksForALock(): void
+    {
+        $source = file_get_contents(
+            dirname(__DIR__, 2) . '/app/Combat/Services/RallyCandidateReader.php'
+        );
+
+        $this->assertIsString($source);
+
+        // **Les fins de ligne d abord.** Le depot est en CRLF sur le disque : un motif ecrit
+        // avec des sauts de ligne simples ne correspond a rien, et la garde echouerait en
+        // accusant le code plutot que sa propre lecture.
+        $source = str_replace("\r\n", "\n", $source);
+
+        $this->assertStringContainsString(
+            '->lockForUpdate()',
+            $source,
+            'The candidate reader no longer asks for a lock: a concurrent recall could slip between the read and the registration.'
+        );
+
+        // **Par identifiant croissant**, parce que c'est l'ordre global que la migration de barriere
+        // fixe. Deux transactions qui verrouillent les memes lignes dans le meme ordre ne s'attendent
+        // jamais en rond.
+        $this->assertStringContainsString(
+            "->orderBy('id')\n            ->lockForUpdate()",
+            $source,
+            'The reader locks candidate missions in an order other than ascending identifier.'
+        );
+    }
+
+    /**
      * Un combat inconnu ne fait pas lever la fermeture.
      */
     public function testAnUnknownCombatIsReportedRatherThanThrown(): void
