@@ -184,6 +184,36 @@ class AppliedLootSharesTest extends UnitTestCase
 
         $this->assertSame(900, $parts->forFleet(self::INITIATOR)->metal);
         $this->assertTrue($parts->forFleet(self::ALLY)->isNothing());
+        $this->assertTrue($parts->hasFleet(self::ALLY), 'A fleet that received nothing still has a share.');
+    }
+
+    /**
+     * Une flotte absente de la repartition n'a pas une part nulle : elle n'a pas de part.
+     *
+     * ## Deux faits differents, et le silence les confondait
+     *
+     * `forFleet()` rendait zero pour n'importe quel identifiant. Une flotte sans place recoit bien
+     * zero — c'est une part, et elle est juste. Une flotte que la repartition ne connait pas n'a
+     * **pas ete comptee** : lui rendre zero en silence lui ferait embarquer « rien » alors que sa
+     * part est ailleurs, et la somme des parts ne vaudrait plus l'applique sans que rien ne le dise.
+     */
+    public function testAFleetThatWasNeverSharedIsRefusedRatherThanGivenNothing(): void
+    {
+        $parts = AppliedLootShares::of(
+            ExactLootAmounts::of(900, 0, 0),
+            [SurvivingFleetCapacity::of(self::INITIATOR, 1_000, 0)],
+            self::INITIATOR,
+            FrozenLootAllocation::atOperationStart()
+        );
+
+        $this->assertFalse($parts->hasFleet(self::ALLY));
+
+        try {
+            $parts->forFleet(self::ALLY);
+            $this->fail('A fleet absent from the sharing was silently given nothing.');
+        } catch (InvalidArgumentException $refus) {
+            $this->assertStringContainsString((string)self::ALLY, $refus->getMessage(), 'The refusal does not name the fleet.');
+        }
     }
 
     /**

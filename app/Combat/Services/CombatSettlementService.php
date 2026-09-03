@@ -13,11 +13,14 @@ use OGame\Combat\Allocation\RemainingTargetStock;
 use OGame\Combat\Allocation\SettledBattleResult;
 use OGame\Combat\Allocation\SurvivingFleetCapacity;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Exceptions\MismatchedCombatIdentity;
 use OGame\Combat\Replay\BattleResultCodec;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\FrozenCombatVersionSet;
 use OGame\GameMissions\Abstracts\GameMission;
+use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleetResult;
+use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatParticipant;
@@ -105,8 +108,36 @@ final class CombatSettlementService
                     return CombatSettlementOutcome::cancelled();
                 case CombatState::Rallying:
                     return CombatSettlementOutcome::stillRallying();
-                default:
+                case CombatState::Active:
                     break;
+                default:
+                    // **`Resolving` ne survit pas a une transaction.** Cet etat n'existe qu'entre
+                    // deux ecritures de la meme transaction : le trouver persiste veut dire qu'une
+                    // application s'est interrompue sans etre annulee — ce qui ne devrait pas
+                    // arriver. Reappliquer a l'aveugle debiterait peut-etre deux fois ; le refus
+                    // amene le combat a l'exploitation, qui tranchera sur pieces.
+                    throw new RuntimeException(
+                        'Le combat ' . $combat->id . ' est persiste en « ' . $combat->status->value
+                        . ' » : une application s est interrompue sans etre annulee, et rien ne dit '
+                        . 'ce qui a ete ecrit. Aucune reapplication automatique.'
+                    );
+            }
+
+            // **Une instance active sans barriere est une contradiction, pas un cas normal.** La
+            // barriere est le « ce corps est pris » du systeme : sans elle, un autre combat a pu
+            // s'ouvrir sur le meme corps pendant celui-ci, et les deux se debiteraient.
+            if ($barriere === null) {
+                throw new MismatchedCombatIdentity(
+                    'le combat ' . $combat->id . ' est « ' . $combat->status->value . ' » sans barriere : '
+                    . 'plus rien ne tient le corps ' . $combat->target_planet_id . ' pendant qu il se bat'
+                );
+            }
+
+            if ((int)$barriere->target_body_id !== (int)$combat->target_planet_id) {
+                throw new MismatchedCombatIdentity(
+                    'la barriere du combat ' . $combat->id . ' garde le corps ' . $barriere->target_body_id
+                    . ' alors que le combat vise le corps ' . $combat->target_planet_id
+                );
             }
 
             // **Le combat dure jusqu'a son echeance.** La regler avant la couperait court : le
@@ -138,6 +169,13 @@ final class CombatSettlementService
             // resolution le sauverait tel quel apres le debit — rendant au defenseur ce qu il a paye.
             $effectif = $this->roster->forCombat($combat);
             $result = BattleResultCodec::fromStorage($combat->battle_result);
+
+            // **Le resultat decrit-il bien ces flottes-la ?** Tout vient de l'instance — le resultat
+            // de sa colonne, l'effectif de ses participants — mais les deux ont ete ecrits a des
+            // moments differents, et rien n'empeche qu'une ligne ait bouge entre les deux. Appliquer
+            // une bataille qui ne parle pas des memes flottes ferait un retour a une flotte qui n'a
+            // pas combattu, ou en oublierait une qui l'a fait.
+            $this->assertTheResultDescribesThisCombat($combat, $result, $effectif);
 
             // **Tout vient du combat**, jamais des courantes : un reglement sous une autre version
             // que celle de l'ouverture serait une autre bataille.
@@ -191,7 +229,7 @@ final class CombatSettlementService
             // nouvelle barriere ne pourrait etre posee, et l'ouverture rendrait indefiniment la
             // bataille d'hier. Rien n'est perdu : ce qui s'est passe vit dans l'instance, ses
             // participants et son rapport.
-            $barriere?->delete();
+            $barriere->delete();
 
             return CombatSettlementOutcome::settled(
                 $reglement,
@@ -200,6 +238,53 @@ final class CombatSettlementService
                 $potentiel->diagnostics->mergedWith($restant->diagnostics)->mergedWith($issue->diagnostics)
             );
         });
+    }
+
+    /**
+     * Refuse d'appliquer un resultat qui ne decrit pas les flottes inscrites a ce combat.
+     */
+    private function assertTheResultDescribesThisCombat(CombatInstance $combat, BattleResult $result, CombatRoster $roster): void
+    {
+        $dansLeResultat = array_map(
+            static fn (AttackerFleetResult $flotte): int => $flotte->fleetMissionId,
+            $result->attackerFleetResults
+        );
+        sort($dansLeResultat);
+
+        $inscrites = array_map(
+            static fn (AttackerFleet $flotte): int => $flotte->fleetMissionId,
+            $roster->attackers
+        );
+        sort($inscrites);
+
+        if ($dansLeResultat !== $inscrites) {
+            throw new MismatchedCombatIdentity(
+                'la bataille figee porte les flottes ' . implode(', ', $dansLeResultat)
+                . ' alors que le combat ' . $combat->id . ' en inscrit ' . implode(', ', $inscrites)
+            );
+        }
+
+        if (!in_array($combat->mission_id, $dansLeResultat, true)) {
+            throw new MismatchedCombatIdentity(
+                'la mission initiatrice ' . $combat->mission_id . ' du combat ' . $combat->id
+                . ' n a pas combattu dans la bataille figee'
+            );
+        }
+
+        if ($result->attackerPlanetId !== (int)$roster->initiator->planet_id_from) {
+            throw new MismatchedCombatIdentity(
+                'la bataille figee est partie du corps ' . $result->attackerPlanetId
+                . ' alors que la mission initiatrice ' . $roster->initiator->id . ' est partie du corps '
+                . $roster->initiator->planet_id_from
+            );
+        }
+
+        if ($roster->target->getPlanetId() !== (int)$combat->target_planet_id) {
+            throw new MismatchedCombatIdentity(
+                'l effectif vise le corps ' . $roster->target->getPlanetId()
+                . ' alors que le combat ' . $combat->id . ' vise le corps ' . $combat->target_planet_id
+            );
+        }
     }
 
     /**

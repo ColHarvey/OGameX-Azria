@@ -18,7 +18,7 @@ use OGame\Combat\Services\PersistentCombatAdvancer;
  * le fichier qu'a son demarrage.
  */
 #[Description('Fermer les ralliements echus et regler les combats durables termines')]
-#[Signature('ogamex:combat:avancer {--instant= : horodatage a utiliser au lieu de maintenant, pour rejouer un retard}')]
+#[Signature('ogamex:combat:avancer')]
 class AdvancePersistentCombats extends Command
 {
     public function __construct(private readonly PersistentCombatAdvancer $avanceur)
@@ -28,10 +28,11 @@ class AdvancePersistentCombats extends Command
 
     public function handle(): int
     {
-        $instant = $this->option('instant');
-        $maintenant = is_string($instant) && $instant !== '' ? (int)$instant : (int)Date::now()->timestamp;
-
-        $avance = $this->avanceur->advance($maintenant);
+        // **L'heure vient de l'horloge, jamais d'un argument.** Une option qui la porterait
+        // permettrait de regler un combat avant son echeance en la lui donnant a l'avance : le
+        // reglement compare `ends_at` a cet instant, et c'est la seule chose qui protege le temps
+        // promis au defenseur. Rejouer un retard se fait en avancant l'horloge, pas en la contournant.
+        $avance = $this->avanceur->advance((int)Date::now()->timestamp);
 
         if ($avance->didSomething()) {
             $this->line('  ' . $avance->closed . ' ralliement(s) ferme(s), ' . $avance->settled . ' combat(s) regle(s).');

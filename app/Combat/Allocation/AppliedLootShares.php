@@ -125,6 +125,26 @@ final readonly class AppliedLootShares
      */
     public function forFleet(int $fleetMissionId): ExactLootAmounts
     {
-        return $this->byFleet[$fleetMissionId] ?? ExactLootAmounts::nothing();
+        // **Absence et part nulle sont deux faits differents.** Une flotte qui n'a rien recu — soute
+        // pleine, rien a prendre — a bien une part, et elle vaut zero. Une flotte que la repartition
+        // ne connait pas n'a pas ete comptee du tout : lui rendre zero en silence ferait embarquer
+        // « rien » a une flotte dont la part est en realite ailleurs, et la somme des parts ne
+        // vaudrait plus l'applique sans que rien ne le dise.
+        if (!array_key_exists($fleetMissionId, $this->byFleet)) {
+            throw new InvalidArgumentException(
+                'La flotte ' . $fleetMissionId . ' n a pas de part dans cette repartition : elle n a '
+                . 'pas ete comptee. Les flottes reparties sont ' . implode(', ', array_keys($this->byFleet)) . '.'
+            );
+        }
+
+        return $this->byFleet[$fleetMissionId];
+    }
+
+    /**
+     * Cette flotte a-t-elle une part, fut-elle nulle ?
+     */
+    public function hasFleet(int $fleetMissionId): bool
+    {
+        return array_key_exists($fleetMissionId, $this->byFleet);
     }
 }

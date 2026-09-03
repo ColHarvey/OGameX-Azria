@@ -11,6 +11,7 @@ use OGame\Combat\Allocation\ExactLootAllocationV1;
 use OGame\Combat\Allocation\LootAllocator;
 use OGame\Combat\Allocation\LootAllocatorRegistry;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Exceptions\MismatchedCombatIdentity;
 use OGame\Combat\Exceptions\MismatchedRuleVersionSet;
 use OGame\Combat\Replay\BattleResultCodec;
 use OGame\Combat\Services\CombatOpeningService;
@@ -26,6 +27,7 @@ use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\BattleReport;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
+use OGame\Models\CombatParticipant;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet;
 use OGame\Models\Resources;
@@ -535,6 +537,96 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
 
         $combat->refresh();
         $this->assertSame(CombatState::Active, $combat->status);
+    }
+
+    /**
+     * Une bataille figee qui ne parle pas des flottes inscrites arrete le reglement.
+     *
+     * Tout vient de l'instance — le resultat de sa colonne, l'effectif de ses participants — mais
+     * les deux ont ete ecrits a des moments differents. Une ligne de participant effacee entre les
+     * deux ferait creer un retour a une flotte qui n'a pas combattu, ou en oublierait une qui l'a
+     * fait. Le reglement s'arrete avant d'ecrire quoi que ce soit.
+     */
+    public function testAFrozenBattleThatDoesNotDescribeTheRegisteredFleetsIsRefused(): void
+    {
+        [$combat, $missions, $cible] = $this->anEngagedCombat(2);
+
+        // La bataille figee porte deux flottes ; l'une n'est plus inscrite. C'est ce que produirait
+        // une ligne de participant effacee entre la cloture et l'echeance.
+        $this->assertCount(2, BattleResultCodec::fromStorage($combat->battle_result)->attackerFleetResults);
+
+        $efface = CombatParticipant::query()
+            ->where('combat_instance_id', $combat->id)
+            ->where('fleet_mission_id', $missions[1]->id)
+            ->delete();
+        $this->assertSame(1, $efface, 'The non-initiating fleet was not registered: nothing would be missing.');
+
+        $avant = $this->stockOf($cible);
+
+        try {
+            $this->settleIt($combat, (int)$combat->ends_at);
+            $this->fail('A battle that does not describe the registered fleets was applied anyway.');
+        } catch (Throwable $refus) {
+            $this->assertInstanceOf(MismatchedCombatIdentity::class, $refus);
+        }
+
+        $this->assertSame($avant, $this->stockOf($cible));
+
+        $combat->refresh();
+        $this->assertSame(CombatState::Active, $combat->status);
+        $this->assertNull($combat->potential_loot_frozen_at);
+        $this->assertSame(0, FleetMission::query()->where('parent_id', $missions[0]->id)->count());
+    }
+
+    /**
+     * Un combat actif sans barriere est une contradiction, pas un cas a poursuivre.
+     *
+     * La barriere est le « ce corps est pris » du systeme, et son unicite par corps empeche deux
+     * combats de se debiter la meme cible. Sans elle, rien ne dit qu'un autre combat ne s'est pas
+     * ouvert pendant celui-ci.
+     */
+    public function testAnActiveCombatWithoutItsBarrierIsRefused(): void
+    {
+        [$combat, $missions, $cible] = $this->anEngagedCombat();
+
+        CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->delete();
+        $avant = $this->stockOf($cible);
+
+        try {
+            $this->settleIt($combat, (int)$combat->ends_at);
+            $this->fail('A combat whose body was no longer held was settled anyway.');
+        } catch (Throwable $refus) {
+            $this->assertInstanceOf(MismatchedCombatIdentity::class, $refus);
+        }
+
+        $this->assertSame($avant, $this->stockOf($cible));
+        $this->assertSame(0, FleetMission::query()->where('parent_id', $missions[0]->id)->count());
+    }
+
+    /**
+     * Un combat persiste en « resolving » n'est pas reapplique a l'aveugle.
+     *
+     * Cet etat n'existe qu'entre deux ecritures de la meme transaction : le trouver persiste veut
+     * dire qu'une application s'est interrompue sans etre annulee, et rien ne dit ce qui a ete
+     * ecrit. Reappliquer debiterait peut-etre une seconde fois.
+     */
+    public function testACombatStuckInResolvingIsNotReappliedBlindly(): void
+    {
+        [$combat, $missions, $cible] = $this->anEngagedCombat();
+
+        DB::table('combat_instances')->where('id', $combat->id)->update(['status' => CombatState::Resolving->value]);
+        $avant = $this->stockOf($cible);
+
+        try {
+            $this->settleIt($combat, (int)$combat->ends_at);
+            $this->fail('An interrupted application was replayed without anyone looking at it.');
+        } catch (Throwable $refus) {
+            $this->assertInstanceOf(RuntimeException::class, $refus);
+            $this->assertStringContainsString('resolving', $refus->getMessage());
+        }
+
+        $this->assertSame($avant, $this->stockOf($cible), 'A combat stuck mid-application was debited again.');
+        $this->assertSame(0, FleetMission::query()->where('parent_id', $missions[0]->id)->count());
     }
 
     /**

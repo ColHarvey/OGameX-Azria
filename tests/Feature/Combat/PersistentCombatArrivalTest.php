@@ -57,6 +57,22 @@ class PersistentCombatArrivalTest extends FleetDispatchTestCase
         }
     }
 
+    /**
+     * L'interrupteur revient a « non » apres chaque essai.
+     *
+     * **Les reglages vivent en base, et la base survit a l'essai** : un processus de la suite
+     * enchaine des dizaines de classes sur la meme. Laisser l'interrupteur arme faisait ouvrir un
+     * combat durable a la premiere attaque d'un essai suivant, qui attendait une resolution
+     * immediate — `GeneralWreckFieldTest` ne trouvait plus son champ d'epaves. La fuite n'etait pas
+     * dans le code du jeu : elle etait dans cet essai.
+     */
+    protected function tearDown(): void
+    {
+        resolve(SettingsService::class)->set('persistent_combat_enabled', '0');
+
+        parent::tearDown();
+    }
+
     protected function basicSetup(): void
     {
         $this->planetAddUnit('small_cargo', 200);

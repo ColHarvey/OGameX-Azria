@@ -4,6 +4,7 @@ namespace Tests\Feature\Combat;
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Services\CombatOpeningService;
@@ -266,9 +267,13 @@ class PersistentCombatAdvancerTest extends FleetDispatchTestCase
     {
         [$combat, $mission, , $barriere] = $this->anOpenedCombat();
 
+        // **L'heure vient de l'horloge.** La commande n'accepte aucun instant en argument : le
+        // donner permettrait de regler un combat avant son echeance. On avance donc l'horloge.
+        $this->travelTo(Date::createFromTimestamp((int)$barriere->owned_through_effect_at));
+
         $this->assertSame(
             Command::SUCCESS,
-            Artisan::call('ogamex:combat:avancer', ['--instant' => (string)((int)$barriere->owned_through_effect_at)]),
+            Artisan::call('ogamex:combat:avancer'),
             'The command failed on a due rally.'
         );
 
@@ -277,9 +282,11 @@ class PersistentCombatAdvancerTest extends FleetDispatchTestCase
 
         DB::table('combat_instances')->where('id', $combat->id)->update(['battle_result' => '{"schema":99}']);
 
+        $this->travelTo(Date::createFromTimestamp((int)$combat->ends_at));
+
         $this->assertSame(
             Command::SUCCESS,
-            Artisan::call('ogamex:combat:avancer', ['--instant' => (string)((int)$combat->ends_at)]),
+            Artisan::call('ogamex:combat:avancer'),
             'A combat failure was reported as a failure of the whole pass.'
         );
 

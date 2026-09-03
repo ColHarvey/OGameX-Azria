@@ -59,7 +59,11 @@ return new class () extends Migration {
             // deux rapports.
             $table->string('participant_key', 32);
 
-            // battle_report / rally_refused / moon_destroyed / loot_released…
+            // Le genre du message, tel que `CombatOutboxKind` le produit. La colonne n'est pas
+            // contrainte a une liste : c'est l'enumeration PHP qui tient les valeurs, et un genre
+            // n'y existe que s'il a un ecrivain. En premiere version, un seul en a un —
+            // « rally_refused ». Le rapport de bataille n'y figure pas : il est ecrit dans la
+            // meme base et la meme transaction que le debit, donc atomique sans depot differe.
             $table->string('kind', 32);
 
             // De quoi composer le message, fige au moment de la resolution. Le recomposer plus tard
