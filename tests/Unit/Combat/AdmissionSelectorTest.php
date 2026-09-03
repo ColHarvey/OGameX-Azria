@@ -8,6 +8,7 @@ use OGame\Combat\Admission\AttackAdmissionSelector;
 use OGame\Combat\Admission\AttackCandidateGroup;
 use OGame\Combat\Admission\CandidateMission;
 use OGame\Combat\Admission\DefensiveAdmissionSelector;
+use OGame\Combat\Admission\DefensiveRallyCandidate;
 use OGame\Combat\Admission\FoundingGroup;
 use OGame\Combat\Admission\GroupAdmission;
 use OGame\Combat\Enums\ActorKind;
@@ -379,31 +380,68 @@ class AdmissionSelectorTest extends UnitTestCase
             );
         }
 
-        $verdict = (new DefensiveAdmissionSelector())->select(7, self::TARGET_BODY, self::OPENING, $candidates);
+        $verdict = (new DefensiveAdmissionSelector())->select(7, self::TARGET_BODY, self::OPENING, DefensiveRallyCandidate::ofAll($candidates));
 
         $this->assertCount(4, $verdict->admitted(), 'The target owner did not take one of the five slots.');
         $this->assertSame(CombatReasonCode::PlayerLimitReached, $verdict->refused()[0]->refusal);
     }
 
     /**
-     * Un retour ou un deploiement personnel ne consomme aucun emplacement defensif.
+     * Un retour, un deploiement personnel et la garnison locale ne sont pas des candidates.
+     *
+     * **Ce n'est pas un refus, c'est une non-candidature**, et la difference compte. Avant, le
+     * selecteur les recevait et rendait `NoCombatEffect` : la phrase etait vraie, le joueur lisait
+     * quelque chose de sense, et un defaut d'integration — une matrice qui delegue une forme qu'elle
+     * ne devrait pas — aurait disparu derriere ce message anodin.
+     *
+     * L'aiguillage les ecarte donc en amont, sans rien prononcer sur eux.
      */
-    public function testAReturnOrPersonalDeploymentConsumesNoDefensiveSlot(): void
+    public function testAReturnOrPersonalDeploymentIsNotADefensiveCandidate(): void
     {
-        $candidates = [
+        $renforts = DefensiveRallyCandidate::ofAll([
             $this->aCandidate(missionId: 1_100, userId: 7, arrivesAt: self::OPENING + 5, mission: CombatMissionKind::Transport, leg: FlightLeg::Return),
             $this->aCandidate(missionId: 1_101, userId: 7, arrivesAt: self::OPENING + 6, mission: CombatMissionKind::Deployment),
             $this->aCandidate(missionId: 1_102, userId: 41, arrivesAt: self::OPENING + 7, mission: CombatMissionKind::AcsDefend),
-        ];
+        ]);
 
-        $verdict = (new DefensiveAdmissionSelector())->select(7, self::TARGET_BODY, self::OPENING, $candidates);
+        $this->assertCount(1, $renforts, 'Only a real ACS Defence is a defensive candidate.');
+        $this->assertSame(1_102, $renforts[0]->mission->missionId);
 
-        $this->assertCount(1, $verdict->admitted(), 'Only a real ACS Defence consumes a slot.');
-        $this->assertCount(2, $verdict->refused());
+        $verdict = (new DefensiveAdmissionSelector())->select(7, self::TARGET_BODY, self::OPENING, $renforts);
 
-        foreach ($verdict->refused() as $refus) {
-            $this->assertSame(CombatReasonCode::NoCombatEffect, $refus->refusal);
-        }
+        $this->assertCount(1, $verdict->admitted());
+        $this->assertCount(0, $verdict->refused(), 'A non-candidate was turned into a refusal shown to a player.');
+    }
+
+    /**
+     * Une Defense ACS en retour n'est pas un renfort non plus.
+     *
+     * Le sens de vol compte autant que le genre : une Defense ACS qui rentre chez elle a fini son
+     * travail, elle ne recommence pas.
+     */
+    public function testAnAcsDefenceOnItsReturnLegIsNotACandidate(): void
+    {
+        $renforts = DefensiveRallyCandidate::ofAll([
+            $this->aCandidate(missionId: 1_110, userId: 41, arrivesAt: self::OPENING + 5, mission: CombatMissionKind::AcsDefend, leg: FlightLeg::Return),
+        ]);
+
+        $this->assertSame([], $renforts);
+    }
+
+    /**
+     * Affirmer tenir un renfort quand ce n'en est pas un s'arrete.
+     *
+     * `ofAll()` trie un lot mele et n'accuse personne ; `from()` repond a un appelant qui a
+     * *affirme* tenir un renfort. Se tromper la est un defaut d'integration, pas une decision de
+     * jeu, et il doit s'entendre.
+     */
+    public function testClaimingAReinforcementThatIsNotOneStops(): void
+    {
+        $this->expectException(ContradictoryAdmissionInput::class);
+
+        DefensiveRallyCandidate::from(
+            $this->aCandidate(missionId: 1_120, userId: 7, arrivesAt: self::OPENING + 5, mission: CombatMissionKind::Deployment)
+        );
     }
 
     /**
@@ -430,7 +468,7 @@ class AdmissionSelectorTest extends UnitTestCase
             mission: CombatMissionKind::AcsDefend
         );
 
-        $verdict = (new DefensiveAdmissionSelector())->select(7, self::TARGET_BODY, self::OPENING, $candidates);
+        $verdict = (new DefensiveAdmissionSelector())->select(7, self::TARGET_BODY, self::OPENING, DefensiveRallyCandidate::ofAll($candidates));
 
         $this->assertCount(16, $verdict->admitted());
         $this->assertSame(CombatReasonCode::FleetLimitReached, $verdict->refused()[0]->refusal);
@@ -446,9 +484,9 @@ class AdmissionSelectorTest extends UnitTestCase
             $this->aFoundingGroup()
         );
 
-        $defense = (new DefensiveAdmissionSelector())->select(7, self::TARGET_BODY, self::OPENING, [
+        $defense = (new DefensiveAdmissionSelector())->select(7, self::TARGET_BODY, self::OPENING, DefensiveRallyCandidate::ofAll([
             $this->aCandidate(missionId: 2, userId: 41, arrivesAt: self::OPENING + 30, mission: CombatMissionKind::AcsDefend),
-        ]);
+        ]));
 
         // La derniere admise des deux camps, plus un pas de temps. **C'est la regle qui existait
         // deja** : j'avais ecrit un second coordinateur avant de m'apercevoir que

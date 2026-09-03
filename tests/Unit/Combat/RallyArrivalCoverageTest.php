@@ -8,6 +8,7 @@ use OGame\Combat\Admission\AttackAdmissionSelector;
 use OGame\Combat\Admission\AttackCandidateGroup;
 use OGame\Combat\Admission\CandidateMission;
 use OGame\Combat\Admission\DefensiveAdmissionSelector;
+use OGame\Combat\Admission\DefensiveRallyCandidate;
 use OGame\Combat\Admission\FoundingGroup;
 use OGame\Combat\Decisions\ArrivalDecision;
 use OGame\Combat\Decisions\ArrivingAssets;
@@ -457,12 +458,12 @@ class RallyArrivalCoverageTest extends UnitTestCase
             7,
             self::TARGET_BODY,
             self::OPENING,
-            [$this->aCandidate(
+            DefensiveRallyCandidate::ofAll([$this->aCandidate(
                 missionId: 900,
                 userId: 21,
                 arrivesAt: self::OPENING + 10,
                 mission: CombatMissionKind::AcsDefend
-            )]
+            )])
         );
 
         $this->assertSame(

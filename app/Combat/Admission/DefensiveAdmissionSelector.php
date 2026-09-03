@@ -4,9 +4,7 @@ namespace OGame\Combat\Admission;
 
 use InvalidArgumentException;
 use OGame\Combat\Enums\ActorKind;
-use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Enums\CombatReasonCode;
-use OGame\Combat\Enums\FlightLeg;
 
 /**
  * Qui rejoint le camp defenseur, avec ses propres budgets.
@@ -52,10 +50,14 @@ final class DefensiveAdmissionSelector
     /**
      * Le verdict d'admission du camp defenseur.
      *
+     * **Il ne recoit que des renforts.** `DefensiveRallyCandidate` ne se construit pas pour une
+     * autre forme ; un retour, un deploiement personnel ou la garnison locale n'arrivent donc jamais
+     * ici, et ce selecteur n'a aucune raison anodine a rendre pour eux.
+     *
      * @param int $targetOwnerUserId Le proprietaire de la cible : il occupe d'office un des cinq.
      * @param int $targetBodyId Le corps **exact** defendu.
      * @param int $openedAt L'instant d'ouverture, en secondes.
-     * @param array<int, CandidateMission> $candidates Les Defenses ACS candidates.
+     * @param array<int, DefensiveRallyCandidate> $candidates Les renforts candidats.
      * @return AdmissionVerdict
      */
     public function select(
@@ -80,7 +82,8 @@ final class DefensiveAdmissionSelector
 
         $admissions = [];
 
-        foreach ($this->inDeterministicOrder($candidates) as $candidate) {
+        foreach ($this->inDeterministicOrder($candidates) as $renfort) {
+            $candidate = $renfort->mission;
             $groupe = AttackCandidateGroup::ofASingleFleet($candidate);
 
             $refus = $this->whyItCannotDefend($candidate, $targetBodyId, $openedAt, $plafondTemporel);
@@ -118,7 +121,11 @@ final class DefensiveAdmissionSelector
     }
 
     /**
-     * Pourquoi cette candidate ne peut pas defendre, ou `null` si elle le peut.
+     * Pourquoi ce renfort ne peut pas defendre, ou `null` s'il le peut.
+     *
+     * Le genre et le sens de vol ne sont plus controles ici : le type les a deja garantis. Ne
+     * subsistent que les refus qui **se racontent au joueur** — mauvaise cible, camp non
+     * renforcable, flotte pas encore partie, rappel, fenetre depassee.
      *
      * @param CandidateMission $candidate
      * @param int $targetBodyId
@@ -134,12 +141,6 @@ final class DefensiveAdmissionSelector
     ): CombatReasonCode|null {
         if ($candidate->targetBodyId !== $targetBodyId) {
             return CombatReasonCode::WrongTargetBody;
-        }
-
-        // **Seulement une veritable Defense ACS.** Un retour, un deploiement ou une garnison locale
-        // ne consomme aucun emplacement : ce sont les vaisseaux du proprietaire, pas un renfort.
-        if ($candidate->mission !== CombatMissionKind::AcsDefend || $candidate->leg !== FlightLeg::Outbound) {
-            return CombatReasonCode::NoCombatEffect;
         }
 
         if ($candidate->actor !== ActorKind::Player) {
@@ -164,10 +165,10 @@ final class DefensiveAdmissionSelector
     }
 
     /**
-     * Les candidates triees par arrivee planifiee, puis par identifiant de mission.
+     * Les renforts tries par arrivee planifiee, puis par identifiant de mission.
      *
-     * @param array<int, CandidateMission> $candidates
-     * @return array<int, CandidateMission>
+     * @param array<int, DefensiveRallyCandidate> $candidates
+     * @return array<int, DefensiveRallyCandidate>
      */
     private function inDeterministicOrder(array $candidates): array
     {
@@ -175,8 +176,9 @@ final class DefensiveAdmissionSelector
 
         usort(
             $ordonnees,
-            static fn (CandidateMission $a, CandidateMission $b): int
-                => [$a->scheduledArrivalAt, $a->missionId] <=> [$b->scheduledArrivalAt, $b->missionId]
+            static fn (DefensiveRallyCandidate $a, DefensiveRallyCandidate $b): int
+                => [$a->mission->scheduledArrivalAt, $a->mission->missionId]
+                <=> [$b->mission->scheduledArrivalAt, $b->mission->missionId]
         );
 
         return $ordonnees;

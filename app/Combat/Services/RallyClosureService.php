@@ -9,13 +9,13 @@ use OGame\Combat\Admission\AttackAdmissionSelector;
 use OGame\Combat\Admission\AttackCandidateGroup;
 use OGame\Combat\Admission\CandidateMission;
 use OGame\Combat\Admission\DefensiveAdmissionSelector;
+use OGame\Combat\Admission\DefensiveRallyCandidate;
 use OGame\Combat\Admission\FoundingGroup;
 use OGame\Combat\Admission\FrozenAllianceMembership;
 use OGame\Combat\Admission\RallyGrouping;
 use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Enums\CombatState;
-use OGame\Combat\Enums\FlightLeg;
 use OGame\Combat\Support\ActorKindResolver;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Models\CelestialBodyCombatBarrier;
@@ -198,11 +198,10 @@ final class RallyClosureService
             return new AdmissionVerdict($openedAt, AdmissionBudget::canonical(), []);
         }
 
-        $defenses = array_values(array_filter(
-            $candidates,
-            static fn (CandidateMission $c): bool => $c->mission === CombatMissionKind::AcsDefend
-                && $c->leg === FlightLeg::Outbound
-        ));
+        // **L aiguillage, pas un refus.** Un retour, un deploiement personnel ou la garnison
+        // locale ne sont pas des renforts refuses : ils ne sont pas candidats. Le type le dit,
+        // et le selecteur n a donc plus de raison anodine a rendre pour eux.
+        $defenses = DefensiveRallyCandidate::ofAll($candidates);
 
         return $this->defenceSelector->select(
             $proprietaire,
