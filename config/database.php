@@ -42,9 +42,13 @@ return [
             // processus concurrents ne se serialisent pas : le second echoue aussitot sur
             // « database is locked », et la suite fabrique ainsi des pannes que MariaDB n'a pas.
             //
+            // **Le delai d attente, et lui seul.** J avais ajoute `journal_mode` WAL dans le meme
+            // mouvement : la suite complete est tombee avec « no such table: planets », le
+            // `migrate:fresh` ne survivant pas au changement de mode sur un fichier existant. Le
+            // delai suffisait a ce qu il fallait corriger ; le mode WAL etait un ajout gratuit.
+            //
             // Sans effet en production, qui tourne sur MariaDB.
             'busy_timeout' => env('DB_BUSY_TIMEOUT', 10000),
-            'journal_mode' => env('DB_JOURNAL_MODE', 'wal'),
         ],
 
         'mysql' => [
