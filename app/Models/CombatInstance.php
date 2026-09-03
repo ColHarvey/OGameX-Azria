@@ -70,6 +70,16 @@ use OGame\Combat\Enums\CombatState;
  * @property string|null $frozen_facts_fingerprint
  * @property array<mixed>|null $frozen_alliance_membership
  * @property string|null $projection_version
+ * @property int|null $potential_loot_metal
+ * @property int|null $potential_loot_crystal
+ * @property int|null $potential_loot_deuterium
+ * @property int|null $potential_loot_rate_in_basis_points
+ * @property int|null $potential_loot_frozen_at
+ * @property string|null $loot_snapshot_fingerprint
+ * @property int|null $applied_loot_metal
+ * @property int|null $applied_loot_crystal
+ * @property int|null $applied_loot_deuterium
+ * @property int|null $loot_settled_at
  * @property bool $result_published
  * @property Carbon $created_at
  * @property Carbon $updated_at
@@ -119,6 +129,16 @@ use OGame\Combat\Enums\CombatState;
     'frozen_facts_fingerprint',
     'frozen_alliance_membership',
     'projection_version',
+    'potential_loot_metal',
+    'potential_loot_crystal',
+    'potential_loot_deuterium',
+    'potential_loot_rate_in_basis_points',
+    'potential_loot_frozen_at',
+    'loot_snapshot_fingerprint',
+    'applied_loot_metal',
+    'applied_loot_crystal',
+    'applied_loot_deuterium',
+    'loot_settled_at',
     'result_published',
 ])]
 class CombatInstance extends Model
