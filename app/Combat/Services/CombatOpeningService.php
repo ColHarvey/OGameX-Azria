@@ -9,8 +9,13 @@ use OGame\Combat\Admission\AttackAdmissionSelector;
 use OGame\Combat\Admission\FoundingGroup;
 use OGame\Combat\Admission\FrozenAllianceMembership;
 use OGame\Combat\Admission\RallyGrouping;
+use OGame\Combat\Allocation\LootAllocatorRegistry;
+use OGame\Combat\Causality\CausalEventOrderRegistry;
 use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\MoonDestruction\MoonDestructionRuleRegistry;
+use OGame\Combat\Policies\LootPolicyRegistry;
+use OGame\Combat\Projection\SnapshotProjectionRegistry;
 use OGame\Combat\Support\ActorKindResolver;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\CombatRallyWindow;
@@ -77,6 +82,11 @@ final class CombatOpeningService
         private AttackAdmissionSelector $selector = new AttackAdmissionSelector(),
         private RallyGrouping $grouping = new RallyGrouping(),
         private LootReservationOpener $reservations = new LootReservationOpener(),
+        private CausalEventOrderRegistry|null $causalOrders = null,
+        private LootAllocatorRegistry|null $allocators = null,
+        private LootPolicyRegistry|null $policies = null,
+        private MoonDestructionRuleRegistry|null $moonRules = null,
+        private SnapshotProjectionRegistry|null $projections = null,
     ) {
     }
 
@@ -128,7 +138,16 @@ final class CombatOpeningService
      */
     private function open(FleetMission $opener, int $targetBodyId, int $openedAt): CombatInstance
     {
-        $versions = FrozenCombatVersionSet::chosenAtOpening();
+        // **Le seul endroit du chemin persistant qui demande les versions courantes.** Les
+        // registres sont injectables pour qu un essai puisse installer des V2 factices et
+        // verifier que le combat garde les siennes, sans toucher a un etat global.
+        $versions = FrozenCombatVersionSet::chosenAtOpening(
+            $this->causalOrders,
+            $this->allocators,
+            $this->policies,
+            $this->moonRules,
+            $this->projections,
+        );
         // **Charge par requete typee, pas par la relation.** `$opener->union` rend un modele
         // generique : le budget et le createur se liraient alors sur un type que rien ne verifie.
         $union = $opener->union_id === null ? null : FleetUnion::find($opener->union_id);
