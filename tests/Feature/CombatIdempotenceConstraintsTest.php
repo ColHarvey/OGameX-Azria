@@ -6,6 +6,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\SnapshotContribution;
+use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatEffectReceipt;
 use OGame\Models\CombatInstance;
@@ -31,6 +32,16 @@ use Tests\TestCase;
  *     un evenement inclus une seule fois par photographie — mais plusieurs fois entre combats
  *     une seule reservation de butin par combat
  *     un seul message par destinataire et par genre
+ *
+ * ## Deux vocabulaires d identite qu il ne faut pas melanger
+ *
+ * Une **cle de participant** — `fleet:123` — dit qui se bat. Une **identite d evenement** dit ce
+ * qui s est produit. Les deux se ressemblaient dans une premiere version de ce fichier, et la garde
+ * de `CombatSchemaShapeTest` l a refuse : une identite qui commence par `fleet:` se lit comme une
+ * cle de participant ecrite a la main, et deux orthographes d une meme source rouvrent le doublon
+ * que l unicite existe pour fermer.
+ *
+ * Les identites d evenement portent donc un prefixe a elles.
  *
  * ## Le cas qui compte le plus
  *
@@ -101,7 +112,7 @@ class CombatIdempotenceConstraintsTest extends TestCase
     public function testAnEventEntersOneSnapshotOnlyOnce(): void
     {
         $combat = $this->aCombat();
-        $identite = 'fleet:4242:arrival';
+        $identite = 'event:arrival:4242';
 
         CombatSnapshotInclusion::create($this->inclusion($combat->id, $identite));
 
@@ -122,7 +133,7 @@ class CombatIdempotenceConstraintsTest extends TestCase
     {
         $premier = $this->aCombat();
         $second = $this->aCombat();
-        $identite = 'planet:77:garrison';
+        $identite = 'event:garrison:77';
 
         CombatSnapshotInclusion::create($this->inclusion($premier->id, $identite));
         CombatSnapshotInclusion::create($this->inclusion($second->id, $identite));
@@ -172,16 +183,16 @@ class CombatIdempotenceConstraintsTest extends TestCase
     {
         $combat = $this->aCombat();
 
-        CombatOutboxMessage::create($this->message($combat->id, 'fleet:1', 'battle_report'));
+        CombatOutboxMessage::create($this->message($combat->id, CombatParticipantKey::forFleet(1), 'battle_report'));
 
         $this->assertRefused(
-            fn () => CombatOutboxMessage::create($this->message($combat->id, 'fleet:1', 'battle_report')),
+            fn () => CombatOutboxMessage::create($this->message($combat->id, CombatParticipantKey::forFleet(1), 'battle_report')),
             'A replayed resolution produced two battle reports for the same player.'
         );
 
         // Un autre genre pour le meme destinataire reste permis : le rapport et la lune detruite
         // sont deux messages, pas un doublon.
-        CombatOutboxMessage::create($this->message($combat->id, 'fleet:1', 'moon_destroyed'));
+        CombatOutboxMessage::create($this->message($combat->id, CombatParticipantKey::forFleet(1), 'moon_destroyed'));
 
         $this->assertSame(
             2,
@@ -277,7 +288,7 @@ class CombatIdempotenceConstraintsTest extends TestCase
             'event_identity' => $identity,
             'kind_version' => 'delivery_v1',
             'effect_fingerprint' => 'sha256:' . substr(hash('sha256', $identity), 0, 32),
-            'aggregate_key' => 'planet:77:resources',
+            'aggregate_key' => 'aggregate:planet-resources:77',
             'applied_at' => 1_000,
             'receipt_id' => substr(hash('sha256', $identity . ':receipt'), 0, 36),
         ];
