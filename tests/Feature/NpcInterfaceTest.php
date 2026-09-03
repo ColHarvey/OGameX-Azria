@@ -308,7 +308,6 @@ class NpcInterfaceTest extends AccountTestCase
             ->where('users.username', '!=', 'Legor')
             ->distinct()
             ->orderBy('users.id')
-            ->limit(120)
             ->pluck('users.id')
             ->all();
 
@@ -343,7 +342,11 @@ class NpcInterfaceTest extends AccountTestCase
             DB::table('highscores')->updateOrInsert(
                 ['player_id' => $id],
                 [
-                    'general' => 10000 - $rang * 10,
+                    // **Un barème pose sur TOUS les joueurs classables, pas sur les cent vingt
+                    // premiers.** La page en affiche cent, triees par rang : si un joueur hors du
+                    // barème obtenait un rang, il finirait la page a zero point. Le plancher a un
+                    // garde le barème valide meme dans un univers de plusieurs milliers de comptes.
+                    'general' => max(1, 1000000 - $rang * 10),
                     'economy' => 0,
                     'research' => 0,
                     'military' => 0,
