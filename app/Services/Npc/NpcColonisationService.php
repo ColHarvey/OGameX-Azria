@@ -168,7 +168,7 @@ class NpcColonisationService
         $releves = NpcBaseSnapshot::query()
             ->where('planet_id', $base->getPlanetId())
             ->where('observed_at', '>=', $depuis)
-            ->orderBy('observed_at')
+            ->oldest('observed_at')
             ->get();
 
         if ($releves->isEmpty()) {

@@ -144,7 +144,7 @@ class NpcBases extends Command
             $premier = NpcBaseSnapshot::query()
                 ->where('planet_id', $planete->getPlanetId())
                 ->where('observed_at', '>=', $depuis)
-                ->orderBy('observed_at')
+                ->oldest('observed_at')
                 ->first();
 
             if ($premier === null) {
@@ -202,7 +202,7 @@ class NpcBases extends Command
                 // disant clairement qu'elle date.
                 $dernier = NpcBaseSnapshot::query()
                     ->where('planet_id', $planete->getPlanetId())
-                    ->orderByDesc('observed_at')
+                    ->latest('observed_at')
                     ->first();
 
                 $etat = $dernier !== null

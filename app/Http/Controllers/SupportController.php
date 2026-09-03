@@ -2,6 +2,7 @@
 
 namespace OGame\Http\Controllers;
 
+use Exception;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -50,7 +51,7 @@ class SupportController extends OGameController
                   ->replyTo($user->email, $user->username)
                   ->subject('[Support] ' . $data['subject']);
             });
-        } catch (\Exception $e) {
+        } catch (Exception $e) {
             Log::warning('Support mail failed: ' . $e->getMessage());
             return back()->withErrors([
                 'body' => "L'envoi a échoué. Réessayez plus tard ou écrivez directement à admin@azriagaming.ca",

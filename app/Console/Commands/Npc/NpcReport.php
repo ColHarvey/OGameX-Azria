@@ -5,6 +5,7 @@ namespace OGame\Console\Commands\Npc;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -81,7 +82,7 @@ class NpcReport extends Command
     /**
      * Get the observation rows for the period.
      */
-    private function observations(Carbon $since): \Illuminate\Database\Query\Builder
+    private function observations(Carbon $since): Builder
     {
         return DB::table('npc_observations')->where('observed_at', '>=', $since);
     }
@@ -91,8 +92,8 @@ class NpcReport extends Command
      */
     private function reportServer(Carbon $since): void
     {
-        $first = $this->observations($since)->orderBy('observed_at')->first();
-        $last = $this->observations($since)->orderByDesc('observed_at')->first();
+        $first = $this->observations($since)->oldest('observed_at')->first();
+        $last = $this->observations($since)->latest('observed_at')->first();
 
         $this->line('');
         $this->line('  --- LE SERVEUR ---');
@@ -301,12 +302,12 @@ class NpcReport extends Command
             $debut = NpcBaseSnapshot::query()
                 ->where('planet_id', (int)$base->id)
                 ->where('observed_at', '>=', $since)
-                ->orderBy('observed_at')
+                ->oldest('observed_at')
                 ->first();
 
             $fin = NpcBaseSnapshot::query()
                 ->where('planet_id', (int)$base->id)
-                ->orderByDesc('observed_at')
+                ->latest('observed_at')
                 ->first();
 
             $progression = $debut !== null && $fin !== null

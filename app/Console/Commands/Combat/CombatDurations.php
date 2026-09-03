@@ -7,6 +7,7 @@ use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use OGame\Combat\Services\CombatDurationEstimator;
 use OGame\Combat\Support\CombatCalibrationScenarios;
+use OGame\GameMissions\BattleEngine\Models\BattleResult;
 
 /**
  * Le tableau qui sert a choisir le coefficient de rythme.
@@ -91,7 +92,7 @@ class CombatDurations extends Command
     /**
      * Show, per round, the figures that produced the work.
      *
-     * @param array<string, \OGame\GameMissions\BattleEngine\Models\BattleResult> $scenarios
+     * @param array<string, BattleResult> $scenarios
      * @param float $rythme
      * @param int $minimum
      * @param float $racine

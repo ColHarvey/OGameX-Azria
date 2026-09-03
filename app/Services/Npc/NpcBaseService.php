@@ -16,7 +16,6 @@ use OGame\Models\User;
 use OGame\Models\UserTech;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
-use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
 use RuntimeException;
 

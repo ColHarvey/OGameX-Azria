@@ -167,7 +167,7 @@ class NpcTick extends Command
 
         $dernier = NpcBaseSnapshot::query()
             ->where('planet_id', $planetId)
-            ->orderByDesc('observed_at')
+            ->latest('observed_at')
             ->value('observed_at');
 
         if ($dernier !== null && Date::parse((string)$dernier)->greaterThan($now->copy()->subHour())) {
