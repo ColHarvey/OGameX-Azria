@@ -149,6 +149,17 @@ class FleetUnionService
             throw new Exception(__('t_acs.error_mission_not_active'));
         }
 
+        // **Un retour ne rejoint pas une union.** `startReturn()` recopie le `mission_type` du
+        // parent : un retour d'attaque se presente donc comme une attaque, et franchissait tous les
+        // controles ci-dessus. Une flotte qui rentre aurait consomme un creneau sur seize — et
+        // puisque la jointure aligne l'union sur l'arrivee la plus tardive, elle aurait retarde
+        // toute l'attaque groupee.
+        //
+        // Le lien vers la mission prolongee est le seul fait qui distingue les deux.
+        if ($mission->parent_id !== null) {
+            throw new Exception(__('t_acs.error_returning_fleet'));
+        }
+
         // Deja dans une union : la deplacer laisserait un creneau vide dans la premiere.
         if ($mission->isInUnion()) {
             throw new Exception(__('t_acs.error_already_in_union'));

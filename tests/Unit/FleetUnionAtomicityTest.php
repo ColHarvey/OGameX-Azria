@@ -129,6 +129,37 @@ class FleetUnionAtomicityTest extends TestCase
     }
 
     /**
+     * Une flotte qui rentre chez elle ne rejoint pas une union.
+     *
+     * ## Le defaut que cet essai ferme
+     *
+     * `startReturn()` recopie le `mission_type` du parent : un retour d'attaque porte donc
+     * `mission_type = 1` et se presente exactement comme une attaque. Il n'est ni traite, ni annule,
+     * ni deja dans une union — la mission de retour est une ligne neuve.
+     *
+     * Il franchissait donc **tous** les autres controles. Un joueur pouvait faire rejoindre une union
+     * a une flotte qui rentre : elle consommait un creneau sur seize, et surtout — puisque la
+     * jointure aligne l'union sur l'arrivee la plus tardive — elle retardait toute l'attaque groupee.
+     *
+     * Le lien vers la mission prolongee est le seul fait qui distingue les deux.
+     */
+    public function testAFleetOnItsWayHomeCannotJoinAUnion(): void
+    {
+        [$union, $second] = $this->aUnionAndASecondAttack();
+
+        // Le retour d'une attaque : meme genre, meme proprietaire, mais il prolonge une mission.
+        $fondatrice = FleetMission::where('union_id', $union->id)->orderBy('union_slot')->first();
+
+        $second->parent_id = $fondatrice?->id;
+        $second->save();
+
+        $this->expectException(Exception::class);
+        $this->expectExceptionMessage(__('t_acs.error_returning_fleet'));
+
+        $this->service->joinUnion($union, $second);
+    }
+
+    /**
      * Une mission deja dans une union n'en change pas.
      *
      * La deplacer laisserait un creneau vide dans la premiere : les numeros ne seraient plus
@@ -225,6 +256,7 @@ class FleetUnionAtomicityTest extends TestCase
             'error_mission_not_active',
             'error_mission_not_found',
             'error_not_buddy_or_ally',
+            'error_returning_fleet',
             'error_not_found',
         ];
 

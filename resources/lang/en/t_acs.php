@@ -18,6 +18,7 @@ return [
     'error_max_players_reached' => 'This union is full: it already holds 5 players. Someone already in it can still send another fleet.',
     'error_mission_not_active' => 'This fleet has already arrived or been recalled.',
     'error_mission_not_found' => 'Fleet not found.',
+    'error_returning_fleet' => 'A fleet on its way home cannot join a union.',
     'error_not_buddy_or_ally' => 'You can only join a union created by a buddy or by a member of your alliance.',
     'error_not_found' => 'This union no longer exists.',
 ];

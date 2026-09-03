@@ -18,6 +18,7 @@ return [
     'error_max_players_reached' => 'Cette union est complète : elle compte déjà 5 joueurs. Un joueur déjà présent peut encore envoyer une autre flotte.',
     'error_mission_not_active' => 'Cette flotte est déjà arrivée ou a été rappelée.',
     'error_mission_not_found' => 'Flotte introuvable.',
+    'error_returning_fleet' => 'Une flotte qui rentre ne peut pas rejoindre une union.',
     'error_not_buddy_or_ally' => 'Vous ne pouvez rejoindre que l\'union d\'un ami ou d\'un membre de votre alliance.',
     'error_not_found' => 'Cette union n\'existe plus.',
 ];
