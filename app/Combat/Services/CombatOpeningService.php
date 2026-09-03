@@ -62,12 +62,16 @@ use OGame\Models\User;
  * dangereuse qu'une documentation absente : elle invite a rajouter une garantie qui existe, ou pire,
  * a supprimer celle qu'on croit manquante.
  *
- * ## Ce qu'il ne fait toujours pas
+ * ## Ce qu'il ne fait pas, et ne fera pas en premiere version
  *
- * Il ne transmet pas encore l'ensemble de versions gele a `LiveLootContextFactory` ni a
- * `LootService` : ces deux-la choisissent encore les versions courantes au moment de la resolution.
- * C'est une dette declaree, inscrite en liste blanche dans la garde architecturale, pas une
- * garantie.
+ * **Il n'immobilise aucune ressource.** Une reservation a ete branchee ici puis retiree : la
+ * regle arretee par le proprietaire est que le defenseur **peut depenser pendant le combat**, et
+ * que le reglement se fait a la resolution par `min(butin potentiel, ressources restantes)`,
+ * composante par composante.
+ *
+ * La difference n'est pas technique : avec une reservation, un defenseur qui vide ses caisses ne
+ * sauve rien ; sans elle, il sauve ce qu'il a eu le temps de depenser. Ce sont deux jeux, et
+ * c'est le second qui a ete choisi.
  *
  * Le dire evite de croire l'ouverture terminee.
  */
@@ -81,7 +85,6 @@ final class CombatOpeningService
         private RallyCandidateReader $reader = new RallyCandidateReader(),
         private AttackAdmissionSelector $selector = new AttackAdmissionSelector(),
         private RallyGrouping $grouping = new RallyGrouping(),
-        private LootReservationOpener $reservations = new LootReservationOpener(),
         private CausalEventOrderRegistry|null $causalOrders = null,
         private LootAllocatorRegistry|null $allocators = null,
         private LootPolicyRegistry|null $policies = null,
@@ -204,16 +207,6 @@ final class CombatOpeningService
             // pour un doublon deja applique.
             'frozen_facts_fingerprint' => SnapshotFingerprint::of($faits + $versions->fingerprintFacts()),
         ]);
-
-        // **Des l'ouverture, pas a la photographie.** Soixante secondes de ralliement suffisent a
-        // lancer un transport : attendre la fermeture laisserait au defenseur le temps de mettre a
-        // l abri exactement ce qui allait etre photographie.
-        $this->reservations->openFor(
-            $combat->id,
-            $targetBodyId,
-            $versions->lootPolicy,
-            $openedAt
-        );
 
         CelestialBodyCombatBarrier::create([
             'target_body_id' => $targetBodyId,
