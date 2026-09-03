@@ -27,10 +27,11 @@ namespace OGame\Combat\Allocation;
  * debite au defenseur, charge dans des soutes et ecrit dans un rapport : ces trois nombres doivent
  * etre le meme, a l'unite pres.
  *
- * Cette classe a d'abord ete ecrite sur `LootEnvelope`, dont les composantes sont des `float`.
- * C'etait une regression silencieuse : au-dela de deux puissance cinquante-trois, un `float` ne
- * distingue plus un entier de son voisin, et tout le pipeline de pillage existe precisement pour
- * convertir **une seule fois** la frontiere vivante en unites entieres puis rester exact.
+ * Cette classe a d'abord ete ecrite sur `LootEnvelope`, qui appartient au chantier exploratoire de
+ * reservation, non raccorde, et porte des flottants. C'etait une regression silencieuse : au-dela
+ * de deux puissance cinquante-trois, un `float` ne distingue plus un entier de son voisin, et tout
+ * le pipeline de pillage existe precisement pour convertir **une seule fois** la frontiere vivante
+ * en unites entieres puis rester exact.
  *
  * ## L'ecart se constate, il ne se recupere pas
  *
