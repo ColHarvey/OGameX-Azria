@@ -4,7 +4,7 @@ namespace OGame\GameMissions\BattleEngine\Services;
 
 use OGame\Combat\Allocation\CappedLoot;
 use OGame\Combat\Allocation\ExactLootAllocationV1;
-use OGame\Combat\Allocation\LootAllocatorRegistry;
+use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Models\Resources;
 
 /**
@@ -43,22 +43,45 @@ class LootService
      *
      * @param Resources $loot
      * @param int $total_cargo_capacity
+     * @param FrozenLootAllocation $allocation L'allocateur de cette operation, choisi a son debut.
      * @return Resources
      */
-    public static function distributeLoot(Resources $loot, int $total_cargo_capacity): Resources
+    public static function distributeLoot(Resources $loot, int $total_cargo_capacity, FrozenLootAllocation $allocation): Resources
     {
-        return self::distribute($loot, $total_cargo_capacity)->resources;
+        return self::distribute($loot, $total_cargo_capacity, $allocation)->resources;
     }
 
     /**
      * Le meme plafonnement, avec ce que la conversion a rencontre.
      *
+     * ## Pourquoi l'allocation est un parametre, et pourquoi il est obligatoire
+     *
+     * Cette methode demandait elle-meme au registre son allocateur courant, **au milieu du calcul**.
+     * (La forme litterale de cet appel n est pas ecrite ici : la garde architecturale cherche des
+     * chaines, et un commentaire qui la cite se compte lui-meme comme un appelant.)
+     * Chaque plafonnement d'une meme resolution redemandait donc « la version courante » : un
+     * deploiement survenu entre deux appels aurait plafonne la premiere moitie d'une bataille sous
+     * une regle et la seconde sous une autre.
+     *
+     * La rendre facultative, avec un repli sur la version courante, aurait laisse exactement ce
+     * chemin ouvert — et il serait revenu par le premier appelant qui aurait omis l'argument. Un
+     * appelant doit dire sous quelle regle il plafonne ; c'est le seul moyen que la question soit
+     * posee.
+     *
      * @param Resources $loot
      * @param int $total_cargo_capacity
+     * @param FrozenLootAllocation $allocation
+     * @param string $phase
+     * @param string $subject
      * @return CappedLoot
      */
-    public static function distribute(Resources $loot, int $total_cargo_capacity, string $phase = ExactLootAllocationV1::PHASE_TARGET_LOOT, string $subject = ''): CappedLoot
-    {
-        return LootAllocatorRegistry::default()->current()->capByCargo($loot, $total_cargo_capacity, $phase, $subject);
+    public static function distribute(
+        Resources $loot,
+        int $total_cargo_capacity,
+        FrozenLootAllocation $allocation,
+        string $phase = ExactLootAllocationV1::PHASE_TARGET_LOOT,
+        string $subject = '',
+    ): CappedLoot {
+        return $allocation->capByCargo($loot, $total_cargo_capacity, $phase, $subject);
     }
 }

@@ -3,6 +3,7 @@
 namespace Tests\Unit\BattleEngine;
 
 use OGame\Combat\Allocation\ExactLootAllocationV1;
+use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\GameMissions\BattleEngine\BattleEngine;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
@@ -301,7 +302,7 @@ class LootAccountingTest extends UnitTestCase
             $this->planetService,
             [DefenderFleet::fromPlanet($this->planetService)],
             $this->settingsService,
-            LiveLootContextFactory::forBattle($flottes, $this->planetService)
+            LiveLootContextFactory::forBattle($flottes, $this->planetService, FrozenLootAllocation::atOperationStart())
         );
 
         $resultat = new BattleResult();

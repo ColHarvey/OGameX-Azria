@@ -3,6 +3,7 @@
 namespace Tests\Unit;
 
 use Illuminate\Contracts\Container\BindingResolutionException;
+use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
@@ -75,7 +76,7 @@ class HamillManoeuvreTest extends AccountTestCase
             $defenderPlanet,
             $defenders,
             $settingsService,
-            LiveLootContextFactory::forBattle([$attacker], $defenderPlanet)
+            LiveLootContextFactory::forBattle([$attacker], $defenderPlanet, FrozenLootAllocation::atOperationStart())
         );
     }
 

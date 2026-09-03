@@ -7,6 +7,7 @@ use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Support\Facades\Date;
 use InvalidArgumentException;
+use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Enums\NoLootReason;
 use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\GameMissions\BattleEngine\BattleEngine;
@@ -155,7 +156,8 @@ class TestBattleEnginePerformance extends TestCommand
         $lootContext = LiveLootContextFactory::withoutLoot(
             NoLootReason::SyntheticBenchmark,
             [$attacker],
-            $this->currentPlanetService
+            $this->currentPlanetService,
+            FrozenLootAllocation::atOperationStart()
         );
 
         return $engine === 'php'

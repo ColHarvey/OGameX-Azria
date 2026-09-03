@@ -3,6 +3,7 @@
 namespace OGame\GameMissions;
 
 use Exception;
+use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Support\OperationKey;
 use OGame\Combat\Support\ResourceDiagnosticsJournal;
 use OGame\Combat\Support\SealedResourceDiagnostics;
@@ -130,7 +131,14 @@ class RecycleMission extends GameMission
         // resolution de combat l appelle cinq fois, et un avertissement pose la-bas en produirait
         // autant. Le recyclage n a qu un appel, mais le proprietaire du journal doit rester le meme
         // partout : l orchestrateur, jamais le calculateur.
-        $recolte = LootService::distribute($resourcesToHarvest, $total_cargo_capacity);
+        // Le recyclage est une operation instantanee : sa version d allocateur se choisit a son
+        // debut, ici, et non au milieu du plafonnement. Un seul appel aujourd hui — mais la
+        // frontiere doit exister avant qu il y en ait deux.
+        $recolte = LootService::distribute(
+            $resourcesToHarvest,
+            $total_cargo_capacity,
+            FrozenLootAllocation::atOperationStart()
+        );
         $resourcesHarvested = $recolte->resources;
 
         ResourceDiagnosticsJournal::report(

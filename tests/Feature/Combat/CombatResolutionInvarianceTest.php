@@ -4,6 +4,7 @@ namespace Tests\Feature\Combat;
 
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Allocation\ExactLootAllocationV1;
+use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Services\CombatResolutionService;
 use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\Combat\Support\ResourceDiagnostic;
@@ -198,7 +199,7 @@ class CombatResolutionInvarianceTest extends FleetDispatchTestCase
             $cible,
             $defenseurs,
             resolve(SettingsService::class),
-            LiveLootContextFactory::forBattle($flottes, $cible)
+            LiveLootContextFactory::forBattle($flottes, $cible, FrozenLootAllocation::atOperationStart())
         );
 
         $resultat = $moteur->simulateBattle();

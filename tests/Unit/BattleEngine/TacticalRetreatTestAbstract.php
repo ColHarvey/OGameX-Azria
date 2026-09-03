@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\BattleEngine;
 
+use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
@@ -392,7 +393,7 @@ abstract class TacticalRetreatTestAbstract extends AccountTestCase
             $defenderPlanet,
             $defenders,
             $settingsService,
-            LiveLootContextFactory::forBattle($attaquantes, $defenderPlanet)
+            LiveLootContextFactory::forBattle($attaquantes, $defenderPlanet, FrozenLootAllocation::atOperationStart())
         );
         $result = $engine->simulateBattle();
 
@@ -553,7 +554,7 @@ abstract class TacticalRetreatTestAbstract extends AccountTestCase
             $defenderPlanet,
             [DefenderFleet::fromPlanet($defenderPlanet)],
             $settingsService,
-            LiveLootContextFactory::forBattle($attaquantes, $defenderPlanet)
+            LiveLootContextFactory::forBattle($attaquantes, $defenderPlanet, FrozenLootAllocation::atOperationStart())
         );
     }
 }

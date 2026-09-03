@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\BattleEngine;
 
+use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
@@ -61,7 +62,7 @@ class DefenseRepairBattleEngineTest extends UnitTestCase
             $this->planetService,
             $defenders,
             $this->settingsService,
-            LiveLootContextFactory::forBattle([$attacker], $this->planetService)
+            LiveLootContextFactory::forBattle([$attacker], $this->planetService, FrozenLootAllocation::atOperationStart())
         );
     }
 

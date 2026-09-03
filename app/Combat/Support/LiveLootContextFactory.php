@@ -3,7 +3,7 @@
 namespace OGame\Combat\Support;
 
 use Illuminate\Support\Facades\Date;
-use OGame\Combat\Allocation\LootAllocatorRegistry;
+use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\Enums\NoLootReason;
 use OGame\Combat\Policies\LootPolicySelector;
@@ -45,11 +45,12 @@ final class LiveLootContextFactory
      *
      * @param array<AttackerFleet> $attackers Les flottes offensives retenues, initiateur compris.
      * @param PlanetService $target Le corps vise.
+     * @param FrozenLootAllocation $allocation L'allocateur de cette operation, choisi a son debut.
      * @return LootContext
      */
-    public static function forBattle(array $attackers, PlanetService $target): LootContext
+    public static function forBattle(array $attackers, PlanetService $target, FrozenLootAllocation $allocation): LootContext
     {
-        return self::snapshotOf(null, $attackers, $target);
+        return self::snapshotOf(null, $attackers, $target, $allocation);
     }
 
     /**
@@ -58,22 +59,32 @@ final class LiveLootContextFactory
      * @param NoLootReason $reason
      * @param array<AttackerFleet> $attackers
      * @param PlanetService $target
+     * @param FrozenLootAllocation $allocation
      * @return LootContext
      */
-    public static function withoutLoot(NoLootReason $reason, array $attackers, PlanetService $target): LootContext
+    public static function withoutLoot(NoLootReason $reason, array $attackers, PlanetService $target, FrozenLootAllocation $allocation): LootContext
     {
-        return self::snapshotOf($reason, $attackers, $target);
+        return self::snapshotOf($reason, $attackers, $target, $allocation);
     }
 
     /**
      * La photographie proprement dite.
      *
+     * ## « Live » porte sur les faits, pas sur les regles
+     *
+     * Cette fabrique lit l'etat vivant du monde — les cargaisons, l'inactivite de la cible, les
+     * classes de personnage — et c'est bien son role : ce sont les faits de l'instant. Elle
+     * choisissait aussi **la version courante de l'allocateur**, ce qui n'a rien a voir : une
+     * regle n'est pas un fait observe, et la choisir ici la faisait dependre du moment ou la
+     * photographie etait prise plutot que du moment ou le combat s'est ouvert.
+     *
      * @param NoLootReason|null $refusal
      * @param array<AttackerFleet> $attackers
      * @param PlanetService $target
+     * @param FrozenLootAllocation $allocation
      * @return LootContext
      */
-    private static function snapshotOf(NoLootReason|null $refusal, array $attackers, PlanetService $target): LootContext
+    private static function snapshotOf(NoLootReason|null $refusal, array $attackers, PlanetService $target, FrozenLootAllocation $allocation): LootContext
     {
         $observe = self::now();
         $inactive = self::targetIsInactiveAt($target, $observe);
@@ -105,7 +116,7 @@ final class LiveLootContextFactory
             $flottes,
             self::targetFactsOf($target),
             $observe,
-            LootAllocatorRegistry::default()->currentVersion(),
+            $allocation->version,
         );
     }
 

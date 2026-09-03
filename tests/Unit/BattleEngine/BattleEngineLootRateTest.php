@@ -3,6 +3,7 @@
 namespace Tests\Unit\BattleEngine;
 
 use OGame\Combat\Allocation\ExactLootAllocationV1;
+use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Allocation\LootAllocatorRegistry;
 use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\Combat\Support\LootContext;
@@ -292,7 +293,7 @@ class BattleEngineLootRateTest extends UnitTestCase
         $this->setTargetInactive(false);
 
         $flottes = [$this->fleet(10, CharacterClass::GENERAL)];
-        $contexte = LiveLootContextFactory::forBattle($flottes, $this->planetService);
+        $contexte = LiveLootContextFactory::forBattle($flottes, $this->planetService, FrozenLootAllocation::atOperationStart());
 
         $this->assertSame(ExactLootAllocationV1::VERSION, $contexte->allocatorVersion);
         $this->assertContains(
@@ -347,7 +348,7 @@ class BattleEngineLootRateTest extends UnitTestCase
             $this->planetService,
             [DefenderFleet::fromPlanet($this->planetService)],
             $this->settingsService,
-            LiveLootContextFactory::forBattle($flottes, $this->planetService)
+            LiveLootContextFactory::forBattle($flottes, $this->planetService, FrozenLootAllocation::atOperationStart())
         );
     }
 

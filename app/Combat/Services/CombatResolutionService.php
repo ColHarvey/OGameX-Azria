@@ -3,6 +3,7 @@
 namespace OGame\Combat\Services;
 
 use Closure;
+use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\ResourceNormalizationDiagnostics;
 use OGame\Factories\PlanetServiceFactory;
@@ -113,6 +114,15 @@ class CombatResolutionService
         // Ce que l'application du resultat rencontre lui appartient : le `BattleResult` reste tel
         // que le moteur l'a fige.
         $diagnostics = ResourceNormalizationDiagnostics::none();
+
+        // **La version de l allocateur se choisit ici, une fois, et vaut pour toute la
+        // resolution.** Elle etait relue a chaque plafonnement : un deploiement survenu entre
+        // deux appels aurait plafonne la premiere moitie de cette bataille sous une regle et la
+        // seconde sous une autre, sans que rien ne le signale.
+        //
+        // C est la frontiere du chemin instantane. Le combat durable, lui, la lira dans ses
+        // faits geles par `FrozenLootAllocation::fromFrozenSet()`.
+        $allocation = FrozenLootAllocation::atOperationStart();
 
         // Deduct loot from the target planet.
         $defenderPlanet->deductResources($battleResult->loot);
@@ -233,7 +243,7 @@ class CombatResolutionService
                     // Ensure total doesn't exceed surviving cargo capacity
                     $remainingCargoCapacity = $fleetResult->unitsResult->getTotalCargoCapacity($fleetOwner);
                     if ($totalResources->sum() > $remainingCargoCapacity) {
-                        $totalResources = $this->capAndCollect($totalResources, $remainingCargoCapacity, $diagnostics, CombatResolutionOutcome::PHASE_RETURN_CAP, CombatParticipantKey::forFleet($fleetResult->fleetMissionId));
+                        $totalResources = $this->capAndCollect($totalResources, $remainingCargoCapacity, $allocation, $diagnostics, CombatResolutionOutcome::PHASE_RETURN_CAP, CombatParticipantKey::forFleet($fleetResult->fleetMissionId));
                     }
 
                     // Calculate natural return duration based on surviving ships and owner's tech.
@@ -304,7 +314,7 @@ class CombatResolutionService
                 $attackerCollectedDebris = $collectionAmount;
             } else {
                 // Distribute the 30% debris amount across Reaper capacity
-                $attackerCollectedDebris = $this->capAndCollect($collectionAmount, $reaperCargoCapacity, $diagnostics, CombatResolutionOutcome::PHASE_ATTACKER_REAPER);
+                $attackerCollectedDebris = $this->capAndCollect($collectionAmount, $reaperCargoCapacity, $allocation, $diagnostics, CombatResolutionOutcome::PHASE_ATTACKER_REAPER);
             }
         }
 
@@ -320,7 +330,7 @@ class CombatResolutionService
             );
 
             if ($attackerCollectedDebris->sum() > $availableForCollectedDebris) {
-                $attackerCollectedDebris = $this->capAndCollect($attackerCollectedDebris, $availableForCollectedDebris, $diagnostics, CombatResolutionOutcome::PHASE_ATTACKER_REAPER_ROOM, CombatParticipantKey::forFleet($singleFleetResult->fleetMissionId));
+                $attackerCollectedDebris = $this->capAndCollect($attackerCollectedDebris, $availableForCollectedDebris, $allocation, $diagnostics, CombatResolutionOutcome::PHASE_ATTACKER_REAPER_ROOM, CombatParticipantKey::forFleet($singleFleetResult->fleetMissionId));
             }
         }
 
@@ -353,7 +363,7 @@ class CombatResolutionService
                 $defenderCollectedDebris = $collectionAmount;
             } else {
                 // Distribute the 30% debris amount across Reaper capacity
-                $defenderCollectedDebris = $this->capAndCollect($collectionAmount, $defenderReaperCargoCapacity, $diagnostics, CombatResolutionOutcome::PHASE_DEFENDER_REAPER);
+                $defenderCollectedDebris = $this->capAndCollect($collectionAmount, $defenderReaperCargoCapacity, $allocation, $diagnostics, CombatResolutionOutcome::PHASE_DEFENDER_REAPER);
             }
 
             // Add collected debris to defender planet's resources
@@ -523,7 +533,7 @@ class CombatResolutionService
             // Defensive cap only: loot and carried cargo are already normalized before we reach
             // this point, so only edge-case rounding should ever hit this.
             if ($totalResources->sum() > $remainingCargoCapacity) {
-                $totalResources = $this->capAndCollect($totalResources, $remainingCargoCapacity, $diagnostics, CombatResolutionOutcome::PHASE_RETURN_CAP_FINAL, CombatParticipantKey::forFleet($singleFleetResult->fleetMissionId));
+                $totalResources = $this->capAndCollect($totalResources, $remainingCargoCapacity, $allocation, $diagnostics, CombatResolutionOutcome::PHASE_RETURN_CAP_FINAL, CombatParticipantKey::forFleet($singleFleetResult->fleetMissionId));
             }
 
             // Calculate wreck field for General class attacker
@@ -587,11 +597,12 @@ class CombatResolutionService
     private function capAndCollect(
         Resources $resources,
         int $capacity,
+        FrozenLootAllocation $allocation,
         ResourceNormalizationDiagnostics &$diagnostics,
         string $phase,
         string $subject = '',
     ): Resources {
-        $plafonne = LootService::distribute($resources, $capacity, $phase, $subject);
+        $plafonne = LootService::distribute($resources, $capacity, $allocation, $phase, $subject);
         $diagnostics = $diagnostics->mergedWith($plafonne->diagnostics);
 
         return $plafonne->resources;

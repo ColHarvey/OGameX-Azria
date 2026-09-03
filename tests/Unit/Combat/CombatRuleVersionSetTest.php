@@ -2,6 +2,11 @@
 
 namespace Tests\Unit\Combat;
 
+use LogicException;
+use OGame\Combat\Allocation\CappedLoot;
+use OGame\Combat\Allocation\ExactLootAllocationV1;
+use OGame\Combat\Allocation\LootAllocator;
+use OGame\Combat\Allocation\LootAllocatorRegistry;
 use OGame\Combat\Causality\CausalEventOrder;
 use OGame\Combat\Causality\CausalEventOrderRegistry;
 use OGame\Combat\Enums\CombatEventType;
@@ -14,6 +19,8 @@ use OGame\Combat\Policies\LootPolicyRegistry;
 use OGame\Combat\Policies\LootRateRule;
 use OGame\Combat\Support\CombatRuleVersionSet;
 use OGame\Combat\Support\LootPolicy;
+use OGame\Combat\Support\ResourceNormalizationDiagnostics;
+use OGame\Models\Resources;
 use Tests\UnitTestCase;
 
 /**
@@ -36,9 +43,9 @@ use Tests\UnitTestCase;
  *
  * Ils ne prouvent **pas** encore que les decisions, la photographie, le pillage et le plan lunaire
  * d'un combat rejoue sont identiques : cela demande `CombatOpeningService`, qui n'existe pas. Ils
- * ne couvrent pas non plus l'allocateur de butin, dont l'interface porte quatre methodes aux
- * types riches — un factice credible y couterait plus que la preuve n'en vaut, et un factice
- * bacle ferait croire a une couverture qu'il n'a pas.
+ * couvrent desormais **les quatre** registres, allocateur compris : son double ne porte qu'une
+ * version, et ses trois autres methodes levent — ce qui se prouve ici est la selection d'une
+ * version, pas un algorithme d'allocation.
  *
  * Le dire evite de compter ces preuves-la comme acquises.
  */
@@ -69,23 +76,28 @@ class CombatRuleVersionSetTest extends UnitTestCase
         $v1 = CombatRuleVersionSet::chosenAtOpening();
         $persiste = $v1->toStorage();
 
-        // Trois V2 factices deviennent les valeurs courantes.
+        // Quatre V2 factices deviennent les valeurs courantes.
         //
-        // **L'allocateur garde la sienne, et c'est dit plutot que masque.** Son interface porte
-        // quatre methodes aux types riches ; un factice credible y demanderait plus de code que la
-        // preuve n'en vaut, et un factice bacle ferait croire a une couverture qu'il n'a pas.
+        // **Les quatre bougent, l'allocateur compris.** Le laisser en V1 laissait un quart de
+        // l'ensemble hors de la preuve : un combat aurait pu changer d'allocateur sans que rien
+        // ici ne s'en apercoive.
         $v2 = CombatRuleVersionSet::chosenAtOpening(
             $this->aCausalRegistryOn('causal_event_order_v2'),
-            null,
+            $this->anAllocatorRegistryOn('exact_loot_allocation_v2'),
             $this->aPolicyRegistryOn('cargo_weighted_v2'),
             $this->aMoonRegistryOn('moon_destruction_v2'),
         );
 
-        $this->assertNotSame(
-            $v1->toStorage(),
-            $v2->toStorage(),
-            'The fake V2 registries were not actually different: the test would prove nothing.'
-        );
+        // **Champ par champ, et non l'ensemble entier.** Comparer les deux ensembles d'un bloc
+        // restait vrai avec trois changements sur quatre : une mutation qui rendait l'allocateur a
+        // sa V1 survivait a cet essai, et le quart manquant serait reste hors de la preuve.
+        foreach ($v1->toStorage() as $regle => $version) {
+            $this->assertNotSame(
+                $version,
+                $v2->toStorage()[$regle],
+                'The fake V2 registry for ' . $regle . ' was not actually different: a quarter of the set stays unproven.'
+            );
+        }
 
         $recharge = CombatRuleVersionSet::fromStorage($persiste);
 
@@ -266,6 +278,65 @@ class CombatRuleVersionSetTest extends UnitTestCase
             $ensemble->toStorage(),
             CombatRuleVersionSet::fromStorage($ensemble->toStorage())->toStorage()
         );
+    }
+
+    /**
+     * Un registre d'allocateurs pose sur cette version, et rien d'autre.
+     *
+     * ## Pourquoi ce double existe enfin
+     *
+     * Cet essai laissait l'allocateur en V1 pendant que les trois autres passaient en V2, et le
+     * disait franchement : son interface porte quatre methodes aux types riches, et un factice
+     * credible aurait coute plus que la preuve n'en valait.
+     *
+     * C'etait une mauvaise lecture de ce qu'il fallait prouver. **Ce qui se teste ici, c'est la
+     * selection d'une version, pas un algorithme d'allocation.** Une seule methode est donc reelle —
+     * celle qui porte la version — et les trois autres levent : si l'une d'elles etait appelee, cet
+     * essai ferait bien plus que ce qu'il annonce, et il vaut mieux l'apprendre par une exception
+     * que par un resultat plausible.
+     */
+    private function anAllocatorRegistryOn(string $version): LootAllocatorRegistry
+    {
+        $allocateur = new class ($version) implements LootAllocator {
+            public function __construct(private string $version)
+            {
+            }
+
+            public function version(): string
+            {
+                return $this->version;
+            }
+
+            public function lootableAmount(
+                float $inStock,
+                int $rateInBasisPoints,
+                string $phase,
+                ResourceNormalizationDiagnostics &$diagnostics,
+            ): int {
+                throw new LogicException('Ce double ne porte qu une version : rien ne doit lui demander de piller.');
+            }
+
+            public function capByCargo(Resources $loot, int $totalCargoCapacity, string $phase = ExactLootAllocationV1::PHASE_TARGET_LOOT, string $subject = ''): CappedLoot
+            {
+                throw new LogicException('Ce double ne porte qu une version : rien ne doit lui demander de plafonner.');
+            }
+
+            /**
+             * @param array<int, int> $weights
+             * @param array<int, int> $remainingCapacity
+             * @return array<int, int>
+             */
+            public function shareBetweenFleets(
+                int $amount,
+                array $weights,
+                array $remainingCapacity,
+                int $initiatorFleetMissionId,
+            ): array {
+                throw new LogicException('Ce double ne porte qu une version : rien ne doit lui demander de repartir.');
+            }
+        };
+
+        return LootAllocatorRegistry::of([$allocateur], $version);
     }
 
     /**

@@ -3,6 +3,7 @@
 namespace OGame\GameMissions;
 
 use Exception;
+use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Enums\NoLootReason;
 use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\Enums\DarkMatterTransactionType;
@@ -765,7 +766,8 @@ class ExpeditionMission extends GameMission
         $lootContext = LiveLootContextFactory::withoutLoot(
             NoLootReason::NpcEncounter,
             [$attackerFleet],
-            $npcPlanetService
+            $npcPlanetService,
+            FrozenLootAllocation::atOperationStart()
         );
 
         switch ($this->settings->battleEngine()) {

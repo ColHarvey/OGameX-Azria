@@ -3,6 +3,7 @@
 namespace OGame\Combat\Support;
 
 use Illuminate\Support\Facades\Log;
+use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Exceptions\UnsupportedActorSide;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\Services\PlanetService;
@@ -49,6 +50,7 @@ final class LootContextForMission
      * @param PlanetService $target
      * @param string $missionKind Le genre de mission, pour le journal.
      * @param int $missionId L'identifiant de la mission qui a declenche le combat.
+     * @param FrozenLootAllocation $allocation L'allocateur de cette operation, choisi a son debut.
      * @param callable(array<AttackerFleet>, PlanetService): LootContext|null $snapshot La fabrique a
      *        employer. Celle du jeu par defaut ; un essai en fournit une qui refuse, pour verifier
      *        que le refus ne remonte pas a l'ordonnanceur.
@@ -59,10 +61,11 @@ final class LootContextForMission
         PlanetService $target,
         string $missionKind,
         int $missionId,
+        FrozenLootAllocation $allocation,
         callable|null $snapshot = null,
     ): LootContext {
         $snapshot ??= static fn (array $flottes, PlanetService $cible): LootContext
-            => LiveLootContextFactory::forBattle($flottes, $cible);
+            => LiveLootContextFactory::forBattle($flottes, $cible, $allocation);
 
         try {
             return $snapshot($attackers, $target);
@@ -82,7 +85,10 @@ final class LootContextForMission
                 'detail' => $refus->getMessage(),
             ]);
 
-            return LiveLootContextFactory::withoutLoot($refus->reason->noLootReason(), $attackers, $target);
+            // **Le meme allocateur que la tentative qui a echoue.** En rechoisir un ici ferait
+            // qu un combat degrade se plafonnerait sous une regle differente de celle sous
+            // laquelle il avait commence a se calculer.
+            return LiveLootContextFactory::withoutLoot($refus->reason->noLootReason(), $attackers, $target, $allocation);
         }
     }
 }

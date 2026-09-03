@@ -3,6 +3,7 @@
 namespace OGame\GameMissions;
 
 use Illuminate\Support\Facades\DB;
+use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\LootContextForMission;
 use OGame\Combat\Support\OperationKey;
@@ -154,7 +155,11 @@ class MoonDestructionMission extends GameMission
         // calcule ici est bel et bien preleve plus bas par `deductResources()`. La lune est un
         // corps distinct de sa planete ; c'est l'inactivite de **son** proprietaire qui compte, et
         // c'est ce que la fabrique lit sur le corps qu'on lui donne.
-        $lootContext = LootContextForMission::lootingOrDegraded([$attackerFleet], $targetMoon, 'moon_destruction', $mission->id);
+        // La version de l allocateur se choisit au debut de l operation, pas au milieu du
+        // plafonnement : sans cela, un deploiement survenu en cours de resolution en changerait
+        // la seconde moitie.
+        $allocation = FrozenLootAllocation::atOperationStart();
+        $lootContext = LootContextForMission::lootingOrDegraded([$attackerFleet], $targetMoon, 'moon_destruction', $mission->id, $allocation);
 
         // Execute the battle logic using configured battle engine
         switch ($this->settings->battleEngine()) {

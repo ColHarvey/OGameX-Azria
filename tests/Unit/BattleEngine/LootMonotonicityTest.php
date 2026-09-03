@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\BattleEngine;
 
+use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\GameMissions\BattleEngine\BattleEngine;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
@@ -272,7 +273,7 @@ class LootMonotonicityTest extends UnitTestCase
      */
     public function testTheCargoCapIsExactAndLosesNothing(): void
     {
-        $plafonne = LootService::distributeLoot(new Resources(37_991, 41_583, 20_836, 0), 53_384);
+        $plafonne = LootService::distributeLoot(new Resources(37_991, 41_583, 20_836, 0), 53_384, FrozenLootAllocation::atOperationStart());
 
         $this->assertSame(17_795.0, $plafonne->metal->get());
         $this->assertSame(17_795.0, $plafonne->crystal->get());
@@ -280,7 +281,7 @@ class LootMonotonicityTest extends UnitTestCase
         $this->assertSame(53_384.0, $plafonne->sum(), 'The cap must use the whole cargo, to the unit.');
 
         // Et il ne depasse jamais le fret, meme quand le butin est bien plus petit que lui.
-        $petit = LootService::distributeLoot(new Resources(10, 20, 30, 0), 1_000);
+        $petit = LootService::distributeLoot(new Resources(10, 20, 30, 0), 1_000, FrozenLootAllocation::atOperationStart());
         $this->assertSame(60.0, $petit->sum(), 'Nothing was to be capped here.');
     }
 
@@ -439,14 +440,14 @@ class LootMonotonicityTest extends UnitTestCase
             $fretAvantBataille += $flotte->units->getTotalCargoCapacity($flotte->player);
         }
 
-        $butinPlafonne = LootService::distributeLoot(clone $butinTheorique, $fretAvantBataille);
+        $butinPlafonne = LootService::distributeLoot(clone $butinTheorique, $fretAvantBataille, FrozenLootAllocation::atOperationStart());
 
         $moteur = new LootMonotonicityHarness(
             $flottes,
             $this->planetService,
             [DefenderFleet::fromPlanet($this->planetService)],
             $this->settingsService,
-            LiveLootContextFactory::forBattle($flottes, $this->planetService)
+            LiveLootContextFactory::forBattle($flottes, $this->planetService, FrozenLootAllocation::atOperationStart())
         );
 
         $resultat = new BattleResult();

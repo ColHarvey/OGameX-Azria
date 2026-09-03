@@ -3,6 +3,7 @@
 namespace Tests\Unit\Combat;
 
 use Illuminate\Support\Facades\Date;
+use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Enums\NoLootReason;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\LiveLootContextFactory;
@@ -144,8 +145,8 @@ class LiveLootContextFactoryTest extends UnitTestCase
 
         $flottes = [$this->fleet(10, CharacterClass::DISCOVERER)];
 
-        $this->assertSame(7_500, LiveLootContextFactory::forBattle($flottes, $this->planetService)->rateInBasisPoints);
-        $this->assertSame(5_000, LiveLootContextFactory::forBattle($flottes, $autreCorps)->rateInBasisPoints);
+        $this->assertSame(7_500, LiveLootContextFactory::forBattle($flottes, $this->planetService, FrozenLootAllocation::atOperationStart())->rateInBasisPoints);
+        $this->assertSame(5_000, LiveLootContextFactory::forBattle($flottes, $autreCorps, FrozenLootAllocation::atOperationStart())->rateInBasisPoints);
     }
 
     /**
@@ -161,7 +162,8 @@ class LiveLootContextFactoryTest extends UnitTestCase
         $contexte = LiveLootContextFactory::withoutLoot(
             NoLootReason::NpcEncounter,
             [$this->fleet(10, CharacterClass::DISCOVERER)],
-            $this->planetService
+            $this->planetService,
+            FrozenLootAllocation::atOperationStart()
         );
 
         $this->assertSame(0, $contexte->rateInBasisPoints);
@@ -178,7 +180,7 @@ class LiveLootContextFactoryTest extends UnitTestCase
         $this->setTargetLastLogin(self::MAINTENANT);
 
         $flottes = [$this->fleet(3, CharacterClass::GENERAL, 101), $this->fleet(4, CharacterClass::GENERAL, 102)];
-        $contexte = LiveLootContextFactory::forBattle($flottes, $this->planetService);
+        $contexte = LiveLootContextFactory::forBattle($flottes, $this->planetService, FrozenLootAllocation::atOperationStart());
 
         // L ordre de presentation ne compte pas : l appariement porte sur les faits, pas sur la
         // position dans le tableau.
@@ -203,7 +205,8 @@ class LiveLootContextFactoryTest extends UnitTestCase
     {
         return LiveLootContextFactory::forBattle(
             [$this->fleet(10, CharacterClass::DISCOVERER)],
-            $this->planetService
+            $this->planetService,
+            FrozenLootAllocation::atOperationStart()
         );
     }
 

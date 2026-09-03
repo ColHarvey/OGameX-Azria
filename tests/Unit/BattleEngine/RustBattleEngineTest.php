@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\BattleEngine;
 
+use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\GameMissions\BattleEngine\BattleEngine;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
@@ -42,7 +43,7 @@ class RustBattleEngineTest extends BattleEngineTestAbstract
             $this->planetService,
             $defenders,
             $this->settingsService,
-            LiveLootContextFactory::forBattle([$attacker], $this->planetService)
+            LiveLootContextFactory::forBattle([$attacker], $this->planetService, FrozenLootAllocation::atOperationStart())
         );
     }
 

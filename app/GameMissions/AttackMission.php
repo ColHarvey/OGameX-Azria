@@ -2,6 +2,7 @@
 
 namespace OGame\GameMissions;
 
+use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Services\CombatResolutionService;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\LootContextForMission;
@@ -144,7 +145,11 @@ class AttackMission extends GameMission
         // **Une attaque pille.** Les faits sont photographies ici, une fois, et pour les deux
         // moteurs : l'inactivite de la cible et le fret engage doivent etre les memes quel que
         // soit le moteur configure.
-        $lootContext = LootContextForMission::lootingOrDegraded($attackerFleets, $defenderPlanet, 'attack', $mission->id);
+        // La version de l allocateur se choisit au debut de l operation, pas au milieu du
+        // plafonnement : sans cela, un deploiement survenu en cours de resolution en changerait
+        // la seconde moitie.
+        $allocation = FrozenLootAllocation::atOperationStart();
+        $lootContext = LootContextForMission::lootingOrDegraded($attackerFleets, $defenderPlanet, 'attack', $mission->id, $allocation);
 
         // Execute the battle logic using configured battle engine
         switch ($this->settings->battleEngine()) {

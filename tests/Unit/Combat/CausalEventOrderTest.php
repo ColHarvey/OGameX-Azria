@@ -266,18 +266,19 @@ class CausalEventOrderTest extends UnitTestCase
      */
     public function testTheCurrentVersionIsOnlyChosenWhereTheOpeningIsFixed(): void
     {
-        // **La frontiere autoritaire, et les deux inscriptions provisoires.**
+        // **Les deux frontieres autoritaires, et elles sont nommees.**
         //
-        // `CombatRuleVersionSet` est faite pour cela : choisir les quatre versions courantes une
-        // seule fois, a l'ouverture durable.
+        // `CombatRuleVersionSet` choisit les quatre versions du combat durable, une seule fois, a
+        // l ouverture. `FrozenLootAllocation` choisit celle du combat instantane, au debut de
+        // l operation.
         //
-        // Les deux autres appartiennent au combat **instantane**, qui se resout a la seconde ou la
-        // flotte arrive. Y lire la version courante est correct tant qu'aucun combat ne dure ; elles
-        // sortiront de cette liste le jour ou le combat persistant leur passera l'ensemble gele.
+        // Les deux derogations provisoires ont disparu. `LiveLootContextFactory` et `LootService`
+        // lisaient la version courante **au milieu du calcul** : un deploiement survenu entre deux
+        // plafonnements aurait regle la seconde moitie d une bataille sous une autre regle. Elles
+        // recoivent desormais l allocation, et ne choisissent plus rien.
         $autorises = [
+            'Combat/Allocation/FrozenLootAllocation.php',
             'Combat/Support/CombatRuleVersionSet.php',
-            'Combat/Support/LiveLootContextFactory.php',
-            'GameMissions/BattleEngine/Services/LootService.php',
         ];
 
         // Les quatre mecanismes versionnes. En surveiller un seul laissait les trois autres deriver.

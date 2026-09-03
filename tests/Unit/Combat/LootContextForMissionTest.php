@@ -3,6 +3,7 @@
 namespace Tests\Unit\Combat;
 
 use Illuminate\Support\Facades\Log;
+use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Enums\NoLootReason;
 use OGame\Combat\Enums\UnsupportedSideReason;
 use OGame\Combat\Exceptions\UnsupportedActorSide;
@@ -52,7 +53,8 @@ class LootContextForMissionTest extends UnitTestCase
             [$this->fleet(101, false)],
             $this->planetService,
             'attack',
-            7
+            7,
+            FrozenLootAllocation::atOperationStart()
         );
 
         $this->assertFalse($contexte->grantsNoLoot(), 'An ordinary attack must keep its right to loot.');
@@ -69,7 +71,8 @@ class LootContextForMissionTest extends UnitTestCase
             [$this->fleet(101, false), $this->fleet(102, true)],
             $this->planetService,
             'attack',
-            7
+            7,
+            FrozenLootAllocation::atOperationStart()
         );
 
         $this->assertTrue($contexte->grantsNoLoot());
@@ -93,7 +96,8 @@ class LootContextForMissionTest extends UnitTestCase
 
         LiveLootContextFactory::forBattle(
             [$this->fleet(101, false), $this->fleet(102, true)],
-            $this->planetService
+            $this->planetService,
+            FrozenLootAllocation::atOperationStart()
         );
     }
 
@@ -127,6 +131,7 @@ class LootContextForMissionTest extends UnitTestCase
                 $this->planetService,
                 'attack',
                 7,
+                FrozenLootAllocation::atOperationStart(),
                 static function () use ($raison): LootContext {
                     throw UnsupportedActorSide::because($raison, [101 => $raison->value]);
                 }
@@ -160,7 +165,8 @@ class LootContextForMissionTest extends UnitTestCase
             [$this->fleet(101, false), $this->fleet(102, true)],
             $this->planetService,
             'attack',
-            77
+            77,
+            FrozenLootAllocation::atOperationStart()
         );
 
         $this->assertCount(1, $capture, 'The degradation must leave exactly one trace.');
@@ -187,6 +193,7 @@ class LootContextForMissionTest extends UnitTestCase
             $this->planetService,
             'attack',
             7,
+            FrozenLootAllocation::atOperationStart(),
             static function (): LootContext {
                 throw new RuntimeException('base injoignable');
             }

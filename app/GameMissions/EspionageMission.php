@@ -2,6 +2,7 @@
 
 namespace OGame\GameMissions;
 
+use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Enums\NoLootReason;
 use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\Enums\FleetMissionStatus;
@@ -292,7 +293,8 @@ class EspionageMission extends GameMission
         $lootContext = LiveLootContextFactory::withoutLoot(
             NoLootReason::CounterEspionage,
             [$attackerFleet],
-            $targetPlanet
+            $targetPlanet,
+            FrozenLootAllocation::atOperationStart()
         );
 
         // Execute battle using configured battle engine
