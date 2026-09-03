@@ -12,8 +12,7 @@ use OGame\Combat\Support\SealedResourceDiagnostics;
 use OGame\Enums\FleetMissionStatus;
 use OGame\Enums\FleetSpeedType;
 use OGame\GameMissions\Abstracts\GameMission;
-use OGame\GameMissions\BattleEngine\PhpBattleEngine;
-use OGame\GameMissions\BattleEngine\RustBattleEngine;
+use OGame\GameMissions\BattleEngine\BattleEngineFactory;
 use OGame\GameMissions\Models\MissionPossibleStatus;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Enums\PlanetType;
@@ -152,16 +151,7 @@ class AttackMission extends GameMission
         $lootContext = LootContextForMission::lootingOrDegraded($attackerFleets, $defenderPlanet, 'attack', $mission->id, $allocation);
 
         // Execute the battle logic using configured battle engine
-        switch ($this->settings->battleEngine()) {
-            case 'php':
-                $battleEngine = new PhpBattleEngine($attackerFleets, $defenderPlanet, $defenders, $this->settings, $lootContext);
-                break;
-            case 'rust':
-            default:
-                // Default to RustBattleEngine if no specific engine is configured
-                $battleEngine = new RustBattleEngine($attackerFleets, $defenderPlanet, $defenders, $this->settings, $lootContext);
-                break;
-        }
+        $battleEngine = BattleEngineFactory::configured($this->settings, $attackerFleets, $defenderPlanet, $defenders, $lootContext);
 
         $battleEngine->setRetreatAfterDefenderRetreat((bool)$mission->retreat_after_defender_retreat);
         $battleResult = $battleEngine->simulateBattle();

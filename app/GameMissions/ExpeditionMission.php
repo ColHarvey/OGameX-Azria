@@ -23,11 +23,10 @@ use OGame\GameMessages\ExpeditionGainShips;
 use OGame\GameMessages\ExpeditionLossOfFleet;
 use OGame\GameMessages\ExpeditionMerchantFound;
 use OGame\GameMissions\Abstracts\GameMission;
+use OGame\GameMissions\BattleEngine\BattleEngineFactory;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
-use OGame\GameMissions\BattleEngine\PhpBattleEngine;
-use OGame\GameMissions\BattleEngine\RustBattleEngine;
 use OGame\GameMissions\Models\ExpeditionOutcomeType;
 use OGame\GameMissions\Models\MissionPossibleStatus;
 use OGame\GameObjects\Models\ShipObject;
@@ -770,27 +769,7 @@ class ExpeditionMission extends GameMission
             FrozenLootAllocation::atOperationStart()
         );
 
-        switch ($this->settings->battleEngine()) {
-            case 'php':
-                $battleEngine = new PhpBattleEngine(
-                    [$attackerFleet],
-                    $npcPlanetService,
-                    $defenders,
-                    $this->settings,
-                    $lootContext
-                );
-                break;
-            case 'rust':
-            default:
-                $battleEngine = new RustBattleEngine(
-                    [$attackerFleet],
-                    $npcPlanetService,
-                    $defenders,
-                    $this->settings,
-                    $lootContext
-                );
-                break;
-        }
+        $battleEngine = BattleEngineFactory::configured($this->settings, [$attackerFleet], $npcPlanetService, $defenders, $lootContext);
 
         $battleResult = $battleEngine->simulateBattle();
 

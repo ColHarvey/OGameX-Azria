@@ -11,10 +11,9 @@ use OGame\Factories\PlayerServiceFactory;
 use OGame\GameMessages\DefenderEspionageDetected;
 use OGame\GameMessages\FleetLostContact;
 use OGame\GameMissions\Abstracts\GameMission;
+use OGame\GameMissions\BattleEngine\BattleEngineFactory;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
-use OGame\GameMissions\BattleEngine\PhpBattleEngine;
-use OGame\GameMissions\BattleEngine\RustBattleEngine;
 use OGame\GameMissions\Models\MissionPossibleStatus;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\BattleReport;
@@ -298,15 +297,7 @@ class EspionageMission extends GameMission
         );
 
         // Execute battle using configured battle engine
-        switch ($this->settings->battleEngine()) {
-            case 'php':
-                $battleEngine = new PhpBattleEngine([$attackerFleet], $targetPlanet, $defenders, $this->settings, $lootContext);
-                break;
-            case 'rust':
-            default:
-                $battleEngine = new RustBattleEngine([$attackerFleet], $targetPlanet, $defenders, $this->settings, $lootContext);
-                break;
-        }
+        $battleEngine = BattleEngineFactory::configured($this->settings, [$attackerFleet], $targetPlanet, $defenders, $lootContext);
 
         $battleResult = $battleEngine->simulateBattle();
 

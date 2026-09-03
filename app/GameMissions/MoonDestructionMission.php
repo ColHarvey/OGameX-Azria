@@ -19,10 +19,9 @@ use OGame\GameMessages\MoonDestructionMissionFailed;
 use OGame\GameMessages\MoonDestructionRepelled;
 use OGame\GameMessages\MoonDestructionSuccess;
 use OGame\GameMissions\Abstracts\GameMission;
+use OGame\GameMissions\BattleEngine\BattleEngineFactory;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
-use OGame\GameMissions\BattleEngine\PhpBattleEngine;
-use OGame\GameMissions\BattleEngine\RustBattleEngine;
 use OGame\GameMissions\Models\MissionPossibleStatus;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\BattleReport;
@@ -162,15 +161,7 @@ class MoonDestructionMission extends GameMission
         $lootContext = LootContextForMission::lootingOrDegraded([$attackerFleet], $targetMoon, 'moon_destruction', $mission->id, $allocation);
 
         // Execute the battle logic using configured battle engine
-        switch ($this->settings->battleEngine()) {
-            case 'php':
-                $battleEngine = new PhpBattleEngine([$attackerFleet], $targetMoon, $defenders, $this->settings, $lootContext);
-                break;
-            case 'rust':
-            default:
-                $battleEngine = new RustBattleEngine([$attackerFleet], $targetMoon, $defenders, $this->settings, $lootContext);
-                break;
-        }
+        $battleEngine = BattleEngineFactory::configured($this->settings, [$attackerFleet], $targetMoon, $defenders, $lootContext);
 
         $battleResult = $battleEngine->simulateBattle();
 

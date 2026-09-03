@@ -65,7 +65,14 @@ class LootPolicyUsageTest extends UnitTestCase
         $trouves = [];
 
         foreach ($this->productionFiles() as $chemin => $contenu) {
-            if (preg_match('/new (?:Php|Rust)BattleEngine\(|new \$engineClass\(/', $contenu) === 1) {
+            // La fabrique construit les moteurs pour le compte de ses appelants et recoit le
+            // contexte tout fait : elle ne choisit rien, et n'a donc aucun genre a declarer.
+            // Le site qui decide est celui qui l'appelle.
+            if ($chemin === 'app/GameMissions/BattleEngine/BattleEngineFactory.php') {
+                continue;
+            }
+
+            if (preg_match('/new (?:Php|Rust)BattleEngine\(|new \$engineClass\(|BattleEngineFactory::configured\(/', $contenu) === 1) {
                 $trouves[] = $chemin;
             }
         }
