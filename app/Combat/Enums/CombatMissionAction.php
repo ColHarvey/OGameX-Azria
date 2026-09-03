@@ -120,4 +120,74 @@ enum CombatMissionAction: string
      * fasse heriter un champ de debris ou une position vide du verrou d'une planete.
      */
     case OutsideMatrixDomain = 'outside_matrix_domain';
+
+    /**
+     * Si cette action depose reellement quelque chose sur le corps celeste.
+     *
+     * ## Pourquoi la table vit ici
+     *
+     * Elle a d'abord habite `ArrivalVerdict`, qui en avait besoin pour batir ses verdicts. Le
+     * consommateur d'arrivee a ensuite eu besoin de la meme reponse, et une seconde liste a
+     * commence a s'ecrire. Deux tables egales finissent par ne plus l'etre — et celle-ci decide si
+     * une flotte figure dans une bataille.
+     *
+     * Elle est donc **portee par l'action**, qui est ce dont elle parle. Une action nouvelle ne
+     * peut plus etre ajoutee sans repondre aux deux questions : le `match` est exhaustif.
+     *
+     * Un report ne pose rien **pour l'instant** : c'est sa continuation qui le dira, et c'est
+     * l'appelant qui la deroule.
+     */
+    public function landsOnTheBody(): bool
+    {
+        return match ($this) {
+            self::AllowNormally,
+            self::JoinAttack,
+            self::JoinDefence,
+            self::LandOutsideSnapshot => true,
+
+            self::DeferImpact,
+            self::SelectByAttackAdmission,
+            self::SelectByDefenceAdmission,
+            self::SelectByEventOrder,
+            self::ReturnToOrigin,
+            self::CancelWithoutImpact,
+            self::DeferUntilResolved,
+            self::RefuseLaunch,
+            self::RequiresAssetRecovery,
+            self::OutsideMatrixDomain => false,
+        };
+    }
+
+    /**
+     * Si cette action peut modifier la photographie, de quelque facon que ce soit.
+     *
+     * ## Pourquoi la question n'est pas « depose-t-elle des vaisseaux »
+     *
+     * Un missile modifie des defenses, un chantier acheve ajoute des unites, une recherche change
+     * des caracteristiques de combat. Aucun ne pose de flotte, et tous les trois modifient la
+     * photographie. Limiter l'obligation aux mouvements qui atterrissent les laisserait entrer sans
+     * qu'aucune decision causale ne soit demandee.
+     *
+     * Seul un depart n'y touche pas : la flotte repart, ou disparait.
+     */
+    public function mayTouchTheSnapshot(): bool
+    {
+        return match ($this) {
+            self::AllowNormally,
+            self::JoinAttack,
+            self::JoinDefence,
+            self::LandOutsideSnapshot,
+            self::DeferImpact,
+            self::SelectByAttackAdmission,
+            self::SelectByDefenceAdmission,
+            self::SelectByEventOrder => true,
+
+            self::ReturnToOrigin,
+            self::CancelWithoutImpact,
+            self::DeferUntilResolved,
+            self::RefuseLaunch,
+            self::RequiresAssetRecovery,
+            self::OutsideMatrixDomain => false,
+        };
+    }
 }

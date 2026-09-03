@@ -35,4 +35,14 @@ enum InvariantCode: string
      * Ce n'est pas une regle de jeu mais un defaut : une alerte, pas un message de rapport.
      */
     case AssetsWithoutDestination = 'assets_without_destination';
+
+    /**
+     * Un effet a ete cree apres l'ouverture du combat, malgre le verrou qui l'interdit.
+     *
+     * Le cas type est le missile : tout lancement visant un corps deja verrouille est refuse
+     * cote serveur, donc un impact engage apres l'ouverture ne devrait pas exister. Le traiter
+     * comme une arrivee tardive ordinaire masquerait la course qui l'a produit ; l'appliquer
+     * modifierait une photographie deja prise.
+     */
+    case EffectCreatedAfterTheLock = 'effect_created_after_the_lock';
 }

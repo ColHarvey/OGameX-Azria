@@ -3,7 +3,6 @@
 namespace OGame\Combat\Decisions;
 
 use LogicException;
-use OGame\Combat\Enums\CombatMissionAction;
 use OGame\Combat\Enums\SnapshotObligation;
 
 /**
@@ -101,6 +100,11 @@ final readonly class ArrivalVerdict
     /**
      * Le classement d'une action, selon qu'on demande l'atterrissage ou l'effet.
      *
+     * **La table vit sur l'action, pas ici.** Le consommateur d'arrivee pose la meme question, et
+     * une seconde copie de la liste aurait fini par diverger de celle-ci. Ce qui reste ici est ce
+     * qui n'appartient qu'au verdict : derouler une continuation, et refuser de classer une case
+     * dont la regle n'est pas arretee.
+     *
      * @param ArrivalDecision $movement
      * @param bool $landingOnly
      * @return bool
@@ -113,27 +117,8 @@ final readonly class ArrivalVerdict
             return false;
         }
 
-        return match ($decision->action()) {
-            CombatMissionAction::AllowNormally,
-            CombatMissionAction::JoinAttack,
-            CombatMissionAction::JoinDefence,
-            CombatMissionAction::LandOutsideSnapshot => true,
-
-            // Ceux-la ne posent aucune flotte, et modifient pourtant ce que le moteur verra : un
-            // impact de missile, une admission encore a prononcer, un effet dont l'ordre reste a
-            // trancher.
-            CombatMissionAction::DeferImpact,
-            CombatMissionAction::SelectByAttackAdmission,
-            CombatMissionAction::SelectByDefenceAdmission,
-            CombatMissionAction::SelectByEventOrder => !$landingOnly,
-
-            // Un depart, lui, ne touche a rien.
-            CombatMissionAction::ReturnToOrigin,
-            CombatMissionAction::CancelWithoutImpact,
-            CombatMissionAction::DeferUntilResolved,
-            CombatMissionAction::RefuseLaunch,
-            CombatMissionAction::RequiresAssetRecovery,
-            CombatMissionAction::OutsideMatrixDomain => false,
-        };
+        return $landingOnly
+            ? $decision->action()->landsOnTheBody()
+            : $decision->action()->mayTouchTheSnapshot();
     }
 }

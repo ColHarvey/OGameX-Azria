@@ -442,13 +442,23 @@ final readonly class ArrivalDecision implements CombatDecision
                 CombatReasonCode::RallyClosed,
                 CombatReasonCode::TargetCombatLocked,
             ],
+            // **Les memes raisons qu un demi-tour, plus l absence de destination.** Annuler, c est
+            // renvoyer une flotte qui n a plus de chez-soi : l action dit ce qu il advient du vaisseau,
+            // la raison dit pourquoi la mission s arrete, et la seconde ne depend pas de la premiere. La
+            // liste s etait arretee aux codes anterieurs aux selecteurs, et une candidate refusee dont
+            // l origine avait ete detruite ne pouvait alors pas etre annulee.
             CombatMissionAction::CancelWithoutImpact => [
                 CombatReasonCode::RallyClosed,
                 CombatReasonCode::AllianceNotEligible,
                 CombatReasonCode::FleetLimitReached,
                 CombatReasonCode::PlayerLimitReached,
+                CombatReasonCode::NpcSideNotReinforceable,
                 CombatReasonCode::TargetCombatLocked,
                 CombatReasonCode::PositionNoLongerFree,
+                CombatReasonCode::WrongTargetBody,
+                CombatReasonCode::NotAlreadyInFlight,
+                CombatReasonCode::RallyWindowLimit,
+                CombatReasonCode::CandidateRecalled,
                 CombatReasonCode::NoReturnDestination,
             ],
             default => [],

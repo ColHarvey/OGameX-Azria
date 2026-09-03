@@ -42,9 +42,10 @@ use Tests\UnitTestCase;
  * directives : la matrice a tranche, et ce qu'elle a tranche est de deleguer a un mecanisme nomme.
  * Seule `MissingRule` designe un trou — et il doit rester vide.
  *
- * Une reserve qui vaut d'etre ecrite : une delegation ne compte comme tranchee **que si son
+ * Une reserve qui valait d'etre ecrite : une delegation ne compte comme tranchee **que si son
  * consommateur existe et traite exhaustivement ses resultats**. Ces essais prouvent que la matrice
- * delegue ; ils ne prouvent pas encore que quelqu'un recoit.
+ * delegue ; c'est `ArrivalResolutionTest` qui prouve que quelqu'un recoit, et que rien ne se rabat
+ * silencieusement quand personne ne repond.
  */
 class CombatDecisionMatrixTest extends UnitTestCase
 {
