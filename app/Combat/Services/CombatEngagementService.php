@@ -5,11 +5,14 @@ namespace OGame\Combat\Services;
 use LogicException;
 use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Allocation\LootAllocatorRegistry;
+use OGame\Combat\Application\FrozenCombatApplicationContext;
+use OGame\Combat\Application\LiveCombatApplicationContext;
 use OGame\Combat\Replay\BattleResultCodec;
 use OGame\Combat\Support\FrozenCombatVersionSet;
 use OGame\Combat\Support\LootContextForMission;
 use OGame\GameMissions\BattleEngine\BattleEngineFactory;
 use OGame\Models\CombatInstance;
+use OGame\Services\CharacterClassService;
 use OGame\Services\SettingsService;
 
 /**
@@ -102,6 +105,14 @@ final class CombatEngagementService
         foreach ($estimation->rounds as $round) {
             $calendrier[] = ['round' => $round->number, 'seconds' => $round->seconds, 'work' => $round->work];
         }
+
+        // **La photographie des faits d'application, prise ici et pas a l'echeance.** Classes des
+        // joueurs, niveau de chantier spatial, seuils de champ d'epaves : chacun peut changer
+        // pendant les heures que dure le combat, et chacun changerait ce que l'application ecrit.
+        $combat->frozen_settings = FrozenCombatApplicationContext::photograph(
+            $effectif,
+            new LiveCombatApplicationContext(resolve(CharacterClassService::class), $this->settings())
+        )->toStorage();
 
         $combat->battle_result = BattleResultCodec::toStorage($resultat);
         $combat->duration_seconds = $estimation->seconds;

@@ -367,6 +367,12 @@ abstract class AccountTestCase extends TestCase
             ->where('destroyed', 0)
             ->whereBetween('system', [$coordinates->system - 15, $coordinates->system + 15])
             ->whereNotIn('user_id', $this->getAdminUserIds())
+            // **Un joueur en conge n'est pas une cible.** Toute mission hostile est refusee contre
+            // lui, et un essai qui en recoit un croit avoir trouve un voisin alors qu'il a trouve un
+            // mur. La base n'est pas remise a zero entre deux essais d'un meme processus : un
+            // voisin qui a mis quelqu'un en conge le laisse en conge, et l'essai suivant heritait
+            // du refus sans rien avoir demande.
+            ->whereNotIn('user_id', DB::table('users')->where('vacation_mode', true)->select('id'))
             // **Le plus proche, pas le plus petit.** Un tri par systeme croissant choisirait
             // systematiquement le bord inferieur de la fenetre — le plus **eloigne** —, ce qui
             // trahirait le nom du helper. La distance d'abord, puis la position, puis l'identifiant :

@@ -12,6 +12,7 @@ use OGame\Combat\Allocation\LootSettlement;
 use OGame\Combat\Allocation\RemainingTargetStock;
 use OGame\Combat\Allocation\SettledBattleResult;
 use OGame\Combat\Allocation\SurvivingFleetCapacity;
+use OGame\Combat\Application\FrozenCombatApplicationContext;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Exceptions\MismatchedCombatIdentity;
 use OGame\Combat\Exceptions\UnsettleableAtThisScale;
@@ -241,6 +242,10 @@ final class CombatSettlementService
                 $missionDeJeu,
                 $creerRetour,
                 $allocation,
+                // **Les faits d'application viennent de la cloture**, pas du monde courant : un
+                // joueur qui a change de classe ou monte son chantier spatial pendant la bataille
+                // ne doit pas en changer l'issue.
+                FrozenCombatApplicationContext::fromStorage($combat->frozen_settings),
             );
 
             $this->moveTo($combat, CombatState::Resolved);

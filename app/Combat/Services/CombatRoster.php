@@ -24,6 +24,10 @@ final readonly class CombatRoster
      * @param PlayerService $targetOwner Son proprietaire.
      * @param PlayerService $initiatorOwner Le proprietaire de la flotte initiatrice.
      * @param FleetMission $initiator La mission qui a ouvert le combat.
+     * @param array<int, PlanetService> $originBodies Les corps d'ou les flottes attaquantes sont
+     *        parties, sans doublon. C'est leur chantier spatial qui fixe la taille du champ d'epaves
+     *        d'un attaquant de classe General : la photographie d'application les fige tous, sans
+     *        quoi un chantier monte d'un niveau pendant la bataille en changerait l'issue.
      */
     public function __construct(
         public array $attackers,
@@ -32,6 +36,7 @@ final readonly class CombatRoster
         public PlayerService $targetOwner,
         public PlayerService $initiatorOwner,
         public FleetMission $initiator,
+        public array $originBodies = [],
     ) {
     }
 }

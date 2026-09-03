@@ -73,13 +73,29 @@ final class CombatRosterReader
             ->keyBy('id');
 
         $flottes = [];
+        $origines = [];
+
         foreach ($this->initiatorFirst($attaquantes, $combat->mission_id) as $id) {
+            $mission = $this->missionOf($missions, $id, $combat);
+
             $flottes[] = AttackerFleet::fromFleetMission(
-                $this->missionOf($missions, $id, $combat),
+                $mission,
                 $this->fleetMissions(),
                 $this->players(),
                 $id === $combat->mission_id
             );
+
+            // Le corps d'ou cette flotte est partie : son chantier spatial fixera la taille du
+            // champ d'epaves si son proprietaire est General. Charge une fois par corps.
+            $origine = $mission->planet_id_from;
+
+            if ($origine !== null && !isset($origines[$origine])) {
+                $corps = $this->planets()->make((int)$origine, true);
+
+                if ($corps !== null) {
+                    $origines[$origine] = $corps;
+                }
+            }
         }
 
         // La garnison d'abord : elle est le camp defenseur meme quand personne n'est venu en renfort.
@@ -104,7 +120,8 @@ final class CombatRosterReader
             $cible,
             $proprietaireCible,
             $this->players()->make($initiatrice->user_id, true),
-            $initiatrice
+            $initiatrice,
+            array_values($origines)
         );
     }
 

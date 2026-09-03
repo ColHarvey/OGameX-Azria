@@ -4,6 +4,8 @@ namespace OGame\Combat\Services;
 
 use Closure;
 use OGame\Combat\Allocation\FrozenLootAllocation;
+use OGame\Combat\Application\CombatApplicationContext;
+use OGame\Combat\Application\LiveCombatApplicationContext;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\ResourceNormalizationDiagnostics;
 use OGame\Factories\PlanetServiceFactory;
@@ -98,6 +100,10 @@ class CombatResolutionService
      * @param Closure $creerRetour Cree une mission retour ; delegue a GameMission::startReturn().
      * @param FrozenLootAllocation|null $allocation L allocation gelee du combat durable ; le chemin
      *        instantane n en passe pas et la resolution choisit alors la courante, une fois.
+     * @param CombatApplicationContext|null $context Les faits dont l application depend encore —
+     *        classes, chantier spatial, seuils de champ d epaves. Le chemin instantane n en passe
+     *        pas et la resolution lit le monde courant ; le combat durable donne la photographie
+     *        prise a la cloture, sans quoi ce qui change pendant la bataille en changerait l issue.
      * @return CombatResolutionOutcome Ce que l application du resultat a rencontre — distinct du
      *         resultat lui-meme, qui reste fige tel que le moteur l a calcule.
      */
@@ -113,6 +119,7 @@ class CombatResolutionService
         GameMission $missionDeJeu,
         Closure $creerRetour,
         FrozenLootAllocation|null $allocation = null,
+        CombatApplicationContext|null $context = null,
     ): CombatResolutionOutcome {
         // Ce que l'application du resultat rencontre lui appartient : le `BattleResult` reste tel
         // que le moteur l'a fige.
@@ -127,6 +134,13 @@ class CombatResolutionService
         // geles par `FrozenLootAllocation::fromFrozenSet()` et la passe en parametre : la
         // resolution ne choisit une version que si personne ne l a choisie avant elle.
         $allocation ??= FrozenLootAllocation::atOperationStart();
+
+        // **Les faits dont l'application depend encore.** Sur le chemin instantane, les lire
+        // dans le monde courant est juste : quelques millisecondes separent le calcul de
+        // l'application. Le combat durable, lui, en donne une photographie prise a la cloture —
+        // un joueur qui change de classe ou monte son chantier spatial pendant la bataille ne
+        // doit pas en changer l'issue.
+        $context ??= new LiveCombatApplicationContext(resolve(CharacterClassService::class), $this->settings);
 
         // Deduct loot from the target planet.
         $defenderPlanet->deductResources($battleResult->loot);
@@ -272,9 +286,8 @@ class CombatResolutionService
                     // Calculate wreck field for General class attacker
                     // General perk: wreck field from attacker's lost ships is transported back with the return mission
                     $attackerWreckFieldData = null;
-                    $characterClassService = resolve(CharacterClassService::class);
-                    if ($characterClassService->isGeneral($fleetOwner->getUser())) {
-                        $attackerWreckFieldData = $this->calculateAttackerWreckField($fleetResult->unitsLost, $fleetResult->unitsStart, $originPlanet);
+                    if ($context->isGeneral($fleetOwner)) {
+                        $attackerWreckFieldData = $this->calculateAttackerWreckField($fleetResult->unitsLost, $fleetResult->unitsStart, $originPlanet, $context);
                     }
 
                     // Mark outbound mission as processed and create return mission with survivors
@@ -294,10 +307,8 @@ class CombatResolutionService
         // Check if attacker has Reaper ships for automatic debris collection (General class only)
         $attackerCollectedDebris = new Resources(0, 0, 0, 0);
         $defenderCollectedDebris = new Resources(0, 0, 0, 0);
-        $characterClassService = app(CharacterClassService::class);
-
         // Attacker Reaper collection
-        $attackerDebrisCollectionPercentage = $characterClassService->getReaperDebrisCollectionPercentage($attackerPlayer->getUser());
+        $attackerDebrisCollectionPercentage = $context->reaperDebrisCollectionPercentage($attackerPlayer);
         if ($attackerDebrisCollectionPercentage > 0 && $battleResult->attackerUnitsResult->getAmountByMachineName('reaper') > 0) {
             // Calculate 30% of the debris to be collected automatically
             $collectionAmount = new Resources(
@@ -347,7 +358,7 @@ class CombatResolutionService
         );
 
         // Defender Reaper collection (from remaining debris after attacker collection)
-        $defenderDebrisCollectionPercentage = $characterClassService->getReaperDebrisCollectionPercentage($defenderPlayer->getUser());
+        $defenderDebrisCollectionPercentage = $context->reaperDebrisCollectionPercentage($defenderPlayer);
         if ($defenderDebrisCollectionPercentage > 0 && $battleResult->defenderUnitsResult->getAmountByMachineName('reaper') > 0) {
             // Calculate 30% of the remaining debris
             $collectionAmount = new Resources(
@@ -436,7 +447,7 @@ class CombatResolutionService
         // attaquante (union ACS comprise) et tout proprietaire d'une flotte en defense
         // (le maitre de la planete, plus les allies venus en ACS Defend). Un joueur ayant
         // engage plusieurs flottes n'est prevenu qu'une seule fois.
-        $reportId = $this->createBattleReport($attackerPlayer, $defenderPlanet, $battleResult, $collectedDebris, $attackerCollectedDebris, $defenderCollectedDebris);
+        $reportId = $this->createBattleReport($attackerPlayer, $defenderPlanet, $battleResult, $collectedDebris, $attackerCollectedDebris, $defenderCollectedDebris, $context);
 
         // Le recit d'un raid de faction se depose ici, dans le rapport, et jamais avant
         // l'attaque : un raid pirate doit rester indiscernable d'une attaque humaine tant
@@ -543,15 +554,14 @@ class CombatResolutionService
             // Calculate wreck field for General class attacker
             // General perk: wreck field from attacker's lost ships is transported back with the return mission
             $attackerWreckFieldData = null;
-            $characterClassService = resolve(CharacterClassService::class);
-            if ($characterClassService->isGeneral($attackerPlayer->getUser())) {
+            if ($context->isGeneral($attackerPlayer)) {
                 // Calculate attacker's lost units (start - result = lost)
                 $attackerUnitsLost = clone $battleResult->attackerUnitsStart;
                 $attackerUnitsLost->subtractCollection($battleResult->attackerUnitsResult);
                 $originPlanet = $this->planetServiceFactory->makeForPlayer($attackerPlayer, $originPlanetId);
 
                 // Calculate wreck field data if conditions are met
-                $attackerWreckFieldData = $this->calculateAttackerWreckField($attackerUnitsLost, $battleResult->attackerUnitsStart, $originPlanet);
+                $attackerWreckFieldData = $this->calculateAttackerWreckField($attackerUnitsLost, $battleResult->attackerUnitsStart, $originPlanet, $context);
             }
 
             ($creerRetour)($mission, $totalResources, $battleResult->attackerUnitsResult, 0, $attackerWreckFieldData);
@@ -612,10 +622,12 @@ class CombatResolutionService
         return $plafonne->resources;
     }
 
-    private function calculateAttackerWreckField(UnitCollection $attackerUnitsLost, UnitCollection $attackerUnitsStart, PlanetService $originPlanet): array|null
+    private function calculateAttackerWreckField(UnitCollection $attackerUnitsLost, UnitCollection $attackerUnitsStart, PlanetService $originPlanet, CombatApplicationContext $context): array|null
     {
+        // **Le niveau vient du contexte, pas du corps.** Un chantier spatial monte d'un niveau
+        // pendant une bataille de deux heures en changerait la taille du champ d'epaves.
+        $spaceDockLevel = $context->spaceDockLevelFor($originPlanet);
         $spaceDockPlanet = $originPlanet->isMoon() ? $originPlanet->planet() : $originPlanet;
-        $spaceDockLevel = max(1, $spaceDockPlanet->getObjectLevel('space_dock'));
         $spaceDockPlayer = $spaceDockPlanet->getPlayer();
         if ($spaceDockPlayer === null) {
             throw new RuntimeException('Space dock planet has no owner.');
@@ -633,8 +645,8 @@ class CombatResolutionService
 
         if ($totalFleetValue > 0) {
             $destroyedPercentage = ($totalLostValue / $totalFleetValue) * 100;
-            $minResourcesRequired = $this->settings->wreckFieldMinResourcesLoss();
-            $minFleetPercentageRequired = $this->settings->wreckFieldMinFleetPercentage();
+            $minResourcesRequired = $context->wreckFieldMinResourcesLoss();
+            $minFleetPercentageRequired = $context->wreckFieldMinFleetPercentage();
 
             // Only return wreck field data if conditions are met and there are ships
             if ($totalLostValue >= $minResourcesRequired
@@ -658,7 +670,7 @@ class CombatResolutionService
      * @param Resources $defenderCollectedDebris Debris collected by defender's Reaper ships.
      * @return int
      */
-    private function createBattleReport(PlayerService $attackPlayer, PlanetService $defenderPlanet, BattleResult $battleResult, Resources $collectedDebris, Resources $attackerCollectedDebris, Resources $defenderCollectedDebris): int
+    private function createBattleReport(PlayerService $attackPlayer, PlanetService $defenderPlanet, BattleResult $battleResult, Resources $collectedDebris, Resources $attackerCollectedDebris, Resources $defenderCollectedDebris, CombatApplicationContext $context): int
     {
         $defenderPlayer = $defenderPlanet->getPlayer();
         if ($defenderPlayer === null) {
@@ -693,9 +705,8 @@ class CombatResolutionService
             ],
         ];
 
-        $characterClassService = app(CharacterClassService::class);
-        $attackerCharacterClass = $characterClassService->getCharacterClass($attackPlayer->getUser());
-        $defenderCharacterClass = $characterClassService->getCharacterClass($defenderPlayer->getUser());
+        $attackerCharacterClass = $context->characterClassOf($attackPlayer);
+        $defenderCharacterClass = $context->characterClassOf($defenderPlayer);
 
         $report->attacker = [
             'player_id' => $attackPlayer->getId(),
@@ -763,12 +774,12 @@ class CombatResolutionService
         // Save General class attacker's wreck field in the report.
         // Shown only if the attacker is General class AND at least one ship survived
         // (survivor condition ensures there is a return mission to transport the wreckage back).
-        if ($characterClassService->isGeneral($attackPlayer->getUser())
+        if ($context->isGeneral($attackPlayer)
             && $battleResult->attackerUnitsResult->getAmount() > 0) {
             $attackerUnitsLost = clone $battleResult->attackerUnitsStart;
             $attackerUnitsLost->subtractCollection($battleResult->attackerUnitsResult);
             $originPlanet = $this->planetServiceFactory->makeForPlayer($attackPlayer, $battleResult->attackerPlanetId);
-            $generalWreckData = $this->calculateAttackerWreckField($attackerUnitsLost, $battleResult->attackerUnitsStart, $originPlanet);
+            $generalWreckData = $this->calculateAttackerWreckField($attackerUnitsLost, $battleResult->attackerUnitsStart, $originPlanet, $context);
 
             if ($generalWreckData !== null) {
                 $generalWreckForReport = [];

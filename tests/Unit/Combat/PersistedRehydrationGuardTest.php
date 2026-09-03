@@ -64,6 +64,10 @@ class PersistedRehydrationGuardTest extends TestCase
             'tests/Unit/Combat/FrozenMoonDestructionPlanTest.php',
             'testAMoonWithANumericStringIdentifierIsRefused',
         ],
+        'Application/FrozenCombatApplicationContext::fromStorage' => [
+            'tests/Unit/Combat/FrozenCombatApplicationContextTest.php',
+            'testASpaceDockLevelGivenAsANumericStringIsRefused',
+        ],
         'Replay/BattleResultCodec::fromStorage' => [
             'tests/Unit/Combat/BattleResultCodecTest.php',
             'testANumericStringIsRefused',
