@@ -5,6 +5,7 @@ namespace OGame\Combat\Admission;
 use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\FlightLeg;
+use OGame\Combat\Support\CombatRallyWindow;
 
 /**
  * Qui rejoint le camp attaquant, decide **en une fois** pour tout le groupe.
@@ -27,8 +28,20 @@ use OGame\Combat\Enums\FlightLeg;
  *     1. corps exact, sens de vol, acteur autorise
  *     2. deja en vol a l'ouverture, non rappelee
  *     3. plafond temporel
- *     4. meme joueur ou alliance figee
- *     5. budgets, dans l'ordre deterministe
+ *     4. combat contre une faction pilotee par le serveur
+ *     5. createur ayant rappele, puis meme joueur ou alliance figee
+ *     6. budgets, dans l'ordre deterministe
+ *
+ * ## Un combat contre le serveur ne se rejoint pas
+ *
+ * La regle vaut **dans les deux sens**, et chacun a son controle :
+ *
+ *     candidate pilotee par le serveur -> elle ne rejoint pas le camp d'un joueur
+ *     cible pilotee par le serveur     -> l'ouvreur y va seul, ses propres vagues comprises
+ *
+ * Le second n'est pas une precaution de style. Sans lui, un rassemblement de seize flottes
+ * tomberait sur une base pirate et le contenu solo du jeu deviendrait une formalite
+ * d'alliance. C'est `targetActor` qui porte le fait, fige a l'ouverture comme le reste.
  *
  * ## Un groupe entier, ou rien
  *
@@ -39,14 +52,19 @@ final class AttackAdmissionSelector
 {
     /**
      * La duree maximale d'une fenetre de ralliement, en secondes.
+     *
+     * **Une seule source, et elle est ailleurs.** Le nombre appartient a la regle de la fenetre ;
+     * le repeter ici en ferait deux, et deux nombres egaux finissent par ne plus l'etre.
      */
-    public const int MAX_WINDOW_SECONDS = 60;
+    public const int MAX_WINDOW_SECONDS = CombatRallyWindow::WINDOW_SECONDS;
 
     /**
      * Le verdict d'admission du camp attaquant.
      *
      * @param FoundingGroup $founding Le groupe qui a ouvert, et l'alliance qui gouverne.
      * @param int $targetBodyId Le corps **exact** attaque.
+     * @param ActorKind $targetActor Qui tient la cible, fige a l'ouverture. Hors `Player`, l'ouvreur
+     *                               attaque seul, ses propres vagues comprises.
      * @param int $openedAt L'instant d'ouverture, en secondes.
      * @param array<int, AttackCandidateGroup> $candidates Les groupes candidats, dans n'importe quel ordre.
      * @return AdmissionVerdict
@@ -54,6 +72,7 @@ final class AttackAdmissionSelector
     public function select(
         FoundingGroup $founding,
         int $targetBodyId,
+        ActorKind $targetActor,
         int $openedAt,
         array $candidates,
     ): AdmissionVerdict {
@@ -69,7 +88,7 @@ final class AttackAdmissionSelector
         $admissions = [];
 
         foreach ($this->inDeterministicOrder($candidates) as $groupe) {
-            $refus = $this->whyItCannotJoin($groupe, $founding, $targetBodyId, $openedAt, $plafondTemporel);
+            $refus = $this->whyItCannotJoin($groupe, $founding, $targetBodyId, $targetActor, $openedAt, $plafondTemporel);
 
             if ($refus !== null) {
                 $admissions[] = GroupAdmission::refuse($groupe, $refus);
@@ -116,6 +135,7 @@ final class AttackAdmissionSelector
      * @param AttackCandidateGroup $group
      * @param FoundingGroup $founding
      * @param int $targetBodyId
+     * @param ActorKind $targetActor
      * @param int $openedAt
      * @param int $ceiling
      * @return CombatReasonCode|null
@@ -124,6 +144,7 @@ final class AttackAdmissionSelector
         AttackCandidateGroup $group,
         FoundingGroup $founding,
         int $targetBodyId,
+        ActorKind $targetActor,
         int $openedAt,
         int $ceiling,
     ): CombatReasonCode|null {
@@ -157,6 +178,18 @@ final class AttackAdmissionSelector
         // **Une egalite avec le plafond compte pour apres**, comme partout ailleurs.
         if ($group->scheduledArrivalAt() >= $ceiling || $group->scheduledArrivalAt() < $openedAt) {
             return CombatReasonCode::RallyWindowLimit;
+        }
+
+        // **Une cible pilotee par le serveur ne se rassemble pas.** L'ouvreur continue seul, ses
+        // propres vagues comprises : ce sont ses flottes, pas un renfort. Le controle passe avant
+        // celui de l'alliance parce qu'il est structurel — l'allie econduit doit lire qu'il n'y
+        // avait rien a rejoindre, et non qu'il s'y est pris trop tard.
+        if ($targetActor !== ActorKind::Player) {
+            foreach ($group->missions as $mission) {
+                if ($mission->userId !== $founding->creatorUserId) {
+                    return CombatReasonCode::NpcSideNotReinforceable;
+                }
+            }
         }
 
         // Le createur a rappele sa flotte : les membres deja lances continuent, personne d'autre

@@ -576,7 +576,7 @@ class AdmissionSelectorTest extends UnitTestCase
      */
     private function selectAttack(array $candidates, FoundingGroup $founding): AdmissionVerdict
     {
-        return (new AttackAdmissionSelector())->select($founding, self::TARGET_BODY, self::OPENING, $candidates);
+        return (new AttackAdmissionSelector())->select($founding, self::TARGET_BODY, ActorKind::Player, self::OPENING, $candidates);
     }
 
     /**
