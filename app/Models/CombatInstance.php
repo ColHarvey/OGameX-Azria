@@ -68,6 +68,7 @@ use OGame\Combat\Enums\CombatState;
  * @property array<mixed>|null $frozen_moon_identity
  * @property array<mixed>|null $moon_destruction_plan
  * @property string|null $frozen_facts_fingerprint
+ * @property array<mixed>|null $frozen_alliance_membership
  * @property bool $result_published
  * @property Carbon $created_at
  * @property Carbon $updated_at
@@ -115,6 +116,7 @@ use OGame\Combat\Enums\CombatState;
     'frozen_moon_identity',
     'moon_destruction_plan',
     'frozen_facts_fingerprint',
+    'frozen_alliance_membership',
     'result_published',
 ])]
 class CombatInstance extends Model
@@ -136,6 +138,7 @@ class CombatInstance extends Model
             'frozen_settings' => 'array',
             'frozen_moon_identity' => 'array',
             'moon_destruction_plan' => 'array',
+            'frozen_alliance_membership' => 'array',
             'result_published' => 'boolean',
         ];
     }

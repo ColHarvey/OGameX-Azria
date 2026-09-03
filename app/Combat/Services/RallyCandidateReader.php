@@ -2,8 +2,8 @@
 
 namespace OGame\Combat\Services;
 
-use Illuminate\Support\Facades\DB;
 use OGame\Combat\Admission\CandidateMission;
+use OGame\Combat\Admission\FrozenAllianceMembership;
 use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Enums\FlightLeg;
@@ -34,19 +34,20 @@ use OGame\Models\User;
  * joueur etranger sont toutes rendues — avec les faits qui permettront de les refuser **en le
  * disant**. Les ecarter ici les ferait disparaitre sans que personne ne sache pourquoi.
  *
- * ## L'alliance a l'ouverture, et pourquoi ce n'est pas `users.alliance_id`
+ * ## L'alliance ne se reconstruit pas, elle se relit
  *
- * `users.alliance_id` porte l'alliance **d'aujourd'hui**. La regle veut celle de l'ouverture : un
- * joueur qui change d'alliance pendant le ralliement ne doit ni y entrer ni en sortir.
+ * La regle est arretee : *un changement d'alliance apres l'ouverture ne change rien*. Ni
+ * `users.alliance_id`, qui porte l'alliance d'aujourd'hui, ni `alliance_members.joined_at` ne
+ * peuvent y repondre — **une sortie supprime la ligne**, et aucun filtre sur une date d'entree ne
+ * ressuscite un membre parti.
  *
- * Il n'existe pas d'historique des appartenances — une sortie supprime la ligne. Mais
- * `alliance_members.joined_at` suffit pour la question posee :
+ * Une premiere version filtrait pourtant sur `joined_at <= ouverture`, et son commentaire affirmait
+ * qu'ecarter un joueur parti « est juste, il est parti ». C'etait substituer un jugement a une
+ * decision deja prise : un allie admissible a l'ouverture devenait inadmissible a la fermeture.
  *
- *     membre de l'alliance qui gouverne, et inscrit avant l'ouverture
- *
- * Un joueur parti n'a plus de ligne, donc il est ecarte — ce qui est juste, il est parti. Un joueur
- * arrive apres l'ouverture porte un `joined_at` posterieur, donc il est ecarte aussi. La question
- * est repondue exactement, avec des donnees qui existent.
+ * Le lecteur ne reconstruit donc plus rien. Il recoit `FrozenAllianceMembership`, la photographie
+ * prise a l'ouverture, et s'y tient — comme le reste du systeme se tient aux faits ecrits avec le
+ * combat plutot qu'a un monde qui a change depuis.
  */
 final class RallyCandidateReader
 {
@@ -56,14 +57,16 @@ final class RallyCandidateReader
      * @param int $targetBodyId Le corps **exact** attaque. Une planete et sa lune partagent leurs
      *                          coordonnees : viser l'une n'est pas viser l'autre.
      * @param int $openedAt L'instant d'ouverture, fige.
-     * @param int|null $governingAllianceId L'alliance qui gouverne le combat, figee a l'ouverture.
+     * @param FrozenAllianceMembership $membership Les appartenances **photographiees a l'ouverture**.
+     *                                             Le lecteur ne les recalcule pas : l'historique
+     *                                             n'existe pas, et une sortie effacerait la trace.
      * @param int $openerMissionId La mission qui a ouvert : elle est le groupe fondateur, pas une candidate.
      * @return array<int, CandidateMission>
      */
     public function read(
         int $targetBodyId,
         int $openedAt,
-        int|null $governingAllianceId,
+        FrozenAllianceMembership $membership,
         int $openerMissionId,
     ): array {
         $plafond = $openedAt + CombatRallyWindow::WINDOW_SECONDS;
@@ -89,7 +92,6 @@ final class RallyCandidateReader
         )));
 
         $acteurs = $this->actorKindsOf($proprietaires);
-        $allies = $this->membersOfAllianceBefore($governingAllianceId, $proprietaires, $openedAt);
 
         $candidates = [];
 
@@ -97,7 +99,7 @@ final class RallyCandidateReader
             $candidates[] = new CandidateMission(
                 $mission->id,
                 $mission->user_id,
-                isset($allies[$mission->user_id]) ? $governingAllianceId : null,
+                $membership->allianceFor($mission->user_id),
                 $acteurs[$mission->user_id] ?? ActorKind::Player,
                 CombatMissionKind::fromMissionType($mission->mission_type),
                 // Une mission de suivi porte l'identifiant de celle qu'elle prolonge : c'est le
@@ -134,36 +136,5 @@ final class RallyCandidateReader
         }
 
         return $genres;
-    }
-
-    /**
-     * Les proprietaires membres de l'alliance qui gouverne **avant** l'ouverture.
-     *
-     * @param int|null $allianceId
-     * @param array<int, int> $userIds
-     * @param int $openedAt
-     * @return array<int, true>
-     */
-    private function membersOfAllianceBefore(int|null $allianceId, array $userIds, int $openedAt): array
-    {
-        if ($allianceId === null) {
-            // Sans alliance qui gouverne, personne d'autre que le createur ne rejoint : le
-            // selecteur le dira, et il n'y a rien a lire.
-            return [];
-        }
-
-        $membres = DB::table('alliance_members')
-            ->where('alliance_id', $allianceId)
-            ->whereIn('user_id', $userIds)
-            ->where('joined_at', '<=', date('Y-m-d H:i:s', $openedAt))
-            ->pluck('user_id');
-
-        $trouves = [];
-
-        foreach ($membres as $userId) {
-            $trouves[(int)$userId] = true;
-        }
-
-        return $trouves;
     }
 }

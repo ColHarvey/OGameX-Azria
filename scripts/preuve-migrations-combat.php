@@ -1,11 +1,11 @@
 <?php
 
 /*
- * Les cinq migrations de combat : appliquer, defaire, reappliquer, sans residu.
+ * Les migrations de combat : appliquer, defaire, reappliquer, sans residu.
  *
  * ## Ce que ce script prouve, et ce qu'il ne prouve pas
  *
- * Il prouve que les cinq migrations s'appliquent, se defont **entierement**, et se reappliquent en
+ * Il prouve que les migrations s'appliquent, se defont **entierement**, et se reappliquent en
  * laissant le schema exactement dans l'etat ou il etait. Une lecture du code ne prouve rien de tout
  * cela : un `down()` incomplet se lit tres bien.
  *
@@ -152,16 +152,21 @@ if ($connexion === null) {
 // ---------------------------------------------------------------------------------------------
 
 /**
- * Les cinq migrations de cette livraison, par leur nom d'inscription.
+ * Les migrations de cette livraison, par leur nom d'inscription.
+ *
+ * **La garde ci-dessous a deja servi.** En ajoutant la photographie d'alliance, elle a refuse de
+ * defaire cinq pas alors que six migrations attendaient : sans elle, le script aurait defait autre
+ * chose et l aurait dit vert.
  *
  * @var array<int, string>
  */
-$cinqMigrations = [
+$migrations = [
     '2026_09_02_210000_create_celestial_body_combat_barriers_table',
     '2026_09_02_210100_create_combat_effect_receipts_table',
     '2026_09_02_210200_add_frozen_facts_to_combat_instances',
     '2026_09_02_210300_create_combat_loot_reservations_table',
     '2026_09_02_210400_create_combat_outbox_table',
+    '2026_09_02_210500_add_frozen_alliance_membership_to_combat_instances',
 ];
 
 $nouvellesTables = [
@@ -253,14 +258,14 @@ $temoin(
 // migration serait ajoutee au depot apres celles-ci — et le script le dirait vert.
 $dernieres = json_decode($dansUnProcessusNeuf(
     'echo json_encode(Illuminate\Support\Facades\DB::table("migrations")'
-    . '->orderByDesc("id")->limit(' . count($cinqMigrations) . ')->pluck("migration")->all());'
+    . '->orderByDesc("id")->limit(' . count($migrations) . ')->pluck("migration")->all());'
 ), true);
 
-$attendues = array_reverse($cinqMigrations);
+$attendues = array_reverse($migrations);
 
 $temoin(
     is_array($dernieres) && array_values($dernieres) === $attendues,
-    'Les cinq dernieres migrations inscrites sont bien celles de cette livraison'
+    'Les dernieres migrations inscrites sont bien celles de cette livraison'
 );
 
 if (!is_array($dernieres) || array_values($dernieres) !== $attendues) {
@@ -268,13 +273,13 @@ if (!is_array($dernieres) || array_values($dernieres) !== $attendues) {
 
     $arret(
         "Les cinq dernieres migrations ne sont pas celles attendues : defaire cinq pas toucherait\n"
-        . "  autre chose. Mettre a jour la liste dans ce script."
+        . "  toucherait autre chose. Mettre a jour la liste dans ce script."
     );
 }
 
 $artisan(
-    'cinq migrations defaites',
-    ['migrate:rollback', '--step=' . count($cinqMigrations), '--force', '--env=testing']
+    'migrations defaites',
+    ['migrate:rollback', '--step=' . count($migrations), '--force', '--env=testing']
 );
 
 $defait = $schema();

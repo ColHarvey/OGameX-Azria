@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Admission\CandidateMission;
+use OGame\Combat\Admission\FrozenAllianceMembership;
 use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\Enums\FlightLeg;
 use OGame\Combat\Services\RallyCandidateReader;
@@ -203,10 +204,77 @@ class RallyCandidateReaderTest extends TestCase
     }
 
     /**
-     * L'alliance retenue est celle de l'ouverture, pas celle d'aujourd'hui.
+     * Un membre a l'ouverture le reste, meme s'il quitte l'alliance avant la fermeture.
      *
-     * **C'est le fait que `users.alliance_id` ne sait pas donner.** Un allie inscrit apres
-     * l'ouverture n'est pas un allie de ce combat, meme s'il l'est au moment ou on lit.
+     * ## L'essai qui manquait
+     *
+     * La regle est arretee : *un changement d'alliance apres l'ouverture ne change rien*. Une
+     * premiere version reconstruisait l'appartenance depuis `alliance_members` en filtrant sur
+     * `joined_at <= ouverture` — et **une sortie supprime la ligne**. L'allie disparaissait donc de
+     * la lecture, alors qu'il avait ete admis.
+     *
+     * Les essais purs du selecteur ne voyaient rien : ils recevaient deja un `allianceIdAtOpening`
+     * correct. Seule cette couture-ci pouvait le montrer.
+     */
+    public function testAMemberAtTheOpeningStaysOneAfterLeaving(): void
+    {
+        $cible = $this->aBodyId();
+
+        $alliance = $this->anAlliance();
+        $parti = $this->aPlayer();
+
+        $this->joinAlliance($parti, $alliance, self::OPENING - 3_600);
+
+        $mission = $this->aMission($parti, $cible, self::OPENING + 10);
+
+        // La photographie est prise a l'ouverture : il en etait.
+        $photographie = FrozenAllianceMembership::of($alliance, [$parti->id]);
+
+        // Puis il quitte l'alliance — la ligne disparait de la table vivante.
+        AllianceMember::where('user_id', $parti->id)->delete();
+
+        $candidates = $this->read($cible, $photographie);
+
+        $this->assertSame(
+            $alliance,
+            $candidates[0]->allianceIdAtOpening,
+            'A member at the opening lost his place by leaving the alliance during the rally.'
+        );
+
+        $this->assertSame($mission->id, $candidates[0]->missionId);
+    }
+
+    /**
+     * Un non-membre a l'ouverture le reste, meme s'il rejoint avant la fermeture.
+     *
+     * La symetrie compte autant : sans elle, un joueur pourrait entrer dans une bataille en
+     * rejoignant l'alliance apres avoir vu la cible.
+     */
+    public function testANonMemberAtTheOpeningStaysOneAfterJoining(): void
+    {
+        $cible = $this->aBodyId();
+
+        $alliance = $this->anAlliance();
+        $arrivant = $this->aPlayer();
+
+        $this->aMission($arrivant, $cible, self::OPENING + 10);
+
+        // La photographie ne le contient pas : il n'en etait pas.
+        $photographie = FrozenAllianceMembership::of($alliance, []);
+
+        // Puis il rejoint l'alliance, bien apres l'ouverture.
+        $this->joinAlliance($arrivant, $alliance, self::OPENING + 30);
+
+        $candidates = $this->read($cible, $photographie);
+
+        $this->assertNull(
+            $candidates[0]->allianceIdAtOpening,
+            'A player who joined the alliance after the opening was let into the battle.'
+        );
+    }
+
+    /**
+     * L'alliance retenue est celle de la photographie, pas celle d'aujourd'hui.
      */
     public function testTheAllianceIsTheOneHeldAtTheOpening(): void
     {
@@ -225,9 +293,12 @@ class RallyCandidateReaderTest extends TestCase
         $missionNouveau = $this->aMission($nouveau, $cible, self::OPENING + 11);
         $missionEtranger = $this->aMission($etranger, $cible, self::OPENING + 12);
 
+        // La photographie ne retient que celui qui en etait a l'ouverture.
+        $photographie = FrozenAllianceMembership::of($alliance, [$ancien->id]);
+
         $parIdentifiant = [];
 
-        foreach ($this->read($cible, governingAllianceId: $alliance) as $candidate) {
+        foreach ($this->read($cible, $photographie) as $candidate) {
             $parIdentifiant[$candidate->missionId] = $candidate->allianceIdAtOpening;
         }
 
@@ -258,7 +329,7 @@ class RallyCandidateReaderTest extends TestCase
 
         $this->aMission($joueur, $cible, self::OPENING + 10);
 
-        $candidates = $this->read($cible, governingAllianceId: null);
+        $candidates = $this->read($cible, FrozenAllianceMembership::none());
 
         $this->assertCount(1, $candidates);
         $this->assertNull(
@@ -352,10 +423,15 @@ class RallyCandidateReaderTest extends TestCase
      */
     private function read(
         int $targetBodyId,
-        int|null $governingAllianceId = null,
+        FrozenAllianceMembership|null $membership = null,
         int $openerMissionId = 0,
     ): array {
-        return $this->lecteur->read($targetBodyId, self::OPENING, $governingAllianceId, $openerMissionId);
+        return $this->lecteur->read(
+            $targetBodyId,
+            self::OPENING,
+            $membership ?? FrozenAllianceMembership::none(),
+            $openerMissionId
+        );
     }
 
     /**
