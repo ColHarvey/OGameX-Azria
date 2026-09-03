@@ -3,6 +3,7 @@
 namespace OGame\Services;
 
 use Exception;
+use Illuminate\Support\Facades\DB;
 use OGame\Models\FleetMission;
 use OGame\Models\FleetUnion;
 
@@ -54,26 +55,30 @@ class FleetUnionService
             throw new Exception(__('t_acs.error_already_in_union'));
         }
 
-        // Create the union
-        $union = FleetUnion::create([
-            'user_id' => $mission->user_id,
-            'name' => $name,
-            'galaxy_to' => $mission->galaxy_to,
-            'system_to' => $mission->system_to,
-            'position_to' => $mission->position_to,
-            'planet_type_to' => $mission->type_to,
-            'time_arrival' => $mission->time_arrival,
-            'max_fleets' => 16,
-            'max_players' => 5,
-        ]);
+        // Une union sans sa mission fondatrice n'est pas une union : elle apparaitrait dans la
+        // liste des unions a rejoindre, vide, et sans moyen d'y entrer. Les deux ecritures ne
+        // font donc qu'une.
+        return DB::transaction(function () use ($mission, $name): FleetUnion {
+            $union = FleetUnion::create([
+                'user_id' => $mission->user_id,
+                'name' => $name,
+                'galaxy_to' => $mission->galaxy_to,
+                'system_to' => $mission->system_to,
+                'position_to' => $mission->position_to,
+                'planet_type_to' => $mission->type_to,
+                'time_arrival' => $mission->time_arrival,
+                'max_fleets' => 16,
+                'max_players' => 5,
+            ]);
 
-        // Link the mission to the union and convert to ACS Attack
-        $mission->union_id = $union->id;
-        $mission->union_slot = 1; // Initiator always gets slot 1
-        $mission->mission_type = 2; // Convert to ACS Attack
-        $mission->save();
+            // Link the mission to the union and convert to ACS Attack
+            $mission->union_id = $union->id;
+            $mission->union_slot = 1; // Initiator always gets slot 1
+            $mission->mission_type = 2; // Convert to ACS Attack
+            $mission->save();
 
-        return $union;
+            return $union;
+        });
     }
 
     /**
@@ -86,6 +91,69 @@ class FleetUnionService
      */
     public function joinUnion(FleetUnion $union, FleetMission $mission): void
     {
+        // ## Pourquoi une transaction et un verrou de ligne
+        //
+        // Trois ecritures se suivent : l'heure d'arrivee de l'union, celle de tous ses membres, et
+        // le rattachement de la nouvelle mission. Une panne entre les deux premieres et la
+        // troisieme laissait l'union decalee **et le rejoignant dehors** : tous les membres
+        // arrivaient plus tard pour rien.
+        //
+        // Les budgets et le numero de creneau, eux, sont lus puis ecrits. Sans verrou de ligne,
+        // deux jointures simultanees a quinze flottes passent toutes les deux, et obtiennent le
+        // meme creneau. Le verrou est pris **avant** la premiere lecture qui decide.
+        //
+        // `lockForUpdate()` ne compile rien sur SQLite : la grammaire de Laravel n'y emet pas de
+        // `FOR UPDATE`. Les essais gardent donc exactement le meme comportement, et MariaDB obtient
+        // un vrai verrou.
+        DB::transaction(function () use ($union, $mission): void {
+            $verrouillee = FleetUnion::whereKey($union->getKey())->lockForUpdate()->first();
+
+            if ($verrouillee === null) {
+                throw new Exception(__('t_acs.error_not_found'));
+            }
+
+            // L'instance de l'appelant porte desormais l'etat verrouille : les compteurs lus
+            // ci-dessous sont ceux de la ligne que nous tenons, pas ceux d'une lecture anterieure.
+            $union->refresh();
+
+            $this->joinUnderLock($union, $mission);
+        });
+    }
+
+    /**
+     * Le corps de la jointure, sous le verrou de la ligne d'union.
+     *
+     * ## Les validations que cette methode avait perdues
+     *
+     * `createUnion()` en fait trois que celle-ci ne faisait pas : le genre de mission, l'etat de la
+     * mission, et l'appartenance a une union. Leur absence n'etait pas une decision — un transport
+     * pouvait devenir une attaque groupee, une mission deja traitee pouvait rejoindre, et une
+     * mission deja dans une autre union changeait d'union en laissant un trou dans les creneaux de
+     * la premiere.
+     *
+     * @param FleetUnion $union
+     * @param FleetMission $mission
+     * @return void
+     * @throws Exception
+     */
+    private function joinUnderLock(FleetUnion $union, FleetMission $mission): void
+    {
+        // Seule une attaque rejoint une union : simple (type 1), qu'on convertit, ou deja etiquetee
+        // attaque groupee (type 2) par l'envoi qui vient de la creer.
+        if ($mission->mission_type !== 1 && $mission->mission_type !== 2) {
+            throw new Exception(__('t_acs.error_invalid_mission_type'));
+        }
+
+        // Une mission arrivee ou annulee n'a plus rien a rejoindre.
+        if ($mission->processed || $mission->canceled) {
+            throw new Exception(__('t_acs.error_mission_not_active'));
+        }
+
+        // Deja dans une union : la deplacer laisserait un creneau vide dans la premiere.
+        if ($mission->isInUnion()) {
+            throw new Exception(__('t_acs.error_already_in_union'));
+        }
+
         // Validate union hasn't reached max fleets
         if ($union->hasReachedMaxFleets()) {
             throw new Exception(__('t_acs.error_max_fleets_reached'));
@@ -172,6 +240,22 @@ class FleetUnionService
             return;
         }
 
+        // Le retrait, le compactage des creneaux et le transfert de propriete ne font qu'une
+        // ecriture : a moitie appliques, ils laisseraient des numeros non consecutifs que rien ne
+        // rattrape ensuite, et une union dont le proprietaire n'est plus celui du creneau 1.
+        DB::transaction(function () use ($mission): void {
+            $this->recallUnderLock($mission);
+        });
+    }
+
+    /**
+     * Le corps du rappel, dans la transaction.
+     *
+     * @param FleetMission $mission
+     * @return void
+     */
+    private function recallUnderLock(FleetMission $mission): void
+    {
         /** @var FleetUnion $union */
         $union = $mission->union;
 

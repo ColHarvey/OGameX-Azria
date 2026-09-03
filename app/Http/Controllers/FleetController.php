@@ -6,6 +6,7 @@ use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
 use OGame\Factories\GameMissionFactory;
 use OGame\Factories\PlanetServiceFactory;
@@ -631,7 +632,19 @@ class FleetController extends OGameController
 
         try {
             $retreatAfterDefenderRetreat = (bool)request()->input('retreatAfterDefenderRetreat');
-            $fleetMission = $fleetMissionService->createNewFromPlanet(
+
+            // **L'envoi et la jointure ne font qu'une ecriture.** Sans cela, une jointure refusee
+            // — union pleine, allie parti, arrivee trop tardive — laissait le joueur lire « votre
+            // flotte n'a pas pu etre envoyee » alors que sa flotte etait partie quand meme, en
+            // attaque groupee sans union : ressources prelevees, creneau consomme, et rien dans
+            // l'interface pour le lui dire.
+            //
+            // Aucune tache en file n'est emise sur ce chemin — la seule classe `ShouldQueue` du
+            // depot ne part que d'une commande d'administration — donc l'annulation ne peut pas
+            // faire rejouer un message deja parti.
+            DB::transaction(function () use (
+                $fleetMissionService,
+                $fleetUnionService,
                 $planet,
                 $target_coordinate,
                 $planetType,
@@ -640,14 +653,27 @@ class FleetController extends OGameController
                 $resources,
                 $speed_percent,
                 $holding_hours,
-                0,
-                $retreatAfterDefenderRetreat
-            );
+                $retreatAfterDefenderRetreat,
+                $union
+            ): void {
+                $fleetMission = $fleetMissionService->createNewFromPlanet(
+                    $planet,
+                    $target_coordinate,
+                    $planetType,
+                    $mission_type,
+                    $units,
+                    $resources,
+                    $speed_percent,
+                    $holding_hours,
+                    0,
+                    $retreatAfterDefenderRetreat
+                );
 
-            // Join the fleet union if requested
-            if ($union !== null) {
-                $fleetUnionService->joinUnion($union, $fleetMission);
-            }
+                // Join the fleet union if requested
+                if ($union !== null) {
+                    $fleetUnionService->joinUnion($union, $fleetMission);
+                }
+            });
 
             return response()->json([
                 'success' => true,
