@@ -236,6 +236,42 @@ class CombatCancellationTest extends FleetDispatchTestCase
     }
 
     /**
+     * Le retour d'une flotte annulee part de l'instant d'annulation, et dure le trajet aller.
+     *
+     * ## Le defaut que cet essai ferme
+     *
+     * `startReturn()` calcule le depart du retour depuis `time_arrival`. Le service marquait la
+     * mission traitee sans remplacer cette heure : une flotte annulee deux heures apres son arrivee
+     * repartait donc **de son arrivee initiale**, arrivait dans le passe, et son retour etait traite
+     * aussitot. Le rappel ordinaire (`GameMission::cancel()`) ne s'y trompe pas ; l'annulation
+     * empruntait la meme mecanique sans la meme precaution.
+     */
+    public function testTheReturnOfACancelledFleetLeavesAtTheCancellationInstant(): void
+    {
+        [$combat, $mission] = $this->anActiveCombat();
+
+        $depart = (int)$mission->time_departure;
+        $arriveeInitiale = (int)$mission->time_arrival;
+        $trajet = $arriveeInitiale - $depart;
+        $this->assertGreaterThan(0, $trajet, 'The outbound trip took no time: nothing would be compared.');
+
+        // Deux heures de combat, puis une annulation.
+        $annulation = $arriveeInitiale + 7_200;
+        $issue = resolve(AttackMission::class)->cancelPersistentCombat($combat->id, CombatCancellationCause::AdministrativeDecision, $annulation);
+        $this->assertTrue($issue->cancelled, 'The cancellation did nothing: ' . $issue->reason);
+
+        $retour = FleetMission::query()->where('parent_id', $mission->id)->first();
+
+        if ($retour === null) {
+            $this->fail('The fleet has no return.');
+        }
+
+        $this->assertSame($annulation, (int)$retour->time_departure, 'The return leaves from the original arrival instead of the cancellation.');
+        $this->assertSame($annulation + $trajet, (int)$retour->time_arrival, 'The return does not take the time the outbound trip took.');
+        $this->assertSame(0, (int)$retour->processed, 'The return was already processed: it was created in the past.');
+    }
+
+    /**
      * Une inscrite deja traitee n'est pas rendue une seconde fois — et l'annulation le dit.
      *
      * Cet etat ne s'atteint pas par le jeu : l'arrivee ne traite pas, le rappel d'une engagee est

@@ -134,8 +134,8 @@ class AttackMission extends GameMission
         return resolve(CombatCancellationService::class)->cancel(
             $combatInstanceId,
             $cause,
-            function (FleetMission $retourDe, Resources $ressources, UnitCollection $unites): void {
-                $this->startReturn($retourDe, $ressources, $unites);
+            function (FleetMission $retourDe, Resources $ressources, UnitCollection $unites, int $tempsSupplementaire = 0): void {
+                $this->startReturn($retourDe, $ressources, $unites, $tempsSupplementaire);
             },
             $now,
         );

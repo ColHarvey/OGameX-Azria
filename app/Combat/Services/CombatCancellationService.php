@@ -61,7 +61,8 @@ final class CombatCancellationService
     /**
      * Annule le combat, ou explique pourquoi il n'y avait rien a annuler.
      *
-     * @param Closure $creerRetour Cree une mission retour ; delegue a GameMission::startReturn().
+     * @param Closure $creerRetour Cree une mission retour ; delegue a GameMission::startReturn(),
+     *                              avec l'ajustement de duree qui ramene le retour au trajet aller.
      */
     public function cancel(int $combatInstanceId, CombatCancellationCause $cause, Closure $creerRetour, int $now): CombatCancellationOutcome
     {
@@ -144,13 +145,24 @@ final class CombatCancellationService
                     ]
                 );
 
+                // **Le retour part de l'instant d'annulation, pas de l'arrivee initiale.**
+                // `startReturn()` calcule le depart du retour depuis `time_arrival` : laisse telle
+                // quelle, une flotte annulee apres des heures de combat repartirait dans le passe, et
+                // son retour serait traite aussitot. `GameMission::cancel()` fait la meme chose pour
+                // un rappel ordinaire ; c'est cette mecanique-la que l'annulation emprunte.
+                //
+                // La duree, elle, reste celle du trajet aller : l'ajustement compense l'allongement
+                // que le decalage de `time_arrival` introduirait sinon.
+                $arriveeInitiale = (int)$mission->time_arrival;
+                $mission->time_arrival = $now;
                 $mission->processed = 1;
                 $mission->save();
 
                 ($creerRetour)(
                     $mission,
                     $this->fleetMissions()->getResources($mission),
-                    $this->fleetMissions()->getFleetUnits($mission)
+                    $this->fleetMissions()->getFleetUnits($mission),
+                    $arriveeInitiale - $now
                 );
 
                 $rendues++;
