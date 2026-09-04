@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Log;
 use OGame\Combat\Enums\CombatCancellationCause;
 use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Exceptions\UnreturnableFleet;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
@@ -62,7 +63,7 @@ final class CombatCancellationService
      * Annule le combat, ou explique pourquoi il n'y avait rien a annuler.
      *
      * @param Closure $creerRetour Cree une mission retour ; delegue a GameMission::startReturn(),
-     *                              avec l'ajustement de duree qui ramene le retour au trajet aller.
+     *                              en lui donnant la duree du trajet aller et l'instant du depart.
      */
     public function cancel(int $combatInstanceId, CombatCancellationCause $cause, Closure $creerRetour, int $now): CombatCancellationOutcome
     {
@@ -145,16 +146,15 @@ final class CombatCancellationService
                     ]
                 );
 
-                // **Le retour part de l'instant d'annulation, pas de l'arrivee initiale.**
-                // `startReturn()` calcule le depart du retour depuis `time_arrival` : laisse telle
-                // quelle, une flotte annulee apres des heures de combat repartirait dans le passe, et
-                // son retour serait traite aussitot. `GameMission::cancel()` fait la meme chose pour
-                // un rappel ordinaire ; c'est cette mecanique-la que l'annulation emprunte.
-                //
-                // La duree, elle, reste celle du trajet aller : l'ajustement compense l'allongement
-                // que le decalage de `time_arrival` introduirait sinon.
-                $arriveeInitiale = (int)$mission->time_arrival;
-                $mission->time_arrival = $now;
+                // **Le retour se decrit, il ne se fabrique pas en reecrivant l'aller.** Il part de
+                // l'instant d'annulation et dure le trajet aller ; la mission aller garde son heure
+                // d'arrivee, qui est un fait de l'admission, de l'ordre causal et de l'audit.
+                $trajet = (int)$mission->time_arrival - (int)$mission->time_departure;
+
+                if ($trajet < 1) {
+                    throw new UnreturnableFleet($combat->id, $mission->id, $trajet);
+                }
+
                 $mission->processed = 1;
                 $mission->save();
 
@@ -162,7 +162,8 @@ final class CombatCancellationService
                     $mission,
                     $this->fleetMissions()->getResources($mission),
                     $this->fleetMissions()->getFleetUnits($mission),
-                    $arriveeInitiale - $now
+                    $trajet,
+                    $now
                 );
 
                 $rendues++;

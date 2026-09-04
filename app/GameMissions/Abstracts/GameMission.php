@@ -512,7 +512,7 @@ abstract class GameMission
      * @param int|null $overrideReturnDuration If set, use this duration (in seconds) for the return trip instead of calculating from parent mission times.
      * @return void
      */
-    protected function startReturn(FleetMission $parentMission, Resources $resources, UnitCollection $units, int $additionalReturnTripTime = 0, array|null $wreckFieldData = null, int|null $overrideReturnDuration = null): void
+    protected function startReturn(FleetMission $parentMission, Resources $resources, UnitCollection $units, int $additionalReturnTripTime = 0, array|null $wreckFieldData = null, int|null $overrideReturnDuration = null, int|null $departureAt = null): void
     {
         if ($units->getAmount() === 0) {
             // No units to return, no need to create a return mission.
@@ -529,9 +529,16 @@ abstract class GameMission
         // IMPORTANT: Holding time is always real time (not affected by fleet speed)
         $actualHoldingTime = $parentMission->time_holding ?? 0;
 
+        // **Un depart donne explicitement l'emporte.** Une operation qui cree un retour longtemps
+        // apres l'arrivee — l'annulation d'un combat durable — doit pouvoir le dire sans reecrire
+        // `time_arrival` sur la mission aller : cette heure est un fait de l'admission, de l'ordre
+        // causal et de l'audit, et une sortie d'exploitation n'a pas a reecrire l'histoire.
+        //
         // For ACS Defend (type 5), time_arrival already includes hold time
         // For other missions with hold time (like Expeditions), add actual holding time
-        if ($parentMission->mission_type === 5) {
+        if ($departureAt !== null) {
+            $time_start = $departureAt;
+        } elseif ($parentMission->mission_type === 5) {
             $time_start = $parentMission->time_arrival;
         } else {
             $time_start = $parentMission->time_arrival + $actualHoldingTime;

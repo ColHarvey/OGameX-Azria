@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\DB;
 use OGame\Combat\Enums\CombatCancellationCause;
 use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Exceptions\UnreturnableFleet;
 use OGame\Combat\Services\CombatCancellationOutcome;
 use OGame\Combat\Services\CombatOpeningService;
 use OGame\Combat\Services\PersistentCombatAdvance;
@@ -269,6 +270,39 @@ class CombatCancellationTest extends FleetDispatchTestCase
         $this->assertSame($annulation, (int)$retour->time_departure, 'The return leaves from the original arrival instead of the cancellation.');
         $this->assertSame($annulation + $trajet, (int)$retour->time_arrival, 'The return does not take the time the outbound trip took.');
         $this->assertSame(0, (int)$retour->processed, 'The return was already processed: it was created in the past.');
+
+        // **L aller garde son histoire.** Son heure d arrivee est un fait de l admission, de l ordre
+        // causal et de l audit : une sortie d exploitation ne la reecrit pas pour piloter un retour.
+        $mission->refresh();
+        $this->assertSame($arriveeInitiale, (int)$mission->time_arrival, 'The cancellation rewrote the outbound arrival to steer the return.');
+        $this->assertSame($depart, (int)$mission->time_departure);
+    }
+
+    /**
+     * Une flotte dont le trajet aller ne se lit pas n est pas rendue, et le corps reste tenu.
+     *
+     * Un trajet nul ferait naitre un retour deja arrive, traite dans la transaction meme qui l a
+     * cree : la flotte se poserait sur un corps que personne n a verrouille. L annulation s arrete
+     * avant de rendre le combat final.
+     */
+    public function testAFleetWhoseOutboundTripCannotBeReadIsNotSentHome(): void
+    {
+        [$combat, $mission] = $this->anActiveCombat();
+
+        DB::table('fleet_missions')->where('id', $mission->id)->update(['time_departure' => $mission->time_arrival]);
+
+        try {
+            $this->cancel($combat, CombatCancellationCause::AdministrativeDecision);
+            $this->fail('A fleet with an unreadable outbound trip was sent home anyway.');
+        } catch (UnreturnableFleet $refus) {
+            $this->assertSame($mission->id, $refus->fleetMissionId);
+        }
+
+        $combat->refresh();
+        $this->assertSame(CombatState::Active, $combat->status, 'The combat was made final though a fleet could not be returned.');
+        $this->assertNotNull(CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->first(), 'The body was released though a fleet is still there.');
+        $this->assertSame(0, FleetMission::query()->where('parent_id', $mission->id)->count());
+        $this->assertSame(0, (int)$mission->refresh()->processed, 'The fleet was marked processed without a return.');
     }
 
     /**
