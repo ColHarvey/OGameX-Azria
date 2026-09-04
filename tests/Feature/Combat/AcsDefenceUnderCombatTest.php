@@ -8,11 +8,13 @@ use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use OGame\Combat\Application\FrozenCombatApplicationContext;
+use OGame\Combat\Application\LiveCombatApplicationContext;
 use OGame\Combat\Enums\CombatCancellationCause;
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\FleetDispositionKind;
 use OGame\Combat\Exceptions\CorruptedFrozenApplicationContext;
+use OGame\Combat\Exceptions\MissingHeldFleetCargo;
 use OGame\Combat\Services\CombatRosterReader;
 use OGame\Combat\Services\FleetDispositionRegistry;
 use OGame\Combat\Services\PersistentCombatAdvancer;
@@ -36,6 +38,7 @@ use OGame\Models\Planet;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
 use OGame\Models\User;
+use OGame\Services\CharacterClassService;
 use OGame\Services\FleetMissionService;
 use OGame\Services\MessageService;
 use OGame\Services\ObjectService;
@@ -218,6 +221,55 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
         $renfort->refresh();
         $this->assertSame(1, (int)$renfort->processed, 'The hold of a reinforcement outlived the combat.');
         $this->assertSame(1, FleetMission::query()->where('parent_id', $renfort->id)->count());
+    }
+
+    /**
+     * Un renfort annonce par l'effectif dont la mission a disparu arrete la cloture.
+     *
+     * ## Absence et zero ne sont pas la meme chose
+     *
+     * Le contexte vivant rendait une cargaison **nulle** quand la mission ne se relisait pas. La
+     * photographie inscrivait alors la clef attendue avec des zeros, et le controle de couverture
+     * passait : il prouve que toutes les clefs de l'effectif figurent dans le document, pas que la
+     * source vivante de chacune existait. Une cargaison reelle disparaissait ainsi sans trace.
+     *
+     * L'essai garde aussi le vrai cas — mission presente, cargaison reellement nulle — parce que
+     * confondre les deux serait exactement le defaut inverse.
+     */
+    public function testAReinforcementAnnouncedWithoutItsMissionStopsTheClosure(): void
+    {
+        $renfort = null;
+        [$combat, , , $ouverture] = $this->anOpenedCombat(true, function (PlanetService $cible, int $ouverture) use (&$renfort): void {
+            $renfort = $this->aDefensiveReinforcement($cible, $ouverture + 5, 30, $ouverture - 600);
+        });
+
+        if ($renfort === null) {
+            $this->fail('The reinforcement was never launched.');
+        }
+
+        // **Une cargaison reellement nulle passe.** Sans ce temoin, le refus qui suit pourrait etre
+        // pris pour « une cargaison vide est refusee », ce qui serait faux.
+        DB::table('fleet_missions')->where('id', $renfort->id)->update(['metal' => 0, 'crystal' => 0, 'deuterium' => 0]);
+
+        $contexte = new LiveCombatApplicationContext(resolve(CharacterClassService::class), resolve(SettingsService::class));
+        $this->assertSame(0.0, $contexte->heldFleetCargo((int)$renfort->id)->metal->get(), 'A genuinely empty cargo was refused.');
+
+        // Puis la mission disparait de la base, l'effectif l'annoncant toujours.
+        $identifiant = (int)$renfort->id;
+        DB::table('combat_participants')->where('fleet_mission_id', $identifiant)->update(['fleet_mission_id' => null]);
+        DB::table('fleet_missions')->where('id', $identifiant)->delete();
+
+        try {
+            $contexte->heldFleetCargo($identifiant);
+            $this->fail('A reinforcement whose mission is gone was frozen as an empty cargo.');
+        } catch (MissingHeldFleetCargo $refus) {
+            $this->assertStringContainsString((string)$identifiant, $refus->getMessage());
+        }
+
+        // Et rien n'a ete ecrit : la cloture s'arrete avant la photographie.
+        $combat->refresh();
+        $this->assertNotSame(CombatState::Resolved, $combat->status, 'The combat was settled on a partial photograph.');
+        unset($ouverture);
     }
 
     /**

@@ -7,6 +7,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use InvalidArgumentException;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameObjects\Models\Abstracts\GameObject;
@@ -2015,9 +2016,9 @@ class PlanetService
      */
     public function addResourcesAtomic(Resources $resources): void
     {
-        $metal = (int)$resources->metal->get();
-        $crystal = (int)$resources->crystal->get();
-        $deuterium = (int)$resources->deuterium->get();
+        $metal = self::wholeCreditOf($resources->metal->get(), 'metal');
+        $crystal = self::wholeCreditOf($resources->crystal->get(), 'crystal');
+        $deuterium = self::wholeCreditOf($resources->deuterium->get(), 'deuterium');
 
         $updates = [];
 
@@ -2037,9 +2038,48 @@ class PlanetService
 
         Planet::where('id', $this->getPlanetId())->update($updates);
 
-        $this->planet->metal += $metal;
-        $this->planet->crystal += $crystal;
-        $this->planet->deuterium += $deuterium;
+        // **Le modele se relit sur la ligne, il ne se recalcule pas.**
+        //
+        // Ajouter le credit au stock **charge** rendait la synchronisation fausse des qu'il y avait
+        // eu de la concurrence : la base porte « valeur courante + credit », l'objet porterait
+        // « ancienne valeur + credit ». Une sauvegarde ulterieure de cet objet reintroduirait
+        // exactement la perte que l'addition atomique venait d'empecher.
+        $ligne = Planet::where('id', $this->getPlanetId())->first(['metal', 'crystal', 'deuterium']);
+
+        if ($ligne instanceof Planet) {
+            $this->planet->metal = $ligne->metal;
+            $this->planet->crystal = $ligne->crystal;
+            $this->planet->deuterium = $ligne->deuterium;
+        }
+    }
+
+    /**
+     * Un credit en unites entieres, ou un refus.
+     *
+     * ## Pourquoi refuser plutot que transtyper
+     *
+     * `(int)` acceptait tout : un negatif devenait un credit ignore — la condition `> 0` le laissait
+     * tomber en silence —, et une fraction etait tronquee sans que personne ne l'apprenne. Ce sont
+     * les deux facons de perdre des ressources sans trace. L'appelant normal fournit deja des unites
+     * entieres positives ; celui qui n'en fournit pas se trompe, et doit l'entendre.
+     *
+     * Le controle est une precondition d'argument, pas une conversion economique : la frontiere du
+     * pipeline de combat garde ce role-la, et ce service general ne lui est pas couple.
+     *
+     * @param float $montant
+     * @param string $champ
+     * @return int
+     */
+    private static function wholeCreditOf(float $montant, string $champ): int
+    {
+        if (!is_finite($montant) || $montant < 0.0 || floor($montant) !== $montant) {
+            throw new InvalidArgumentException(
+                'Le credit « ' . $champ . ' » vaut ' . var_export($montant, true) . ' : un credit se compte en unites '
+                . 'entieres et positives. Le transtyper perdrait la fraction, et un negatif serait ignore en silence.'
+            );
+        }
+
+        return (int)$montant;
     }
 
     public function deductResourcesAtomic(Resources $resources): bool

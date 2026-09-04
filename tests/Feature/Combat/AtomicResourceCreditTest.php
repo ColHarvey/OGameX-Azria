@@ -3,6 +3,7 @@
 namespace Tests\Feature\Combat;
 
 use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
 use OGame\Combat\Services\CombatResolutionService;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\Models\Planet;
@@ -117,6 +118,72 @@ class AtomicResourceCreditTest extends TestCase
         $service->addResourcesAtomic(new Resources(0, 0, 0, 0));
 
         $this->assertSame(0, $ecritures, 'An empty credit still wrote to the planets table.');
+    }
+
+    /**
+     * Le modele suit la **base**, pas le stock qu'il avait charge.
+     *
+     * ## Ce qu'une synchronisation calculee laissait passer
+     *
+     * L'addition en base est juste : la ligne porte « valeur courante + credit ». Mais le modele
+     * etait mis a jour par « ancienne valeur + credit ». Des qu'une ecriture concurrente etait
+     * passee, les deux divergeaient — et une sauvegarde ulterieure de cet objet reintroduisait
+     * exactement la perte que l'addition atomique venait d'empecher.
+     */
+    public function testTheModelFollowsTheRowAndNotTheStockItHadLoaded(): void
+    {
+        $corps = $this->aBodyWith(100, 100, 100);
+        $service = resolve(PlanetServiceFactory::class)->make($corps->id, true);
+        $this->assertNotNull($service);
+
+        DB::table('planets')->where('id', $corps->id)->update(['metal' => 150, 'crystal' => 150, 'deuterium' => 150]);
+
+        $service->addResourcesAtomic(new Resources(10, 10, 10, 0));
+
+        $this->assertSame(160, (int)$service->metal()->get(), 'The model rebuilt the value from the stock it had loaded.');
+        $this->assertSame(160, (int)$service->crystal()->get());
+        $this->assertSame(160, (int)$service->deuterium()->get());
+
+        // **Et une sauvegarde ulterieure ne ramene pas 110.** C'est la consequence qui compte : un
+        // objet desynchronise finit toujours par etre sauve.
+        $service->save();
+
+        $ligne = DB::table('planets')->where('id', $corps->id)->first();
+        $this->assertNotNull($ligne);
+        $this->assertSame(160, (int)$ligne->metal, 'A later save brought back the value the credit had replaced.');
+    }
+
+    /**
+     * Un credit negatif ou fractionnaire est refuse, jamais ignore ni tronque.
+     *
+     * Le transtypage acceptait tout : un negatif tombait sur la condition « superieur a zero » et
+     * disparaissait en silence, une fraction etait tronquee sans que personne ne l'apprenne. Ce sont
+     * les deux facons de perdre des ressources sans trace.
+     */
+    public function testACreditThatIsNotAWholePositiveNumberIsRefused(): void
+    {
+        $corps = $this->aBodyWith(10, 10, 10);
+        $service = resolve(PlanetServiceFactory::class)->make($corps->id, true);
+        $this->assertNotNull($service);
+
+        $refuses = [
+            'fraction' => new Resources(10.5, 0, 0, 0),
+            'negatif' => new Resources(0, -5, 0, 0),
+        ];
+
+        foreach ($refuses as $quoi => $credit) {
+            try {
+                $service->addResourcesAtomic($credit);
+                $this->fail("A credit carrying a {$quoi} was accepted.");
+            } catch (InvalidArgumentException $refus) {
+                $this->assertStringContainsString('unites entieres et positives', $refus->getMessage());
+            }
+        }
+
+        $ligne = DB::table('planets')->where('id', $corps->id)->first();
+        $this->assertNotNull($ligne);
+        $this->assertSame(10, (int)$ligne->metal, 'A refused credit still wrote to the planet.');
+        $this->assertSame(10, (int)$ligne->crystal, 'A refused credit still wrote to the planet.');
     }
 
     /**

@@ -3,6 +3,7 @@
 namespace OGame\Combat\Application;
 
 use Illuminate\Support\Facades\Date;
+use OGame\Combat\Exceptions\MissingHeldFleetCargo;
 use OGame\Enums\CharacterClass;
 use OGame\Models\FleetMission;
 use OGame\Models\Resources;
@@ -57,13 +58,19 @@ final class LiveCombatApplicationContext implements CombatApplicationContext
      *
      * C'est le comportement d'origine du chemin instantane, et il y est juste : la bataille vient
      * d'etre calculee, et rien n'a pu toucher ces colonnes entre-temps.
+     *
+     * **Une mission introuvable n'est pas une flotte vide.** Rendre zero inscrivait la clef attendue
+     * avec des zeros dans la photographie, et le controle de couverture passait : il prouve que
+     * toutes les clefs de l'effectif y figurent, pas que la source vivante de chacune existait. Une
+     * cargaison reelle disparaissait ainsi sans trace. Le refus arrete la cloture avant toute
+     * ecriture.
      */
     public function heldFleetCargo(int $fleetMissionId): Resources
     {
         $mission = FleetMission::query()->whereKey($fleetMissionId)->first();
 
         if (!$mission instanceof FleetMission) {
-            return new Resources(0, 0, 0, 0);
+            throw MissingHeldFleetCargo::because($fleetMissionId);
         }
 
         return new Resources((float)$mission->metal, (float)$mission->crystal, (float)$mission->deuterium, 0);
