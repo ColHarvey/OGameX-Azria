@@ -29,6 +29,7 @@ use OGame\Models\BattleReport;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatParticipant;
+use OGame\Models\DebrisField;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet;
 use OGame\Models\Resources;
@@ -308,7 +309,7 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
         [$combat] = $this->anEngagedCombat();
 
         $tables = [];
-        $suivies = ['celestial_body_combat_barriers', 'combat_instances', 'fleet_missions', 'planets'];
+        $suivies = ['celestial_body_combat_barriers', 'combat_instances', 'fleet_missions', 'planets', 'debris_fields'];
 
         DB::listen(function (QueryExecuted $requete) use (&$tables, $suivies): void {
             foreach ($suivies as $table) {
@@ -320,7 +321,7 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
 
         $this->settleIt($combat, (int)$combat->ends_at);
 
-        $this->assertSame($suivies, array_slice($tables, 0, 4), 'The settlement does not take its locks in the order the barrier migration fixes.');
+        $this->assertSame($suivies, array_slice($tables, 0, 5), 'The settlement does not take its locks in the order the barrier migration fixes.');
     }
 
     /**
@@ -398,6 +399,8 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
             // Le nom de classe vient de la reflexion : ecrit d'un trait entre guillemets, il
             // ressemblerait a une cle de participant pour la garde qui traque celles ecrites a la main.
             'corps' => (new ReflectionClass(Planet::class))->getShortName() . "::query() ->whereIn('id', \$corps) ->orderBy('id') ->lockForUpdate()",
+            // Le champ de debris de la cible, apres les corps : un recyclage concurrent le lit et l'ecrit.
+            'debris' => (new ReflectionClass(DebrisField::class))->getShortName() . "::query() ->where('galaxy', \$combat->galaxy) ->where('system', \$combat->system) ->where('planet', \$combat->position) ->lockForUpdate()",
         ];
 
         foreach ($verrous as $quoi => $declaration) {
@@ -728,12 +731,81 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
     }
 
     /**
+     * Une cargaison de retour que la colonne ne porte pas arrete le reglement avant tout debit.
+     *
+     * Le resultat fige est modifie a la main : aucune flotte reelle ne transporte 2^53 unites, et
+     * c'est precisement sur un resultat corrompu ou repare que la borne doit constater la chose. Le
+     * potentiel et le solde sont sains ; seule l'ecriture du retour depasserait.
+     */
+    public function testAReturnCargoTheStorageCannotHoldStopsTheSettlement(): void
+    {
+        [$combat, $missions, $cible] = $this->anEngagedCombat();
+
+        $stocke = json_decode((string)DB::table('combat_instances')->where('id', $combat->id)->value('battle_result'), true);
+        $this->assertIsArray($stocke);
+        $stocke['attacker_fleet_results'][0]['surviving_cargo']['metal'] = 9_007_199_254_740_992; // 2^53
+        // Une soute qui contient cette cargaison, sinon la repartition des parts refuse avant la borne.
+        $stocke['attacker_fleet_results'][0]['surviving_cargo_capacity'] = 18_014_398_509_481_984; // 2^54
+        DB::table('combat_instances')->where('id', $combat->id)->update(['battle_result' => json_encode($stocke)]);
+
+        $avant = $this->stockOf($cible);
+
+        try {
+            $this->settleIt($combat, (int)$combat->ends_at);
+            $this->fail('A return cargo beyond what the column holds was written anyway.');
+        } catch (Throwable $refus) {
+            $this->assertInstanceOf(UnsettleableAtThisScale::class, $refus);
+            $this->assertStringContainsString('cargaison de retour', $refus->getMessage());
+        }
+
+        $this->assertSame($avant, $this->stockOf($cible), 'The target was debited before the return was found unwritable.');
+        $this->assertSame(0, FleetMission::query()->where('parent_id', $missions[0]->id)->count(), 'A return was created with a degraded cargo.');
+        $this->assertSame(CombatState::Active, $combat->refresh()->status, 'The combat is not left recoverable.');
+    }
+
+    /**
+     * Un champ de debris que la colonne ne porte plus arrete le reglement avant tout debit.
+     */
+    public function testADebrisFieldTheStorageCannotHoldStopsTheSettlement(): void
+    {
+        // Deux cents lanceurs : l'attaquant perd des chasseurs, et des debris existent.
+        [$combat, $missions, $cible] = $this->anEngagedCombat(1, 200);
+
+        $result = BattleResultCodec::fromStorage($combat->refresh()->battle_result);
+        $this->assertGreaterThan(0, $result->debris->metal->get(), 'The battle left no debris: nothing could overflow.');
+
+        $coordonnees = $cible->getPlanetCoordinates();
+        DebrisField::query()->create([
+            'galaxy' => $coordonnees->galaxy,
+            'system' => $coordonnees->system,
+            'planet' => $coordonnees->position,
+            'metal' => 9_007_199_254_740_991, // 2^53 - 1 : encore exact, plus une unite ne l'est plus
+            'crystal' => 0,
+            'deuterium' => 0,
+        ]);
+
+        $avant = $this->stockOf($cible);
+
+        try {
+            $this->settleIt($combat, (int)$combat->ends_at);
+            $this->fail('Debris were added to a field the column can no longer hold.');
+        } catch (Throwable $refus) {
+            $this->assertInstanceOf(UnsettleableAtThisScale::class, $refus);
+            $this->assertStringContainsString('champ de debris', $refus->getMessage());
+        }
+
+        $this->assertSame($avant, $this->stockOf($cible), 'The target was debited before the debris field was found unwritable.');
+        $this->assertSame(0, FleetMission::query()->where('parent_id', $missions[0]->id)->count());
+        $this->assertSame(CombatState::Active, $combat->refresh()->status);
+    }
+
+    /**
      * Une vraie bataille, ouverte, close et engagee, prete a etre reglee.
      *
      * @param int $fleets Le nombre de flottes attaquantes, toutes du meme joueur, vers la meme cible.
      * @return array{0: CombatInstance, 1: array<int, FleetMission>, 2: PlanetService}
      */
-    private function anEngagedCombat(int $fleets = 1): array
+    private function anEngagedCombat(int $fleets = 1, int $defences = 20): array
     {
         for ($i = 0; $i < 6; $i++) {
             $this->createAndLoginUser();
@@ -773,7 +845,7 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
         // Un stock connu **avant la cloture** : c'est elle qui calcule la bataille, donc le butin.
         // Et une garnison : sans defense, la cible ne perd rien et le camp defenseur ne prouverait
         // rien. Vingt lanceurs tombent devant trois cent cinquante chasseurs sans changer l'issue.
-        $this->setStockOf($cible, ['metal' => 500_000, 'crystal' => 300_000, 'deuterium' => 100_000, 'rocket_launcher' => 20]);
+        $this->setStockOf($cible, ['metal' => 500_000, 'crystal' => 300_000, 'deuterium' => 100_000, 'rocket_launcher' => $defences]);
 
         $combat = (new CombatOpeningService())->openOrJoin($missions[0], $cible->getPlanetId(), (int)$missions[0]->time_arrival);
 

@@ -171,6 +171,7 @@ $migrations = [
     '2026_09_03_120000_make_snapshot_inclusions_one_row_per_event',
     '2026_09_03_150000_add_loot_settlement_to_combat_instances',
     '2026_09_03_180000_add_advance_attempts_to_combat_instances',
+    '2026_09_03_230000_change_fleet_mission_resources_to_double',
 ];
 
 $nouvellesTables = [

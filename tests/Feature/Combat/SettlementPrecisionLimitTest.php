@@ -30,6 +30,21 @@ use Tests\TestCase;
  */
 class SettlementPrecisionLimitTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // La planete de mesure ne survit pas a l'essai : deux passages directs se heurtaient sur ses coordonnees.
+        DB::beginTransaction();
+    }
+
+    protected function tearDown(): void
+    {
+        DB::rollBack();
+
+        parent::tearDown();
+    }
+
     /**
      * La colonne ne distingue pas deux montants voisins au-dela de 2^53.
      *
@@ -38,6 +53,10 @@ class SettlementPrecisionLimitTest extends TestCase
      */
     public function testThePlanetColumnCannotTellTwoNeighbouringAmountsApartBeyondTwoToTheFiftyThree(): void
     {
+        // Place nette a ces coordonnees, dans la transaction : un residu d'un passage anterieur
+        // ferait tomber l'essai sur l'unicite des coordonnees, sans rien dire de la colonne.
+        DB::table('planets')->where('galaxy', 7)->where('system', 499)->where('planet', 15)->delete();
+
         $planete = Planet::factory()->create([
             'user_id' => User::factory()->create()->id,
             'galaxy' => 7,

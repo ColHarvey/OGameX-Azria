@@ -19,6 +19,7 @@ use OGame\Combat\Exceptions\UnsettleableAtThisScale;
 use OGame\Combat\Replay\BattleResultCodec;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\FrozenCombatVersionSet;
+use OGame\Combat\Support\ResourceBoundary;
 use OGame\Combat\Support\ResourceNormalizationDiagnostics;
 use OGame\GameMissions\Abstracts\GameMission;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
@@ -27,6 +28,7 @@ use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatParticipant;
+use OGame\Models\DebrisField;
 use OGame\Models\FleetMission;
 use OGame\Models\FleetUnion;
 use OGame\Models\Planet;
@@ -193,6 +195,17 @@ final class CombatSettlementService
                 ->get()
                 ->keyBy('id');
 
+            // 5. **Le champ de debris de la cible**, s'il existe. L'application y ajoute les debris de la
+            // bataille, et un recyclage concurrent le lit puis l'ecrit : sans verrou, l'un des deux
+            // perdrait sa mise a jour. Meme ordre partout — barriere, instance, union, missions,
+            // corps, debris — et une seule ligne, celle des coordonnees de la cible.
+            $champDebris = DebrisField::query()
+                ->where('galaxy', $combat->galaxy)
+                ->where('system', $combat->system)
+                ->where('planet', $combat->position)
+                ->lockForUpdate()
+                ->first();
+
             $ligneCible = $lignes->get((int)$combat->target_planet_id);
 
             if (!$ligneCible instanceof Planet) {
@@ -244,6 +257,11 @@ final class CombatSettlementService
                 $result->attackerFleetResults
             );
             $parts = AppliedLootShares::of($reglement->applied, $capacites, $combat->mission_id, $allocation);
+
+            // **Ce qui sera ecrit doit tenir dans la colonne, pas seulement ce qui a ete lu.** Les
+            // cargaisons de retour et le champ de debris sont des colonnes flottantes elles aussi :
+            // au-dela de 2^53, l'unite se perd a l'ecriture, apres que tout a ete calcule juste.
+            $this->assertTheWritesFitTheStorage($combat, $result, $parts, $champDebris);
 
             // **Les nombres avant le debit.** Si tout ce qui suit echoue, la transaction les efface
             // avec le reste ; s'il reussit, ils sont ce sur quoi tout a ete ecrit, et la relecture
@@ -329,6 +347,47 @@ final class CombatSettlementService
     /**
      * Refuse d'appliquer un resultat qui ne decrit pas les flottes inscrites a ce combat.
      */
+    /**
+     * Les montants que l'application va ecrire tiennent-ils dans leurs colonnes ?
+     *
+     * Le potentiel fige et le solde restant sont verifies a la lecture ; ici ce sont les **ecritures**
+     * qui restent : la cargaison de retour de chaque flotte (survivante, plus sa part, plus au pire
+     * les debris qu'un Faucheur ramasserait) et le champ de debris de la cible (existant, plus ceux
+     * de la bataille). Une borne large plutot que fine : refuser un combat qu'on aurait su ecrire a
+     * cette echelle ne coute rien, ecrire un nombre degrade couterait une unite a quelqu'un.
+     */
+    private function assertTheWritesFitTheStorage(
+        CombatInstance $combat,
+        BattleResult $result,
+        AppliedLootShares $parts,
+        DebrisField|null $champDebris,
+    ): void {
+        foreach ($result->attackerFleetResults as $flotte) {
+            $part = $parts->forFleet($flotte->fleetMissionId);
+
+            foreach (['metal', 'crystal', 'deuterium'] as $ressource) {
+                $retour = $flotte->survivingCargo->{$ressource}->get()
+                    + $part->{$ressource}
+                    + $result->debris->{$ressource}->get();
+
+                if ($retour >= ResourceBoundary::EXACT_INTEGER_LIMIT) {
+                    throw new UnsettleableAtThisScale(
+                        $combat->id,
+                        'la cargaison de retour de la flotte ' . $flotte->fleetMissionId . ' (' . $ressource . ')'
+                    );
+                }
+            }
+        }
+
+        foreach (['metal', 'crystal', 'deuterium'] as $ressource) {
+            $existant = $champDebris === null ? 0.0 : (float)$champDebris->{$ressource};
+
+            if ($existant + $result->debris->{$ressource}->get() >= ResourceBoundary::EXACT_INTEGER_LIMIT) {
+                throw new UnsettleableAtThisScale($combat->id, 'le champ de debris de la cible (' . $ressource . ')');
+            }
+        }
+    }
+
     private function assertTheResultDescribesThisCombat(CombatInstance $combat, BattleResult $result, CombatRoster $roster): void
     {
         $dansLeResultat = array_map(
