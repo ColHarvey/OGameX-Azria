@@ -38,6 +38,16 @@ class CombatParticipantKey
     public const string UNIDENTIFIED_BODY = 'body:unidentified';
 
     /**
+     * Le nom d'une flotte attaquante qui n'a pas de mission.
+     *
+     * Une seule en produit en jeu : la sonde ephemere du contre-espionnage, qui combat sans avoir
+     * ete lancee. Les bancs d'essai en font aussi. Un combat durable n'en admet aucune — son
+     * effectif est fait d'inscriptions, et une inscription nomme une mission —, mais la chronologie
+     * d'un round doit pouvoir nommer cette flotte-la sans lui inventer un identifiant.
+     */
+    public const string EPHEMERAL_ATTACKER = 'attacker:ephemeral';
+
+    /**
      * Build the identity of a fleet taking part in a combat.
      *
      * Une flotte est identifiee par sa mission : c'est ce qui la distingue de toutes les autres,
@@ -108,5 +118,32 @@ class CombatParticipantKey
         }
 
         return $prefixe . ':' . $identifiant;
+    }
+
+    /**
+     * Dit si une chaine relue est une cle que cette classe aurait pu produire.
+     *
+     * Une porte de confiance — la relecture d'un resultat gele, par exemple — recoit des clefs
+     * ecrites par un autre processus. Une clef qui ne nomme ni un corps ni une flotte, ou qui
+     * porte un identifiant nul, un zero en tete ou une majuscule, n'aurait jamais ete produite
+     * ici : elle ne designe personne, et une chronologie batie dessus attribuerait des pertes a un
+     * fantome. Le nom reserve des bancs d'essai est admis, puisqu'il sort d'ici aussi.
+     *
+     * @param string $key
+     * @return bool
+     */
+    public static function isWellFormed(string $key): bool
+    {
+        if ($key === self::UNIDENTIFIED_BODY || $key === self::EPHEMERAL_ATTACKER) {
+            return true;
+        }
+
+        $parts = explode(':', $key, 2);
+
+        if (count($parts) !== 2 || !in_array($parts[0], [self::FLEET_PREFIX, self::PLANET_PREFIX], true)) {
+            return false;
+        }
+
+        return preg_match('/^[1-9][0-9]*$/', $parts[1]) === 1;
     }
 }

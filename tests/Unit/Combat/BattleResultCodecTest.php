@@ -125,6 +125,41 @@ class BattleResultCodecTest extends UnitTestCase
      * Le numero se derive de la constante : ecrit en dur, il devenait connu le jour ou le schema
      * montait, et l'essai passait alors en n'exigeant plus rien.
      */
+    /**
+     * Les pertes d'un round par participant reviennent sous leurs clefs typees, garnison comprise.
+     */
+    public function testRoundLossesByParticipantSurviveTheRoundTrip(): void
+    {
+        $relu = BattleResultCodec::fromStorage($this->aDocument());
+
+        $this->assertSame(
+            [CombatParticipantKey::forFleet(41), CombatParticipantKey::forPlanet(2)],
+            array_keys($relu->rounds[1]->lossesInRoundByParticipant),
+            'The typed keys did not survive the round trip.'
+        );
+        $this->assertSame(['rocket_launcher' => 2], $relu->rounds[1]->lossesInRoundByParticipant[CombatParticipantKey::forPlanet(2)]->toArray());
+        $this->assertSame(['light_fighter' => 1], $relu->rounds[1]->lossesInRoundByParticipant[CombatParticipantKey::forFleet(41)]->toArray());
+        $this->assertSame(['rocket_launcher' => 2], $relu->rounds[1]->defenderLossesInRoundPerFleet[0]->toArray(), 'The garrison losses of the round did not survive under their engine-level key.');
+    }
+
+    /**
+     * Une clef qui ne nomme aucun participant se refuse : une chronologie batie dessus attribuerait
+     * des pertes a un fantome. Le nom reserve d'une attaquante sans mission, lui, est admis.
+     */
+    public function testAParticipantKeyThatNamesNobodyIsRefused(): void
+    {
+        $document = $this->aDocument();
+        $document['rounds'][0]['losses_in_round_by_participant'] = ['garnison' => ['rocket_launcher' => 2]];
+
+        $this->assertRefused($document, 'garnison');
+
+        $document = $this->aDocument();
+        $document['rounds'][0]['losses_in_round_by_participant'] = [CombatParticipantKey::EPHEMERAL_ATTACKER => ['light_fighter' => 1]];
+
+        $relu = BattleResultCodec::fromStorage($document);
+        $this->assertSame(['light_fighter' => 1], $relu->rounds[0]->lossesInRoundByParticipant[CombatParticipantKey::EPHEMERAL_ATTACKER]->toArray());
+    }
+
     public function testAnUnknownSchemaIsRefused(): void
     {
         $inconnu = BattleResultCodec::SCHEMA + 1;
@@ -373,6 +408,11 @@ class BattleResultCodecTest extends UnitTestCase
         $round->damagePerAttackerFleet = [41 => $degats];
         $round->defenderLosses = $this->units($pertesDefenseur);
         $round->defenderLossesInRound = $this->units($pertesDefenseurDuRound);
+        $round->defenderLossesInRoundPerFleet = [0 => $this->units($pertesDefenseurDuRound)];
+        $round->lossesInRoundByParticipant = [
+            CombatParticipantKey::forFleet(41) => $this->units($pertesAttaquantDuRound),
+            CombatParticipantKey::forPlanet(2) => $this->units($pertesDefenseurDuRound),
+        ];
         $round->hitsAttacker = $coups;
         $round->hitsDefender = 3;
         $round->absorbedDamageAttacker = 40;

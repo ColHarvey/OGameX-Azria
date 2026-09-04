@@ -3,6 +3,7 @@
 namespace OGame\Combat\Replay;
 
 use OGame\Combat\Exceptions\CorruptedBattleResult;
+use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\ResourceDiagnostic;
 use OGame\Combat\Support\ResourceNormalizationDiagnostics;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleetResult;
@@ -53,8 +54,13 @@ final class BattleResultCodec
      * de transferts de ressources, et un changement de classe ou d'hyperespace survenu pendant
      * la bataille en changeait le resultat. Un document du schema 2 se refuse : ces capacites ne
      * se devinent pas apres coup.
+     *
+     * Le schema 4 ajoute, dans chaque round, les pertes par flotte defensive et les pertes par
+     * participant des deux camps, sous la clef typee des inscriptions au combat : la garnison est
+     * le corps, chaque flotte sa mission. Un document du schema 3 se refuse : dire apres coup de
+     * quelle flotte venait chaque perte reviendrait a inventer une chronologie.
      */
-    public const int SCHEMA = 3;
+    public const int SCHEMA = 4;
 
     private const array KEYS = [
         'schema',
@@ -139,6 +145,8 @@ final class BattleResultCodec
         'damage_per_attacker_fleet',
         'defender_losses',
         'defender_losses_in_round',
+        'defender_losses_in_round_per_fleet',
+        'losses_in_round_by_participant',
         'hits_attacker',
         'hits_defender',
         'absorbed_damage_attacker',
@@ -203,6 +211,8 @@ final class BattleResultCodec
                 'damage_per_attacker_fleet' => $round->damagePerAttackerFleet,
                 'defender_losses' => $round->defenderLosses->toArray(),
                 'defender_losses_in_round' => $round->defenderLossesInRound->toArray(),
+                'defender_losses_in_round_per_fleet' => self::unitsByFleetToStorage($round->defenderLossesInRoundPerFleet),
+                'losses_in_round_by_participant' => self::unitsByParticipantToStorage($round->lossesInRoundByParticipant),
                 'hits_attacker' => $round->hitsAttacker,
                 'hits_defender' => $round->hitsDefender,
                 'absorbed_damage_attacker' => $round->absorbedDamageAttacker,
@@ -439,6 +449,8 @@ final class BattleResultCodec
         $round->damagePerAttackerFleet = self::intByFleet($document, 'damage_per_attacker_fleet', $path);
         $round->defenderLosses = self::units($document, 'defender_losses', $path);
         $round->defenderLossesInRound = self::units($document, 'defender_losses_in_round', $path);
+        $round->defenderLossesInRoundPerFleet = self::unitsByFleet($document, 'defender_losses_in_round_per_fleet', $path);
+        $round->lossesInRoundByParticipant = self::unitsByParticipant($document, 'losses_in_round_by_participant', $path);
         $round->hitsAttacker = self::int($document, 'hits_attacker', $path);
         $round->hitsDefender = self::int($document, 'hits_defender', $path);
         $round->absorbedDamageAttacker = self::int($document, 'absorbed_damage_attacker', $path);
@@ -700,6 +712,46 @@ final class BattleResultCodec
         }
 
         return $parFlotte;
+    }
+
+    /**
+     * @param array<string, UnitCollection> $parParticipant
+     * @return array<string, array<string, int>>
+     */
+    private static function unitsByParticipantToStorage(array $parParticipant): array
+    {
+        $document = [];
+
+        foreach ($parParticipant as $participant => $unites) {
+            $document[$participant] = $unites->toArray();
+        }
+
+        return $document;
+    }
+
+    /**
+     * Une carte « clef de participant => unites ».
+     *
+     * La clef est celle des inscriptions au combat, et elle se verifie ici : une clef qui ne
+     * nomme ni un corps ni une flotte ne designe personne, et une chronologie batie dessus
+     * attribuerait des pertes a un fantome.
+     *
+     * @param array<mixed, mixed> $document
+     * @return array<string, UnitCollection>
+     */
+    private static function unitsByParticipant(array $document, string $field, string $path): array
+    {
+        $parParticipant = [];
+
+        foreach (self::array($document, $field, $path) as $participant => $unites) {
+            if (!is_string($participant) || !CombatParticipantKey::isWellFormed($participant)) {
+                throw new CorruptedBattleResult('« ' . $path . '.' . $field . ' » porte une clef qui ne nomme aucun participant (' . (is_string($participant) ? $participant : get_debug_type($participant)) . ')', $document);
+            }
+
+            $parParticipant[$participant] = self::unitsFrom(self::structure($unites, $path . '.' . $field . '[' . $participant . ']'), $path . '.' . $field . '[' . $participant . ']');
+        }
+
+        return $parParticipant;
     }
 
     /**

@@ -116,6 +116,14 @@ class PhpBattleEngine extends BattleEngine
                 $round->damagePerAttackerFleet[$attackerFleet->fleetMissionId] = 0;
             }
 
+            // **Le camp defenseur est suivi flotte par flotte lui aussi** : la garnison sous zero,
+            // chaque renfort sous sa mission. Sans cela, un defenseur accompagne ne saurait pas de
+            // quelle flotte vient chaque perte de sa bataille.
+            $round->defenderLossesInRoundPerFleet = [];
+            foreach ($this->defenders as $defenderFleet) {
+                $round->defenderLossesInRoundPerFleet[$defenderFleet->fleetMissionId] = new UnitCollection();
+            }
+
             // Let the attacker attack the defender.
             foreach ($attackerUnits as $unit) {
                 // Every single unit attacks a random unit from the defender's units.
@@ -323,6 +331,12 @@ class PhpBattleEngine extends BattleEngine
             if ($unit->currentHullPlating <= 0) {
                 // Remove destroyed units from the array.
                 $round->defenderLossesInRound->addUnit($unit->unitObject, 1);
+
+                // La perte est attribuee a la flotte qui portait l'unite, garnison comprise.
+                if (isset($round->defenderLossesInRoundPerFleet[$unit->fleetMissionId])) {
+                    $round->defenderLossesInRoundPerFleet[$unit->fleetMissionId]->addUnit($unit->unitObject, 1);
+                }
+
                 unset($defenderUnits[$key]);
             } else {
                 // Apply shield regeneration.

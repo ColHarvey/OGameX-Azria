@@ -100,4 +100,31 @@ class BattleResultRound
      * @var UnitCollection The units of the defender remaining at the end of the round.
      */
     public UnitCollection $defenderShips;
+
+    /**
+     * @var array<int, UnitCollection> Les pertes de **ce round** par flotte defensive, par identifiant de mission.
+     *
+     * Le symetrique de `$attackerLossesInRoundPerFleet` : la garnison est sous `0`, chaque renfort
+     * sous sa mission. C'est la forme que les deux moteurs produisent ; la forme typee, ou la
+     * garnison porte un nom, est `$lossesInRoundByParticipant`.
+     */
+    public array $defenderLossesInRoundPerFleet = [];
+
+    /**
+     * @var array<string, UnitCollection> Les pertes de **ce round** par participant, des deux camps.
+     *
+     * ## Pourquoi une clef typee
+     *
+     * Les deux cartes par flotte designent la garnison par `0` : un identifiant de mission que rien
+     * ne distingue d'une entree absente ou d'une flotte sans identifiant. La chronologie qu'un
+     * defenseur lit pendant sa bataille doit dire **de qui** vient chaque perte, et « zero » ne
+     * nomme personne. Ici la garnison est le corps (`CombatParticipantKey::forBody()`), chaque
+     * flotte sa mission (`forFleet()`), et les deux camps partagent un seul jeu de clefs — celui
+     * des inscriptions au combat.
+     *
+     * Cette carte est **derivee** par le moteur partage a partir des cartes par flotte, et une
+     * attribution qui ne couvre pas exactement les pertes du camp se refuse : un moteur qui
+     * perdrait des vaisseaux sans dire de quelle flotte ne produirait pas de resultat.
+     */
+    public array $lossesInRoundByParticipant = [];
 }

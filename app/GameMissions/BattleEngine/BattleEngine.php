@@ -6,6 +6,7 @@ use InvalidArgumentException;
 use OGame\Combat\Allocation\ExactLootAllocationV1;
 use OGame\Combat\Allocation\LootAllocator;
 use OGame\Combat\Allocation\LootAllocatorRegistry;
+use OGame\Combat\Exceptions\IncoherentRoundAttribution;
 use OGame\Combat\Policies\CargoWeightedV1;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\LootContext;
@@ -254,6 +255,10 @@ abstract class BattleEngine
             // every round.
             $result->rounds = $this->sanitizeRoundArray($result->rounds);
 
+            // **Chaque perte porte le nom de qui l'a subie**, des deux camps, sous une clef typee. Une
+            // attribution qui ne recouvre pas les pertes du camp arrete le moteur ici.
+            $this->keyRoundLossesByParticipant($result->rounds);
+
             // Get the result of the battle.
             if (count($result->rounds) > 0) {
                 // Take the remaining ships in the last round as the result.
@@ -353,6 +358,89 @@ abstract class BattleEngine
         }
 
         return $result;
+    }
+
+    /**
+     * Nomme, dans chaque round, le participant qui a subi chaque perte — des deux camps.
+     *
+     * ## Ce que les moteurs fournissent, et ce que cette methode en fait
+     *
+     * Les deux moteurs attribuent chaque vaisseau detruit a sa flotte, par identifiant de mission :
+     * `attackerLossesInRoundPerFleet` et `defenderLossesInRoundPerFleet`, la garnison sous `0`. Ces
+     * cartes disent d'ou vient une perte, mais leur clef ne nomme personne : `0` est un identifiant
+     * de mission que rien ne distingue d'une flotte sans identifiant.
+     *
+     * La carte derivee ici porte les clefs des inscriptions au combat : la garnison est le corps,
+     * chaque flotte sa mission. C'est elle que la chronologie d'un defenseur lira, et elle que le
+     * banc de parite comparera entre les deux moteurs.
+     *
+     * ## Pourquoi un refus
+     *
+     * Si les attributions d'un camp ne font pas exactement ses pertes du round, le moteur a perdu
+     * des vaisseaux sans dire de qui. Completer en versant le reste a la garnison rendrait ce defaut
+     * invisible — c'est precisement ce qu'un moteur qui ne suit pas les flottes produirait. Le
+     * resultat ne se produit pas.
+     *
+     * @param array<BattleResultRound> $rounds
+     */
+    protected function keyRoundLossesByParticipant(array $rounds): void
+    {
+        $garnison = CombatParticipantKey::forBody($this->defenderPlanet);
+
+        foreach ($rounds as $rang => $round) {
+            $parParticipant = [];
+
+            // Une attaquante sans mission — la sonde ephemere du contre-espionnage, ou un banc —
+            // porte le nom reserve : lui inventer un identifiant nommerait une flotte qui n'existe pas.
+            foreach ($round->attackerLossesInRoundPerFleet as $mission => $pertes) {
+                $parParticipant[$mission === 0 ? CombatParticipantKey::EPHEMERAL_ATTACKER : CombatParticipantKey::forFleet($mission)] = clone $pertes;
+            }
+
+            foreach ($round->defenderLossesInRoundPerFleet as $mission => $pertes) {
+                $parParticipant[$mission === 0 ? $garnison : CombatParticipantKey::forFleet($mission)] = clone $pertes;
+            }
+
+            $this->refuseIfTheAttributionDoesNotCoverTheLosses($rang + 1, 'attaquant', $round->attackerLossesInRoundPerFleet, $round->attackerLossesInRound);
+            $this->refuseIfTheAttributionDoesNotCoverTheLosses($rang + 1, 'defenseur', $round->defenderLossesInRoundPerFleet, $round->defenderLossesInRound);
+
+            ksort($parParticipant);
+            $round->lossesInRoundByParticipant = $parParticipant;
+        }
+    }
+
+    /**
+     * @param array<int, UnitCollection> $parFlotte
+     */
+    private function refuseIfTheAttributionDoesNotCoverTheLosses(int $round, string $camp, array $parFlotte, UnitCollection $pertesDuCamp): void
+    {
+        $attribue = [];
+
+        foreach ($parFlotte as $pertes) {
+            foreach ($pertes->units as $entree) {
+                if ($entree->amount === 0) {
+                    continue;
+                }
+
+                $attribue[$entree->unitObject->machine_name] = ($attribue[$entree->unitObject->machine_name] ?? 0) + $entree->amount;
+            }
+        }
+
+        $perdu = [];
+
+        foreach ($pertesDuCamp->units as $entree) {
+            if ($entree->amount === 0) {
+                continue;
+            }
+
+            $perdu[$entree->unitObject->machine_name] = $entree->amount;
+        }
+
+        ksort($attribue);
+        ksort($perdu);
+
+        if ($attribue !== $perdu) {
+            throw IncoherentRoundAttribution::inRound($round, $camp, $attribue, $perdu);
+        }
     }
 
     /**

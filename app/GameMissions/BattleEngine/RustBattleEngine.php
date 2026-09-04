@@ -214,6 +214,29 @@ class RustBattleEngine extends BattleEngine
                 $round->defenderLossesInRound = $this->convertUnitArrayToUnitCollection($roundData['defender_losses_in_round']);
             }
 
+            // **Les cartes par flotte, des deux camps.** Le contrat du round Rust les porte depuis
+            // le schema 2 ; le moteur partage refuse un round dont l'attribution ne recouvre pas
+            // les pertes du camp, donc une bibliotheque qui ne les rendrait pas ne produirait
+            // aucun resultat plutot qu'un resultat muet.
+            $round->attackerLossesInRoundPerFleet = $this->convertUnitsByFleet($roundData['attacker_losses_in_round_per_fleet'] ?? []);
+            $round->defenderLossesInRoundPerFleet = $this->convertUnitsByFleet($roundData['defender_losses_in_round_per_fleet'] ?? []);
+            $round->hitsPerAttackerFleet = $this->convertIntByFleet($roundData['hits_per_attacker_fleet'] ?? []);
+            $round->damagePerAttackerFleet = $this->convertIntByFleet($roundData['damage_per_attacker_fleet'] ?? []);
+
+            // Pertes cumulees et effectif par flotte attaquante : le round Rust les porte deja dans
+            // ses resultats par flotte, calcules a la fin de chaque round.
+            if (isset($roundData['attacker_fleet_results']) && is_array($roundData['attacker_fleet_results'])) {
+                foreach ($roundData['attacker_fleet_results'] as $fleetResult) {
+                    if (!is_array($fleetResult) || !isset($fleetResult['fleet_mission_id'])) {
+                        continue;
+                    }
+
+                    $mission = (int)$fleetResult['fleet_mission_id'];
+                    $round->attackerLossesPerFleet[$mission] = $this->convertUnitArrayToUnitCollection(is_array($fleetResult['units_lost'] ?? null) ? $fleetResult['units_lost'] : []);
+                    $round->attackerShipsPerFleet[$mission] = $this->convertUnitArrayToUnitCollection(is_array($fleetResult['units_result'] ?? null) ? $fleetResult['units_result'] : []);
+                }
+            }
+
             // Extract other properties.
             $round->hitsAttacker = (int)($roundData['hits_attacker'] ?? 0);
             $round->hitsDefender = (int)($roundData['hits_defender'] ?? 0);
@@ -280,6 +303,48 @@ class RustBattleEngine extends BattleEngine
             $rounds[] = $round;
         }
         return $rounds;
+    }
+
+    /**
+     * Une carte « identifiant de mission => unites » telle que le round Rust la rend.
+     *
+     * @param mixed $parFlotte
+     * @return array<int, UnitCollection>
+     */
+    private function convertUnitsByFleet(mixed $parFlotte): array
+    {
+        if (!is_array($parFlotte)) {
+            return [];
+        }
+
+        $cartes = [];
+
+        foreach ($parFlotte as $mission => $unites) {
+            $cartes[(int)$mission] = $this->convertUnitArrayToUnitCollection(is_array($unites) ? $unites : []);
+        }
+
+        return $cartes;
+    }
+
+    /**
+     * Une carte « identifiant de mission => entier » telle que le round Rust la rend.
+     *
+     * @param mixed $parFlotte
+     * @return array<int, int>
+     */
+    private function convertIntByFleet(mixed $parFlotte): array
+    {
+        if (!is_array($parFlotte)) {
+            return [];
+        }
+
+        $cartes = [];
+
+        foreach ($parFlotte as $mission => $valeur) {
+            $cartes[(int)$mission] = (int)$valeur;
+        }
+
+        return $cartes;
     }
 
     /**
