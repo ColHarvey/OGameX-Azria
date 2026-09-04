@@ -378,9 +378,18 @@ class CombatResolutionService
                 $defenderCollectedDebris = $this->capAndCollect($collectionAmount, $defenderReaperCargoCapacity, $allocation, $diagnostics, CombatResolutionOutcome::PHASE_DEFENDER_REAPER);
             }
 
-            // Add collected debris to defender planet's resources
-            $defenderPlanet->addResources($defenderCollectedDebris);
-            $defenderPlanet->save();
+            // **Le credit du Faucheur defenseur s'ecrit en base, pas depuis le modele en memoire.**
+            //
+            // `addResources()` prenait le stock **tel qu'il avait ete lu** et reecrivait la somme.
+            // Entre cette lecture et cette ecriture, la production du corps, un transport arrive ou
+            // une construction terminee ont pu changer les memes colonnes — et aucune de ces
+            // ecritures-la ne prend les verrous du combat, donc rien ne les retient. La somme
+            // recalculee les effacait.
+            //
+            // Une addition faite par la base ne peut pas les perdre : elle lit la ligne qu'elle
+            // ecrit, au moment ou elle l'ecrit. Et elle ne touche que les trois colonnes, au lieu de
+            // flusher tout le modele de planete que la resolution a manipule par ailleurs.
+            $defenderPlanet->addResourcesAtomic($defenderCollectedDebris);
         }
 
         // Total collected debris for battle report

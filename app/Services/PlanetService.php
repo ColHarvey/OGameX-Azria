@@ -1989,6 +1989,59 @@ class PlanetService
      * @param Resources $resources The resources to deduct.
      * @return bool True if deduction succeeded, false if insufficient resources.
      */
+    /**
+     * Atomically add resources to the planet, in a single UPDATE that reads the row it writes.
+     *
+     * ## Pourquoi un credit atomique, et pas `addResources()`
+     *
+     * `addResources()` incremente le stock **tel qu'il a ete lu** puis sauve tout le modele. Entre
+     * la lecture et l'ecriture, la production du corps, un transport arrive ou une construction
+     * terminee ont pu changer les memes colonnes : la somme recalculee les efface. C'est la course
+     * ordinaire du lire-modifier-ecrire, et elle ne se voit qu'en production.
+     *
+     * Une addition faite par la base lit la ligne qu'elle ecrit, au moment ou elle l'ecrit : rien ne
+     * peut s'y perdre. Elle ne touche en outre que les trois colonnes concernees, au lieu de flusher
+     * tout un modele que l'appelant a pu manipuler par ailleurs.
+     *
+     * Le modele en memoire suit ensuite, comme le fait le debit : l'appelant qui l'affiche voit la
+     * meme chose que la base.
+     *
+     * **Ce credit ne plafonne rien.** `addResources()` ramene les trois colonnes a zero apres coup,
+     * pour rattraper une production negative ; ce n'est pas le role d'un credit, et le faire ici
+     * demanderait de relire la ligne — ce que cette methode existe justement pour eviter.
+     *
+     * @param Resources $resources
+     * @return void
+     */
+    public function addResourcesAtomic(Resources $resources): void
+    {
+        $metal = (int)$resources->metal->get();
+        $crystal = (int)$resources->crystal->get();
+        $deuterium = (int)$resources->deuterium->get();
+
+        $updates = [];
+
+        if ($metal > 0) {
+            $updates['metal'] = DB::raw("metal + {$metal}");
+        }
+        if ($crystal > 0) {
+            $updates['crystal'] = DB::raw("crystal + {$crystal}");
+        }
+        if ($deuterium > 0) {
+            $updates['deuterium'] = DB::raw("deuterium + {$deuterium}");
+        }
+
+        if ($updates === []) {
+            return;
+        }
+
+        Planet::where('id', $this->getPlanetId())->update($updates);
+
+        $this->planet->metal += $metal;
+        $this->planet->crystal += $crystal;
+        $this->planet->deuterium += $deuterium;
+    }
+
     public function deductResourcesAtomic(Resources $resources): bool
     {
         $metalCost = (int)$resources->metal->get();
