@@ -33,6 +33,7 @@ use OGame\Models\DebrisField;
 use OGame\Models\FleetMission;
 use OGame\Models\FleetUnion;
 use OGame\Models\Planet;
+use OGame\Models\WreckField;
 use RuntimeException;
 
 /**
@@ -212,6 +213,23 @@ final class CombatSettlementService
             if (!$ligneCible instanceof Planet) {
                 throw new RuntimeException('Le combat ' . $combat->id . ' vise un corps ' . $combat->target_planet_id . ' qui n existe plus.');
             }
+
+            // 6. **Les champs d'epaves du defenseur a ces coordonnees.** L'application en cree un, ou
+            // etend celui qui vit deja ; une seconde bataille sur le meme corps, ou une reparation
+            // lancee par le joueur, touchent les memes lignes. Elles ferment l'inventaire : barriere,
+            // instance, union, missions, corps, debris, epaves — toujours dans cet ordre, et par
+            // identifiant croissant a l'interieur de chaque famille.
+            //
+            // Une lune depose ses epaves sur sa planete ; les deux partagent leurs coordonnees, et
+            // c'est le proprietaire du corps vise qui les possede.
+            WreckField::query()
+                ->where('galaxy', $combat->galaxy)
+                ->where('system', $combat->system)
+                ->where('planet', $combat->position)
+                ->where('owner_player_id', $ligneCible->user_id)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get();
 
             // **Apres le verrou, jamais avant.** Le lecteur charge le corps a neuf : un service
             // charge avant le verrou porterait un solde d'avant une depense concurrente, et la

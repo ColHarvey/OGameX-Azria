@@ -2,6 +2,7 @@
 
 namespace OGame\Combat\Services;
 
+use Illuminate\Support\Facades\Date;
 use LogicException;
 use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Allocation\LootAllocatorRegistry;
@@ -12,6 +13,7 @@ use OGame\Combat\Replay\CombatResultIdentity;
 use OGame\Combat\Support\FrozenCombatVersionSet;
 use OGame\Combat\Support\LootContextForMission;
 use OGame\GameMissions\BattleEngine\BattleEngineFactory;
+use OGame\Jobs\SettlePersistentCombat;
 use OGame\Models\CombatInstance;
 use OGame\Services\CharacterClassService;
 use OGame\Services\SettingsService;
@@ -130,6 +132,15 @@ final class CombatEngagementService
         $combat->duration_implausible = $estimation->implausible;
         $combat->round_schedule = $calendrier;
         $combat->ends_at = $startsAt + $estimation->seconds;
+
+        // **Le reglement est programme a l'echeance exacte, dans cette transaction.** Le planificateur
+        // ne descend pas sous la minute : sans ce travail, une bataille de cinq secondes garderait son
+        // corps pres d'une minute de plus que sa duree — l'attente que la fenetre dynamique existe
+        // pour supprimer. La file vit en base : si la cloture est annulee, le travail l'est avec elle.
+        //
+        // Le passage minute reste, en rattrapage : une file perd un message, un travailleur s'arrete.
+        // Les deux chemins passent par la meme frontiere, qui refuse un combat deja regle.
+        SettlePersistentCombat::dispatch($combat->id)->delay(Date::createFromTimestamp($combat->ends_at));
 
         return new CombatEngagement($estimation->seconds, $startsAt + $estimation->seconds, $estimation->implausible, count($estimation->rounds));
     }

@@ -33,6 +33,7 @@ use OGame\Models\DebrisField;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet;
 use OGame\Models\Resources;
+use OGame\Models\WreckField;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
 use OGame\Services\SettingsService;
@@ -312,7 +313,7 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
         [$combat] = $this->anEngagedCombat();
 
         $tables = [];
-        $suivies = ['celestial_body_combat_barriers', 'combat_instances', 'fleet_missions', 'planets', 'debris_fields'];
+        $suivies = ['celestial_body_combat_barriers', 'combat_instances', 'fleet_missions', 'planets', 'debris_fields', 'wreck_fields'];
 
         DB::listen(function (QueryExecuted $requete) use (&$tables, $suivies): void {
             foreach ($suivies as $table) {
@@ -324,7 +325,7 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
 
         $this->settleIt($combat, (int)$combat->ends_at);
 
-        $this->assertSame($suivies, array_slice($tables, 0, 5), 'The settlement does not take its locks in the order the barrier migration fixes.');
+        $this->assertSame($suivies, array_slice($tables, 0, 6), 'The settlement does not take its locks in the order the barrier migration fixes.');
     }
 
     /**
@@ -404,6 +405,9 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
             'corps' => (new ReflectionClass(Planet::class))->getShortName() . "::query() ->whereIn('id', \$corps) ->orderBy('id') ->lockForUpdate()",
             // Le champ de debris de la cible, apres les corps : un recyclage concurrent le lit et l'ecrit.
             'debris' => (new ReflectionClass(DebrisField::class))->getShortName() . "::query() ->where('galaxy', \$combat->galaxy) ->where('system', \$combat->system) ->where('planet', \$combat->position) ->lockForUpdate()",
+            // Les champs d'epaves du defenseur, en dernier : l'application en cree ou en etend un, et
+            // une reparation lancee par le joueur touche les memes lignes.
+            'epaves' => (new ReflectionClass(WreckField::class))->getShortName() . "::query() ->where('galaxy', \$combat->galaxy) ->where('system', \$combat->system) ->where('planet', \$combat->position) ->where('owner_player_id', \$ligneCible->user_id) ->orderBy('id') ->lockForUpdate()",
         ];
 
         foreach ($verrous as $quoi => $declaration) {
