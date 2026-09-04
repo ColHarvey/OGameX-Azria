@@ -72,6 +72,7 @@ use OGame\Combat\Enums\CombatState;
  * @property string|null $frozen_facts_fingerprint
  * @property array<mixed>|null $frozen_alliance_membership
  * @property string|null $projection_version
+ * @property string|null $presentation_version La regle de presentation sous laquelle le fil a ete ecrit.
  * @property int|null $potential_loot_metal
  * @property int|null $potential_loot_crystal
  * @property int|null $potential_loot_deuterium
@@ -135,6 +136,7 @@ use OGame\Combat\Enums\CombatState;
     'frozen_facts_fingerprint',
     'frozen_alliance_membership',
     'projection_version',
+    'presentation_version',
     'potential_loot_metal',
     'potential_loot_crystal',
     'potential_loot_deuterium',

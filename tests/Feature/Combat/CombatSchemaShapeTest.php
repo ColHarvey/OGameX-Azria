@@ -33,6 +33,7 @@ class CombatSchemaShapeTest extends UnitTestCase
             'started_at', 'ends_at', 'duration_seconds',
             'duration_rate', 'duration_damping', 'duration_minimum_seconds', 'duration_implausible',
             'round_schedule', 'battle_snapshot', 'battle_result', 'battle_report_id',
+            'presentation_version',
             'created_at', 'updated_at',
         ];
 

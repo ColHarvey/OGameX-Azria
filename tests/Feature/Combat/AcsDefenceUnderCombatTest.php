@@ -426,6 +426,7 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
             'inclusions' => $lignes('combat_snapshot_inclusions', 'event_identity'),
             'dispositions' => $lignes('combat_fleet_dispositions', 'fleet_mission_id'),
             'outbox' => $lignes('combat_outbox', 'participant_key'),
+            'presentation' => $lignes('combat_presentation_events', 'sequence'),
         ];
     }
 

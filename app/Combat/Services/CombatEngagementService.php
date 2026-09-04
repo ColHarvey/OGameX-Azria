@@ -9,6 +9,7 @@ use OGame\Combat\Allocation\LootAllocatorRegistry;
 use OGame\Combat\Application\CombatApplicationContext;
 use OGame\Combat\Application\FrozenCombatApplicationContext;
 use OGame\Combat\Application\LiveCombatApplicationContext;
+use OGame\Combat\Presentation\CombatPresentationTimelineWriter;
 use OGame\Combat\Replay\BattleResultCodec;
 use OGame\Combat\Replay\CombatResultIdentity;
 use OGame\Combat\Support\FrozenCombatVersionSet;
@@ -59,6 +60,7 @@ final class CombatEngagementService
         private CombatDurationEstimator|null $estimator = null,
         private LootAllocatorRegistry|null $allocators = null,
         private CombatApplicationContext|null $faits = null,
+        private CombatPresentationTimelineWriter|null $presentation = null,
     ) {
     }
 
@@ -80,6 +82,15 @@ final class CombatEngagementService
         }
 
         $effectif = $this->roster->forCombat($combat);
+
+        // **Aucune attaquante sans mission dans un combat durable.** Son effectif est fait
+        // d'inscriptions, et une inscription nomme une mission ; une flotte a l'identifiant zero
+        // porterait le nom reserve de la sonde ephemere et se confondrait avec elle.
+        foreach ($effectif->attackers as $attaquante) {
+            if ($attaquante->fleetMissionId < 1) {
+                throw new LogicException('Le combat ' . $combat->id . ' compte une attaquante sans mission : un combat durable n en admet aucune.');
+            }
+        }
 
         // **Sous les versions du combat**, pas les courantes : un combat ouvert sous V1 se calcule
         // sous V1, meme si une V2 est devenue courante entre l'ouverture et la cloture.
@@ -141,6 +152,17 @@ final class CombatEngagementService
         $combat->duration_implausible = $estimation->implausible;
         $combat->round_schedule = $calendrier;
         $combat->ends_at = $startsAt + $estimation->seconds;
+
+        // **La chronologie de presentation part avec le resultat**, dans la meme transaction :
+        // derivee du resultat gele et du calendrier, jamais des modeles vivants. Ce que chaque
+        // joueur verra apparaitre pendant la bataille est fixe ici, une fois, et un rejeu du
+        // meme resultat rendrait exactement les memes evenements.
+        ($this->presentation ??= new CombatPresentationTimelineWriter())->write(
+            $combat,
+            $resultat,
+            array_map(static fn ($round): int => $round->seconds, $estimation->rounds),
+            $startsAt
+        );
 
         // **Le reglement est programme a l'echeance exacte, dans cette transaction.** Le planificateur
         // ne descend pas sous la minute : sans ce travail, une bataille de cinq secondes garderait son
