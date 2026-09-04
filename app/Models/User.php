@@ -45,6 +45,8 @@ use Spatie\Permission\Traits\HasRoles;
  * @property Carbon|null $dark_matter_last_regen
  * @property bool $is_npc
  * @property string|null $npc_type
+ * @property int|null $deletion_pending_since
+ * @property string|null $deletion_deferred_reason
  * @property bool $vacation_mode
  * @property Carbon|null $vacation_mode_activated_at
  * @property Carbon|null $vacation_mode_until

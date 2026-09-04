@@ -565,6 +565,17 @@ class FleetMissionService
      */
     public function createNewFromPlanet(PlanetService $planet, Coordinate $targetCoordinate, PlanetType $targetType, int $missionType, UnitCollection $units, Resources $resources, float $speedPercent, int $holdingHours = 0, int $parent_id = 0, bool $retreatAfterDefenderRetreat = false): FleetMission
     {
+        // **Un compte en suppression en attente ne lance plus rien.** C'est ici que la course se
+        // ferme : sans ce refus, une flotte partie apres l'inventaire des combats du compte pourrait
+        // ouvrir une bataille que personne n'annulerait, et sa barriere tiendrait un corps pour
+        // toujours. Le refus vaut pour tous les genres de mission, pas seulement l'attaque : une
+        // Defense ACS ou un deploiement laisserait la meme flotte derriere un compte disparu.
+        $proprietaire = $planet->getPlayer();
+
+        if ($proprietaire !== null && $proprietaire->isPendingDeletion()) {
+            throw new Exception('Ce compte est en cours de suppression : il ne peut plus lancer de flotte.');
+        }
+
         $missionObject = $this->gameMissionFactory->getMissionById($missionType, [
             'fleetMissionService' => $this,
             'messageService' => $this->messageService,

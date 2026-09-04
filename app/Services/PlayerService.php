@@ -997,7 +997,54 @@ class PlayerService
     }
 
     /**
-     * Delete the player and all associated records from the database.
+     * Si ce compte est en suppression en attente : il ne lance plus rien.
+     *
+     * ## Pourquoi un etat, et pas un instant
+     *
+     * Un compte qui renforce le combat d'un autre joueur ne peut pas disparaitre tout de suite —
+     * retirer son renfort changerait une issue deja gelee. Regle arretee par Keven : il passe en
+     * attente, cesse d'agir, et sa suppression reprend d'elle-meme quand ces combats sont finaux.
+     *
+     * Le drapeau ferme aussi une course : pose **avant** l'inventaire des combats, il empeche qu'un
+     * combat s'ouvre entre cet inventaire et l'effacement des lignes du compte.
+     */
+    public function isPendingDeletion(): bool
+    {
+        return $this->user->deletion_pending_since !== null;
+    }
+
+    /**
+     * Ce qui retient la suppression de ce compte, ou une chaine vide.
+     */
+    public function deletionDeferredReason(): string
+    {
+        return (string)($this->user->deletion_deferred_reason ?? '');
+    }
+
+    /**
+     * Le compte entre en suppression en attente : des cet instant il ne lance plus rien.
+     */
+    private function markDeletionPending(): void
+    {
+        if ($this->user->deletion_pending_since === null) {
+            $this->user->deletion_pending_since = (int)Date::now()->timestamp;
+        }
+
+        $this->user->deletion_deferred_reason = null;
+        $this->user->save();
+    }
+
+    /**
+     * La suppression attend, et la raison se lit sur le compte.
+     */
+    private function deferDeletion(string $pourquoi): void
+    {
+        $this->user->deletion_deferred_reason = $pourquoi;
+        $this->user->save();
+    }
+
+    /**
+     * Supprime le compte, ou le laisse en attente si un combat le retient.
      *
      * @return void
      */
@@ -1005,42 +1052,59 @@ class PlayerService
     {
         // Include destroyed planets still awaiting purge so related rows are cleaned up.
         $planetIds = Planet::where('user_id', $this->getId())->pluck('id');
+        $corps = $planetIds->map(static fn (mixed $id): int => (int)$id)->all();
 
-        // **Ses combats d'abord.** Une mission inscrite dans un combat actif ne s'efface pas : la
-        // bataille a ete calculee avec elle. Les combats que ce compte ouvre ou subit sont annules,
-        // avec leur cause ; s'il renforce celui d'un autre, la suppression attend.
-        resolve(AccountCombatWithdrawal::class)->withdraw(
-            $this->getId(),
-            $planetIds->map(static fn (mixed $id): int => (int)$id)->all(),
-            (int)Date::now()->timestamp
-        );
+        // **Le drapeau avant l'inventaire.** Sans lui, un combat pouvait s'ouvrir entre le moment
+        // ou l'on releve les combats du compte et celui ou l'on efface ses lignes : ce combat-la
+        // n'aurait ete annule par personne, et sa barriere aurait tenu un corps pour toujours. Le
+        // lancement de flotte lit ce drapeau et refuse.
+        $this->markDeletionPending();
+
+        // **Ses combats d'abord, et le plan entier avant le premier effet.** Une mission inscrite
+        // dans un combat actif ne s'efface pas : la bataille a ete calculee avec elle. Le retrait
+        // annulait combat par combat et ne decouvrait qu'en arrivant a sa ligne qu'un combat
+        // retenait la suppression — le compte engage dans deux combats perdait le premier et
+        // restait la. Un seul empechement suffit maintenant a n'en annuler aucun.
+        $retrait = resolve(AccountCombatWithdrawal::class);
+        $plan = $retrait->planFor($this->getId(), $corps);
+
+        if ($plan->deferred()) {
+            // **La suppression attend, elle n'echoue pas.** Regle arretee par Keven : le compte
+            // reste, ne lance plus rien, et sa suppression reprend d'elle-meme des que les combats
+            // qui la retiennent sont finaux. Aucun combat d'un tiers n'est annule.
+            $this->deferDeletion($plan->reason());
+
+            return;
+        }
+
+        $retrait->apply($this->getId(), $plan, (int)Date::now()->timestamp);
 
         foreach ($planetIds as $planetId) {
             // Delete all queue items.
             ResearchQueue::where('planet_id', $planetId)->delete();
             BuildingQueue::where('planet_id', $planetId)->delete();
             UnitQueue::where('planet_id', $planetId)->delete();
-            // **Les missions du compte s'effacent ; celles des autres se detachent.** Ce code
-            // effacait toute mission qui partait de ce corps ou y allait, quel qu'en fut le
-            // proprietaire : la flotte d'un autre joueur en route vers cette planete — un
-            // transport, une attaque, un retour cree par l'annulation de son combat — disparaissait
-            // avec le compte. Les corps du compte cessent d'exister ; les missions des autres qui les
-            // nommaient gardent leurs coordonnees, et perdent seulement le lien vers un corps qui
-            // n'est plus la — exactement ce que `startReturn()` sait deja traiter.
-            $missions = FleetMission::where('user_id', $this->getId())
-                ->where(function ($query) use ($planetId) {
-                    $query->where('planet_id_from', $planetId)->orWhere('planet_id_to', $planetId);
-                })
-                ->get();
-            foreach ($missions as $mission) {
-                // Delete any that have this mission as their parent.
-                FleetMission::where('parent_id', $mission->id)->delete();
-                // Delete mission itself.
-                $mission->delete();
-            }
-
+            // **Les missions des autres se detachent.** Ce code effacait toute mission qui partait
+            // de ce corps ou y allait, quel qu'en fut le proprietaire : la flotte d'un autre joueur
+            // en route vers cette planete — un transport, une attaque, un retour cree par
+            // l'annulation de son combat — disparaissait avec le compte. Les corps du compte cessent
+            // d'exister ; les missions des autres qui les nommaient gardent leurs coordonnees, et
+            // perdent seulement le lien vers un corps qui n'est plus la — exactement ce que
+            // `startReturn()` sait deja traiter.
             FleetMission::where('user_id', '!=', $this->getId())->where('planet_id_to', $planetId)->update(['planet_id_to' => null]);
             FleetMission::where('user_id', '!=', $this->getId())->where('planet_id_from', $planetId)->update(['planet_id_from' => null]);
+        }
+
+        // **Toutes les missions du compte, quels que soient leurs liens de corps.** Elles etaient
+        // effacees corps par corps : une mission dont les deux liens etaient deja nuls — detachee
+        // par la disparition d'un autre corps, ou par une lune rasee — survivait a son
+        // proprietaire. Les enfants d'abord, les parents ensuite : l'ordre est celui de la
+        // contrainte, pas une precaution.
+        $siennes = FleetMission::where('user_id', $this->getId())->orderBy('id')->pluck('id')->all();
+
+        if ($siennes !== []) {
+            FleetMission::whereIn('parent_id', $siennes)->delete();
+            FleetMission::whereIn('id', $siennes)->delete();
         }
 
         // Delete all messages.

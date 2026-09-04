@@ -15,6 +15,8 @@ use OGame\Combat\Exceptions\FleetHasNowhereToReturn;
 use OGame\Combat\Exceptions\IncoherentCombatEnrolment;
 use OGame\Combat\Exceptions\ReturnDestinationMoved;
 use OGame\Combat\Exceptions\UnreturnableFleet;
+use OGame\Combat\Services\AccountCombatWithdrawal;
+use OGame\Combat\Services\AccountWithdrawalPlan;
 use OGame\Combat\Services\CombatCancellationOutcome;
 use OGame\Combat\Services\CombatCancellationService;
 use OGame\Combat\Services\CombatOpeningService;
@@ -25,6 +27,7 @@ use OGame\Combat\Services\ReturnDestinationResolver;
 use OGame\Combat\Services\ReturnPlanner;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\ReturnPlan;
+use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameMissions\AttackMission;
 use OGame\GameMissions\Models\ResolvedReturnDestination;
@@ -34,11 +37,13 @@ use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatOutboxMessage;
 use OGame\Models\CombatParticipant;
+use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
 use OGame\Models\User;
+use OGame\Services\FleetMissionService;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
 use OGame\Services\SettingsService;
@@ -736,9 +741,9 @@ class CombatCancellationTest extends FleetDispatchTestCase
      * Un combat en cours d'application arrete la suppression du compte, et dit pourquoi.
      *
      * `Resolving` n'est pas final, donc la recherche le trouve — mais la machine d'etats refuse de
-     * l'annuler, et elle a raison : des ecritures sont en train de partir. Sans ce contrôle, la
-     * suppression echouait sur un message qui parle d'etats de combat a un administrateur venu
-     * effacer un compte.
+     * l'annuler, et elle a raison : des ecritures sont en train de partir. La suppression attend, et
+     * la raison se lit sur le compte, en mots qui parlent de suppression : sans ce contrôle, elle
+     * echouait sur un message d'etats de combat devant un administrateur venu effacer un compte.
      */
     public function testDeletingAnAccountWaitsForACombatThatIsBeingApplied(): void
     {
@@ -747,12 +752,12 @@ class CombatCancellationTest extends FleetDispatchTestCase
         DB::table('combat_instances')->where('id', $combat->id)->update(['status' => CombatState::Resolving->value]);
         $combat->refresh();
 
-        try {
-            resolve(PlayerServiceFactory::class)->make($this->currentUserId, true)->delete();
-            $this->fail('An account was deleted while one of its combats was being applied.');
-        } catch (RuntimeException $refus) {
-            $this->assertStringContainsString('en cours d application', $refus->getMessage());
-        }
+        resolve(PlayerServiceFactory::class)->make($this->currentUserId, true)->delete();
+
+        $attendant = resolve(PlayerServiceFactory::class)->make($this->currentUserId, true);
+        $this->assertTrue($attendant->isPendingDeletion(), 'The account is not marked as awaiting deletion.');
+        $this->assertStringContainsString('en cours d application', $attendant->deletionDeferredReason());
+        $this->assertStringContainsString('combat ' . $combat->id, $attendant->deletionDeferredReason());
 
         $this->assertSame(CombatState::Resolving, $combat->refresh()->status, 'The combat being applied was changed.');
         $this->assertNotNull(FleetMission::query()->find($mission->id), 'The mission of a combat being applied was erased.');
@@ -806,16 +811,237 @@ class CombatCancellationTest extends FleetDispatchTestCase
 
         $this->assertTrue($combat->participants()->where('fleet_mission_id', $renfort->id)->exists(), 'The reinforcement is not enrolled: nothing would be proved.');
 
-        try {
-            resolve(PlayerServiceFactory::class)->make((int)$renfort->user_id, true)->delete();
-            $this->fail('The account of an enrolled defender was deleted while the combat was running.');
-        } catch (RuntimeException $refus) {
-            $this->assertStringContainsString('renforce le combat ' . $combat->id, $refus->getMessage());
+        $joueur = resolve(PlayerServiceFactory::class)->make((int)$renfort->user_id, true);
+        $joueur->delete();
+
+        // **La suppression attend, elle n'echoue pas.** Le compte reste, il ne lance plus rien, et
+        // la raison de l'attente se lit sur lui — pas dans un journal, pas dans une exception.
+        $this->assertSame(CombatState::Active, $combat->refresh()->status, 'A third party combat was cancelled because an ally left.');
+        $this->assertNotNull(FleetMission::query()->find($renfort->id), 'The deferred deletion still erased the reinforcement.');
+        $this->assertNotNull(DB::table('users')->where('id', $renfort->user_id)->first(), 'The deferred deletion still erased the account.');
+
+        $attendant = resolve(PlayerServiceFactory::class)->make((int)$renfort->user_id, true);
+        $this->assertTrue($attendant->isPendingDeletion(), 'The account is not marked as awaiting deletion.');
+        $this->assertStringContainsString('combat ' . $combat->id, $attendant->deletionDeferredReason(), 'The wait does not say which combat holds it.');
+        $this->assertStringContainsString('renforce la defense', $attendant->deletionDeferredReason(), 'The wait does not say why.');
+    }
+
+    /**
+     * La suppression reprend d'elle-meme quand le combat qui la retenait devient final.
+     *
+     * Un combat dure des heures, pas des jours : l'attente est bornee par lui, et la commande de
+     * reprise n'a rien a forcer — elle redemande le plan, et n'agit que si plus rien ne retient.
+     */
+    public function testAPendingDeletionResumesOnceTheHoldingCombatIsOver(): void
+    {
+        $renfort = null;
+        [$combat] = $this->anActiveCombat(function (PlanetService $cible, int $ouverture) use (&$renfort): void {
+            $renfort = $this->aDefensiveReinforcement($cible, $ouverture - 10, 100_000, $ouverture - 600);
+        });
+
+        if ($renfort === null) {
+            $this->fail('The reinforcement was never launched.');
         }
 
-        $this->assertSame(CombatState::Active, $combat->refresh()->status, 'A third party combat was cancelled because an ally left.');
-        $this->assertNotNull(FleetMission::query()->find($renfort->id), 'The refused deletion still erased the reinforcement.');
-        $this->assertNotNull(DB::table('users')->where('id', $renfort->user_id)->first(), 'The refused deletion still erased the account.');
+        $compte = (int)$renfort->user_id;
+        resolve(PlayerServiceFactory::class)->make($compte, true)->delete();
+        $this->assertNotNull(DB::table('users')->where('id', $compte)->first(), 'The deletion did not wait.');
+
+        // Tant que le combat tient, la reprise ne fait rien.
+        $this->assertSame(Command::SUCCESS, Artisan::call('ogamex:comptes:reprendre-suppressions', ['--compte' => $compte]));
+        $this->assertNotNull(DB::table('users')->where('id', $compte)->first(), 'The resumption deleted an account a combat still holds.');
+
+        // **Ce que la commande dit compte autant que ce qu'elle fait** : l'attente doit se voir. Un
+        // administrateur qui la lance cherche pourquoi le compte est toujours la, et la reponse est
+        // dans sa sortie, avec le combat qui retient.
+        $dit = Artisan::output();
+        $this->assertStringContainsString('attend toujours', $dit, 'The command did not report the wait.');
+        $this->assertStringContainsString('combat ' . $combat->id, $dit, 'The command did not name the combat that holds the deletion.');
+        $this->assertStringNotContainsString('a ete supprime', $dit, 'The command announced a deletion that did not happen.');
+
+        // Le combat devient final ; plus rien ne retient.
+        DB::table('combat_instances')->where('id', $combat->id)->update(['status' => CombatState::Resolved->value]);
+
+        $this->assertSame(Command::SUCCESS, Artisan::call('ogamex:comptes:reprendre-suppressions', ['--compte' => $compte]));
+        $this->assertNull(DB::table('users')->where('id', $compte)->first(), 'The deletion did not resume once the combat was over.');
+
+        $dit = Artisan::output();
+        $this->assertStringContainsString('a ete supprime', $dit, 'The command did not report the deletion it performed.');
+        $this->assertStringNotContainsString('attend toujours', $dit, 'The command still reported a wait that was over.');
+    }
+
+    /**
+     * Un empechement sur le second combat n'annule pas le premier.
+     *
+     * ## Ce que l'annulation combat par combat perdait
+     *
+     * Le retrait annulait au fur et a mesure et ne decouvrait qu'en arrivant a sa ligne qu'un
+     * combat retenait la suppression. Un compte engage dans deux combats — le premier annulable,
+     * le second renforce — perdait donc le premier **et** gardait le compte : une bataille avait
+     * disparu pour rien, et personne ne pouvait la rendre. Le plan couvre maintenant tout avant le
+     * premier effet.
+     */
+    public function testABlockingSecondCombatLeavesTheFirstOneUntouched(): void
+    {
+        $renfort = null;
+        [$retenu] = $this->anActiveCombat(function (PlanetService $cible, int $ouverture) use (&$renfort): void {
+            $renfort = $this->aDefensiveReinforcement($cible, $ouverture - 10, 100_000, $ouverture - 600);
+        });
+
+        if ($renfort === null) {
+            $this->fail('The reinforcement was never launched.');
+        }
+
+        $compte = (int)$renfort->user_id;
+
+        // Le meme compte ouvre par ailleurs un combat bien a lui, annulable, et d'identifiant
+        // inferieur : sans le plan, c'est celui-la que le retrait aurait perdu en premier.
+        $sien = CombatInstance::create([
+            'status' => CombatState::Rallying,
+            'mission_id' => $renfort->id,
+            'target_planet_id' => (int)DB::table('planets')->where('user_id', '!=', $compte)->orderBy('id')->value('id'),
+            'target_type' => 1,
+            'galaxy' => 1,
+            'system' => 1,
+            'position' => 1,
+            'started_at' => (int)$retenu->started_at,
+        ]);
+
+        $aLui = $this->anAttackingFleetOf($compte, (int)$sien->target_planet_id);
+        DB::table('fleet_missions')->where('id', $aLui->id)->update(['combat_instance_id' => $sien->id]);
+        DB::table('combat_instances')->where('id', $sien->id)->update(['mission_id' => $aLui->id]);
+
+        resolve(PlayerServiceFactory::class)->make($compte, true)->delete();
+
+        $this->assertSame(CombatState::Rallying, $sien->refresh()->status, 'A cancellable combat was lost although the deletion was refused.');
+        $this->assertSame(CombatState::Active, $retenu->refresh()->status, 'The third party combat was cancelled.');
+        $this->assertSame(0, FleetMission::query()->where('parent_id', $aLui->id)->count(), 'A fleet was sent home by a withdrawal that had to stop.');
+        $this->assertNotNull(DB::table('users')->where('id', $compte)->first(), 'The account was erased.');
+    }
+
+    /**
+     * Un compte en suppression en attente ne lance plus de flotte.
+     *
+     * C'est ce refus qui ferme la course : sans lui, une flotte partie apres l'inventaire des
+     * combats du compte pourrait ouvrir une bataille que personne n'annulerait, et sa barriere
+     * tiendrait un corps pour toujours.
+     */
+    public function testAnAccountAwaitingDeletionCannotLaunchAFleet(): void
+    {
+        $renfort = null;
+        $this->anActiveCombat(function (PlanetService $cible, int $ouverture) use (&$renfort): void {
+            $renfort = $this->aDefensiveReinforcement($cible, $ouverture - 10, 100_000, $ouverture - 600);
+        });
+
+        if ($renfort === null) {
+            $this->fail('The reinforcement was never launched.');
+        }
+
+        $compte = (int)$renfort->user_id;
+        resolve(PlayerServiceFactory::class)->make($compte, true)->delete();
+
+        $origine = resolve(PlanetServiceFactory::class)->make((int)$renfort->planet_id_from, true);
+        $this->assertNotNull($origine, 'The reinforcement has no origin body: nothing would be proved.');
+
+        $unites = new UnitCollection();
+        $unites->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 1);
+
+        $this->expectExceptionMessage('en cours de suppression');
+        resolve(FleetMissionService::class)->createNewFromPlanet(
+            $origine,
+            new Coordinate(1, 1, 1),
+            PlanetType::Planet,
+            3,
+            $unites,
+            new Resources(0, 0, 0, 0),
+            10
+        );
+    }
+
+    /**
+     * Une mission du compte dont les deux liens de corps sont deja nuls disparait avec lui.
+     *
+     * Les missions etaient effacees corps par corps : une mission detachee — par la disparition
+     * d'un autre corps, ou par une lune rasee — survivait a son proprietaire, et restait dans la
+     * table en nommant un joueur qui n'existe plus.
+     */
+    public function testAMissionWithNoBodyLinksIsErasedWithItsOwner(): void
+    {
+        [, $mission] = $this->anActiveCombat();
+        $compte = (int)$mission->user_id;
+
+        $orpheline = $this->anAttackingFleetOf($compte, (int)$mission->planet_id_to);
+        DB::table('fleet_missions')->where('id', $orpheline->id)->update(['planet_id_from' => null, 'planet_id_to' => null]);
+
+        resolve(PlayerServiceFactory::class)->make($compte, true)->delete();
+
+        $this->assertNull(DB::table('users')->where('id', $compte)->first(), 'The account was not deleted.');
+        $this->assertNull(FleetMission::query()->find($orpheline->id), 'A mission with no body links outlived its owner.');
+    }
+
+    /**
+     * Un plan qui retient quelque chose n'annule rien, meme si on l'applique.
+     *
+     * ## Pourquoi ce garde vit dans le service, et pas seulement chez son appelant
+     *
+     * `apply()` est publique. Un appelant qui lirait un plan, verrait sa liste de causes et
+     * l'appliquerait sans regarder ses empechements annulerait exactement ce que le plan existe pour
+     * retenir — une bataille perdue pour rien, et un compte toujours la. La suppression, elle,
+     * s'arrete avant d'appeler ; c'est pourquoi seule une application directe rend ce garde
+     * observable, et pourquoi il fallait cet essai plutot que de le supprimer.
+     */
+    public function testAPlanThatHoldsSomethingCancelsNothingEvenWhenApplied(): void
+    {
+        [$combat, $mission] = $this->anActiveCombat();
+
+        // Un plan mixte : ce combat serait annulable, un autre retient tout.
+        $plan = new AccountWithdrawalPlan(
+            [(int)$combat->id => CombatCancellationCause::AttackerRemoved],
+            [(int)$combat->id + 10_000 => 'le compte y renforce la defense d un autre joueur']
+        );
+
+        $this->assertTrue($plan->deferred(), 'The plan does not hold anything: nothing would be proved.');
+
+        $annules = resolve(AccountCombatWithdrawal::class)->apply($this->currentUserId, $plan, (int)$combat->ends_at);
+
+        $this->assertSame(0, $annules, 'A plan that holds something still cancelled a combat.');
+        $this->assertSame(CombatState::Active, $combat->refresh()->status, 'The combat was cancelled by a plan that had to stop.');
+        $this->assertNull($combat->cancellation_cause);
+        $this->assertNotNull(CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->first(), 'The body was released.');
+        $this->assertSame(0, (int)$mission->refresh()->processed, 'The fleet was sent home by a plan that had to stop.');
+    }
+
+    /**
+     * Une flotte attaquante brute appartenant a ce compte, sans passer par le lancement.
+     */
+    private function anAttackingFleetOf(int $userId, int $corps): FleetMission
+    {
+        $origine = Planet::query()->where('user_id', $userId)->orderBy('id')->first();
+
+        if ($origine === null) {
+            $this->fail('The account owns no planet.');
+        }
+
+        return FleetMission::forceCreate([
+            'user_id' => $userId,
+            'planet_id_from' => $origine->id,
+            'type_from' => 1,
+            'galaxy_from' => $origine->galaxy,
+            'system_from' => $origine->system,
+            'position_from' => $origine->planet,
+            'planet_id_to' => $corps,
+            'type_to' => 1,
+            'galaxy_to' => 1,
+            'system_to' => 1,
+            'position_to' => 1,
+            'mission_type' => 1,
+            'time_departure' => 1_700_000_000,
+            'time_arrival' => 1_700_000_600,
+            'light_fighter' => 10,
+            'metal' => 0,
+            'crystal' => 0,
+            'deuterium' => 0,
+        ]);
     }
 
     /**
