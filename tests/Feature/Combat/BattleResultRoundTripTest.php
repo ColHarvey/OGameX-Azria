@@ -6,7 +6,9 @@ use OGame\Combat\Allocation\ExactLootAllocationV1;
 use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Allocation\FrozenLootPotential;
 use OGame\Combat\Replay\BattleResultCodec;
+use OGame\Combat\Replay\CombatResultIdentity;
 use OGame\Combat\Services\CombatDurationEstimator;
+use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\FrozenCombatVersionSet;
 use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\Combat\Support\ResourceDiagnostic;
@@ -71,7 +73,21 @@ class BattleResultRoundTripTest extends FleetDispatchTestCase
     public function testAnEngineResultComesBackWithTheSameDurationAndPotential(): void
     {
         $original = $this->aRealResult();
-        $document = BattleResultCodec::toStorage($original);
+        $identite = CombatResultIdentity::fromStorage([
+            'combat_instance_id' => 1,
+            'target_body_id' => 2,
+            'initiator_mission_id' => 3,
+            'participants' => [CombatParticipantKey::forFleet(3)],
+            'frozen_facts_fingerprint' => 'empreinte',
+            'versions' => [
+                'causal_order' => 'v1',
+                'loot_allocator' => 'v1',
+                'loot_policy' => 'v1',
+                'moon_destruction' => 'v1',
+                'projection' => 'v1',
+            ],
+        ]);
+        $document = BattleResultCodec::toStorage($original, $identite);
 
         $this->assertNotSame([], $document['rounds'], 'The battle had no round: the round trip would prove little.');
         $this->assertGreaterThan(0, $document['loot']['metal'] + $document['loot']['crystal'] + $document['loot']['deuterium'], 'No loot: the potential could not be compared.');
@@ -84,7 +100,7 @@ class BattleResultRoundTripTest extends FleetDispatchTestCase
         // colonne, pas du codec, et les champs types du codec acceptent l'un comme l'autre.
         $this->assertSame(
             $this->throughJson($document),
-            $this->throughJson(BattleResultCodec::toStorage($relu)),
+            $this->throughJson(BattleResultCodec::toStorage($relu, $identite)),
             'The engine result read back is not the one that was written.'
         );
 

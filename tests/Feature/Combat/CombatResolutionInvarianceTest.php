@@ -5,11 +5,14 @@ namespace Tests\Feature\Combat;
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Allocation\ExactLootAllocationV1;
 use OGame\Combat\Allocation\FrozenLootAllocation;
+use OGame\Combat\Application\LiveCombatApplicationContext;
+use OGame\Combat\Services\CombatResolutionOutcome;
 use OGame\Combat\Services\CombatResolutionService;
 use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\Combat\Support\ResourceDiagnostic;
 use OGame\Combat\Support\ResourceNormalizationDiagnostics;
 use OGame\Factories\PlanetServiceFactory;
+use OGame\Factories\PlayerServiceFactory;
 use OGame\GameMissions\AttackMission;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
@@ -18,6 +21,7 @@ use OGame\GameMissions\BattleEngine\PhpBattleEngine;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\FleetMission;
 use OGame\Models\Resources;
+use OGame\Services\CharacterClassService;
 use OGame\Services\FleetMissionService;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
@@ -187,7 +191,7 @@ class CombatResolutionInvarianceTest extends FleetDispatchTestCase
         $attaquant = AttackerFleet::fromFleetMission(
             $mission,
             resolve(FleetMissionService::class),
-            resolve(\OGame\Factories\PlayerServiceFactory::class),
+            resolve(PlayerServiceFactory::class),
             true
         );
 
@@ -236,7 +240,7 @@ class CombatResolutionInvarianceTest extends FleetDispatchTestCase
      * @param BattleResult $resultat
      * @param array<int, AttackerFleet> $flottes
      * @param array<int, DefenderFleet> $defenseurs
-     * @return \OGame\Combat\Services\CombatResolutionOutcome
+     * @return CombatResolutionOutcome
      */
     private function applyIt(
         FleetMission $mission,
@@ -244,7 +248,7 @@ class CombatResolutionInvarianceTest extends FleetDispatchTestCase
         BattleResult $resultat,
         array $flottes,
         array $defenseurs,
-    ): \OGame\Combat\Services\CombatResolutionOutcome {
+    ): CombatResolutionOutcome {
         $proprietaireCible = $cible->getPlayer();
         $attaquant = $flottes[0]->player;
 
@@ -269,6 +273,10 @@ class CombatResolutionInvarianceTest extends FleetDispatchTestCase
                 // La creation du retour n'est pas l'objet de cet essai : elle est neutralisee pour
                 // que l'observation porte sur le resultat, et sur rien d'autre.
             },
+            // Les memes sources que le chemin instantane : l'applicateur n'a plus de repli, et
+            // c'est bien le comportement du chemin instantane que cet essai observe.
+            FrozenLootAllocation::atOperationStart(),
+            new LiveCombatApplicationContext(resolve(CharacterClassService::class), resolve(SettingsService::class)),
         );
     }
 }

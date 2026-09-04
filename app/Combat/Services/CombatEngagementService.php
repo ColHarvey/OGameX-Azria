@@ -8,6 +8,7 @@ use OGame\Combat\Allocation\LootAllocatorRegistry;
 use OGame\Combat\Application\FrozenCombatApplicationContext;
 use OGame\Combat\Application\LiveCombatApplicationContext;
 use OGame\Combat\Replay\BattleResultCodec;
+use OGame\Combat\Replay\CombatResultIdentity;
 use OGame\Combat\Support\FrozenCombatVersionSet;
 use OGame\Combat\Support\LootContextForMission;
 use OGame\GameMissions\BattleEngine\BattleEngineFactory;
@@ -119,7 +120,9 @@ final class CombatEngagementService
             $startsAt + $estimation->seconds
         )->toStorage();
 
-        $combat->battle_result = BattleResultCodec::toStorage($resultat);
+        // **Le resultat part avec son identite** : ce combat, cette cible, ces participants — inscrits
+        // juste avant, sous les memes verrous —, la photographie de l'ouverture et les cinq versions.
+        $combat->battle_result = BattleResultCodec::toStorage($resultat, CombatResultIdentity::of($combat));
         $combat->duration_seconds = $estimation->seconds;
         $combat->duration_rate = $rythme;
         $combat->duration_damping = $amortissement;

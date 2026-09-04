@@ -6,6 +6,8 @@ use OGame\Combat\Allocation\ExactLootAllocationV1;
 use OGame\Combat\Exceptions\CorruptedBattleResult;
 use OGame\Combat\Policies\CargoWeightedV1;
 use OGame\Combat\Replay\BattleResultCodec;
+use OGame\Combat\Replay\CombatResultIdentity;
+use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\ResourceDiagnostic;
 use OGame\Combat\Support\ResourceNormalizationDiagnostics;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleetResult;
@@ -35,14 +37,14 @@ class BattleResultCodecTest extends UnitTestCase
     public function testTheDocumentSurvivesJsonAndComesBackIdentical(): void
     {
         $original = $this->aSyntheticResult();
-        $document = BattleResultCodec::toStorage($original);
+        $document = BattleResultCodec::toStorage($original, $this->anIdentity());
 
         $encode = json_encode($document);
         $this->assertIsString($encode);
 
         $relu = BattleResultCodec::fromStorage(json_decode($encode, true));
 
-        $this->assertSame($document, BattleResultCodec::toStorage($relu), 'The result read back is not the one that was written.');
+        $this->assertSame($document, BattleResultCodec::toStorage($relu, $this->anIdentity()), 'The result read back is not the one that was written.');
 
         // Quelques faits relus directement, pour que l'egalite des documents ne soit pas la seule preuve.
         $this->assertSame(1000.0, $relu->loot->metal->get());
@@ -75,7 +77,7 @@ class BattleResultCodecTest extends UnitTestCase
         $original->tacticalRetreatDefenderFled = true;
         $original->tacticalRetreatFleeingUnits = $this->units(['light_fighter' => 3]);
 
-        $relu = BattleResultCodec::fromStorage($this->throughJson(BattleResultCodec::toStorage($original)));
+        $relu = BattleResultCodec::fromStorage($this->throughJson(BattleResultCodec::toStorage($original, $this->anIdentity())));
 
         $this->assertNotNull($relu->tacticalRetreatFleeingUnits);
         $this->assertSame(['light_fighter' => 3], $relu->tacticalRetreatFleeingUnits->toArray());
@@ -120,9 +122,9 @@ class BattleResultCodecTest extends UnitTestCase
     public function testAnUnknownSchemaIsRefused(): void
     {
         $document = $this->aDocument();
-        $document['schema'] = 2;
+        $document['schema'] = 3;
 
-        $this->assertRefused($document, 'schema 2');
+        $this->assertRefused($document, 'schema 3');
     }
 
     public function testAnUnknownUnitIsRefused(): void
@@ -177,6 +179,71 @@ class BattleResultCodecTest extends UnitTestCase
     /**
      * Refuse, et dit ou.
      */
+    /**
+     * L'enveloppe d'identite traverse avec le resultat et se relit telle quelle.
+     */
+    public function testTheIdentityTravelsWithTheResult(): void
+    {
+        $document = $this->aDocument();
+
+        $this->assertSame($this->anIdentityDocument(), $document['identity']);
+        $this->assertSame($this->anIdentityDocument(), BattleResultCodec::identityOf($document)->toStorage());
+    }
+
+    public function testADocumentWithoutAnIdentityIsRefused(): void
+    {
+        $document = $this->aDocument();
+        unset($document['identity']);
+
+        $this->assertRefused($document, 'identity');
+    }
+
+    public function testAnIdentityWithANumericStringCombatIsRefused(): void
+    {
+        $document = $this->aDocument();
+        $document['identity']['combat_instance_id'] = '42';
+
+        $this->assertRefused($document, 'combat_instance_id');
+    }
+
+    /**
+     * La liste des participants est canonique : triee, sans doublon. Deux ecritures du meme ensemble
+     * donneraient deux enveloppes differentes pour un meme combat.
+     */
+    public function testAnIdentityWhoseParticipantsAreNotCanonicalIsRefused(): void
+    {
+        $document = $this->aDocument();
+        $document['identity']['participants'] = [
+            CombatParticipantKey::forFleet(1_101),
+            CombatParticipantKey::forFleet(1_100),
+        ];
+
+        $this->assertRefused($document, 'canonique');
+
+        $document['identity']['participants'] = [
+            CombatParticipantKey::forFleet(1_100),
+            CombatParticipantKey::forFleet(1_100),
+        ];
+
+        $this->assertRefused($document, 'canonique');
+    }
+
+    public function testAnIdentityWithAMissingRuleVersionIsRefused(): void
+    {
+        $document = $this->aDocument();
+        unset($document['identity']['versions']['projection']);
+
+        $this->assertRefused($document, 'versions');
+    }
+
+    public function testAnIdentityWithoutAFingerprintIsRefused(): void
+    {
+        $document = $this->aDocument();
+        $document['identity']['frozen_facts_fingerprint'] = '';
+
+        $this->assertRefused($document, 'frozen_facts_fingerprint');
+    }
+
     private function assertRefused(mixed $document, string $attendu): void
     {
         try {
@@ -192,7 +259,7 @@ class BattleResultCodecTest extends UnitTestCase
      */
     private function aDocument(): array
     {
-        return $this->throughJson(BattleResultCodec::toStorage($this->aSyntheticResult()));
+        return $this->throughJson(BattleResultCodec::toStorage($this->aSyntheticResult(), $this->anIdentity()));
     }
 
     /**
@@ -322,5 +389,34 @@ class BattleResultCodecTest extends UnitTestCase
         }
 
         return $collection;
+    }
+
+    /**
+     * Une identite ecrite a la main : cet essai n'a pas d'instance a lire.
+     */
+    private function anIdentity(): CombatResultIdentity
+    {
+        return CombatResultIdentity::fromStorage($this->anIdentityDocument());
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function anIdentityDocument(): array
+    {
+        return [
+            'combat_instance_id' => 42,
+            'target_body_id' => 7,
+            'initiator_mission_id' => 1_100,
+            'participants' => [CombatParticipantKey::forFleet(1_100), CombatParticipantKey::forFleet(1_101)],
+            'frozen_facts_fingerprint' => 'abc123',
+            'versions' => [
+                'causal_order' => 'v1',
+                'loot_allocator' => 'v1',
+                'loot_policy' => 'v1',
+                'moon_destruction' => 'v1',
+                'projection' => 'v1',
+            ],
+        ];
     }
 }

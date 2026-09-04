@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Services\CombatOpeningService;
+use OGame\Combat\Services\PersistentCombatAdvance;
 use OGame\Combat\Services\PersistentCombatAdvancer;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\BattleReport;
@@ -100,13 +101,13 @@ class PersistentCombatAdvancerTest extends FleetDispatchTestCase
         $avanceur = new PersistentCombatAdvancer();
 
         // Avant l'echeance du ralliement, rien ne bouge.
-        $rien = $avanceur->advance((int)$barriere->owned_through_effect_at - 1);
+        $rien = $this->advanceAt($avanceur, (int)$barriere->owned_through_effect_at - 1);
         $this->assertFalse($rien->didSomething(), 'Something advanced before the rally deadline.');
         $combat->refresh();
         $this->assertSame(CombatState::Rallying, $combat->status);
 
         // A l'echeance, le ralliement ferme et la bataille se calcule.
-        $fermeture = $avanceur->advance((int)$barriere->owned_through_effect_at);
+        $fermeture = $this->advanceAt($avanceur, (int)$barriere->owned_through_effect_at);
         $this->assertSame(1, $fermeture->closed, 'The rally did not close at its deadline.');
         $this->assertSame(0, $fermeture->settled, 'A combat was settled the moment it began.');
 
@@ -116,14 +117,14 @@ class PersistentCombatAdvancerTest extends FleetDispatchTestCase
         $this->assertNotNull($combat->ends_at);
 
         // Pendant le combat, toujours rien.
-        $pendant = $avanceur->advance((int)$combat->ends_at - 1);
+        $pendant = $this->advanceAt($avanceur, (int)$combat->ends_at - 1);
         $this->assertFalse($pendant->didSomething(), 'A combat still under way was settled.');
         $this->assertSame(0, FleetMission::query()->where('parent_id', $mission->id)->count());
 
         $avant = (int)Planet::query()->whereKey($cible->getPlanetId())->value('metal');
 
         // A la fin, le resultat s'applique.
-        $reglement = $avanceur->advance((int)$combat->ends_at);
+        $reglement = $this->advanceAt($avanceur, (int)$combat->ends_at);
         $this->assertSame(1, $reglement->settled, 'The combat did not settle at its end.');
         $this->assertSame([], $reglement->failures);
 
@@ -135,7 +136,7 @@ class PersistentCombatAdvancerTest extends FleetDispatchTestCase
         $this->assertLessThan($avant, (int)Planet::query()->whereKey($cible->getPlanetId())->value('metal'), 'The target was never looted.');
 
         // Un passage de plus ne refait rien.
-        $encore = $avanceur->advance((int)$combat->ends_at + 60);
+        $encore = $this->advanceAt($avanceur, (int)$combat->ends_at + 60);
         $this->assertFalse($encore->didSomething());
         $this->assertSame(1, FleetMission::query()->where('parent_id', $mission->id)->count(), 'A second return was created.');
     }
@@ -162,7 +163,7 @@ class PersistentCombatAdvancerTest extends FleetDispatchTestCase
         $horizon = end($echeances) + 86_400;
 
         foreach ($echeances as $echeanceDeRalliement) {
-            $avanceur->advance($echeanceDeRalliement);
+            $this->advanceAt($avanceur, $echeanceDeRalliement);
             $this->pushDeadlinesTo($horizon);
         }
 
@@ -176,7 +177,7 @@ class PersistentCombatAdvancerTest extends FleetDispatchTestCase
         // Le premier devient inreglable : son resultat fige ne se relit plus.
         DB::table('combat_instances')->where('id', $premier->id)->update(['battle_result' => '{"schema":99}']);
 
-        $avance = $avanceur->advance($echeance);
+        $avance = $this->advanceAt($avanceur, $echeance);
 
         $this->assertArrayHasKey($premier->id, $avance->failures, 'The corrupted combat did not report a failure.');
         $this->assertSame(1, $avance->settled, 'The healthy combat did not settle while its neighbour failed.');
@@ -225,14 +226,14 @@ class PersistentCombatAdvancerTest extends FleetDispatchTestCase
         [$combat, , , $barriere] = $this->anOpenedCombat();
 
         $avanceur = new PersistentCombatAdvancer();
-        $avanceur->advance((int)$barriere->owned_through_effect_at);
+        $this->advanceAt($avanceur, (int)$barriere->owned_through_effect_at);
 
         $combat->refresh();
         DB::table('combat_instances')->where('id', $combat->id)->update(['battle_result' => '{"schema":99}']);
         $echeance = (int)$combat->ends_at;
 
         for ($essai = 1; $essai <= PersistentCombatAdvancer::MAX_ATTEMPTS; $essai++) {
-            $avance = $avanceur->advance($echeance);
+            $avance = $this->advanceAt($avanceur, $echeance);
             $this->assertArrayHasKey($combat->id, $avance->failures, "The combat was not attempted on pass {$essai}.");
         }
 
@@ -240,7 +241,7 @@ class PersistentCombatAdvancerTest extends FleetDispatchTestCase
         $this->assertSame(PersistentCombatAdvancer::MAX_ATTEMPTS, $combat->advance_attempts);
 
         // Le passage suivant ne le reprend plus, et le compte parmi ceux qui attendent.
-        $apres = $avanceur->advance($echeance);
+        $apres = $this->advanceAt($avanceur, $echeance);
         $this->assertSame([], $apres->failures, 'A quarantined combat was attempted again.');
         $this->assertSame(1, $apres->quarantined, 'The quarantined combat is not reported to the operator.');
 
@@ -249,7 +250,7 @@ class PersistentCombatAdvancerTest extends FleetDispatchTestCase
 
         // Remis a zero par un humain, il repart — et le resultat repare se regle.
         DB::table('combat_instances')->where('id', $combat->id)->update(['advance_attempts' => 0]);
-        $this->assertArrayHasKey($combat->id, $avanceur->advance($echeance)->failures, 'A combat cleared by hand was not picked up again.');
+        $this->assertArrayHasKey($combat->id, $this->advanceAt($avanceur, $echeance)->failures, 'A combat cleared by hand was not picked up again.');
     }
 
     /**
@@ -266,7 +267,7 @@ class PersistentCombatAdvancerTest extends FleetDispatchTestCase
             'frozen_alliance_membership' => '{"alliance_id":"douze"}',
         ]);
 
-        $avance = (new PersistentCombatAdvancer())->advance((int)$barriere->owned_through_effect_at);
+        $avance = $this->advanceAt(new PersistentCombatAdvancer(), (int)$barriere->owned_through_effect_at);
 
         $this->assertSame(0, $avance->closed, 'A rally closed on a corrupted membership snapshot.');
         $this->assertArrayHasKey($combat->id, $avance->failures, 'The closure failure was not reported.');
@@ -295,7 +296,7 @@ class PersistentCombatAdvancerTest extends FleetDispatchTestCase
         DB::table('combat_instances')->where('id', $combat->id)->update(['frozen_alliance_membership' => '{"alliance_id":"douze"}']);
 
         for ($essai = 1; $essai <= PersistentCombatAdvancer::MAX_ATTEMPTS - 1; $essai++) {
-            $this->assertArrayHasKey($combat->id, $avanceur->advance($echeanceDuRalliement)->failures, "The closure did not fail on pass {$essai}.");
+            $this->assertArrayHasKey($combat->id, $this->advanceAt($avanceur, $echeanceDuRalliement)->failures, "The closure did not fail on pass {$essai}.");
         }
 
         $combat->refresh();
@@ -304,7 +305,7 @@ class PersistentCombatAdvancerTest extends FleetDispatchTestCase
 
         // Gueri, la fermeture reussit — et efface ce qui l'a precedee.
         DB::table('combat_instances')->where('id', $combat->id)->update(['frozen_alliance_membership' => json_encode($saine)]);
-        $this->assertSame(1, $avanceur->advance($echeanceDuRalliement)->closed, 'The healed rally did not close.');
+        $this->assertSame(1, $this->advanceAt($avanceur, $echeanceDuRalliement)->closed, 'The healed rally did not close.');
 
         $combat->refresh();
         $this->assertSame(CombatState::Active, $combat->status);
@@ -316,7 +317,7 @@ class PersistentCombatAdvancerTest extends FleetDispatchTestCase
         $echeance = (int)$combat->ends_at;
 
         for ($essai = 1; $essai <= PersistentCombatAdvancer::MAX_ATTEMPTS - 1; $essai++) {
-            $avance = $avanceur->advance($echeance);
+            $avance = $this->advanceAt($avanceur, $echeance);
             $this->assertArrayHasKey($combat->id, $avance->failures, "The settlement was not attempted on pass {$essai}: it inherited the closure's failures.");
             $this->assertSame(0, $avance->quarantined, "The combat was set aside on settlement pass {$essai}.");
         }
@@ -437,5 +438,19 @@ class PersistentCombatAdvancerTest extends FleetDispatchTestCase
         }
 
         return $barriere;
+    }
+
+    /**
+     * Avance le passage a cet instant, horloge comprise.
+     *
+     * La frontiere du reglement lit **sa propre horloge** : l'heure donnee au passage ne sert qu'a
+     * choisir les combats dus, et l'horloge doit dire la meme chose — comme en production, ou le
+     * passage planifie prend l'une et l'autre au meme moment.
+     */
+    private function advanceAt(PersistentCombatAdvancer $avanceur, int $now): PersistentCombatAdvance
+    {
+        $this->travelTo(Date::createFromTimestamp($now));
+
+        return $avanceur->advance($now);
     }
 }

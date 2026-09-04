@@ -2,7 +2,9 @@
 
 namespace OGame\GameMissions;
 
+use Illuminate\Support\Facades\Date;
 use OGame\Combat\Allocation\FrozenLootAllocation;
+use OGame\Combat\Application\LiveCombatApplicationContext;
 use OGame\Combat\Enums\CombatCancellationCause;
 use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatReasonCode;
@@ -31,6 +33,7 @@ use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
+use OGame\Services\CharacterClassService;
 use OGame\Services\PlanetService;
 use OGame\Services\WreckFieldService;
 use RuntimeException;
@@ -99,12 +102,13 @@ class AttackMission extends GameMission
      * mission, pas de n'importe quel appelant. Le chemin instantane passe deja une fermeture qui la
      * rend accessible au service de resolution sans elargir sa visibilite ; le chemin durable fait
      * exactement la meme chose, au meme endroit. Le travail planifie n'a donc rien a assembler : il
-     * nomme un combat et un instant.
+     * nomme un combat, et cette frontiere lit sa propre horloge. Rien d'autre dans `app/` n'assemble
+     * `CombatSettlementService` — un essai de source y veille.
      *
      * Ce qui est regle, c'est la bataille figee a la cloture du ralliement — jamais un calcul refait
      * ici.
      */
-    public function settlePersistentCombat(int $combatInstanceId, int $now): CombatSettlementOutcome
+    public function settlePersistentCombat(int $combatInstanceId): CombatSettlementOutcome
     {
         return resolve(CombatSettlementService::class)->settle(
             $combatInstanceId,
@@ -112,7 +116,9 @@ class AttackMission extends GameMission
             function (FleetMission $retourDe, Resources $ressources, UnitCollection $unites, int $tempsSupplementaire = 0, array|null $epaves = null, int|null $dureeImposee = null): void {
                 $this->startReturn($retourDe, $ressources, $unites, $tempsSupplementaire, $epaves, $dureeImposee);
             },
-            $now,
+            // **L'heure vient de cette frontiere**, jamais de l'appelant : un travail planifie ne
+            // transporte qu'un identifiant, et l'instant du reglement est celui ou il se fait.
+            (int)Date::now()->timestamp,
         );
     }
 
@@ -348,6 +354,12 @@ class AttackMission extends GameMission
             function (FleetMission $retourDe, Resources $ressources, UnitCollection $unites, int $tempsSupplementaire = 0, array|null $epaves = null, int|null $dureeImposee = null): void {
                 $this->startReturn($retourDe, $ressources, $unites, $tempsSupplementaire, $epaves, $dureeImposee);
             },
+            // **Le chemin instantane nomme ses sources, comme le durable nomme les siennes.** Plus
+            // aucun repli dans l'applicateur : l'allocation est celle du debut de l'operation, les
+            // faits d'application sont ceux du monde courant — ici c'est juste, rien n'a bouge entre
+            // le calcul et l'ecriture.
+            FrozenLootAllocation::atOperationStart(),
+            new LiveCombatApplicationContext(resolve(CharacterClassService::class), $this->settings),
         );
 
         // **Le seul journal de l operation, et la fusion de ses deux sources.**

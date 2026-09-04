@@ -78,7 +78,7 @@ final class PersistentCombatAdvancer
 
         foreach ($this->combatsDue($now) as $id) {
             try {
-                if ($this->mission()->settlePersistentCombat($id, $now)->settled) {
+                if ($this->mission()->settlePersistentCombat($id)->settled) {
                     $regles++;
                     $this->recordRecovery($id);
                 }

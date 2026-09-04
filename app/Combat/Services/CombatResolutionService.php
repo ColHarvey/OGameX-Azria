@@ -5,7 +5,6 @@ namespace OGame\Combat\Services;
 use Closure;
 use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Application\CombatApplicationContext;
-use OGame\Combat\Application\LiveCombatApplicationContext;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\ResourceNormalizationDiagnostics;
 use OGame\Factories\PlanetServiceFactory;
@@ -22,7 +21,6 @@ use OGame\Models\BattleReport;
 use OGame\Models\FleetMission;
 use OGame\Models\Resources;
 use OGame\Models\User;
-use OGame\Services\CharacterClassService;
 use OGame\Services\DebrisFieldService;
 use OGame\Services\FleetMissionService;
 use OGame\Services\MessageService;
@@ -98,12 +96,13 @@ class CombatResolutionService
      * @param int $originPlanetId
      * @param GameMission $missionDeJeu Porte le type de vitesse de flotte, qui determine la duree du retour.
      * @param Closure $creerRetour Cree une mission retour ; delegue a GameMission::startReturn().
-     * @param FrozenLootAllocation|null $allocation L allocation gelee du combat durable ; le chemin
-     *        instantane n en passe pas et la resolution choisit alors la courante, une fois.
-     * @param CombatApplicationContext|null $context Les faits dont l application depend encore —
-     *        classes, chantier spatial, seuils de champ d epaves. Le chemin instantane n en passe
-     *        pas et la resolution lit le monde courant ; le combat durable donne la photographie
-     *        prise a la cloture, sans quoi ce qui change pendant la bataille en changerait l issue.
+     * @param FrozenLootAllocation $allocation L allocation gelee du combat durable ; le chemin
+     *        instantane passe celle du debut de l operation, le durable celle qu il a gelee.
+     * @param CombatApplicationContext $context Les faits dont l application depend encore — classes,
+     *        chantier spatial, reglages et instant du champ d epaves. Le chemin instantane passe le
+     *        monde courant, le combat durable la photographie prise a la cloture, sans quoi ce qui
+     *        change pendant la bataille en changerait l issue. **Aucun repli** : chaque appelant
+     *        nomme sa source, et l oublier est une erreur de type et non un comportement silencieux.
      * @return CombatResolutionOutcome Ce que l application du resultat a rencontre — distinct du
      *         resultat lui-meme, qui reste fige tel que le moteur l a calcule.
      */
@@ -118,8 +117,8 @@ class CombatResolutionService
         int $originPlanetId,
         GameMission $missionDeJeu,
         Closure $creerRetour,
-        FrozenLootAllocation|null $allocation = null,
-        CombatApplicationContext|null $context = null,
+        FrozenLootAllocation $allocation,
+        CombatApplicationContext $context,
     ): CombatResolutionOutcome {
         // Ce que l'application du resultat rencontre lui appartient : le `BattleResult` reste tel
         // que le moteur l'a fige.
@@ -133,14 +132,12 @@ class CombatResolutionService
         // C est la frontiere du chemin instantane. Le combat durable, lui, la lit dans ses faits
         // geles par `FrozenLootAllocation::fromFrozenSet()` et la passe en parametre : la
         // resolution ne choisit une version que si personne ne l a choisie avant elle.
-        $allocation ??= FrozenLootAllocation::atOperationStart();
 
         // **Les faits dont l'application depend encore.** Sur le chemin instantane, les lire
         // dans le monde courant est juste : quelques millisecondes separent le calcul de
         // l'application. Le combat durable, lui, en donne une photographie prise a la cloture —
         // un joueur qui change de classe ou monte son chantier spatial pendant la bataille ne
         // doit pas en changer l'issue.
-        $context ??= new LiveCombatApplicationContext(resolve(CharacterClassService::class), $this->settings);
 
         // Deduct loot from the target planet.
         $defenderPlanet->deductResources($battleResult->loot);

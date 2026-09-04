@@ -219,6 +219,12 @@ final class CombatSettlementService
             $effectif = $this->roster->forCombat($combat);
             $result = BattleResultCodec::fromStorage($combat->battle_result);
 
+            // **L'enveloppe d'abord.** Le document dit de quel combat il parle : le combat, la cible,
+            // l'initiatrice, les participants inscrits, la photographie de l'ouverture, les cinq
+            // versions. Chacun est compare a ce que l'instance porte maintenant, sous verrou. Vivre
+            // sur la meme ligne ne prouve rien d'une ligne a moitie ecrite ou reparee a la main.
+            BattleResultCodec::identityOf($combat->battle_result)->assertDescribes($combat);
+
             // **Le resultat decrit-il bien ces flottes-la ?** Tout vient de l'instance — le resultat
             // de sa colonne, l'effectif de ses participants — mais les deux ont ete ecrits a des
             // moments differents, et rien n'empeche qu'une ligne ait bouge entre les deux. Appliquer

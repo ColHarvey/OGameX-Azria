@@ -42,10 +42,16 @@ use RuntimeException;
  */
 final class BattleResultCodec
 {
-    public const int SCHEMA = 1;
+    /**
+     * Le schema 2 ajoute l'enveloppe d'identite : le combat, la cible, l'initiatrice, les
+     * participants, la photographie et les cinq versions. Un document du schema 1 se refuse — il ne
+     * se complete pas, parce que rien ne dirait de quel combat il parle.
+     */
+    public const int SCHEMA = 2;
 
     private const array KEYS = [
         'schema',
+        'identity',
         'loot',
         'debris',
         'wreck_field',
@@ -139,7 +145,7 @@ final class BattleResultCodec
      *
      * @return array<string, mixed>
      */
-    public static function toStorage(BattleResult $result): array
+    public static function toStorage(BattleResult $result, CombatResultIdentity $identity): array
     {
         $flottesAttaquantes = [];
         foreach ($result->attackerFleetResults as $flotte) {
@@ -205,6 +211,7 @@ final class BattleResultCodec
 
         return [
             'schema' => self::SCHEMA,
+            'identity' => $identity->toStorage(),
             'loot' => self::resourcesToStorage($result->loot),
             'debris' => self::resourcesToStorage($result->debris),
             'wreck_field' => $result->wreckField,
@@ -249,6 +256,22 @@ final class BattleResultCodec
     }
 
     /**
+     * L'identite que le document porte : de quel combat, quelle cible, quels participants il parle.
+     */
+    public static function identityOf(mixed $stored): CombatResultIdentity
+    {
+        if (!is_array($stored)) {
+            throw new CorruptedBattleResult('le document est un ' . get_debug_type($stored) . ' et non une structure', $stored);
+        }
+
+        if (!array_key_exists('identity', $stored)) {
+            throw new CorruptedBattleResult('le champ « resultat.identity » manque', $stored);
+        }
+
+        return CombatResultIdentity::fromStorage($stored['identity']);
+    }
+
+    /**
      * Le resultat relu, exactement comme il a ete ecrit — ou un refus qui nomme le champ.
      */
     public static function fromStorage(mixed $stored): BattleResult
@@ -260,6 +283,10 @@ final class BattleResultCodec
         self::shape($stored, self::KEYS, 'resultat');
 
         $schema = self::int($stored, 'schema', 'resultat');
+
+        // **L'enveloppe se relit avec le resultat, ou rien ne se relit.** Un document dont l'identite
+        // est corrompue n'est pas un resultat fige : personne ne saurait de quel combat il parle.
+        CombatResultIdentity::fromStorage(self::present($stored, 'identity', 'resultat'));
 
         if ($schema !== self::SCHEMA) {
             throw new CorruptedBattleResult('le schema ' . $schema . ' est inconnu, seul le schema ' . self::SCHEMA . ' se relit', $stored);

@@ -4,12 +4,14 @@ namespace Tests\Feature\Combat;
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Enums\CombatCancellationCause;
 use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Services\CombatCancellationOutcome;
 use OGame\Combat\Services\CombatOpeningService;
+use OGame\Combat\Services\PersistentCombatAdvance;
 use OGame\Combat\Services\PersistentCombatAdvancer;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\GameMissions\AttackMission;
@@ -157,7 +159,7 @@ class CombatCancellationTest extends FleetDispatchTestCase
     {
         [$combat, $mission, $cible] = $this->anActiveCombat();
 
-        (new PersistentCombatAdvancer())->advance((int)$combat->ends_at);
+        $this->advanceAt(new PersistentCombatAdvancer(), (int)$combat->ends_at);
         $combat->refresh();
         $this->assertSame(CombatState::Resolved, $combat->status, 'The combat did not settle: nothing would be irreversible.');
 
@@ -200,22 +202,22 @@ class CombatCancellationTest extends FleetDispatchTestCase
 
         DB::table('combat_instances')->where('id', $combat->id)->update(['battle_result' => '{"schema":99}']);
         for ($essai = 1; $essai <= PersistentCombatAdvancer::MAX_ATTEMPTS; $essai++) {
-            $avanceur->advance((int)$combat->ends_at);
+            $this->advanceAt($avanceur, (int)$combat->ends_at);
         }
-        $this->assertSame(1, $avanceur->advance((int)$combat->ends_at)->quarantined, 'The combat was not set aside.');
+        $this->assertSame(1, $this->advanceAt($avanceur, (int)$combat->ends_at)->quarantined, 'The combat was not set aside.');
 
         // La reprise remet le compteur a zero, et le passage suivant reessaie.
         $this->assertSame(Command::SUCCESS, Artisan::call('ogamex:combat:reprendre', ['combat' => $combat->id]));
         $combat->refresh();
         $this->assertSame(0, $combat->advance_attempts);
         $this->assertNull($combat->advance_last_error);
-        $this->assertArrayHasKey($combat->id, $avanceur->advance((int)$combat->ends_at)->failures, 'A resumed combat was not attempted again.');
+        $this->assertArrayHasKey($combat->id, $this->advanceAt($avanceur, (int)$combat->ends_at)->failures, 'A resumed combat was not attempted again.');
 
         // L'annulation le sort de la quarantaine pour de bon.
         $this->assertSame(Command::SUCCESS, Artisan::call('ogamex:combat:annuler', ['combat' => $combat->id, '--cause' => 'inconsistent_snapshot']));
         $combat->refresh();
         $this->assertSame(CombatState::Cancelled, $combat->status);
-        $this->assertSame(0, $avanceur->advance((int)$combat->ends_at)->quarantined, 'A cancelled combat is still counted as waiting for an operator.');
+        $this->assertSame(0, $this->advanceAt($avanceur, (int)$combat->ends_at)->quarantined, 'A cancelled combat is still counted as waiting for an operator.');
     }
 
     /**
@@ -342,5 +344,19 @@ class CombatCancellationTest extends FleetDispatchTestCase
         }
 
         return ['metal' => (int)$ligne->metal, 'crystal' => (int)$ligne->crystal, 'deuterium' => (int)$ligne->deuterium];
+    }
+
+    /**
+     * Avance le passage a cet instant, horloge comprise.
+     *
+     * La frontiere du reglement lit **sa propre horloge** : l'heure donnee au passage ne sert qu'a
+     * choisir les combats dus, et l'horloge doit dire la meme chose — comme en production, ou le
+     * passage planifie prend l'une et l'autre au meme moment.
+     */
+    private function advanceAt(PersistentCombatAdvancer $avanceur, int $now): PersistentCombatAdvance
+    {
+        $this->travelTo(Date::createFromTimestamp($now));
+
+        return $avanceur->advance($now);
     }
 }

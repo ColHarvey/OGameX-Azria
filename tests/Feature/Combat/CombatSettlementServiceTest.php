@@ -36,8 +36,11 @@ use OGame\Models\Resources;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
 use OGame\Services\SettingsService;
+use RecursiveDirectoryIterator;
+use RecursiveIteratorIterator;
 use ReflectionClass;
 use RuntimeException;
+use SplFileInfo;
 use Tests\FleetDispatchTestCase;
 use Throwable;
 
@@ -797,6 +800,151 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
         $this->assertSame($avant, $this->stockOf($cible), 'The target was debited before the debris field was found unwritable.');
         $this->assertSame(0, FleetMission::query()->where('parent_id', $missions[0]->id)->count());
         $this->assertSame(CombatState::Active, $combat->refresh()->status);
+    }
+
+    /**
+     * Un resultat qui appartient a un autre combat est refuse par son enveloppe, avant tout debit.
+     *
+     * Le document vit sur la ligne de l'instance ; c'est son contenu qui est altere, comme le ferait
+     * une reparation a la main qui recopie le resultat d'un autre combat.
+     */
+    public function testAResultThatBelongsToAnotherCombatIsRefusedByItsIdentity(): void
+    {
+        [$combat, $missions, $cible] = $this->anEngagedCombat();
+
+        $stocke = json_decode((string)DB::table('combat_instances')->where('id', $combat->id)->value('battle_result'), true);
+        $this->assertIsArray($stocke);
+        $this->assertSame($combat->id, $stocke['identity']['combat_instance_id'], 'The frozen result does not carry its combat.');
+        $stocke['identity']['combat_instance_id'] = $combat->id + 1;
+        DB::table('combat_instances')->where('id', $combat->id)->update(['battle_result' => json_encode($stocke)]);
+
+        $avant = $this->stockOf($cible);
+
+        try {
+            $this->settleIt($combat, (int)$combat->ends_at);
+            $this->fail('A result belonging to another combat was applied.');
+        } catch (Throwable $refus) {
+            $this->assertInstanceOf(MismatchedCombatIdentity::class, $refus);
+            $this->assertStringContainsString('appartient au combat', $refus->getMessage());
+        }
+
+        $this->assertSame($avant, $this->stockOf($cible), 'The target was debited by a result that is not its own.');
+        $this->assertSame(0, FleetMission::query()->where('parent_id', $missions[0]->id)->count());
+        $this->assertSame(CombatState::Active, $combat->refresh()->status);
+    }
+
+    /**
+     * Un resultat dont les participants ne sont pas ceux inscrits est refuse.
+     */
+    public function testAResultWhoseParticipantsAreNotTheRegisteredOnesIsRefused(): void
+    {
+        [$combat, , $cible] = $this->anEngagedCombat();
+
+        $stocke = json_decode((string)DB::table('combat_instances')->where('id', $combat->id)->value('battle_result'), true);
+        $this->assertIsArray($stocke);
+        $this->assertNotSame([], $stocke['identity']['participants'], 'The frozen result names no participant: nothing would be compared.');
+        $stocke['identity']['participants'] = [];
+        DB::table('combat_instances')->where('id', $combat->id)->update(['battle_result' => json_encode($stocke)]);
+
+        $avant = $this->stockOf($cible);
+
+        try {
+            $this->settleIt($combat, (int)$combat->ends_at);
+            $this->fail('A result naming other participants was applied.');
+        } catch (Throwable $refus) {
+            $this->assertInstanceOf(MismatchedCombatIdentity::class, $refus);
+            $this->assertStringContainsString('participants', $refus->getMessage());
+        }
+
+        $this->assertSame($avant, $this->stockOf($cible));
+    }
+
+    /**
+     * Un resultat calcule sous d'autres versions de regle est refuse.
+     */
+    public function testAResultComputedUnderOtherRuleVersionsIsRefused(): void
+    {
+        [$combat, , $cible] = $this->anEngagedCombat();
+
+        $stocke = json_decode((string)DB::table('combat_instances')->where('id', $combat->id)->value('battle_result'), true);
+        $this->assertIsArray($stocke);
+        $stocke['identity']['versions']['loot_policy'] = 'v99';
+        DB::table('combat_instances')->where('id', $combat->id)->update(['battle_result' => json_encode($stocke)]);
+
+        $avant = $this->stockOf($cible);
+
+        try {
+            $this->settleIt($combat, (int)$combat->ends_at);
+            $this->fail('A result computed under other rule versions was applied.');
+        } catch (Throwable $refus) {
+            $this->assertInstanceOf(MismatchedRuleVersionSet::class, $refus);
+        }
+
+        $this->assertSame($avant, $this->stockOf($cible));
+    }
+
+    /**
+     * Un resultat dont la photographie n'est pas celle de l'ouverture est refuse.
+     */
+    public function testAResultCarryingAnotherSnapshotIsRefused(): void
+    {
+        [$combat, , $cible] = $this->anEngagedCombat();
+
+        $stocke = json_decode((string)DB::table('combat_instances')->where('id', $combat->id)->value('battle_result'), true);
+        $this->assertIsArray($stocke);
+        $this->assertSame($combat->frozen_facts_fingerprint, $stocke['identity']['frozen_facts_fingerprint'], 'The frozen result does not carry the opening snapshot.');
+        $stocke['identity']['frozen_facts_fingerprint'] = 'une autre empreinte';
+        DB::table('combat_instances')->where('id', $combat->id)->update(['battle_result' => json_encode($stocke)]);
+
+        $avant = $this->stockOf($cible);
+
+        try {
+            $this->settleIt($combat, (int)$combat->ends_at);
+            $this->fail('A result carrying another snapshot was applied.');
+        } catch (Throwable $refus) {
+            $this->assertInstanceOf(MismatchedCombatIdentity::class, $refus);
+            $this->assertStringContainsString('photographie', $refus->getMessage());
+        }
+
+        $this->assertSame($avant, $this->stockOf($cible));
+    }
+
+    /**
+     * L'applicateur riche n'est assemble que par la mission d'attaque.
+     *
+     * `settle()` recoit encore la mission de jeu, la fermeture de retour et l'heure : c'est
+     * l'applicateur riche, et il reste appelable avec un autre assemblage. Cette garde lit `app/` et
+     * refuse tout autre assembleur que la seule frontiere de production — celle qui derive l'heure
+     * de sa propre horloge et prete la fermeture protegee de la mission.
+     */
+    public function testOnlyTheAttackMissionMayAssembleASettlement(): void
+    {
+        $racine = base_path();
+        $assembleurs = [];
+
+        foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator(app_path())) as $entree) {
+            if (!$entree instanceof SplFileInfo || $entree->getExtension() !== 'php') {
+                continue;
+            }
+
+            $source = file_get_contents($entree->getPathname());
+
+            if ($source === false) {
+                continue;
+            }
+
+            if (str_contains($source, 'CombatSettlementService::class') || str_contains($source, 'new CombatSettlementService(')) {
+                $assembleurs[] = str_replace([$racine . DIRECTORY_SEPARATOR, DIRECTORY_SEPARATOR], ['', '/'], $entree->getPathname());
+            }
+        }
+
+        sort($assembleurs);
+
+        $this->assertSame(
+            ['app/GameMissions/AttackMission.php'],
+            $assembleurs,
+            'The rich applicator is assembled somewhere other than the attack mission: it has a second production entry.'
+        );
     }
 
     /**

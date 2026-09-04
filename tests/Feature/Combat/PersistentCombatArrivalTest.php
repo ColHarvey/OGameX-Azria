@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\DB;
 use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Services\PersistentCombatAdvance;
 use OGame\Combat\Services\PersistentCombatAdvancer;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\GameObjects\Models\Units\UnitCollection;
@@ -266,14 +267,14 @@ class PersistentCombatArrivalTest extends FleetDispatchTestCase
         $barriere = CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->firstOrFail();
 
         $avanceur = new PersistentCombatAdvancer();
-        $avanceur->advance((int)$barriere->owned_through_effect_at);
+        $this->advanceAt($avanceur, (int)$barriere->owned_through_effect_at);
 
         $combat->refresh();
         $this->assertSame(CombatState::Active, $combat->status);
         $this->assertNotNull($combat->ends_at);
         $this->assertSame(500_000, $this->metalOf($cible), 'The target was looted the moment the battle was computed.');
 
-        $avanceur->advance((int)$combat->ends_at);
+        $this->advanceAt($avanceur, (int)$combat->ends_at);
 
         $combat->refresh();
         $this->assertSame(CombatState::Resolved, $combat->status);
@@ -372,5 +373,19 @@ class PersistentCombatArrivalTest extends FleetDispatchTestCase
     private function metalOf(PlanetService $cible): int
     {
         return (int)Planet::query()->whereKey($cible->getPlanetId())->value('metal');
+    }
+
+    /**
+     * Avance le passage a cet instant, horloge comprise.
+     *
+     * La frontiere du reglement lit **sa propre horloge** : l'heure donnee au passage ne sert qu'a
+     * choisir les combats dus, et l'horloge doit dire la meme chose — comme en production, ou le
+     * passage planifie prend l'une et l'autre au meme moment.
+     */
+    private function advanceAt(PersistentCombatAdvancer $avanceur, int $now): PersistentCombatAdvance
+    {
+        $this->travelTo(Date::createFromTimestamp($now));
+
+        return $avanceur->advance($now);
     }
 }
