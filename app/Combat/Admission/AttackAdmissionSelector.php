@@ -80,6 +80,8 @@ final class AttackAdmissionSelector
      *                               attaque seul, ses propres vagues comprises.
      * @param int $openedAt L'instant d'ouverture, en secondes.
      * @param array<int, AttackCandidateGroup> $candidates Les groupes candidats, dans n'importe quel ordre.
+     * @param AdmissionCeiling $ceiling La limite au-dela de laquelle une candidate arrive trop tard :
+     *        plafond de la fenetre quand on calcule l'echeance, echeance persistee quand on juge.
      * @return AdmissionVerdict
      */
     public function select(
@@ -88,8 +90,11 @@ final class AttackAdmissionSelector
         ActorKind $targetActor,
         int $openedAt,
         array $candidates,
+        AdmissionCeiling $ceiling,
     ): AdmissionVerdict {
-        $plafondTemporel = $openedAt + self::MAX_WINDOW_SECONDS;
+        // **La limite vient de l'appelant, et elle n'est pas la meme aux deux passages.** Au calcul
+        // de l'echeance c'est le plafond de la fenetre ; au verdict c'est l'echeance persistee.
+        $plafondTemporel = $ceiling->instant;
 
         $flottesRestantes = $founding->budget->maxFleets - $founding->fleetCount();
         $joueursPresents = [];

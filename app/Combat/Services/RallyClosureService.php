@@ -5,6 +5,7 @@ namespace OGame\Combat\Services;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Admission\AdmissionBudget;
+use OGame\Combat\Admission\AdmissionCeiling;
 use OGame\Combat\Admission\AdmissionVerdict;
 use OGame\Combat\Admission\AttackAdmissionSelector;
 use OGame\Combat\Admission\AttackCandidateGroup;
@@ -168,8 +169,8 @@ final class RallyClosureService
         // Le combat se serait ouvert sans son attaquant.
         $groupesFondateurs = $fondatrices === [] ? [] : $this->grouping->intoGroups($fondatrices);
 
-        $attaquants = $this->admitAttackers($combat, $corps, $openedAt, $fondatrices, $autres, $appartenances, $budget);
-        $defenseurs = $this->admitDefenders($corps, $openedAt, $candidates);
+        $attaquants = $this->admitAttackers($combat, $corps, $openedAt, $closedAt, $fondatrices, $autres, $appartenances, $budget);
+        $defenseurs = $this->admitDefenders($corps, $openedAt, $closedAt, $candidates);
 
         $cotesAttaquants = array_merge($groupesFondateurs, $attaquants->admitted());
 
@@ -220,6 +221,7 @@ final class RallyClosureService
         CombatInstance $combat,
         int $targetBodyId,
         int $openedAt,
+        int $closedAt,
         array $founding,
         array $others,
         FrozenAllianceMembership $membership,
@@ -241,7 +243,11 @@ final class RallyClosureService
             $targetBodyId,
             $this->actorHolding($targetBodyId),
             $openedAt,
-            $this->grouping->intoGroups($others)
+            $this->grouping->intoGroups($others),
+            // **Le verdict se prononce contre l'echeance persistee**, pas contre le plafond : une
+            // candidate qui arrive apres la photographie n'y entre pas, meme si une place s'est
+            // liberee entre l'ouverture et la fermeture.
+            AdmissionCeiling::theDeadlineTheBarrierHolds($closedAt)
         );
     }
 
@@ -253,6 +259,7 @@ final class RallyClosureService
     private function admitDefenders(
         int $targetBodyId,
         int $openedAt,
+        int $closedAt,
         array $candidates,
     ): AdmissionVerdict {
         $proprietaire = $this->ownerOf($targetBodyId);
@@ -272,7 +279,8 @@ final class RallyClosureService
             $proprietaire,
             $targetBodyId,
             $openedAt,
-            $defenses
+            $defenses,
+            AdmissionCeiling::theDeadlineTheBarrierHolds($closedAt)
         );
     }
 

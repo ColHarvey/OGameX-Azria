@@ -1146,6 +1146,61 @@ class RallyClosureServiceTest extends TestCase
     }
 
     /**
+     * Une place liberee par un rappel n'admet pas une vague qui arrive apres l'echeance.
+     *
+     * ## Le defaut, cote attaquant
+     *
+     * Le selecteur jugeait contre le plafond de la fenetre — soixante secondes — aux deux passages.
+     * A l'ouverture c'est juste : on cherche qui pourrait fixer l'echeance. A la fermeture c'est
+     * faux, et il suffit qu'une place se libere entre les deux pour qu'une vague entre dans une
+     * photographie prise bien avant son arrivee.
+     *
+     * Seize flottes au plus, l'ouvreur compris : l'ouvreur et quinze vagues remplissent le budget,
+     * une seizieme vague prevue a `+50` est donc refusee a l'ouverture et ne prolonge rien.
+     * L'echeance vaut `+6`. Un rappel libere ensuite une place.
+     */
+    public function testAPlaceFreedByARecallDoesNotAdmitAWaveArrivingAfterTheDeadline(): void
+    {
+        $joueur = $this->aPlayer();
+        $corps = $this->aBodyId();
+
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $joueur);
+
+        $vagues = [];
+        for ($i = 0; $i < 15; $i++) {
+            $vagues[] = $this->anAttackAt($corps, self::OPENING + 5, $joueur);
+        }
+
+        $tardive = $this->anAttackAt($corps, self::OPENING + 50, $joueur);
+
+        $combat = $this->ouverture->openOrJoin($ouvreur, $corps, self::OPENING);
+
+        $barriere = CelestialBodyCombatBarrier::where('combat_instance_id', $combat->id)->first();
+        $this->assertNotNull($barriere);
+        $this->assertSame(
+            self::OPENING + 6,
+            (int)$barriere->owned_through_effect_at,
+            'The deadline is not one tick after the last admitted wave: the sixteenth wave was counted, though the budget was full.'
+        );
+
+        // Un rappel libere une place avant la fermeture.
+        $vagues[0]->canceled = 1;
+        $vagues[0]->save();
+
+        $this->fermeture->close($combat->id, self::OPENING + 6);
+
+        $cles = CombatParticipant::where('combat_instance_id', $combat->id)->pluck('participant_key')->all();
+
+        $this->assertNotContains(
+            CombatParticipantKey::forFleet($tardive->id),
+            $cles,
+            'A wave arriving forty-four seconds after the photograph entered it, because a recall had freed a place.'
+        );
+        $this->assertNotContains(CombatParticipantKey::forFleet($vagues[0]->id), $cles, 'The recalled wave was registered.');
+        $this->assertContains(CombatParticipantKey::forFleet($ouvreur->id), $cles);
+    }
+
+    /**
      * Une attaque en vol vers ce corps.
      */
     private function anAttackAt(int $targetBodyId, int $arrivesAt, User|null $owner = null): FleetMission

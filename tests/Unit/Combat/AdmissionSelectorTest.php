@@ -3,6 +3,7 @@
 namespace Tests\Unit\Combat;
 
 use OGame\Combat\Admission\AdmissionBudget;
+use OGame\Combat\Admission\AdmissionCeiling;
 use OGame\Combat\Admission\AdmissionVerdict;
 use OGame\Combat\Admission\AttackAdmissionSelector;
 use OGame\Combat\Admission\AttackCandidateGroup;
@@ -380,7 +381,7 @@ class AdmissionSelectorTest extends UnitTestCase
             );
         }
 
-        $verdict = (new DefensiveAdmissionSelector())->select(7, self::TARGET_BODY, self::OPENING, DefensiveRallyCandidate::ofAll($candidates));
+        $verdict = (new DefensiveAdmissionSelector())->select(7, self::TARGET_BODY, self::OPENING, DefensiveRallyCandidate::ofAll($candidates), AdmissionCeiling::whilePlanningTheWindow(self::OPENING));
 
         $this->assertCount(4, $verdict->admitted(), 'The target owner did not take one of the five slots.');
         $this->assertSame(CombatReasonCode::PlayerLimitReached, $verdict->refused()[0]->refusal);
@@ -407,7 +408,7 @@ class AdmissionSelectorTest extends UnitTestCase
         $this->assertCount(1, $renforts, 'Only a real ACS Defence is a defensive candidate.');
         $this->assertSame(1_102, $renforts[0]->mission->missionId);
 
-        $verdict = (new DefensiveAdmissionSelector())->select(7, self::TARGET_BODY, self::OPENING, $renforts);
+        $verdict = (new DefensiveAdmissionSelector())->select(7, self::TARGET_BODY, self::OPENING, $renforts, AdmissionCeiling::whilePlanningTheWindow(self::OPENING));
 
         $this->assertCount(1, $verdict->admitted());
         $this->assertCount(0, $verdict->refused(), 'A non-candidate was turned into a refusal shown to a player.');
@@ -468,7 +469,7 @@ class AdmissionSelectorTest extends UnitTestCase
             mission: CombatMissionKind::AcsDefend
         );
 
-        $verdict = (new DefensiveAdmissionSelector())->select(7, self::TARGET_BODY, self::OPENING, DefensiveRallyCandidate::ofAll($candidates));
+        $verdict = (new DefensiveAdmissionSelector())->select(7, self::TARGET_BODY, self::OPENING, DefensiveRallyCandidate::ofAll($candidates), AdmissionCeiling::whilePlanningTheWindow(self::OPENING));
 
         $this->assertCount(16, $verdict->admitted());
         $this->assertSame(CombatReasonCode::FleetLimitReached, $verdict->refused()[0]->refusal);
@@ -486,7 +487,7 @@ class AdmissionSelectorTest extends UnitTestCase
 
         $defense = (new DefensiveAdmissionSelector())->select(7, self::TARGET_BODY, self::OPENING, DefensiveRallyCandidate::ofAll([
             $this->aCandidate(missionId: 2, userId: 41, arrivesAt: self::OPENING + 30, mission: CombatMissionKind::AcsDefend),
-        ]));
+        ]), AdmissionCeiling::whilePlanningTheWindow(self::OPENING));
 
         // La derniere admise des deux camps, plus un pas de temps. **C'est la regle qui existait
         // deja** : j'avais ecrit un second coordinateur avant de m'apercevoir que
@@ -499,7 +500,7 @@ class AdmissionSelectorTest extends UnitTestCase
 
         // Aucune candidate admise nulle part : fermeture et ouverture coincident.
         $vide = $this->selectAttack([], $this->aFoundingGroup());
-        $videDefense = (new DefensiveAdmissionSelector())->select(7, self::TARGET_BODY, self::OPENING, []);
+        $videDefense = (new DefensiveAdmissionSelector())->select(7, self::TARGET_BODY, self::OPENING, [], AdmissionCeiling::whilePlanningTheWindow(self::OPENING));
 
         $this->assertSame(
             self::OPENING,
@@ -521,7 +522,7 @@ class AdmissionSelectorTest extends UnitTestCase
             $this->aFoundingGroup()
         );
 
-        $videDefense = (new DefensiveAdmissionSelector())->select(7, self::TARGET_BODY, self::OPENING, []);
+        $videDefense = (new DefensiveAdmissionSelector())->select(7, self::TARGET_BODY, self::OPENING, [], AdmissionCeiling::whilePlanningTheWindow(self::OPENING));
 
         // A 59 secondes, l'arrivee tient **exactement** sous le plafond : 59 + un pas de temps = 60.
         // La fenetre se ferme donc au plafond, et pas une seconde plus tard.
@@ -720,7 +721,7 @@ class AdmissionSelectorTest extends UnitTestCase
      */
     private function selectAttack(array $candidates, FoundingGroup $founding): AdmissionVerdict
     {
-        return (new AttackAdmissionSelector())->select($founding, self::TARGET_BODY, ActorKind::Player, self::OPENING, $candidates);
+        return (new AttackAdmissionSelector())->select($founding, self::TARGET_BODY, ActorKind::Player, self::OPENING, $candidates, AdmissionCeiling::whilePlanningTheWindow(self::OPENING));
     }
 
     /**

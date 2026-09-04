@@ -5,6 +5,7 @@ namespace OGame\Combat\Services;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Admission\AdmissionBudget;
+use OGame\Combat\Admission\AdmissionCeiling;
 use OGame\Combat\Admission\AttackAdmissionSelector;
 use OGame\Combat\Admission\DefensiveAdmissionSelector;
 use OGame\Combat\Admission\DefensiveRallyCandidate;
@@ -363,7 +364,9 @@ final class CombatOpeningService
                 $targetBodyId,
                 $this->actorHolding($targetBodyId),
                 $openedAt,
-                $this->grouping->intoGroups($autres)
+                $this->grouping->intoGroups($autres),
+                // On cherche qui pourrait fixer l'echeance : la limite est le plafond de la fenetre.
+                AdmissionCeiling::whilePlanningTheWindow($openedAt)
             );
 
             foreach ($verdict->admitted() as $groupe) {
@@ -378,7 +381,13 @@ final class CombatOpeningService
         $proprietaire = $this->ownerOf($targetBodyId);
 
         if ($renforts !== [] && $proprietaire >= 1) {
-            $defense = $this->defenceSelector->select($proprietaire, $targetBodyId, $openedAt, $renforts);
+            $defense = $this->defenceSelector->select(
+                $proprietaire,
+                $targetBodyId,
+                $openedAt,
+                $renforts,
+                AdmissionCeiling::whilePlanningTheWindow($openedAt)
+            );
 
             foreach ($defense->admitted() as $groupe) {
                 $arrivees[] = $groupe->scheduledArrivalAt();

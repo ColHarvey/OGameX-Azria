@@ -3,6 +3,7 @@
 namespace Tests\Unit\Combat;
 
 use OGame\Combat\Admission\AdmissionBudget;
+use OGame\Combat\Admission\AdmissionCeiling;
 use OGame\Combat\Admission\AdmissionVerdict;
 use OGame\Combat\Admission\AttackAdmissionSelector;
 use OGame\Combat\Admission\AttackCandidateGroup;
@@ -11,6 +12,7 @@ use OGame\Combat\Admission\DefensiveAdmissionSelector;
 use OGame\Combat\Admission\DefensiveRallyCandidate;
 use OGame\Combat\Admission\FoundingGroup;
 use OGame\Combat\Decisions\ArrivalDecision;
+use OGame\Combat\Decisions\ArrivalVerdict;
 use OGame\Combat\Decisions\ArrivingAssets;
 use OGame\Combat\Decisions\CombatDecisionMatrix;
 use OGame\Combat\Decisions\CombatSituation;
@@ -463,7 +465,8 @@ class RallyArrivalCoverageTest extends UnitTestCase
                 userId: 21,
                 arrivesAt: self::OPENING + 10,
                 mission: CombatMissionKind::AcsDefend
-            )])
+            )]),
+            AdmissionCeiling::whilePlanningTheWindow(self::OPENING)
         );
 
         $this->assertSame(
@@ -752,7 +755,7 @@ class RallyArrivalCoverageTest extends UnitTestCase
         CombatMissionKind $mission,
         FlightLeg $leg,
         CombatState|null $state,
-    ): \OGame\Combat\Decisions\ArrivalVerdict {
+    ): ArrivalVerdict {
         return (new CombatDecisionMatrix())->verdictOf(
             new CombatSituation($mission, $leg, ActorKind::Player, $state),
             $this->aPossibleReturn(),
@@ -796,7 +799,8 @@ class RallyArrivalCoverageTest extends UnitTestCase
             self::TARGET_BODY,
             $targetActor,
             self::OPENING,
-            [$candidate]
+            [$candidate],
+            AdmissionCeiling::whilePlanningTheWindow(self::OPENING)
         );
     }
 

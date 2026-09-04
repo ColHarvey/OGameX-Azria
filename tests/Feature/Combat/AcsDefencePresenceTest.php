@@ -3,6 +3,7 @@
 namespace Tests\Feature\Combat;
 
 use Illuminate\Support\Facades\DB;
+use OGame\Combat\Admission\AdmissionCeiling;
 use OGame\Combat\Admission\CandidateMission;
 use OGame\Combat\Admission\DefensiveAdmissionSelector;
 use OGame\Combat\Admission\DefensiveRallyCandidate;
@@ -106,7 +107,8 @@ class AcsDefencePresenceTest extends TestCase
             $defenseur->id,
             $corps,
             self::OPENING,
-            DefensiveRallyCandidate::ofAll(array_values($lues))
+            DefensiveRallyCandidate::ofAll(array_values($lues)),
+            AdmissionCeiling::whilePlanningTheWindow(self::OPENING)
         );
 
         $admises = array_map(static fn ($groupe): int => $groupe->missions[0]->missionId, $verdict->admitted());
@@ -303,6 +305,57 @@ class AcsDefencePresenceTest extends TestCase
     }
 
     /**
+     * Une place liberee par un rappel ne fait pas entrer une candidate qui arrive apres l'echeance.
+     *
+     * ## Le defaut que cet essai ferme
+     *
+     * Le selecteur jugeait contre le plafond de la fenetre — soixante secondes — aux deux passages.
+     * A l'ouverture c'est juste : on cherche qui pourrait fixer l'echeance. A la fermeture c'est
+     * faux : l'echeance est deja fixee, et la photographie se prend a cet instant-la.
+     *
+     * Le scenario : quatre renforts en vol occupent les quatre places exterieures et fixent
+     * l'echeance ; un cinquieme, prevu bien plus tard, est refuse a l'ouverture pour la limite de
+     * joueurs — il ne prolonge donc rien. Un rappel libere ensuite sa place. Juge contre le plafond,
+     * il entrait dans une photographie prise quarante-quatre secondes avant son arrivee.
+     */
+    public function testAPlaceFreedByARecallDoesNotAdmitACandidateArrivingAfterTheDeadline(): void
+    {
+        $defenseur = $this->aPlayer();
+        $corps = $this->aPlanetOwnedBy($defenseur)->id;
+
+        // Quatre renforts en vol, quatre joueurs : les quatre places exterieures sont prises, et
+        // l'echeance se fixe une seconde apres leur arrivee.
+        $enVol = [];
+        for ($i = 0; $i < 4; $i++) {
+            $enVol[] = $this->anAcsDefence($this->aPlayer(), $corps, self::OPENING + 5, 3600);
+        }
+
+        // Un cinquieme joueur, prevu bien plus tard : refuse a l'ouverture pour la limite de joueurs,
+        // donc il ne prolonge pas la fenetre.
+        $tardif = $this->anAcsDefence($this->aPlayer(), $corps, self::OPENING + 50, 3600);
+
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $this->aPlayer());
+        $combat = (new CombatOpeningService())->openOrJoin($ouvreur, $corps, self::OPENING);
+
+        $barriere = CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->first();
+        $this->assertNotNull($barriere);
+        $this->assertSame(self::OPENING + 6, (int)$barriere->owned_through_effect_at, 'The deadline is not one tick after the four reinforcements in flight.');
+
+        // Un rappel libere une place avant la fermeture.
+        $enVol[0]->canceled = 1;
+        $enVol[0]->save();
+
+        $this->assertTrue((new RallyClosureService())->close($combat->id, self::OPENING + 6)->closed, 'The rally did not close.');
+
+        $this->assertFalse(
+            $this->isADefendingParticipant($combat, $tardif),
+            'A candidate arriving forty-four seconds after the photograph was taken entered it, because a place had been freed.'
+        );
+        $this->assertFalse($this->isADefendingParticipant($combat, $enVol[0]), 'The recalled reinforcement was admitted.');
+        $this->assertSame(3, $this->defendingParticipants($combat), 'The three remaining reinforcements were not the ones admitted.');
+    }
+
+    /**
      * @return array<int, CandidateMission> par identifiant de mission
      */
     private function readById(int $targetBodyId): array
@@ -314,6 +367,18 @@ class AcsDefencePresenceTest extends TestCase
         }
 
         return $parId;
+    }
+
+    /**
+     * Le nombre de renforts inscrits du cote defenseur.
+     */
+    private function defendingParticipants(CombatInstance $combat): int
+    {
+        return CombatParticipant::query()
+            ->where('combat_instance_id', $combat->id)
+            ->where('side', CombatParticipant::SIDE_DEFENDER)
+            ->whereNotNull('fleet_mission_id')
+            ->count();
     }
 
     private function isADefendingParticipant(CombatInstance $combat, FleetMission $mission): bool

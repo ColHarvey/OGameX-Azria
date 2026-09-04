@@ -58,6 +58,7 @@ final class DefensiveAdmissionSelector
      * @param int $targetBodyId Le corps **exact** defendu.
      * @param int $openedAt L'instant d'ouverture, en secondes.
      * @param array<int, DefensiveRallyCandidate> $candidates Les renforts candidats.
+     * @param AdmissionCeiling $ceiling La limite au-dela de laquelle un renfort arrive trop tard.
      * @return AdmissionVerdict
      */
     public function select(
@@ -65,6 +66,7 @@ final class DefensiveAdmissionSelector
         int $targetBodyId,
         int $openedAt,
         array $candidates,
+        AdmissionCeiling $ceiling,
     ): AdmissionVerdict {
         if ($targetOwnerUserId < 1) {
             throw new InvalidArgumentException(
@@ -73,7 +75,10 @@ final class DefensiveAdmissionSelector
             );
         }
 
-        $plafondTemporel = $openedAt + AttackAdmissionSelector::MAX_WINDOW_SECONDS;
+        // **La limite vient de l'appelant** : plafond de la fenetre au calcul, echeance persistee
+        // au verdict. Les confondre laissait entrer une candidate qui n'arrivait qu'apres la
+        // photographie, des qu'un rappel liberait sa place entre les deux passages.
+        $plafondTemporel = $ceiling->instant;
 
         // **Le proprietaire occupe d'office un emplacement de joueur**, et aucun emplacement de
         // flotte : sa garnison est deja sur place, elle n'arrive pas.
