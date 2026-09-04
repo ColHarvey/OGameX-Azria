@@ -20,9 +20,21 @@ use rand::Rng;
 use std::collections::HashMap;
 use memory_stats::memory_stats;
 
+/// The version of the FFI contract this library speaks.
+///
+/// Version 2 adds, to every round, the losses of the round per fleet on both sides, and the hits
+/// and damage per attacking fleet; it also names its version in the input and the output, exports
+/// `battle_engine_abi_version()` and `free_battle_output()`. A PHP client declares those two symbols
+/// when it loads the library: an older library fails at load time instead of answering with rounds
+/// that say nothing about who lost what.
+pub const ABI_VERSION: u32 = 2;
+
 /// Battle input which is provided by the PHP client.
 #[derive(Serialize, Deserialize)]
 pub struct BattleInput {
+    /// The contract version the client believes it is speaking. Absent means version 1.
+    #[serde(default)]
+    schema: u32,
     attacker_fleets: Vec<AttackerFleetInput>,
     defender_fleets: Vec<DefenderFleetInput>,
 }
@@ -104,6 +116,14 @@ struct BattleRound {
     attacker_fleet_results: HashMap<u32, AttackerFleetResult>,
     /// Per-fleet defender results keyed by fleet_mission_id.
     defender_fleet_results: HashMap<u32, DefenderFleetResult>,
+    /// Unit losses of THIS round per attacker fleet_mission_id.
+    attacker_losses_in_round_per_fleet: HashMap<u32, HashMap<i16, BattleUnitCount>>,
+    /// Unit losses of THIS round per defender fleet_mission_id (0 is the garrison).
+    defender_losses_in_round_per_fleet: HashMap<u32, HashMap<i16, BattleUnitCount>>,
+    /// Hits made by each attacker fleet this round.
+    hits_per_attacker_fleet: HashMap<u32, u32>,
+    /// Damage dealt by each attacker fleet this round.
+    damage_per_attacker_fleet: HashMap<u32, f64>,
 }
 
 /// Result for a single attacker fleet.
@@ -140,6 +160,8 @@ struct MemoryMetrics {
 /// for debugging purposes when called from battle_engine_debug Rust project.
 #[derive(Serialize, Deserialize)]
 pub struct BattleOutput {
+    /// The contract version of this document: the client refuses any other.
+    schema: u32,
     rounds: Vec<BattleRound>,
     memory_metrics: MemoryMetrics,
 }
@@ -149,12 +171,64 @@ pub struct BattleOutput {
 /// This is the method which is called from the PHP client in RustBattleEngine.php.
 #[no_mangle]
 pub extern "C" fn fight_battle_rounds(input_json: *const c_char) -> *mut c_char {
-    let input_str = unsafe { CStr::from_ptr(input_json).to_str().unwrap() };
-    let battle_input: BattleInput = serde_json::from_str(input_str).unwrap();
-    let battle_output = process_battle_rounds(battle_input);
-    let result_json = serde_json::to_string(&battle_output).unwrap();
-    let c_str = CString::new(result_json).unwrap();
-    c_str.into_raw()
+    // A panic must never cross the FFI boundary: it would abort the PHP process. Every failure
+    // becomes an error document the client can name.
+    let answer = match unsafe { CStr::from_ptr(input_json) }.to_str() {
+        Ok(input_str) => answer_to(input_str),
+        Err(_) => error_document("input is not valid UTF-8"),
+    };
+
+    CString::new(answer).unwrap_or_default().into_raw()
+}
+
+/// The version of the contract, readable before any battle is fought.
+#[no_mangle]
+pub extern "C" fn battle_engine_abi_version() -> u32 {
+    ABI_VERSION
+}
+
+/// Gives back to Rust the string that `fight_battle_rounds` handed out.
+///
+/// The output used to leak on every battle. The pointer must come from `fight_battle_rounds`;
+/// a null pointer is ignored.
+#[no_mangle]
+pub extern "C" fn free_battle_output(output: *mut c_char) {
+    if output.is_null() {
+        return;
+    }
+
+    unsafe {
+        drop(CString::from_raw(output));
+    }
+}
+
+/// The JSON answer to a JSON input: the battle output, or an error document.
+fn answer_to(input_str: &str) -> String {
+    let battle_input: BattleInput = match serde_json::from_str(input_str) {
+        Ok(input) => input,
+        Err(erreur) => return error_document(&format!("input does not parse: {}", erreur)),
+    };
+
+    if battle_input.schema != ABI_VERSION {
+        return error_document(&format!(
+            "input schema {} is not the contract version {} this library speaks",
+            battle_input.schema, ABI_VERSION
+        ));
+    }
+
+    match serde_json::to_string(&process_battle_rounds(battle_input)) {
+        Ok(json) => json,
+        Err(erreur) => error_document(&format!("output does not serialize: {}", erreur)),
+    }
+}
+
+/// An error the client can read: it carries the version so the mismatch names itself.
+fn error_document(message: &str) -> String {
+    serde_json::json!({
+        "schema": ABI_VERSION,
+        "error": message,
+    })
+    .to_string()
 }
 
 /// Process the battle rounds and return the battle output.
@@ -205,6 +279,10 @@ fn process_battle_rounds(input: BattleInput) -> BattleOutput {
             hits_defender: 0,
             attacker_fleet_results: HashMap::new(),
             defender_fleet_results: HashMap::new(),
+            attacker_losses_in_round_per_fleet: HashMap::new(),
+            defender_losses_in_round_per_fleet: HashMap::new(),
+            hits_per_attacker_fleet: HashMap::new(),
+            damage_per_attacker_fleet: HashMap::new(),
         };
 
         // Merge all fleet units for the metadata lookup (needed for combat calculations)
@@ -246,6 +324,7 @@ fn process_battle_rounds(input: BattleInput) -> BattleOutput {
     }
 
     BattleOutput {
+        schema: ABI_VERSION,
         rounds,
         memory_metrics: MemoryMetrics {
             peak_memory,
@@ -257,7 +336,12 @@ fn process_battle_rounds(input: BattleInput) -> BattleOutput {
 fn expand_fleets(fleets: &Vec<impl FleetInput>) -> Vec<BattleUnitInstance> {
     let mut expanded = Vec::new();
     for fleet in fleets {
-        for (_, unit) in fleet.get_units() {
+        // Canonical order: a HashMap iterates in an order that changes from one run to the next,
+        // and two runs fed the same draws would not pick the same targets.
+        let mut units: Vec<&BattleUnitInfo> = fleet.get_units().values().collect();
+        units.sort_by_key(|unit| unit.unit_id);
+
+        for unit in units {
             for _ in 0..unit.amount {
                 expanded.push(BattleUnitInstance {
                     unit_id: unit.unit_id.clone(),
@@ -444,6 +528,8 @@ fn process_combat(
                 round.hits_attacker += 1;
                 round.full_strength_attacker += damage as f64;
                 round.absorbed_damage_defender += shield_absorption as f64;
+                *round.hits_per_attacker_fleet.entry(attacker.fleet_mission_id).or_insert(0) += 1;
+                *round.damage_per_attacker_fleet.entry(attacker.fleet_mission_id).or_insert(0.0) += damage as f64;
             } else {
                 round.hits_defender += 1;
                 round.full_strength_defender += damage as f64;
@@ -496,6 +582,7 @@ fn cleanup_round(
         // Check if unit is fully destroyed.
         if unit.current_hull_plating <= 0.0 {
             increment_battle_unit_count_amount(&mut round.attacker_losses_in_round, unit.unit_id, 1);
+            increment_battle_unit_count_amount(round.attacker_losses_in_round_per_fleet.entry(unit.fleet_mission_id).or_default(), unit.unit_id, 1);
             return false;
         }
 
@@ -516,6 +603,7 @@ fn cleanup_round(
         // Check if unit is fully destroyed.
         if unit.current_hull_plating <= 0.0 {
             increment_battle_unit_count_amount(&mut round.defender_losses_in_round, unit.unit_id, 1);
+            increment_battle_unit_count_amount(round.defender_losses_in_round_per_fleet.entry(unit.fleet_mission_id).or_default(), unit.unit_id, 1);
             return false;
         }
 
@@ -615,5 +703,152 @@ fn increment_battle_unit_count_amount(hash_map: &mut HashMap<i16, BattleUnitCoun
 fn update_peak_memory(current_peak: &mut u64) {
     if let Some(usage) = memory_stats() {
         *current_peak = (*current_peak).max(usage.physical_mem as u64 / 1024);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unit(unit_id: i16, amount: u32, attack: f32, shield: f32, hull: f32) -> (i16, BattleUnitInfo) {
+        (
+            unit_id,
+            BattleUnitInfo {
+                unit_id,
+                amount,
+                attack_power: attack,
+                shield_points: shield,
+                hull_plating: hull,
+                rapidfire: HashMap::new(),
+            },
+        )
+    }
+
+    /// A garrison of rocket launchers, a reinforcement of light fighters, and an attack that
+    /// bites into both without wiping either before several rounds.
+    fn a_battle_with_a_garrison_and_a_reinforcement() -> BattleInput {
+        BattleInput {
+            schema: ABI_VERSION,
+            attacker_fleets: vec![AttackerFleetInput {
+                fleet_mission_id: 4242,
+                owner_id: 1,
+                units: HashMap::from([unit(204, 150, 50.0, 10.0, 400.0), unit(206, 20, 400.0, 50.0, 2700.0)]),
+            }],
+            defender_fleets: vec![
+                DefenderFleetInput {
+                    fleet_mission_id: 0,
+                    owner_id: 2,
+                    units: HashMap::from([unit(401, 150, 80.0, 20.0, 200.0)]),
+                },
+                DefenderFleetInput {
+                    fleet_mission_id: 777,
+                    owner_id: 5,
+                    units: HashMap::from([unit(204, 60, 50.0, 10.0, 400.0)]),
+                },
+            ],
+        }
+    }
+
+    fn total(units: &HashMap<i16, BattleUnitCount>) -> HashMap<i16, u32> {
+        units.iter().map(|(id, count)| (*id, count.amount)).collect()
+    }
+
+    fn sum_per_fleet(per_fleet: &HashMap<u32, HashMap<i16, BattleUnitCount>>) -> HashMap<i16, u32> {
+        let mut somme: HashMap<i16, u32> = HashMap::new();
+        for units in per_fleet.values() {
+            for (id, count) in units {
+                *somme.entry(*id).or_insert(0) += count.amount;
+            }
+        }
+        somme
+    }
+
+    #[test]
+    fn every_loss_of_every_round_is_attributed_to_a_fleet_on_both_sides() {
+        let output = process_battle_rounds(a_battle_with_a_garrison_and_a_reinforcement());
+
+        assert!(output.rounds.len() > 1, "the battle lasted one round: nothing would distinguish a per-round attribution from a final one");
+
+        let mut garrison_lost = 0;
+        let mut reinforcement_lost = 0;
+
+        for round in &output.rounds {
+            assert_eq!(total(&round.defender_losses_in_round), sum_per_fleet(&round.defender_losses_in_round_per_fleet), "defending attributions do not add up to the defending losses");
+            assert_eq!(total(&round.attacker_losses_in_round), sum_per_fleet(&round.attacker_losses_in_round_per_fleet), "attacking attributions do not add up to the attacking losses");
+
+            garrison_lost += round.defender_losses_in_round_per_fleet.get(&0).map(|u| u.values().map(|c| c.amount).sum::<u32>()).unwrap_or(0);
+            reinforcement_lost += round.defender_losses_in_round_per_fleet.get(&777).map(|u| u.values().map(|c| c.amount).sum::<u32>()).unwrap_or(0);
+        }
+
+        // Both fleets lost something, otherwise "everything to the garrison" would pass too.
+        assert!(garrison_lost > 0, "the garrison lost nothing");
+        assert!(reinforcement_lost > 0, "the reinforcement lost nothing");
+
+        // The cumulative attribution is exactly what the last round's fleet result records.
+        let last = output.rounds.last().unwrap();
+        let recorded: u32 = last.defender_fleet_results.get(&777).unwrap().units_lost.values().map(|c| c.amount).sum();
+        assert_eq!(recorded, reinforcement_lost, "the losses attributed round by round to the reinforcement are not the losses its fleet result records");
+    }
+
+    #[test]
+    fn hits_and_damage_per_attacker_fleet_add_up_to_the_round_totals() {
+        let output = process_battle_rounds(a_battle_with_a_garrison_and_a_reinforcement());
+
+        for round in &output.rounds {
+            let hits: u32 = round.hits_per_attacker_fleet.values().sum();
+            let damage: f64 = round.damage_per_attacker_fleet.values().sum();
+            assert_eq!(hits, round.hits_attacker);
+            assert!((damage - round.full_strength_attacker).abs() < 0.5);
+        }
+    }
+
+    #[test]
+    fn the_output_names_the_contract_version() {
+        let output = process_battle_rounds(a_battle_with_a_garrison_and_a_reinforcement());
+        assert_eq!(ABI_VERSION, output.schema);
+        assert_eq!(ABI_VERSION, battle_engine_abi_version());
+    }
+
+    #[test]
+    fn an_input_of_another_version_is_refused_with_a_readable_document() {
+        let mut input = a_battle_with_a_garrison_and_a_reinforcement();
+        input.schema = 1;
+
+        let answer: serde_json::Value = serde_json::from_str(&answer_to(&serde_json::to_string(&input).unwrap())).unwrap();
+
+        assert_eq!(ABI_VERSION, answer["schema"]);
+        assert!(answer["error"].as_str().unwrap().contains("input schema 1"));
+        assert!(answer.get("rounds").is_none());
+    }
+
+    #[test]
+    fn an_input_that_does_not_parse_is_refused_without_a_panic() {
+        let answer: serde_json::Value = serde_json::from_str(&answer_to("{not json")).unwrap();
+        assert!(answer["error"].as_str().unwrap().contains("does not parse"));
+    }
+
+    #[test]
+    fn the_output_can_be_handed_out_and_freed_repeatedly() {
+        let input = CString::new(serde_json::to_string(&a_battle_with_a_garrison_and_a_reinforcement()).unwrap()).unwrap();
+
+        for _ in 0..3 {
+            let output = fight_battle_rounds(input.as_ptr());
+            let text = unsafe { CStr::from_ptr(output) }.to_str().unwrap().to_owned();
+            assert!(text.contains("\"rounds\""));
+            free_battle_output(output);
+        }
+
+        free_battle_output(std::ptr::null_mut());
+    }
+
+    #[test]
+    fn the_expansion_order_is_canonical() {
+        let input = a_battle_with_a_garrison_and_a_reinforcement();
+        let first: Vec<(i16, u32)> = expand_fleets(&input.attacker_fleets).iter().map(|u| (u.unit_id, u.fleet_mission_id)).collect();
+        let second: Vec<(i16, u32)> = expand_fleets(&input.attacker_fleets).iter().map(|u| (u.unit_id, u.fleet_mission_id)).collect();
+
+        assert_eq!(first, second);
+        assert_eq!(204, first[0].0, "units are not expanded in ascending unit id order");
+        assert_eq!(206, first[150].0);
     }
 }

@@ -3,6 +3,7 @@
 namespace OGame\GameMissions\BattleEngine;
 
 use FFI;
+use OGame\Combat\Exceptions\RustEngineContractMismatch;
 use OGame\Combat\Support\LootContext;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
@@ -28,6 +29,16 @@ use stdClass;
 class RustBattleEngine extends BattleEngine
 {
     /**
+     * La version du contrat FFI que ce client parle.
+     *
+     * Elle est ecrite dans l'entree, exigee dans la sortie, et lue sur la bibliotheque avant le
+     * premier combat. La version 2 porte, dans chaque round, les pertes du round par flotte des
+     * deux camps et les coups et degats par flotte attaquante — sans elles, le moteur partage
+     * refuse le round, et une bibliotheque plus ancienne ne produirait aucune bataille.
+     */
+    public const int ABI_VERSION = 2;
+
+    /**
      * @var FFI The FFI instance used to call the Rust battle engine.
      */
     private FFI $ffi;
@@ -45,10 +56,22 @@ class RustBattleEngine extends BattleEngine
     {
         parent::__construct($attackers, $defenderPlanet, $defenders, $settings, $lootContext);
 
+        // **Les trois symboles du contrat, declares ensemble.** FFI resout chaque symbole au
+        // chargement : une bibliotheque qui n'exporte pas la version ou la liberation est une
+        // bibliotheque d'avant le contrat, et elle echoue ici — pas au milieu d'une bataille.
         $this->ffi = FFI::cdef(
-            "char* fight_battle_rounds(const char* input_json);",
+            "char* fight_battle_rounds(const char* input_json);\n"
+            . "unsigned int battle_engine_abi_version(void);\n"
+            . "void free_battle_output(char* output);",
             base_path('storage/rust-libs/libbattle_engine_ffi.so')
         );
+
+        // @phpstan-ignore-next-line
+        $version = (int)$this->ffi->battle_engine_abi_version();
+
+        if ($version !== self::ABI_VERSION) {
+            throw RustEngineContractMismatch::becauseTheLibrarySpeaks($version, self::ABI_VERSION);
+        }
     }
 
     /**
@@ -73,8 +96,14 @@ class RustBattleEngine extends BattleEngine
         $outputPtr = $this->ffi->fight_battle_rounds($inputJson);
         $output = FFI::string($outputPtr);
 
-        // Parse JSON response
-        $battleOutput = json_decode($output, true);
+        // **La chaine rendue est libree aussitot lue.** Elle fuyait a chaque bataille.
+        // @phpstan-ignore-next-line
+        $this->ffi->free_battle_output($outputPtr);
+
+        // **Une reponse qui n'est pas une bataille se refuse avec sa raison** — document illisible,
+        // document d'erreur (le moteur Rust ne laisse plus passer de panique), autre version, aucun
+        // round. Le jugement vit a part, pour etre eprouve sans bibliotheque.
+        $battleOutput = RustEngineAnswer::battleOutputFrom($output, self::ABI_VERSION);
 
         // Convert Rust output back to PHP battle rounds
         $rounds = $this->convertBattleOutput($result, $battleOutput);
@@ -131,12 +160,22 @@ class RustBattleEngine extends BattleEngine
         }
 
         // Build defender fleets (planet owner + ACS defend fleets)
-        $defenderPlayer = $this->defenderPlanet->getPlayer();
-        if ($defenderPlayer === null) {
-            throw new RuntimeException('Battle defender planet has no owner.');
+        //
+        // **Chaque flotte defensive combat avec les technologies de son proprietaire**, comme dans
+        // le moteur PHP. Toutes etaient evaluees avec celles du proprietaire de la planete : un
+        // renfort ACS recevait, sous Rust, les boucliers et l'armement d'un autre joueur.
+        $proprietaires = [];
+        foreach ($this->defenders as $defenderFleet) {
+            $proprietaires[$defenderFleet->fleetMissionId] = $defenderFleet->player;
         }
+
         $defenderFleets = [];
         foreach ($result->defenderFleetResults as $fleetResult) {
+            $defenderPlayer = $proprietaires[$fleetResult->fleetMissionId] ?? null;
+            if ($defenderPlayer === null) {
+                throw new RuntimeException('Defending fleet ' . $fleetResult->fleetMissionId . ' has no owner among the defenders.');
+            }
+
             $defenderUnits = new stdClass();
             foreach ($fleetResult->unitsStart->units as $unit) {
                 $rapidfire = new stdClass();
@@ -163,6 +202,7 @@ class RustBattleEngine extends BattleEngine
         }
 
         return [
+            'schema' => self::ABI_VERSION,
             'attacker_fleets' => $attackerFleets,
             'defender_fleets' => $defenderFleets,
         ];
