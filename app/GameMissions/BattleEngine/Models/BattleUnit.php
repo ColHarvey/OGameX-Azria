@@ -2,6 +2,8 @@
 
 namespace OGame\GameMissions\BattleEngine\Models;
 
+use OGame\GameMissions\BattleEngine\Draws\BattleDraws;
+use OGame\GameMissions\BattleEngine\Draws\Draw;
 use OGame\GameObjects\Models\UnitObject;
 
 /**
@@ -52,7 +54,7 @@ class BattleUnit
      *
      * @return bool
      */
-    public function damagedHullExplosion(): bool
+    public function damagedHullExplosion(BattleDraws $draws): bool
     {
         $hullPercentage = $this->currentHullPlating / $this->originalHullPlating;
         if ($hullPercentage >= 0.7) {
@@ -60,6 +62,7 @@ class BattleUnit
         }
 
         $explosionChance = (1 - $hullPercentage) * 100;
-        return rand(0, 100) < $explosionChance;
+
+        return Draw::explodes($draws, $explosionChance);
     }
 }

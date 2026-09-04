@@ -2,10 +2,15 @@
 
 namespace OGame\GameMissions\BattleEngine;
 
+use OGame\GameMissions\BattleEngine\Draws\BattleDraws;
+use OGame\GameMissions\BattleEngine\Draws\Draw;
+use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameMissions\BattleEngine\Models\BattleResultRound;
 use OGame\GameMissions\BattleEngine\Models\BattleUnit;
+use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\GameObjects\Models\Units\UnitEntry;
 use OGame\Services\CharacterClassService;
 use OGame\Services\SettingsService;
 
@@ -21,6 +26,14 @@ use OGame\Services\SettingsService;
 class PhpBattleEngine extends BattleEngine
 {
     /**
+     * La source des tirages des rounds : cible, explosion, tir rapide.
+     *
+     * Prise de `$this->draws->forRounds()` juste avant le premier round. Avec une graine, c'est
+     * une suite neuve, celle que le moteur Rust commence au meme instant.
+     */
+    private BattleDraws $roundDraws;
+
+    /**
      * Fight the battle in max 6 rounds.
      *
      * @param BattleResult $result
@@ -32,9 +45,12 @@ class PhpBattleEngine extends BattleEngine
 
         // Convert attacker units to BattleUnit objects to keep track of hull plating and shields.
         // Each attacker fleet uses its own player's tech levels.
+        // **Ordre canonique** : flottes par identifiant de mission, unites par identifiant d'objet.
+        // Une cible se choisit par sa position parmi les unites restantes ; deux moteurs nourris
+        // des memes tirages ne visent la meme unite que s'ils les ont rangees pareil.
         $attackerUnits = [];
-        foreach ($this->attackers as $attackerFleet) {
-            foreach ($attackerFleet->units->units as $unit) {
+        foreach (self::inCanonicalOrder($this->attackers) as $attackerFleet) {
+            foreach (self::unitsInCanonicalOrder($attackerFleet->units) as $unit) {
                 // Create new object for each unique unit in this fleet.
                 // Use THIS fleet owner's tech levels for calculations
                 $structuralIntegrity = $unit->unitObject->properties->structural_integrity->calculate($attackerFleet->player)->totalValue;
@@ -51,8 +67,8 @@ class PhpBattleEngine extends BattleEngine
 
         $defenderUnits = [];
         // Create BattleUnits for each defending fleet separately to preserve ownership and tech levels
-        foreach ($this->defenders as $defenderFleet) {
-            foreach ($defenderFleet->units->units as $unit) {
+        foreach (self::inCanonicalOrder($this->defenders) as $defenderFleet) {
+            foreach (self::unitsInCanonicalOrder($defenderFleet->units) as $unit) {
                 // Create new object for each unique unit type in this fleet
                 // Use THIS fleet owner's tech levels for calculations
                 $structuralIntegrity = $unit->unitObject->properties->structural_integrity->calculate($defenderFleet->player)->totalValue;
@@ -77,6 +93,13 @@ class PhpBattleEngine extends BattleEngine
 
         // Hamill Manoeuvre: General class Light Fighters have a chance to destroy one Deathstar before battle
         $this->checkHamillManoeuvre($result, $attackerUnits, $defenderUnits);
+        $attackerUnits = array_values($attackerUnits);
+        $defenderUnits = array_values($defenderUnits);
+
+        // **Les rounds tirent d'une suite neuve**, celle que le moteur Rust recoit avec la graine :
+        // Hamill a deja tire de la source de la bataille, et les deux moteurs doivent commencer
+        // leurs rounds au meme point.
+        $this->roundDraws = $this->draws->forRounds();
 
         $roundNumber = 0;
         $attackerRemainingShips = clone $result->attackerUnitsStart;
@@ -130,8 +153,7 @@ class PhpBattleEngine extends BattleEngine
                 // If the attacker has rapidfire against the defender and successfully rolled a dice,
                 // the attacker can attack a random unit again.
                 do {
-                    $targetUnitKey = array_rand($defenderUnits);
-                    $targetUnit = $defenderUnits[$targetUnitKey];
+                    $targetUnit = $defenderUnits[Draw::index($this->roundDraws, count($defenderUnits))];
 
                     $rapidfire = $this->attackUnit(true, $round, $unit, $targetUnit);
                 } while ($rapidfire);
@@ -142,8 +164,7 @@ class PhpBattleEngine extends BattleEngine
                 // If the attacker has rapidfire against the defender and successfully rolled a dice,
                 // the attacker can attack a random unit again.
                 do {
-                    $targetUnitKey = array_rand($attackerUnits);
-                    $targetUnit = $attackerUnits[$targetUnitKey];
+                    $targetUnit = $attackerUnits[Draw::index($this->roundDraws, count($attackerUnits))];
 
                     $rapidfire = $this->attackUnit(false, $round, $unit, $targetUnit);
                 } while ($rapidfire);
@@ -152,6 +173,8 @@ class PhpBattleEngine extends BattleEngine
             // After all units have attacked each other, clean up the round. This removes destroyed units
             // and applies shield regeneration.
             $this->cleanupRound($round, $attackerUnits, $defenderUnits);
+            $attackerUnits = array_values($attackerUnits);
+            $defenderUnits = array_values($defenderUnits);
 
             // Subtract losses from the attacker and defender units.
             $attackerRemainingShips->subtractCollection($round->attackerLossesInRound);
@@ -224,6 +247,34 @@ class PhpBattleEngine extends BattleEngine
     }
 
     /**
+     * Les flottes par identifiant de mission croissant : la garnison (zero) d'abord.
+     *
+     * @template T of AttackerFleet|DefenderFleet
+     * @param array<T> $fleets
+     * @return array<T>
+     */
+    private static function inCanonicalOrder(array $fleets): array
+    {
+        $rangees = array_values($fleets);
+        usort($rangees, static fn (AttackerFleet|DefenderFleet $a, AttackerFleet|DefenderFleet $b): int => $a->fleetMissionId <=> $b->fleetMissionId);
+
+        return $rangees;
+    }
+
+    /**
+     * Les unites par identifiant d'objet croissant.
+     *
+     * @return array<UnitEntry>
+     */
+    private static function unitsInCanonicalOrder(UnitCollection $units): array
+    {
+        $rangees = array_values($units->units);
+        usort($rangees, static fn ($a, $b): int => $a->unitObject->id <=> $b->unitObject->id);
+
+        return $rangees;
+    }
+
+    /**
      * Let one unit attack another unit and apply the damage to the defending unit.
      *
      * @param bool $isAttacker True if the attacker is attacking, false if the defender is attacking. This is used
@@ -260,7 +311,7 @@ class PhpBattleEngine extends BattleEngine
         }
 
         // If the defender's hull integrity is less than 70%, the unit can explode randomly.
-        if ($defender->damagedHullExplosion()) {
+        if ($defender->damagedHullExplosion($this->roundDraws)) {
             // Hull was damaged and dice roll was successful, destroy the unit.
             $defender->currentShieldPoints = 0;
             $defender->currentHullPlating = 0;
@@ -284,7 +335,7 @@ class PhpBattleEngine extends BattleEngine
 
         // Rapidfire: if the attacker has a rapidfire bonus against the defender, roll a dice to see if the
         // attacker can attack again.
-        if ($attacker->unitObject->didSuccessfulRapidfire($defender->unitObject)) {
+        if ($attacker->unitObject->didSuccessfulRapidfire($defender->unitObject, $this->roundDraws)) {
             // Rapidfire was successful, return true to indicate that the attacker can attack again.
             return true;
         }
@@ -392,9 +443,9 @@ class PhpBattleEngine extends BattleEngine
         // Roll the dice for Hamill Manoeuvre
         $settings = app(SettingsService::class);
         $probability = $settings->hamillManoeuvreChance();
-        $dice = random_int(1, $probability);
 
-        if ($dice === 1) {
+        // Une chance sur `$probability`, tiree de la source de la bataille.
+        if (Draw::index($this->draws, $probability) === 0) {
             // Hamill Manoeuvre triggered! Destroy one Deathstar
             $result->hamillManoeuvreTriggered = true;
 

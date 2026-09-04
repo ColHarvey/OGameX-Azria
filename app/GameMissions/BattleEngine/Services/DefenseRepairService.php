@@ -2,6 +2,8 @@
 
 namespace OGame\GameMissions\BattleEngine\Services;
 
+use OGame\GameMissions\BattleEngine\Draws\BattleDraws;
+use OGame\GameMissions\BattleEngine\Draws\Draw;
 use OGame\GameObjects\Models\Enums\GameObjectType;
 use OGame\GameObjects\Models\Units\UnitCollection;
 
@@ -24,7 +26,7 @@ class DefenseRepairService
      * @param int $repairRate The percentage chance (0-100) for each destroyed defense to be repaired.
      * @param int|null $seed Optional seed for deterministic testing.
      */
-    public function __construct(int $repairRate = 70, private int|null $seed = null)
+    public function __construct(int $repairRate = 70, private int|null $seed = null, private BattleDraws|null $draws = null)
     {
         // Clamp repair rate to valid range
         $this->repairRate = max(0, min(100, $repairRate));
@@ -83,7 +85,14 @@ class DefenseRepairService
             } else {
                 // For each destroyed unit, roll the dice to see if it gets repaired
                 for ($i = 0; $i < $entry->amount; $i++) {
-                    $roll = $this->seed !== null ? mt_rand(1, 100) : random_int(1, 100);
+                    // La source de la bataille d'abord : c'est elle qui rend la reparation rejouable
+                    // et identique entre les deux moteurs. La graine historique reste pour les essais
+                    // du service seul.
+                    $roll = match (true) {
+                        $this->draws !== null => Draw::index($this->draws, 100) + 1,
+                        $this->seed !== null => mt_rand(1, 100),
+                        default => random_int(1, 100),
+                    };
                     if ($roll <= $this->repairRate) {
                         $repairedCount++;
                     }

@@ -5,6 +5,8 @@ namespace OGame\GameMissions\BattleEngine;
 use FFI;
 use OGame\Combat\Exceptions\RustEngineContractMismatch;
 use OGame\Combat\Support\LootContext;
+use OGame\GameMissions\BattleEngine\Draws\Draw;
+use OGame\GameMissions\BattleEngine\Draws\SeededDraws;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameMissions\BattleEngine\Models\BattleResultRound;
@@ -201,11 +203,19 @@ class RustBattleEngine extends BattleEngine
             ];
         }
 
-        return [
+        $entree = [
             'schema' => self::ABI_VERSION,
             'attacker_fleets' => $attackerFleets,
             'defender_fleets' => $defenderFleets,
         ];
+
+        // **La graine voyage avec l'entree** quand la source en a une : la bibliotheque tire alors
+        // la meme suite que le moteur PHP tirerait. Sans graine, elle tire du systeme.
+        if ($this->draws instanceof SeededDraws) {
+            $entree['seed'] = $this->draws->seed();
+        }
+
+        return $entree;
     }
 
     /**
@@ -436,9 +446,10 @@ class RustBattleEngine extends BattleEngine
         // Roll the dice for Hamill Manoeuvre
         $settings = app(SettingsService::class);
         $probability = $settings->hamillManoeuvreChance();
-        $dice = random_int(1, $probability);
 
-        if ($dice === 1) {
+        // Une chance sur `$probability`, tiree de la source de la bataille — la meme que le
+        // moteur PHP, au meme instant : avant les rounds.
+        if (Draw::index($this->draws, $probability) === 0) {
             // Hamill Manoeuvre triggered! Destroy one Deathstar
             $result->hamillManoeuvreTriggered = true;
 

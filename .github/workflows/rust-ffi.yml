@@ -11,9 +11,10 @@ name: Moteur Rust et couture FFI
 # donc etre eprouvee que sur Linux, et **ce workflow est la preuve canonique** : un run vert sur un
 # autre hash ne valide pas le candidat.
 #
-# Ce qu'il ne fait pas encore, et qui est du : le banc de parite deterministe PHP/Rust, alimente par
-# la meme bande de tirages, avec les pertes defensives par participant et par periode. Il sera ajoute
-# en meme temps que le contrat qu'il compare — l'inscrire ici avant qu'il existe ne prouverait rien.
+# Le groupe Rust comprend le banc de parite deterministe PHP/Rust (`RustParityBenchTest`) : une
+# seule entree gelee, une seule bande de tirages (`SeededDraws`), deux moteurs, une projection
+# canonique comparee champ par champ. Une divergence nomme le premier chemin divergent et laisse les
+# deux projections dans `storage/logs/parite-*.json`, publiees avec l'artefact.
 
 on:
   push:
@@ -112,7 +113,9 @@ jobs:
       # de bibliotheque. Un code de sortie vert ne suffit pas — une suite entierement sautee sort
       # verte aussi. Le rapport est lu comme une structure.
       - name: Exiger les essais Rust executes, aucun ignore
-        run: php scripts/verifier-junit.php storage/logs/junit-rust.xml --minimum=30 --sans-ignores
+        # 41 : les 30 essais historiques du moteur, plus les pertes par participant (2), le contrat
+        # FFI (3) et le banc de parite (6). Un fichier d'essai qui disparaitrait ferait tomber le compte.
+        run: php scripts/verifier-junit.php storage/logs/junit-rust.xml --minimum=41 --sans-ignores
 
       - name: Executer la suite complete
         shell: bash
@@ -152,6 +155,7 @@ jobs:
             storage/logs/junit-suite.xml
             storage/logs/console-rust.txt
             storage/logs/console-suite.txt
+            storage/logs/parite-*.json
             storage/logs/laravel.log
             /tmp/so.txt
             /tmp/so-sha256.txt

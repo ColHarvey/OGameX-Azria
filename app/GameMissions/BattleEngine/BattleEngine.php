@@ -11,6 +11,9 @@ use OGame\Combat\Policies\CargoWeightedV1;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\LootContext;
 use OGame\Combat\Support\ResourceNormalizationDiagnostics;
+use OGame\GameMissions\BattleEngine\Draws\BattleDraws;
+use OGame\GameMissions\BattleEngine\Draws\Draw;
+use OGame\GameMissions\BattleEngine\Draws\SystemDraws;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleetResult;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
@@ -105,6 +108,29 @@ abstract class BattleEngine
         $this->resourceDiagnostics = ResourceNormalizationDiagnostics::none();
         $this->lootRateInBasisPoints = $this->lootContext->rateInBasisPoints;
         $this->lootPercentage = intdiv($this->lootRateInBasisPoints, 100);
+
+        // En jeu, le hasard du systeme. Un banc remplace la source par une graine (`withDraws()`).
+        $this->draws = new SystemDraws();
+    }
+
+    /**
+     * La source des tirages de cette bataille : cible visee, explosion d'une coque, tir rapide.
+     *
+     * Les deux moteurs la partagent. Le moteur PHP en tire directement ; le moteur Rust transmet la
+     * graine a la bibliotheque quand la source en a une, et laisse la bibliotheque tirer du systeme
+     * sinon. Ainsi une meme graine joue la meme bataille des deux cotes — c'est ce que le banc de
+     * parite compare.
+     */
+    protected BattleDraws $draws;
+
+    /**
+     * Remplace la source des tirages. Pour un banc ; en jeu, la source est celle du systeme.
+     */
+    public function withDraws(BattleDraws $draws): static
+    {
+        $this->draws = $draws;
+
+        return $this;
     }
 
     /**
@@ -304,7 +330,7 @@ abstract class BattleEngine
         // Ingenieur : la part reconstruite passe de 70 % a 85 %. Cette methode appartient
         // a la classe de base partagee, le bonus vaut donc pour les deux moteurs de combat.
         $defenseRepairRate = $defenderPlayer->hasEngineer() ? 85 : $this->settings->defenseRepairRate();
-        $defenseRepairService = new DefenseRepairService($defenseRepairRate);
+        $defenseRepairService = new DefenseRepairService($defenseRepairRate, null, $this->draws);
         $result->repairedDefenses = $defenseRepairService->calculateRepairedDefenses($result->defenderUnitsLost);
 
         // Determine winner of battle.
@@ -1019,7 +1045,8 @@ abstract class BattleEngine
      */
     protected function rollMoonCreation($moonChance): bool
     {
-        $dice = random_int(1, 100);
+        $dice = Draw::index($this->draws, 100) + 1;
+
         return $dice <= $moonChance;
     }
 }

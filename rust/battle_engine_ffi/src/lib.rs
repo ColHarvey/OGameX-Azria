@@ -29,12 +29,70 @@ use memory_stats::memory_stats;
 /// that say nothing about who lost what.
 pub const ABI_VERSION: u32 = 2;
 
+/// The source of every draw a battle makes: which target, whether a damaged hull explodes,
+/// whether rapidfire is granted.
+///
+/// The three formulas (`draw_index`, `draw_explodes`, `draw_rapidfire`) are the ones the PHP engine
+/// uses (`Draw` in `app/GameMissions/BattleEngine/Draws`): two engines fed the same draws fight the
+/// same battle, and that is what the parity bench compares.
+trait Draws {
+    /// The next draw: a uniform thirty-two bit integer.
+    fn next(&mut self) -> u32;
+}
+
+/// The game's draws: the system's randomness.
+struct SystemDraws {
+    rng: rand::rngs::ThreadRng,
+}
+
+impl Draws for SystemDraws {
+    fn next(&mut self) -> u32 {
+        self.rng.gen::<u32>()
+    }
+}
+
+/// Replayable draws: a thirty-two bit xorshift from a seed, identical to PHP's `SeededDraws`.
+struct SeededDraws {
+    state: u32,
+}
+
+impl Draws for SeededDraws {
+    fn next(&mut self) -> u32 {
+        let mut x = self.state;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        self.state = x;
+        x
+    }
+}
+
+/// A uniform position among `count` candidates.
+fn draw_index(draws: &mut dyn Draws, count: usize) -> usize {
+    (draws.next() as usize) % count
+}
+
+/// Does a damaged hull explode? A whole percent from 0 to 100, strictly under the chance.
+fn draw_explodes(draws: &mut dyn Draws, chance: f64) -> bool {
+    ((draws.next() % 101) as f64) < chance
+}
+
+/// Is rapidfire granted? A hundredth of a percent from 0.01 to 100.00, at most the chance.
+fn draw_rapidfire(draws: &mut dyn Draws, chance: f64) -> bool {
+    ((1 + draws.next() % 10000) as f64) / 100.0 <= chance
+}
+
 /// Battle input which is provided by the PHP client.
 #[derive(Serialize, Deserialize)]
 pub struct BattleInput {
     /// The contract version the client believes it is speaking. Absent means version 1.
     #[serde(default)]
     schema: u32,
+    /// A seed makes the battle replayable: the same seed draws the same sequence the PHP engine
+    /// would draw. Absent, the draws come from the system. Zero is refused: it would leave the
+    /// generator at zero forever.
+    #[serde(default)]
+    seed: Option<u32>,
     attacker_fleets: Vec<AttackerFleetInput>,
     defender_fleets: Vec<DefenderFleetInput>,
 }
@@ -209,6 +267,10 @@ fn answer_to(input_str: &str) -> String {
         Err(erreur) => return error_document(&format!("input does not parse: {}", erreur)),
     };
 
+    if battle_input.seed == Some(0) {
+        return error_document("seed 0 is refused: it would leave the generator at zero forever");
+    }
+
     if battle_input.schema != ABI_VERSION {
         return error_document(&format!(
             "input schema {} is not the contract version {} this library speaks",
@@ -254,6 +316,12 @@ fn process_battle_rounds(input: BattleInput) -> BattleOutput {
     // Create individual ships from provided battle unit info which contains the amount
     let mut attacker_units = expand_fleets(&input.attacker_fleets);
     let mut defender_units = expand_fleets(&input.defender_fleets);
+
+    // One source for the whole battle: seeded when the client asked for a replayable one.
+    let mut draws: Box<dyn Draws> = match input.seed {
+        Some(seed) => Box::new(SeededDraws { state: seed }),
+        None => Box::new(SystemDraws { rng: rand::thread_rng() }),
+    };
 
     // Track peak memory usage for debugging purposes
     update_peak_memory(&mut peak_memory);
@@ -301,8 +369,8 @@ fn process_battle_rounds(input: BattleInput) -> BattleOutput {
         }
 
         // Process combat
-        process_combat(&mut attacker_units, &mut defender_units, &mut round, &attacker_units_metadata, &defender_units_metadata, true);
-        process_combat(&mut defender_units, &mut attacker_units, &mut round, &defender_units_metadata, &attacker_units_metadata, false);
+        process_combat(&mut attacker_units, &mut defender_units, &mut round, &attacker_units_metadata, &defender_units_metadata, true, draws.as_mut());
+        process_combat(&mut defender_units, &mut attacker_units, &mut round, &defender_units_metadata, &attacker_units_metadata, false, draws.as_mut());
 
         // Cleanup round
         cleanup_round(&mut round, &mut attacker_units, &mut defender_units, &attacker_units_metadata, &defender_units_metadata);
@@ -333,9 +401,15 @@ fn process_battle_rounds(input: BattleInput) -> BattleOutput {
 }
 
 /// Expand fleet inputs into individual unit instances with ownership tracking.
-fn expand_fleets(fleets: &Vec<impl FleetInput>) -> Vec<BattleUnitInstance> {
+fn expand_fleets<F: FleetInput>(fleets: &Vec<F>) -> Vec<BattleUnitInstance> {
     let mut expanded = Vec::new();
-    for fleet in fleets {
+
+    // Fleets in ascending mission id, so that the order the client listed them in changes
+    // nothing: a permutation of the input must fight the same battle.
+    let mut ordered: Vec<&F> = fleets.iter().collect();
+    ordered.sort_by_key(|fleet| fleet.get_fleet_mission_id());
+
+    for fleet in ordered {
         // Canonical order: a HashMap iterates in an order that changes from one run to the next,
         // and two runs fed the same draws would not pick the same targets.
         let mut units: Vec<&BattleUnitInfo> = fleet.get_units().values().collect();
@@ -471,9 +545,8 @@ fn process_combat(
     attacker_unit_metadata: &HashMap<i16, BattleUnitInfo>,
     defender_unit_metadata: &HashMap<i16, BattleUnitInfo>,
     is_attacker: bool,
+    draws: &mut dyn Draws,
 ) {
-    let mut rng = rand::thread_rng();
-
     for attacker in attackers.iter() {
         let mut continue_attacking = true;
 
@@ -485,7 +558,7 @@ fn process_combat(
             continue_attacking = false;
 
             // Select a random defender as a target
-            let target_idx = rng.gen_range(0..defenders.len());
+            let target_idx = draw_index(draws, defenders.len());
             let target = &mut defenders[target_idx];
 
             // Get metadata of the defending unit.
@@ -513,10 +586,12 @@ fn process_combat(
             }
 
             // If hull integrity < 70%, then unit can explode randomly. Roll dice to see if it does.
-            if target.current_hull_plating / target_metadata.hull_plating < 0.7 {
-                let explosion_chance = 100.0 - ((target.current_hull_plating / target_metadata.hull_plating) * 100.0);
-                let roll = rng.gen_range(0..=100);
-                if roll < explosion_chance as i32 {
+            // The ratio is computed in f64 from exact operands, as PHP computes it: an f32 division
+            // rounds differently near the bound, and the two engines could disagree on an explosion.
+            let hull_ratio = target.current_hull_plating as f64 / target_metadata.hull_plating as f64;
+            if hull_ratio < 0.7 {
+                let explosion_chance = (1.0 - hull_ratio) * 100.0;
+                if draw_explodes(draws, explosion_chance) {
                     // Unit explodes, set current hull plating and shield points to 0.
                     target.current_hull_plating = 0.0;
                     target.current_shield_points = 0.0;
@@ -547,12 +622,8 @@ fn process_combat(
                 let rounded_chance = (chance * 100.0).floor() / 100.0;
                 let rapidfire_chance = 100.0 - rounded_chance;
 
-                // Roll for rapidfire
-                let roll = rng.gen_range(0.0..100.0);
-
-                // If the roll is less than or equal to the rapidfire chance, the unit can attack again
-                // and continue_attacking is set to true which will cause the loop to continue.
-                roll <= rapidfire_chance
+                // The same draw as the PHP engine: a hundredth of a percent, at most the chance.
+                draw_rapidfire(draws, rapidfire_chance)
             } else {
                 false
             }
@@ -839,6 +910,45 @@ mod tests {
         }
 
         free_battle_output(std::ptr::null_mut());
+    }
+
+    #[test]
+    fn the_same_seed_fights_the_same_battle_and_the_seed_zero_is_refused() {
+        let mut input = a_battle_with_a_garrison_and_a_reinforcement();
+        input.seed = Some(20260904);
+
+        let first = serde_json::to_string(&process_battle_rounds(a_seeded(&input))).unwrap();
+        let second = serde_json::to_string(&process_battle_rounds(a_seeded(&input))).unwrap();
+        assert_eq!(first, second, "two battles fed the same seed differ");
+
+        input.seed = Some(0);
+        let answer: serde_json::Value = serde_json::from_str(&answer_to(&serde_json::to_string(&input).unwrap())).unwrap();
+        assert!(answer["error"].as_str().unwrap().contains("seed 0"));
+    }
+
+    #[test]
+    fn a_permutation_of_the_fleets_fights_the_same_battle() {
+        let mut input = a_battle_with_a_garrison_and_a_reinforcement();
+        input.seed = Some(77);
+        let straight = serde_json::to_string(&process_battle_rounds(a_seeded(&input))).unwrap();
+
+        input.defender_fleets.reverse();
+        let reversed = serde_json::to_string(&process_battle_rounds(a_seeded(&input))).unwrap();
+
+        assert_eq!(straight, reversed, "the order the fleets were listed in changed the battle");
+    }
+
+    #[test]
+    fn the_xorshift_matches_the_php_sequence() {
+        // Computed by hand from the algorithm; the PHP test asserts the same three values.
+        let mut draws = SeededDraws { state: 1 };
+        assert_eq!(270369, draws.next());
+        assert_eq!(67634689, draws.next());
+        assert_eq!(2647435461, draws.next());
+    }
+
+    fn a_seeded(input: &BattleInput) -> BattleInput {
+        serde_json::from_str(&serde_json::to_string(input).unwrap()).unwrap()
     }
 
     #[test]
