@@ -4,6 +4,7 @@ namespace OGame\Combat\Services;
 
 use Closure;
 use Illuminate\Support\Facades\DB;
+use OGame\Combat\Exceptions\MovementLocksOutdated;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatParticipant;
@@ -16,95 +17,164 @@ use RuntimeException;
  *
  * ## Pourquoi une seule porte
  *
- * Trois chemins decident du sort d'une meme flotte, et ils tournent en meme temps : le **rappel**
- * lance par le joueur, le **demi-tour** d'une flotte que le combat refuse, et l'**expiration** du
- * stationnement. Chacun lisait ses faits sans verrou, puis ecrivait.
+ * Plusieurs chemins decident du sort d'une meme flotte, et ils tournent en meme temps : le
+ * **rappel** lance par le joueur, le **demi-tour** d'une flotte que le combat refuse,
+ * l'**expiration** du stationnement, l'**arrivee** qui rattache une vague a un combat, et les
+ * **jointures d'union** qui changent ce a quoi la flotte est liee. Chacun lisait ses faits sans
+ * verrou, puis ecrivait.
  *
  * Le defaut n'etait pas theorique. Une Defense ACS refusee et un rappel simultane pouvaient creer
  * **deux missions retour pour une seule flotte** : le rappel ne regarde pas la disposition, et la
- * disposition ne regarde pas le rappel. Les vaisseaux existaient deux fois. De meme, un rappel qui
- * lisait la mission juste avant que la retenue lui pose son `combat_instance_id` laissait partir une
- * flotte deja comptee dans la photographie.
+ * disposition ne regarde pas le rappel. Les vaisseaux existaient deux fois. Un rappel qui lisait
+ * la mission juste avant qu'une arrivee lui rattache son combat laissait partir une flotte que la
+ * bataille comptait deja.
  *
  * ## Ce que la porte fait, et ce qu'elle ne fait pas
  *
- * Elle **ne decide rien** : les regles restent ou elles sont — `EngagedFleetCheck` pour le rappel,
- * `AcsDefendMission` pour la retenue et le demi-tour, `FleetDispositionRegistry` pour le mouvement
- * ecrit. Elle ouvre la section critique, prend les verrous **dans l'ordre global du systeme** et
- * **relit la mission sous verrou** avant de laisser decider.
+ * Elle **ne decide rien** : les regles restent ou elles sont. Elle ouvre la section critique, prend
+ * les verrous **dans l'ordre global du systeme** et **relit la mission sous verrou** avant de
+ * laisser decider. La relecture est le coeur : un modele charge avant la porte decrit un passe.
  *
- * La relecture est le coeur : un modele charge avant la porte decrit un passe. C'est en decidant sur
- * lui qu'un rappel accordait un second retour a une flotte deja renvoyee.
+ * ## L'ordre des verrous, et ce qui arrive quand les liens bougent
  *
- * ## L'ordre des verrous
+ * **Barriere -> instance -> union -> missions**, chaque famille par identifiant croissant — celui
+ * que la migration de barriere fixe et que le reglement, la fermeture et l'annulation suivent.
  *
- * Celui que la migration de barriere fixe et que le reglement, la fermeture et l'annulation suivent
- * deja : **barriere -> instance -> union -> missions**, chaque famille par identifiant croissant.
- * Deux transactions qui prennent les memes lignes dans le meme ordre ne peuvent pas s'attendre
- * mutuellement.
+ * Les instances et les unions a tenir se calculent depuis le modele recu, **avant** la relecture :
+ * l'ordre l'impose. Si une jointure ou un rattachement a change ces liens entre-temps, la porte
+ * tient l'ancien et s'appreterait a decider sur le nouveau. Elle le verifie apres la relecture, et
+ * quand un lien courant n'est pas tenu, elle **relache tout et recommence depuis la barriere** avec
+ * les liens a jour — jamais en acquerant le verrou manquant apres la mission, ce qui inverserait
+ * l'ordre. Le nombre de reprises est borne ; au-dela, `MovementLocksOutdated` sort.
  *
  * `lockForUpdate()` ne compile a rien sous SQLite : ce que les essais locaux montrent est la
- * **relecture** et la forme des requetes. La preuve d'interblocage et de stabilite est MariaDB.
+ * **relecture**, la forme des requetes et la reprise. La preuve d'interblocage et de stabilite est
+ * MariaDB — y compris ce que vaut un `FOR UPDATE` sur une barriere absente, qui n'est un verrou de
+ * portee que sous des hypotheses de moteur, d'isolation et d'index a verifier la-bas.
  */
 final class FleetMovementGate
 {
+    /**
+     * Combien de fois la porte recommence depuis la barriere quand un lien a change sous elle.
+     */
+    private const int ATTEMPTS = 3;
+
     /**
      * Ouvre la section critique, puis laisse decider sur une mission relue sous verrou.
      *
      * @template TValeur
      * @param Closure(FleetMission): TValeur $decider Ce que l'appelant veut decider, sur la mission tenue.
+     * @param array<int, int> $alsoHoldingUnionIds Des unions que la decision touchera sans que la
+     *        mission y soit encore liee — celle qu'une jointure s'apprete a rejoindre. Elles entrent
+     *        dans l'ordre global a leur place, avec les autres.
      * @return TValeur
      */
-    public function decideUnderLock(FleetMission $mission, Closure $decider): mixed
+    public function decideUnderLock(FleetMission $mission, Closure $decider, array $alsoHoldingUnionIds = []): mixed
     {
-        return DB::transaction(function () use ($mission, $decider): mixed {
-            // 1. La barriere du corps vise. Elle est le « ce corps est pris » du systeme, et le
-            // reglement la prend en premier : la prendre ailleurs en second remettrait les deux
-            // sens de rotation que l'ordre global existe pour interdire.
-            $barriere = $mission->planet_id_to === null
-                ? null
-                : CelestialBodyCombatBarrier::query()
-                    ->where('target_body_id', $mission->planet_id_to)
-                    ->lockForUpdate()
-                    ->first();
-
-            // 2. Les instances qui lient cette flotte, par identifiant croissant.
-            $instances = CombatInstance::query()
-                ->whereIn('id', $this->combatsThatBindIt($mission, $barriere))
-                ->orderBy('id')
-                ->lockForUpdate()
-                ->get();
-
-            // 3. Les unions, par identifiant croissant. Celle de la flotte compte autant que celles
-            // des combats : un rappel retire la flotte de son union, et une union videe se supprime.
-            $unions = [];
-
-            if ($mission->union_id !== null) {
-                $unions[(int)$mission->union_id] = true;
-            }
-
-            foreach ($instances as $instance) {
-                if ($instance->union_id !== null) {
-                    $unions[(int)$instance->union_id] = true;
+        for ($tentative = 1; ; $tentative++) {
+            try {
+                return DB::transaction(fn (): mixed => $this->attempt($mission, $decider, $alsoHoldingUnionIds));
+            } catch (MovementLocksOutdated $perime) {
+                if ($tentative >= self::ATTEMPTS) {
+                    throw $perime;
                 }
+
+                // **Reprise depuis la barriere, avec les liens a jour.** La transaction est deja
+                // relachee ; on recharge le modele hors verrou, puisque c'est de lui que la porte
+                // deduit ce qu'elle doit tenir.
+                $mission->refresh();
             }
+        }
+    }
 
-            $identifiants = array_keys($unions);
-            sort($identifiants);
+    /**
+     * Une prise des verrous, dans l'ordre, puis la decision.
+     *
+     * @template TValeur
+     * @param Closure(FleetMission): TValeur $decider
+     * @param array<int, int> $alsoHoldingUnionIds
+     * @return TValeur
+     */
+    private function attempt(FleetMission $mission, Closure $decider, array $alsoHoldingUnionIds): mixed
+    {
+        // 1. La barriere du corps vise. Elle est le « ce corps est pris » du systeme, et le
+        // reglement la prend en premier : la prendre ailleurs en second remettrait les deux sens
+        // de rotation que l'ordre global existe pour interdire.
+        $barriere = $mission->planet_id_to === null
+            ? null
+            : CelestialBodyCombatBarrier::query()
+                ->where('target_body_id', $mission->planet_id_to)
+                ->lockForUpdate()
+                ->first();
 
-            FleetUnion::query()->whereIn('id', $identifiants)->orderBy('id')->lockForUpdate()->get();
+        // 2. Les instances qui lient cette flotte, par identifiant croissant.
+        $instancesTenues = $this->combatsThatBindIt($mission, $barriere);
 
-            // 4. La mission, relue sous verrou. **C'est elle que l'appelant doit lire**, pas celle
-            // qu'il tenait en entrant : entre les deux, un demi-tour a pu la renvoyer, une retenue a
-            // pu l'inscrire, un reglement a pu la traiter.
-            $tenue = FleetMission::query()->whereKey($mission->id)->lockForUpdate()->first();
+        $instances = CombatInstance::query()
+            ->whereIn('id', $instancesTenues)
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get();
 
-            if (!$tenue instanceof FleetMission) {
-                throw new RuntimeException('La mission ' . $mission->id . ' a disparu avant que son mouvement soit decide.');
+        // 3. Les unions, par identifiant croissant. Celle de la flotte compte autant que celles
+        // des combats — un rappel retire la flotte de son union, et une union videe se supprime —
+        // et celle qu'une jointure vise, que la flotte ne porte pas encore.
+        $unions = [];
+
+        if ($mission->union_id !== null) {
+            $unions[(int)$mission->union_id] = true;
+        }
+
+        foreach ($instances as $instance) {
+            if ($instance->union_id !== null) {
+                $unions[(int)$instance->union_id] = true;
             }
+        }
 
-            return ($decider)($tenue);
-        });
+        foreach ($alsoHoldingUnionIds as $identifiant) {
+            $unions[(int)$identifiant] = true;
+        }
+
+        $unionsTenues = array_keys($unions);
+        sort($unionsTenues);
+
+        FleetUnion::query()->whereIn('id', $unionsTenues)->orderBy('id')->lockForUpdate()->get();
+
+        // 4. La mission, relue sous verrou. **C'est elle que l'appelant doit lire**, pas celle
+        // qu'il tenait en entrant : entre les deux, un demi-tour a pu la renvoyer, une retenue a
+        // pu l'inscrire, un reglement a pu la traiter.
+        $tenue = FleetMission::query()->whereKey($mission->id)->lockForUpdate()->first();
+
+        if (!$tenue instanceof FleetMission) {
+            throw new RuntimeException('La mission ' . $mission->id . ' a disparu avant que son mouvement soit decide.');
+        }
+
+        // **Les liens relus sont-ils ceux que l'on tient ?** Sinon, une jointure ou un
+        // rattachement est passe entre le calcul et la relecture. Decider maintenant, ce serait
+        // decider sur un combat ou une union jamais verrouilles ; prendre le verrou ici, ce serait
+        // le prendre apres la mission. On relache tout, et on recommence depuis la barriere.
+        $this->refuseIfALinkIsNotHeld($tenue, $mission, $instancesTenues, $unionsTenues);
+
+        return ($decider)($tenue);
+    }
+
+    /**
+     * @param array<int, int> $instancesTenues
+     * @param array<int, int> $unionsTenues
+     */
+    private function refuseIfALinkIsNotHeld(FleetMission $tenue, FleetMission $recue, array $instancesTenues, array $unionsTenues): void
+    {
+        if ((int)$tenue->planet_id_to !== (int)$recue->planet_id_to) {
+            throw new MovementLocksOutdated($tenue->id, 'le corps vise', $recue->planet_id_to === null ? null : (int)$recue->planet_id_to, $tenue->planet_id_to === null ? null : (int)$tenue->planet_id_to);
+        }
+
+        if ($tenue->combat_instance_id !== null && !in_array((int)$tenue->combat_instance_id, $instancesTenues, true)) {
+            throw new MovementLocksOutdated($tenue->id, 'le combat', null, (int)$tenue->combat_instance_id);
+        }
+
+        if ($tenue->union_id !== null && !in_array((int)$tenue->union_id, $unionsTenues, true)) {
+            throw new MovementLocksOutdated($tenue->id, 'l union', $recue->union_id === null ? null : (int)$recue->union_id, (int)$tenue->union_id);
+        }
     }
 
     /**

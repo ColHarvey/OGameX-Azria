@@ -9,6 +9,7 @@ use OGame\Combat\Enums\FleetDispositionKind;
 use OGame\Combat\Exceptions\FleetHasNowhereToReturn;
 use OGame\Combat\Services\FleetDispositionRegistry;
 use OGame\Combat\Services\RefusedFleetHomecoming;
+use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatOutboxMessage;
 use OGame\Models\FleetMission;
@@ -102,7 +103,14 @@ class RefusedFleetHomecomingTest extends TestCase
         $mission->refresh();
         $this->assertSame(0, (int)$mission->processed, 'The fleet was marked as processed without a return: it disappeared.');
         $this->assertNotNull($registre->pendingFor($mission), 'The decision was consumed though nothing was carried out.');
-        $this->assertSame(0, CombatOutboxMessage::query()->count(), 'A refusal was announced for a movement that never happened.');
+        // **Pour cette flotte**, pas dans toute la table : d'autres classes d'essais laissent des
+        // avis derriere elles dans le meme processus, et un compte global passait ou echouait selon
+        // ses voisins.
+        $this->assertSame(
+            0,
+            CombatOutboxMessage::query()->where('participant_key', CombatParticipantKey::forFleet($mission->id))->count(),
+            'A refusal was announced for a movement that never happened.'
+        );
         $this->assertSame(0, FleetMission::query()->where('parent_id', $mission->id)->count());
     }
 

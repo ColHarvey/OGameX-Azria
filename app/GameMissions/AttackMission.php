@@ -15,6 +15,7 @@ use OGame\Combat\Services\CombatOpeningService;
 use OGame\Combat\Services\CombatResolutionService;
 use OGame\Combat\Services\CombatSettlementOutcome;
 use OGame\Combat\Services\CombatSettlementService;
+use OGame\Combat\Services\FleetMovementGate;
 use OGame\Combat\Services\RefusedFleetHomecoming;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\LootContextForMission;
@@ -192,6 +193,54 @@ class AttackMission extends GameMission
     }
 
     /**
+     * Entre dans le combat qui tient le corps, ou en repart — sur la mission tenue sous verrou.
+     *
+     * Appele **uniquement** derriere `FleetMovementGate` : chacune de ces lectures decide d'une
+     * ecriture, et aucune ne vaut sur un modele charge plus tot.
+     */
+    private function enterOrLeaveTheCombat(FleetMission $mission, int $targetBodyId): void
+    {
+        // **Une flotte deja partie n'entre nulle part.** Un rappel accorde entre le chargement du
+        // modele et ce verrou l'a fait rentrer ; l'engager maintenant la ferait exister deux fois.
+        if ((int)$mission->processed === 1) {
+            return;
+        }
+
+        // **Un mouvement deja decide prime sur toute ouverture.** Sans cela, une vague refusee
+        // traitee apres le reglement ouvrirait un second combat sur un corps redevenu libre.
+        if ($this->followTheMovementAlreadyDecided($mission)) {
+            return;
+        }
+
+        // **L'heure d'ouverture est l'arrivee, pas l'horloge du travailleur.** Un traitement en
+        // retard ouvrirait sinon un combat plus tard qu'il n'a commence, et decalerait de la meme
+        // duree l'echeance du ralliement — donc les flottes admises.
+        $combat = resolve(CombatOpeningService::class)->openOrJoin($mission, $targetBodyId, (int)$mission->time_arrival);
+
+        // **Qui appartient a ce combat, et qui arrive trop tard.**
+        //
+        // La distinction est causale, pas horaire. Une candidate dont l'arrivee planifiee precede
+        // la fermeture a ete jugee par l'admission et **inscrite dans la photographie** : elle
+        // appartient au combat, meme si son evenement est traite en retard. Une flotte planifiee a
+        // la fermeture ou apres n'a jamais ete jugee : la photographie est prise, les budgets
+        // consommes, la bataille calculee — personne ne l'admettrait, et elle ne serait jamais
+        // reglee.
+        //
+        // Tant que le ralliement est ouvert, toute arrivee le rejoint : c'est l'admission, a la
+        // fermeture, qui tranchera.
+        if ($combat->status === CombatState::Rallying || $this->belongsToCombat($mission, $combat)) {
+            $mission->combat_instance_id = $combat->id;
+            $mission->save();
+
+            return;
+        }
+
+        // **Elle repart, tout de suite.** Ni file d'attente, ni second combat quand le corps se
+        // libere : la regle arretee est le demi-tour immediat, avec sa raison.
+        $this->sendItHomeAfterTheRallyClosed($mission, $combat);
+    }
+
+    /**
      * Suit le mouvement que le combat a deja decide pour cette vague, s'il y en a un.
      *
      * ## Pourquoi avant toute ouverture
@@ -298,39 +347,17 @@ class AttackMission extends GameMission
         // retard ouvrirait sinon un combat plus tard qu'il n'a commence, et decalerait de la meme
         // duree l'echeance du ralliement — donc les flottes admises.
         if ($this->settings->persistentCombatEnabled()) {
-            // **Un mouvement deja decide prime sur toute ouverture.** Sans cela, une vague refusee
-            // traitee apres le reglement ouvrirait un second combat sur un corps redevenu libre.
-            if ($this->followTheMovementAlreadyDecided($mission)) {
-                return;
-            }
-
-            $combat = resolve(CombatOpeningService::class)->openOrJoin(
+            // **Ouvrir, rejoindre et se rattacher sont une seule section critique.** Le lien
+            // `combat_instance_id` s'ecrivait apres le retour de l'ouverture, hors de sa transaction
+            // et sur le modele recu : un rappel pouvait prendre la porte entre les deux, relire une
+            // mission sans lien, creer son retour — puis ce code lui rattachait le combat quand
+            // meme. Une flotte partie et engagee a la fois.
+            resolve(FleetMovementGate::class)->decideUnderLock(
                 $mission,
-                $defenderPlanet->getPlanetId(),
-                (int)$mission->time_arrival
+                function (FleetMission $tenue) use ($defenderPlanet): void {
+                    $this->enterOrLeaveTheCombat($tenue, $defenderPlanet->getPlanetId());
+                }
             );
-
-            // **Qui appartient a ce combat, et qui arrive trop tard.**
-            //
-            // La distinction est causale, pas horaire. Une candidate dont l'arrivee planifiee
-            // precede la fermeture a ete jugee par l'admission et **inscrite dans la photographie** :
-            // elle appartient au combat, meme si son evenement est traite en retard. Une flotte
-            // planifiee a la fermeture ou apres n'a jamais ete jugee : la photographie est prise,
-            // les budgets consommes, la bataille calculee — personne ne l'admettrait, et elle ne
-            // serait jamais reglee.
-            //
-            // Tant que le ralliement est ouvert, toute arrivee le rejoint : c'est l'admission, a la
-            // fermeture, qui tranchera.
-            if ($combat->status === CombatState::Rallying || $this->belongsToCombat($mission, $combat)) {
-                $mission->combat_instance_id = $combat->id;
-                $mission->save();
-
-                return;
-            }
-
-            // **Elle repart, tout de suite.** Ni file d'attente, ni second combat quand le corps se
-            // libere : la regle arretee est le demi-tour immediat, avec sa raison.
-            $this->sendItHomeAfterTheRallyClosed($mission, $combat);
 
             return;
         }

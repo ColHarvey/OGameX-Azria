@@ -147,10 +147,61 @@ class ReturnPlanner
             $identifiants[(int)$identifiant] = true;
         }
 
+        // **La planete associee, quel que soit son proprietaire actuel.** Les planetes du
+        // proprietaire ne la contiennent que si elle lui appartient deja. Or la propriete est
+        // precisement un fait qui decide : apres la destruction d'une lune, la planete aux memes
+        // coordonnees peut etre a quelqu'un d'autre, et redevenir eligible si elle est transferee
+        // entre les deux passes. Ne pas la tenir, c'est laisser ce transfert changer le verdict
+        // sans qu'aucune ligne tenue n'ait bouge. Le plan, lui, continue d'exiger le bon
+        // proprietaire.
+        $associee = $this->planetAtTheHistoricalCoordinatesOf($mission);
+
+        if ($associee !== null) {
+            $identifiants[$associee] = true;
+        }
+
         $liste = array_keys($identifiants);
         sort($liste);
 
         return $liste;
+    }
+
+    /**
+     * La ligne de type planete aux coordonnees de depart, si la flotte est partie d'une lune.
+     *
+     * La lune peut etre encore la, ou deja purgee : dans les deux cas les coordonnees existent —
+     * sur la ligne, ou sur les faits que la mission porte.
+     */
+    private function planetAtTheHistoricalCoordinatesOf(FleetMission $mission): int|null
+    {
+        $origine = $mission->planet_id_from === null
+            ? null
+            : Planet::query()->whereKey($mission->planet_id_from)->first();
+
+        $origineEtaitUneLune = $origine instanceof Planet
+            ? $this->genreDe($origine) === PlanetType::Moon
+            : (int)$mission->type_from === PlanetType::Moon->value;
+
+        if (!$origineEtaitUneLune) {
+            return null;
+        }
+
+        $coordonnees = $origine instanceof Planet
+            ? $this->coordonneesDe($origine)
+            : $this->coordonneesDuDepart($mission);
+
+        if ($coordonnees === null) {
+            return null;
+        }
+
+        $identifiant = Planet::query()
+            ->where('galaxy', $coordonnees->galaxy)
+            ->where('system', $coordonnees->system)
+            ->where('planet', $coordonnees->position)
+            ->where('planet_type', PlanetType::Planet->value)
+            ->value('id');
+
+        return $identifiant === null ? null : (int)$identifiant;
     }
 
     /**

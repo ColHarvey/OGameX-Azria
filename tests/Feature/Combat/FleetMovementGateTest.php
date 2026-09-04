@@ -2,15 +2,19 @@
 
 namespace Tests\Feature\Combat;
 
+use ArrayObject;
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Exceptions\MovementLocksOutdated;
 use OGame\Combat\Services\FleetMovementGate;
 use OGame\Factories\GameMissionFactory;
 use OGame\GameMissions\AcsDefendMission;
+use OGame\GameMissions\AttackMission;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatParticipant;
 use OGame\Models\FleetMission;
+use OGame\Models\FleetUnion;
 use OGame\Models\Planet;
 use OGame\Models\User;
 use OGame\Services\FleetMissionService;
@@ -227,26 +231,183 @@ class FleetMovementGateTest extends TestCase
      * l'etat d'avant, ou chacun lisait son propre modele. Les deux decisions sont donc **privees**,
      * et leur seul appelant est la fermeture confiee a la porte.
      */
-    public function testTheThreePathsDecideOnlyBehindTheGate(): void
+    public function testTheDecisionsAreReachableOnlyBehindTheGate(): void
     {
-        $rappel = new ReflectionMethod(FleetMissionService::class, 'recallIfNothingHoldsIt');
-        $this->assertTrue($rappel->isPrivate(), 'The recall decision is reachable without the gate.');
-
-        $expiration = new ReflectionMethod(AcsDefendMission::class, 'sendHomeWhenTheHoldIsOver');
-        $this->assertTrue($expiration->isPrivate(), 'The hold expiry decision is reachable without the gate.');
+        // **Le type impose ce qu'une garde de texte ne faisait que constater.** Une decision
+        // publique peut etre appelee avec un modele jamais relu ; privee, son seul appelant est
+        // l'entree qui prend la porte.
+        foreach ([
+            [FleetMissionService::class, 'recallIfNothingHoldsIt'],
+            [AcsDefendMission::class, 'sendHomeWhenTheHoldIsOver'],
+            [AcsDefendMission::class, 'holdIfTheBodyIsRallying'],
+            [AcsDefendMission::class, 'turnBackIfTheCombatHasNoPlaceForIt'],
+            [AttackMission::class, 'enterOrLeaveTheCombat'],
+        ] as [$classe, $methode]) {
+            $this->assertTrue(
+                (new ReflectionMethod($classe, $methode))->isPrivate(),
+                "{$methode} can be called with a fleet mission that was never re-read under the lock."
+            );
+        }
 
         $service = $this->sourceOf(FleetMissionService::class);
         $acs = $this->sourceOf(AcsDefendMission::class);
+        $attaque = $this->sourceOf(AttackMission::class);
 
         $appels = [
             'le rappel' => [$service, 'resolve(FleetMovementGate::class)->decideUnderLock($mission, function (FleetMission $tenue): void { $this->recallIfNothingHoldsIt($tenue); });'],
-            'la retenue et le demi-tour' => [$service, 'resolve(FleetMovementGate::class)->decideUnderLock( $mission, function (FleetMission $tenue) use ($defense): bool {'],
+            'la retenue et le demi-tour' => [$acs, 'public function settleArrival(FleetMission $mission, int $now): bool { return resolve(FleetMovementGate::class)->decideUnderLock($mission, function (FleetMission $tenue) use ($now): bool {'],
             'l expiration' => [$acs, 'resolve(FleetMovementGate::class)->decideUnderLock($mission, function (FleetMission $tenue): void { $this->sendHomeWhenTheHoldIsOver($tenue); });'],
+            'l arrivee attaquante' => [$attaque, 'resolve(FleetMovementGate::class)->decideUnderLock( $mission, function (FleetMission $tenue) use ($defenderPlanet): void { $this->enterOrLeaveTheCombat($tenue, $defenderPlanet->getPlanetId()); } );'],
         ];
 
         foreach ($appels as $chemin => [$source, $appel]) {
             $this->assertStringContainsString($appel, $source, "The path « {$chemin} » no longer goes through the movement gate.");
         }
+
+        $this->assertStringContainsString('$defense->settleArrival($mission,', $service, 'The worker no longer enters the ACS arrival through its single entry.');
+    }
+
+    /**
+     * Un lien qui a change sous la porte est tenu a la reprise, jamais decide sans l'etre.
+     *
+     * ## Pourquoi relacher plutot que prendre le verrou manquant
+     *
+     * La porte calcule ce qu'elle tient depuis le modele recu, avant de relire la mission — l'ordre
+     * global l'impose. Si une jointure a change l'union entre-temps, la porte tient l'ancienne et
+     * s'apprete a decider sur la nouvelle. Prendre ce verrou-la maintenant, ce serait le prendre
+     * **apres** la mission : l'ordre inverse, et l'interblocage qu'il ouvre. Elle relache tout et
+     * recommence depuis la barriere, avec le lien a jour.
+     */
+    public function testALinkThatChangedUnderTheGateIsHeldOnTheRetry(): void
+    {
+        [, $mission] = $this->aCombatAndAFleet();
+        $union = $this->aUnionFor($mission);
+
+        // Le modele que l'appelant tient ne connait aucune union ; la ligne, si.
+        $perime = FleetMission::query()->findOrFail($mission->id);
+        DB::table('fleet_missions')->where('id', $mission->id)->update(['union_id' => $union->id]);
+
+        $unionsDemandees = [];
+        DB::listen(function ($requete) use (&$unionsDemandees): void {
+            if (str_contains($requete->sql, '"fleet_unions"')) {
+                $unionsDemandees[] = $requete->bindings;
+            }
+        });
+
+        $vu = (new FleetMovementGate())->decideUnderLock(
+            $perime,
+            fn (FleetMission $tenue): int|null => $tenue->union_id === null ? null : (int)$tenue->union_id
+        );
+
+        $this->assertSame($union->id, $vu, 'The decision did not see the current union.');
+        $this->assertContains([$union->id], $unionsDemandees, 'The gate decided on a union it never held.');
+    }
+
+    /**
+     * Un combat rattache sous la porte est tenu a la reprise, comme une union.
+     *
+     * L'arrivee pose `combat_instance_id` sur la mission ; si elle passe entre le calcul des
+     * instances a tenir et la relecture, la porte tient un ensemble sans ce combat et deciderait
+     * sur un combat jamais verrouille — le combat que la barriere designe n'est pas toujours celui
+     * de la mission, quand la barriere a deja ete levee.
+     */
+    public function testACombatBoundUnderTheGateIsHeldOnTheRetry(): void
+    {
+        [$combat, $mission] = $this->aCombatAndAFleet();
+
+        // Aucune barriere ne designe ce combat : seule la mission le nomme, et le modele de
+        // l'appelant ne le sait pas encore.
+        $perime = FleetMission::query()->findOrFail($mission->id);
+        DB::table('fleet_missions')->where('id', $mission->id)->update(['combat_instance_id' => $combat->id]);
+
+        $combatsDemandes = [];
+        DB::listen(function ($requete) use (&$combatsDemandes): void {
+            if (str_contains($requete->sql, '"combat_instances"')) {
+                $combatsDemandes[] = $requete->bindings;
+            }
+        });
+
+        $vu = (new FleetMovementGate())->decideUnderLock(
+            $perime,
+            fn (FleetMission $tenue): int|null => $tenue->combat_instance_id === null ? null : (int)$tenue->combat_instance_id
+        );
+
+        $this->assertSame($combat->id, $vu, 'The decision did not see the current combat.');
+        $this->assertContains([$combat->id], $combatsDemandes, 'The gate decided on a combat it never held.');
+    }
+
+    /**
+     * Des liens qui changent plus vite que la porte ne les rattrape finissent par la faire refuser.
+     *
+     * Une reprise sans borne tournerait pour toujours sous une jointure qui ne s'arrete pas ; une
+     * reprise absente deciderait sur un lien jamais tenu. Entre les deux, un nombre fini d'essais,
+     * puis un refus que l'appelant voit.
+     */
+    public function testLinksThatKeepChangingExhaustTheRetriesInsteadOfDecidingOnAnUnheldOne(): void
+    {
+        [, $mission] = $this->aCombatAndAFleet();
+
+        $unions = [];
+        for ($i = 0; $i < 5; $i++) {
+            $unions[] = $this->aUnionFor($mission)->id;
+        }
+
+        // A chaque prise des unions, la ligne change encore d'union. L'ecouteur se desarme a la
+        // fin de l'essai : il reste enregistre sur la connexion. L'etat vit dans un objet, pour
+        // qu'une analyse statique ne conclue pas qu'il ne change jamais.
+        $course = new ArrayObject(['actif' => true, 'passages' => 0]);
+        DB::listen(function ($requete) use ($course, $unions, $mission): void {
+            $passages = (int)$course['passages'];
+
+            if ($course['actif'] === true && str_contains($requete->sql, '"fleet_unions"') && $passages < count($unions)) {
+                DB::table('fleet_missions')->where('id', $mission->id)->update(['union_id' => $unions[$passages]]);
+                $course['passages'] = $passages + 1;
+            }
+        });
+
+        $decide = false;
+
+        try {
+            (new FleetMovementGate())->decideUnderLock($mission, function (FleetMission $tenue) use (&$decide): int {
+                $decide = true;
+
+                return $tenue->id;
+            });
+            $this->fail('The gate never gave up on links that kept changing.');
+        } catch (MovementLocksOutdated $refus) {
+            $this->assertSame($mission->id, $refus->fleetMissionId);
+            $this->assertSame('l union', $refus->lien);
+        } finally {
+            $course['actif'] = false;
+        }
+
+        $this->assertFalse($decide, 'The gate decided on a link it never held.');
+        $this->assertGreaterThan(1, $course['passages'], 'The gate refused on the first divergence instead of retrying from the barrier.');
+    }
+
+    /**
+     * Une union que la decision va toucher est tenue, meme si la flotte n'y est pas encore.
+     *
+     * La jointure ecrit le lien vers une union que la mission ne porte pas : la porte ne peut pas
+     * la deduire. L'appelant la nomme, et elle entre dans la famille des unions a son rang.
+     */
+    public function testAUnionTheDecisionWillTouchIsHeldEvenIfTheFleetIsNotInItYet(): void
+    {
+        [, $mission] = $this->aCombatAndAFleet();
+        $visee = $this->aUnionFor($mission);
+
+        $this->assertNull($mission->union_id);
+
+        $unionsDemandees = [];
+        DB::listen(function ($requete) use (&$unionsDemandees): void {
+            if (str_contains($requete->sql, '"fleet_unions"')) {
+                $unionsDemandees[] = $requete->bindings;
+            }
+        });
+
+        (new FleetMovementGate())->decideUnderLock($mission, fn (FleetMission $tenue): int => $tenue->id, [$visee->id]);
+
+        $this->assertContains([$visee->id], $unionsDemandees, 'The union a join is about to enter was not held.');
     }
 
     /**
@@ -303,6 +464,21 @@ class FleetMovementGateTest extends TestCase
         ]);
 
         return [$combat, $mission, $corps];
+    }
+
+    private function aUnionFor(FleetMission $mission): FleetUnion
+    {
+        return FleetUnion::create([
+            'user_id' => $mission->user_id,
+            'name' => null,
+            'galaxy_to' => $mission->galaxy_to,
+            'system_to' => $mission->system_to,
+            'position_to' => $mission->position_to,
+            'planet_type_to' => $mission->type_to,
+            'time_arrival' => $mission->time_arrival,
+            'max_fleets' => 16,
+            'max_players' => 5,
+        ]);
     }
 
     private function aBarrierOver(Planet $corps, CombatInstance $combat): void

@@ -218,6 +218,38 @@ class FleetUnionAtomicityTest extends TestCase
     }
 
     /**
+     * Une jointure prend la barriere du corps vise avant l'union.
+     *
+     * ## L'ordre global, et ce que l'inverse ouvrait
+     *
+     * La jointure verrouillait l'union en premier. La porte des mouvements prend barriere,
+     * instances, unions puis mission : une jointure qui commence par l'union peut attendre une porte
+     * qui tient la barriere et attend cette union. Deux transactions, chacune tenant ce que l'autre
+     * demande. La jointure entre donc par la porte, et l'union visee y prend son rang.
+     */
+    public function testAJoinTakesTheBarrierBeforeTheUnion(): void
+    {
+        [$union, $second] = $this->aUnionAndASecondAttack();
+
+        $tables = [];
+        DB::listen(function (QueryExecuted $requete) use (&$tables): void {
+            foreach (['celestial_body_combat_barriers', 'fleet_unions'] as $table) {
+                if (str_contains($requete->sql, '"' . $table . '"')) {
+                    $tables[] = $table;
+
+                    return;
+                }
+            }
+        });
+
+        $this->service->joinUnion($union, $second);
+
+        $this->assertNotSame([], $tables, 'The join touched neither the barrier nor the union.');
+        $this->assertSame('celestial_body_combat_barriers', $tables[0], 'A join takes the union before the barrier: the global order is inverted.');
+        $this->assertSame($union->id, (int)$second->union_id, 'The caller model was not aligned on the row written under the lock.');
+    }
+
+    /**
      * Le retrait d'une flotte, le compactage des creneaux et le transfert de propriete ne font
      * qu'une ecriture.
      */
@@ -366,11 +398,39 @@ class FleetUnionAtomicityTest extends TestCase
             'mission_type' => 1,
             'time_departure' => time(),
             'time_arrival' => time() + 1_000,
+            // **Un corps vise, pas seulement des coordonnees.** La porte des mouvements prend la
+            // barriere de ce corps en premier ; une mission sans corps n'aurait rien a tenir, et
+            // l'ordre des verrous ne se verrait pas.
+            'planet_id_to' => $this->theTargetBodyId(),
             'galaxy_to' => 1,
             'system_to' => 1,
             'position_to' => 1,
             'type_to' => 1,
             'light_fighter' => 10,
         ]);
+    }
+
+    /**
+     * Le corps que toutes les attaques de ces essais visent, en 1:1:1.
+     */
+    private function theTargetBodyId(): int
+    {
+        $existant = Planet::query()
+            ->where('galaxy', 1)
+            ->where('system', 1)
+            ->where('planet', 1)
+            ->where('planet_type', 1)
+            ->value('id');
+
+        if ($existant !== null) {
+            return (int)$existant;
+        }
+
+        return (int)Planet::factory()->create([
+            'user_id' => User::factory()->create()->id,
+            'galaxy' => 1,
+            'system' => 1,
+            'planet' => 1,
+        ])->id;
     }
 }

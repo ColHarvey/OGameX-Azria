@@ -14,6 +14,7 @@ use OGame\Combat\Services\FleetDispositionRegistry;
 use OGame\Combat\Services\PersistentCombatAdvancer;
 use OGame\Combat\Services\RallyClosureService;
 use OGame\Combat\Support\CombatParticipantKey;
+use OGame\Factories\GameMissionFactory;
 use OGame\GameMissions\AcsDefendMission;
 use OGame\GameMissions\AttackMission;
 use OGame\GameObjects\Models\Units\UnitCollection;
@@ -29,6 +30,7 @@ use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
 use OGame\Models\User;
 use OGame\Services\FleetMissionService;
+use OGame\Services\MessageService;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
 use OGame\Services\SettingsService;
@@ -534,8 +536,8 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
         $this->travelTo(Date::createFromTimestamp($ouverture + 30));
         $mission = resolve(AcsDefendMission::class);
 
-        $this->assertTrue($mission->turnBackIfTheCombatHasNoPlaceForIt($renfort->refresh(), $ouverture + 30), 'The first pass did nothing.');
-        $this->assertFalse($mission->turnBackIfTheCombatHasNoPlaceForIt($renfort->refresh(), $ouverture + 60), 'A second pass consumed the same disposition again.');
+        $this->assertTrue($mission->settleArrival($renfort->refresh(), $ouverture + 30), 'The first pass did nothing.');
+        $this->assertFalse($mission->settleArrival($renfort->refresh(), $ouverture + 60), 'A second pass consumed the same disposition again.');
 
         $this->assertSame(1, FleetMission::query()->where('parent_id', $renfort->id)->count(), 'A second return was created.');
     }
@@ -791,6 +793,56 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
         $this->assertSame(0, FleetMission::query()->where('parent_id', $renfort->id)->count(), 'A fleet already counted in the photograph was recalled on a stale read.');
         $this->assertSame(0, (int)$renfort->processed, 'The recall marked a held fleet as processed.');
         $this->assertSame($combat->id, (int)$renfort->combat_instance_id, 'The recall unbound a held fleet.');
+    }
+
+    /**
+     * Une arrivee traitee sur une lecture plus ancienne n'engage pas une flotte deja rappelee.
+     *
+     * ## La course, telle qu'elle se produit
+     *
+     * Le travailleur charge la mission. Le joueur la rappelle : retour cree, aller marque. Le
+     * travailleur poursuit avec son souvenir — non traitee, en vol — et traite l'arrivee : il ouvre
+     * un combat, ou en rejoint un, et **rattache** la flotte. Elle est partie et engagee a la fois ;
+     * la bataille se calculera avec des vaisseaux qui rentrent, et le retour les ramenera.
+     *
+     * Le lien s'ecrivait apres le retour de l'ouverture, hors de sa transaction et sur le modele
+     * recu. Il s'ecrit maintenant derriere la porte, sur la mission relue.
+     */
+    public function testAnArrivalHoldingAnOlderReadDoesNotEngageAFleetAlreadyRecalled(): void
+    {
+        for ($i = 0; $i < 3; $i++) {
+            $this->createAndLoginUser();
+        }
+
+        $this->basicSetup();
+
+        $units = new UnitCollection();
+        $units->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 100);
+        $this->sendMissionToOtherPlayerPlanet($units, new Resources(0, 0, 0, 0));
+
+        $ouvreuse = $this->lastAttackDispatched();
+        $arrivee = (int)$ouvreuse->time_arrival;
+
+        resolve(SettingsService::class)->set('persistent_combat_enabled', '1');
+
+        // Le travailleur a lu la mission ; le joueur la rappelle ensuite.
+        $perime = FleetMission::query()->findOrFail($ouvreuse->id);
+        resolve(FleetMissionService::class)->cancelMission($ouvreuse->refresh());
+
+        $this->assertSame(1, (int)$ouvreuse->refresh()->canceled, 'The recall did not happen: nothing would be proved.');
+        $this->assertSame(1, FleetMission::query()->where('parent_id', $ouvreuse->id)->count());
+
+        // L'arrivee est traitee avec la lecture d'avant.
+        $this->travelTo(Date::createFromTimestamp($arrivee));
+        $attaque = GameMissionFactory::getMissionById(1, [
+            'fleetMissionService' => resolve(FleetMissionService::class),
+            'messageService' => resolve(MessageService::class),
+        ]);
+        $attaque->process($perime);
+
+        $this->assertSame(0, CombatInstance::query()->count(), 'A recalled fleet opened a combat: it is gone and engaged at the same time.');
+        $this->assertNull(FleetMission::query()->findOrFail($ouvreuse->id)->combat_instance_id, 'A recalled fleet was bound to a combat.');
+        $this->assertSame(1, FleetMission::query()->where('parent_id', $ouvreuse->id)->count(), 'The fleet got a second return.');
     }
 
     /**

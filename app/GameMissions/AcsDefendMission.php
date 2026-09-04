@@ -148,6 +148,28 @@ class AcsDefendMission extends GameMission
     }
 
     /**
+     * Ce qu'une Defense ACS fait a son arrivee physique : retenue si le corps rallie, demi-tour si
+     * le combat n'a pas de place pour elle, stationnement sinon.
+     *
+     * ## La seule entree, et pourquoi elle prend la porte elle-meme
+     *
+     * Les deux decisions qu'elle enchaine sont privees : rien ne peut retenir ou renvoyer une
+     * flotte avec un `FleetMission` qui n'a pas ete relu sous verrou. Une garde de texte sur
+     * l'appelant disait la meme chose ; le type, lui, l'impose a tout appelant futur.
+     *
+     * @return bool Vrai si la flotte a ete renvoyee, et qu'il n'y a plus rien a traiter.
+     */
+    public function settleArrival(FleetMission $mission, int $now): bool
+    {
+        return resolve(FleetMovementGate::class)->decideUnderLock($mission, function (FleetMission $tenue) use ($now): bool {
+            // Posee sur un corps en ralliement : retenue jusqu'au verdict de l'admission.
+            $this->holdIfTheBodyIsRallying($tenue);
+
+            return $this->turnBackIfTheCombatHasNoPlaceForIt($tenue, $now);
+        });
+    }
+
+    /**
      * Retient la flotte si le corps qu'elle rejoint est en ralliement.
      *
      * ## Pourquoi a l'arrivee physique, et pas a la fermeture
@@ -160,7 +182,7 @@ class AcsDefendMission extends GameMission
      * Le lien est celui que l'arrivee d'une attaque pose deja : `EngagedFleetCheck` le lit, donc le
      * rappel et l'expiration sont fermes par la meme porte.
      */
-    public function holdIfTheBodyIsRallying(FleetMission $mission): void
+    private function holdIfTheBodyIsRallying(FleetMission $mission): void
     {
         if ($mission->planet_id_to === null || $mission->combat_instance_id !== null) {
             return;
@@ -192,7 +214,7 @@ class AcsDefendMission extends GameMission
      *
      * @return bool Vrai si la flotte a ete renvoyee.
      */
-    public function turnBackIfTheCombatHasNoPlaceForIt(FleetMission $mission, int $now): bool
+    private function turnBackIfTheCombatHasNoPlaceForIt(FleetMission $mission, int $now): bool
     {
         if ($mission->planet_id_to === null || (int)$mission->processed === 1) {
             return false;

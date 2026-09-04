@@ -629,20 +629,9 @@ class FleetMissionService
 
             if ($defense instanceof AcsDefendMission) {
                 // **Retenue et demi-tour se decident derriere la meme porte que le rappel**, sur une
-                // mission relue sous verrou. Sans elle, un rappel simultane accordait un second
-                // retour a une flotte deja renvoyee, et une flotte que la retenue venait d'inscrire
-                // partait quand meme parce que le rappel lisait un modele d'avant l'inscription.
-                $renvoyee = resolve(FleetMovementGate::class)->decideUnderLock(
-                    $mission,
-                    function (FleetMission $tenue) use ($defense): bool {
-                        // Posee sur un corps en ralliement : retenue jusqu'au verdict de l'admission.
-                        $defense->holdIfTheBodyIsRallying($tenue);
-
-                        return $defense->turnBackIfTheCombatHasNoPlaceForIt($tenue, (int)Date::now()->timestamp);
-                    }
-                );
-
-                if ($renvoyee) {
+                // mission relue sous verrou — et c'est la mission qui prend la porte, pour qu'aucun
+                // appelant ne puisse decider avec un modele d'avant.
+                if ($defense->settleArrival($mission, (int)Date::now()->timestamp)) {
                     return;
                 }
 

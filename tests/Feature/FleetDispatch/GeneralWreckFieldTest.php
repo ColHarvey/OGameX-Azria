@@ -49,6 +49,16 @@ class GeneralWreckFieldTest extends FleetDispatchTestCase
      */
     public function testGeneralCreatesWreckFieldAtOriginPlanet(): void
     {
+        // **Cet essai exige une resolution instantanee.** Il a echoue deux fois sur cinq passages
+        // paralleles le 4 septembre 2026 — « aucun retour apres la bataille » — sans jamais echouer
+        // isole. Un combat durable laisse par un voisin du meme processus produirait exactement ce
+        // symptome : l'attaque commencerait au lieu de finir. Le dire ici nomme le coupable au
+        // prochain echec, ou l'exclut.
+        $this->assertFalse(
+            resolve(SettingsService::class)->persistentCombatEnabled(),
+            'Persistent combat was left switched on by a neighbouring test: this attack would open a combat instead of resolving.'
+        );
+
         // Clear all battle reports and wreck fields to ensure test isolation
         Message::where('battle_report_id', '!=', null)->delete();
         BattleReport::query()->delete();

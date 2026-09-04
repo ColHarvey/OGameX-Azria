@@ -173,6 +173,48 @@ class ReturnPlannerTest extends TestCase
         $this->assertNotSame($mere->id, $plan->planetId);
     }
 
+    /**
+     * La planete associee decide du recours meme quand elle appartient a quelqu'un d'autre.
+     *
+     * ## Le fait que l'ensemble oubliait
+     *
+     * Les corps qui decident etaient l'origine et les planetes du proprietaire. La planete sous une
+     * lune rasee n'y figurait que si elle lui appartenait deja. Or la propriete est justement ce
+     * qui decide : a un autre joueur a la premiere passe, transferee entre les deux, elle devient
+     * le recours — sans qu'aucune ligne tenue n'ait bouge. Elle est donc tenue quel que soit son
+     * proprietaire ; le plan, lui, continue d'exiger le bon.
+     */
+    public function testTheAssociatedPlanetIsAFactThatDecidesEvenWhenSomebodyElseOwnsIt(): void
+    {
+        $joueur = $this->aPlayer();
+        $this->aBodyOf($joueur, PlanetType::Planet);
+
+        $autre = $this->aPlayer();
+        $planete = $this->aBodyOf($autre, PlanetType::Planet);
+
+        $lune = Planet::factory()->create([
+            'user_id' => $joueur->id,
+            'galaxy' => $planete->galaxy,
+            'system' => $planete->system,
+            'planet' => $planete->planet,
+            'planet_type' => PlanetType::Moon->value,
+        ]);
+
+        $mission = $this->aMissionFrom($joueur, $lune);
+        DB::table('planets')->where('id', $lune->id)->update(['destroyed' => self::DESTROYED_AT]);
+
+        $planificateur = new ReturnPlanner();
+        $this->assertContains($planete->id, $planificateur->bodiesThatDecideFor($mission), 'The planet under the moon is not held because somebody else owns it.');
+        $this->assertNotSame(ReturnDestinationKind::AssociatedPlanet, $planificateur->planFor($mission)->kind, 'The plan sent the fleet to somebody else.');
+
+        // La lune purgee : il ne reste que les coordonnees que la mission porte.
+        DB::table('fleet_missions')->where('id', $mission->id)->update(['planet_id_from' => null, 'planet_id_to' => $planete->id]);
+        DB::table('planets')->where('id', $lune->id)->delete();
+        $mission->refresh();
+
+        $this->assertContains($planete->id, $planificateur->bodiesThatDecideFor($mission), 'Once the moon is purged, the planet under it is no longer held.');
+    }
+
     private function aMissionFrom(User $owner, Planet $origine): FleetMission
     {
         return FleetMission::forceCreate([

@@ -3,7 +3,7 @@
 namespace OGame\Services;
 
 use Exception;
-use Illuminate\Support\Facades\DB;
+use OGame\Combat\Services\FleetMovementGate;
 use OGame\Models\FleetMission;
 use OGame\Models\FleetUnion;
 
@@ -58,7 +58,11 @@ class FleetUnionService
         // Une union sans sa mission fondatrice n'est pas une union : elle apparaitrait dans la
         // liste des unions a rejoindre, vide, et sans moyen d'y entrer. Les deux ecritures ne
         // font donc qu'une.
-        return DB::transaction(function () use ($mission, $name): FleetUnion {
+        // **Dans l'ordre global, comme tout ce qui touche a ce a quoi une flotte est liee.** La
+        // porte prend la barriere du corps vise avant d'ecrire le lien d'union : une porte
+        // concurrente — rappel, arrivee — ne peut plus tenir l'ancien lien pendant que celui-ci
+        // s'ecrit. L'objet de l'appelant est ensuite aligne sur la ligne ecrite.
+        return resolve(FleetMovementGate::class)->decideUnderLock($mission, function (FleetMission $tenue) use ($mission, $name): FleetUnion {
             $union = FleetUnion::create([
                 'user_id' => $mission->user_id,
                 'name' => $name,
@@ -72,13 +76,26 @@ class FleetUnionService
             ]);
 
             // Link the mission to the union and convert to ACS Attack
-            $mission->union_id = $union->id;
-            $mission->union_slot = 1; // Initiator always gets slot 1
-            $mission->mission_type = 2; // Convert to ACS Attack
-            $mission->save();
+            $tenue->union_id = $union->id;
+            $tenue->union_slot = 1; // Initiator always gets slot 1
+            $tenue->mission_type = 2; // Convert to ACS Attack
+            $tenue->save();
+
+            $this->alignOn($mission, $tenue);
 
             return $union;
         });
+    }
+
+    /**
+     * Aligne l'objet de l'appelant sur la ligne ecrite sous verrou.
+     *
+     * La porte decide et ecrit sur une mission relue ; l'objet que l'appelant tenait decrirait
+     * sinon un passe — et un `save()` ulterieur de sa part rejouerait des attributs perimes.
+     */
+    private function alignOn(FleetMission $appelant, FleetMission $tenue): void
+    {
+        $appelant->setRawAttributes($tenue->getAttributes(), true);
     }
 
     /**
@@ -105,19 +122,28 @@ class FleetUnionService
         // `lockForUpdate()` ne compile rien sur SQLite : la grammaire de Laravel n'y emet pas de
         // `FOR UPDATE`. Les essais gardent donc exactement le meme comportement, et MariaDB obtient
         // un vrai verrou.
-        DB::transaction(function () use ($union, $mission): void {
-            $verrouillee = FleetUnion::whereKey($union->getKey())->lockForUpdate()->first();
+        //
+        // **L'union se prend a sa place dans l'ordre global, pas en premier.** La jointure la
+        // verrouillait avant tout le reste ; la porte des mouvements prend barriere, instances,
+        // unions puis mission — et une jointure qui commencerait par l'union pourrait attendre une
+        // porte qui tient deja la barriere et attend cette union. L'union visee est donnee a la
+        // porte pour qu'elle entre dans la famille des unions, a son rang.
+        resolve(FleetMovementGate::class)->decideUnderLock(
+            $mission,
+            function (FleetMission $tenue) use ($union, $mission): void {
+                if (FleetUnion::query()->whereKey($union->getKey())->doesntExist()) {
+                    throw new Exception(__('t_acs.error_not_found'));
+                }
 
-            if ($verrouillee === null) {
-                throw new Exception(__('t_acs.error_not_found'));
-            }
+                // L'instance de l'appelant porte desormais l'etat verrouille : les compteurs lus
+                // ci-dessous sont ceux de la ligne que nous tenons, pas ceux d'une lecture anterieure.
+                $union->refresh();
 
-            // L'instance de l'appelant porte desormais l'etat verrouille : les compteurs lus
-            // ci-dessous sont ceux de la ligne que nous tenons, pas ceux d'une lecture anterieure.
-            $union->refresh();
-
-            $this->joinUnderLock($union, $mission);
-        });
+                $this->joinUnderLock($union, $tenue);
+                $this->alignOn($mission, $tenue);
+            },
+            [(int)$union->getKey()]
+        );
     }
 
     /**
@@ -254,8 +280,12 @@ class FleetUnionService
         // Le retrait, le compactage des creneaux et le transfert de propriete ne font qu'une
         // ecriture : a moitie appliques, ils laisseraient des numeros non consecutifs que rien ne
         // rattrape ensuite, et une union dont le proprietaire n'est plus celui du creneau 1.
-        DB::transaction(function () use ($mission): void {
-            $this->recallUnderLock($mission);
+        //
+        // Et dans l'ordre global : le rappel d'une flotte engagee passe deja par la porte des
+        // mouvements ; celle-ci s'y imbrique, et tout autre appelant y entre par la meme voie.
+        resolve(FleetMovementGate::class)->decideUnderLock($mission, function (FleetMission $tenue) use ($mission): void {
+            $this->recallUnderLock($tenue);
+            $this->alignOn($mission, $tenue);
         });
     }
 
