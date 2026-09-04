@@ -8,6 +8,10 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use OGame\Combat\Decisions\CombatSituation;
+use OGame\Combat\Enums\CombatMissionKind;
+use OGame\Combat\Enums\FlightLeg;
+use OGame\Combat\Enums\TargetScope;
 use OGame\Combat\Exceptions\MovementLocksOutdated;
 use OGame\Combat\Services\AccountCombatWithdrawal;
 use OGame\GameObjects\Models\Calculations\CalculationType;
@@ -838,23 +842,45 @@ class PlayerService
     /**
      * Cette mission passe-t-elle par la porte des mouvements a son traitement ?
      *
-     * Une Defense ACS a l'aller, toujours : sa retenue et son demi-tour se decident derriere la
-     * porte, que le combat durable soit active ou non. Une attaque a l'aller, seulement quand le
-     * combat durable est active : sans lui, son arrivee est la bataille instantanee, qui se
-     * protege par les verrous de page comme avant.
+     * ## La portee ne se recopie pas, elle se demande
+     *
+     * Ce predicat portait une liste de genres — attaque, attaque groupee, Defense ACS — et laissait
+     * dehors **tous les retours**, ainsi que le transport, le deploiement, le missile et la
+     * destruction de lune. Or une arrivee de n'importe lequel de ces genres pendant un ralliement
+     * touche le corps que la barriere tient, et peut donc composer ou deranger la photographie. La
+     * liste etait une seconde matrice, qui aurait diverge de la vraie au premier genre ajoute.
+     *
+     * La question est maintenant posee a la matrice elle-meme : `CombatSituation::scopeOf()` dit ce
+     * qu'une arrivee touche reellement, en tenant compte de l'etape de vol autant que du genre. Un
+     * retour se pose toujours sur un corps celeste, quel qu'ait ete l'objet de son aller ; un
+     * recyclage vise un champ de debris, une colonisation une position vide, une expedition l'espace
+     * profond — aucun de ces trois-la ne touche le corps, et aucun n'a besoin de la porte.
+     *
+     * ## Ce que l'interrupteur commande encore
+     *
+     * Une Defense ACS a l'aller passe **toujours** par la porte : sa retenue et son demi-tour s'y
+     * decident, que le combat durable soit actif ou non. Tout le reste n'y passe que **quand le
+     * combat durable est arme** : sans lui aucune barriere n'existe, l'arrivee d'une attaque est la
+     * bataille instantanee, et le traitement de page la protege comme il l'a toujours fait. Elargir
+     * la porte a l'interrupteur ferme changerait le chemin de toutes les missions du serveur pour
+     * fermer une course qui ne peut pas s'y produire.
      */
     private function isGovernedByTheCombatGate(FleetMission $mission): bool
     {
-        if ($mission->parent_id !== null) {
-            return false;
-        }
+        $etape = $mission->parent_id === null ? FlightLeg::Outbound : FlightLeg::Return;
 
-        if ((int)$mission->mission_type === 5) {
+        if ($etape === FlightLeg::Outbound && (int)$mission->mission_type === 5) {
             return true;
         }
 
-        return in_array((int)$mission->mission_type, [1, 2], true)
-            && resolve(SettingsService::class)->persistentCombatEnabled();
+        if (!resolve(SettingsService::class)->persistentCombatEnabled()) {
+            return false;
+        }
+
+        return CombatSituation::scopeOf(
+            CombatMissionKind::fromMissionType((int)$mission->mission_type),
+            $etape
+        ) === TargetScope::CelestialBody;
     }
 
     /**

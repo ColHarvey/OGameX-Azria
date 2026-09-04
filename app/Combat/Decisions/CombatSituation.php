@@ -109,11 +109,28 @@ final readonly class CombatSituation
      */
     public function scope(): TargetScope
     {
-        if ($this->leg === FlightLeg::Return) {
+        return self::scopeOf($this->mission, $this->leg);
+    }
+
+    /**
+     * La meme portee, sans avoir a composer une situation entiere.
+     *
+     * Le travailleur des pages doit savoir si une arrivee peut toucher un corps celeste — donc si
+     * elle doit passer par la porte des mouvements — bien avant de connaitre l'acteur ou l'etat du
+     * combat vise. Sans cette entree, il aurait fallu recopier la regle chez lui : une seconde
+     * matrice, qui aurait diverge au premier genre ajoute.
+     *
+     * @param CombatMissionKind $mission
+     * @param FlightLeg $leg
+     * @return TargetScope
+     */
+    public static function scopeOf(CombatMissionKind $mission, FlightLeg $leg): TargetScope
+    {
+        if ($leg === FlightLeg::Return) {
             return TargetScope::CelestialBody;
         }
 
-        return $this->mission->targetScope();
+        return $mission->targetScope();
     }
 
     /**
