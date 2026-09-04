@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Log;
 use OGame\Combat\Enums\CombatCancellationCause;
 use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Exceptions\FleetHasNowhereToReturn;
 use OGame\Combat\Exceptions\UnreturnableFleet;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Models\CelestialBodyCombatBarrier;
@@ -55,6 +56,7 @@ final class CombatCancellationService
 {
     public function __construct(
         private CombatRosterReader $roster = new CombatRosterReader(),
+        private ReturnPlanner $planner = new ReturnPlanner(),
         private FleetMissionService|null $fleetMissions = null,
     ) {
     }
@@ -63,7 +65,8 @@ final class CombatCancellationService
      * Annule le combat, ou explique pourquoi il n'y avait rien a annuler.
      *
      * @param Closure $creerRetour Cree une mission retour ; delegue a GameMission::startReturn(),
-     *                              en lui donnant la duree du trajet aller et l'instant du depart.
+     *                              en lui donnant la duree du trajet aller, l'instant du depart et le
+     *                              corps ou le plan de repli fait atterrir la flotte.
      */
     public function cancel(int $combatInstanceId, CombatCancellationCause $cause, Closure $creerRetour, int $now): CombatCancellationOutcome
     {
@@ -106,6 +109,32 @@ final class CombatCancellationService
                 ->lockForUpdate()
                 ->get();
 
+            // **Tous les plans d'abord, l'etat ensuite.** Une flotte sans destination legitime, ou
+            // dont le trajet aller ne se lit pas, arrete l'annulation : le corps reste tenu et rien
+            // n'est ecrit. Liberer le corps en pretendant que toutes les flottes sont rendues serait
+            // exactement la perte silencieuse que ce chemin existe pour eviter.
+            $plans = [];
+
+            foreach ($missions as $mission) {
+                if ((int)$mission->processed === 1) {
+                    continue;
+                }
+
+                $trajet = (int)$mission->time_arrival - (int)$mission->time_departure;
+
+                if ($trajet < 1) {
+                    throw new UnreturnableFleet($combat->id, $mission->id, $trajet);
+                }
+
+                $plan = $this->planner->planFor($mission);
+
+                if (!$plan->isPossible() || $plan->planetId === null) {
+                    throw new FleetHasNowhereToReturn($combat->id, $mission->id, $plan->reason?->value);
+                }
+
+                $plans[$mission->id] = [$plan, $trajet];
+            }
+
             $combat->status = CombatState::Cancelled;
             $combat->cancellation_cause = $cause;
             $combat->save();
@@ -147,13 +176,10 @@ final class CombatCancellationService
                 );
 
                 // **Le retour se decrit, il ne se fabrique pas en reecrivant l'aller.** Il part de
-                // l'instant d'annulation et dure le trajet aller ; la mission aller garde son heure
-                // d'arrivee, qui est un fait de l'admission, de l'ordre causal et de l'audit.
-                $trajet = (int)$mission->time_arrival - (int)$mission->time_departure;
-
-                if ($trajet < 1) {
-                    throw new UnreturnableFleet($combat->id, $mission->id, $trajet);
-                }
+                // l'instant d'annulation, dure le trajet aller, et se pose la ou son plan le dit ; la
+                // mission aller garde son heure d'arrivee, qui est un fait de l'admission, de l'ordre
+                // causal et de l'audit.
+                [$plan, $trajet] = $plans[$mission->id];
 
                 $mission->processed = 1;
                 $mission->save();
@@ -163,7 +189,8 @@ final class CombatCancellationService
                     $this->fleetMissions()->getResources($mission),
                     $this->fleetMissions()->getFleetUnits($mission),
                     $trajet,
-                    $now
+                    $now,
+                    (int)$plan->planetId
                 );
 
                 $rendues++;

@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\DB;
 use OGame\Combat\Enums\CombatCancellationCause;
 use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Exceptions\FleetHasNowhereToReturn;
 use OGame\Combat\Exceptions\UnreturnableFleet;
 use OGame\Combat\Services\CombatCancellationOutcome;
 use OGame\Combat\Services\CombatOpeningService;
@@ -303,6 +304,67 @@ class CombatCancellationTest extends FleetDispatchTestCase
         $this->assertNotNull(CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->first(), 'The body was released though a fleet is still there.');
         $this->assertSame(0, FleetMission::query()->where('parent_id', $mission->id)->count());
         $this->assertSame(0, (int)$mission->refresh()->processed, 'The fleet was marked processed without a return.');
+    }
+
+    /**
+     * Une flotte sans destination arrete l'annulation, et le corps reste tenu.
+     *
+     * Les recours sont ordonnes — corps d'origine, planete associee, planete mere — et les epuiser
+     * tous signifie que le proprietaire n'a plus aucun corps ou poser sa flotte. Liberer le corps
+     * attaque en pretendant que toutes les flottes sont rendues serait la perte silencieuse que ce
+     * chemin existe pour eviter.
+     */
+    public function testAFleetWithNowhereToReturnStopsTheCancellation(): void
+    {
+        [$combat, $mission] = $this->anActiveCombat();
+
+        // L attaquant n a plus aucun corps : tous les recours sont epuises.
+        DB::table('planets')->where('user_id', $mission->user_id)->update(['destroyed' => 1]);
+
+        try {
+            $this->cancel($combat, CombatCancellationCause::AdministrativeDecision);
+            $this->fail('A fleet with nowhere to return was sent home anyway.');
+        } catch (FleetHasNowhereToReturn $refus) {
+            $this->assertSame($mission->id, $refus->fleetMissionId);
+        }
+
+        $combat->refresh();
+        $this->assertSame(CombatState::Active, $combat->status, 'The combat was made final though a fleet had nowhere to go.');
+        $this->assertNotNull(CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->first(), 'The body was released while assets are still in the air.');
+        $this->assertSame(0, FleetMission::query()->where('parent_id', $mission->id)->count());
+        $this->assertSame(0, (int)$mission->refresh()->processed);
+    }
+
+    /**
+     * Le retour se pose la ou le plan le dit, pas sur un corps d'origine qui a disparu.
+     */
+    public function testTheReturnLandsWhereThePlanSaysWhenTheOriginIsGone(): void
+    {
+        [$combat, $mission] = $this->anActiveCombat();
+
+        $origine = (int)$mission->planet_id_from;
+        DB::table('planets')->where('id', $origine)->update(['destroyed' => 1]);
+
+        $mere = DB::table('planets')
+            ->where('user_id', $mission->user_id)
+            ->where('planet_type', 1)
+            ->where('destroyed', 0)
+            ->orderBy('id')
+            ->first();
+        $this->assertNotNull($mere, 'The attacker has no other planet: the test would prove nothing.');
+
+        $this->assertTrue($this->cancel($combat, CombatCancellationCause::AdministrativeDecision)->cancelled);
+
+        $retour = FleetMission::query()->where('parent_id', $mission->id)->first();
+
+        if ($retour === null) {
+            $this->fail('The fleet has no return.');
+        }
+
+        $this->assertSame((int)$mere->id, (int)$retour->planet_id_to, 'The return heads for a body that no longer exists.');
+        $this->assertSame((int)$mere->galaxy, (int)$retour->galaxy_to);
+        $this->assertSame((int)$mere->system, (int)$retour->system_to);
+        $this->assertSame((int)$mere->planet, (int)$retour->position_to);
     }
 
     /**
