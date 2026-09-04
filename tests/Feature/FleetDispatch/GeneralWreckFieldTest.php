@@ -49,11 +49,13 @@ class GeneralWreckFieldTest extends FleetDispatchTestCase
      */
     public function testGeneralCreatesWreckFieldAtOriginPlanet(): void
     {
-        // **Cet essai exige une resolution instantanee.** Il a echoue deux fois sur cinq passages
-        // paralleles le 4 septembre 2026 — « aucun retour apres la bataille » — sans jamais echouer
-        // isole. Un combat durable laisse par un voisin du meme processus produirait exactement ce
-        // symptome : l'attaque commencerait au lieu de finir. Le dire ici nomme le coupable au
-        // prochain echec, ou l'exclut.
+        // **Cet essai exige une resolution instantanee, et une cible qu'il est seul a armer.** Il a
+        // echoue trois fois sur sept passages paralleles le 4 septembre 2026 — « aucun retour apres
+        // la bataille » — sans jamais echouer isole. La cause : la planete etrangere « voisine » est
+        // partagee entre les essais d'un meme processus, et `FleetDispatchAttackTest` y laisse vingt
+        // mille tourelles a plasma. Cent croiseurs n'en reviennent pas. La cible est donc une planete
+        // propre, creee pour cet essai. Le combat durable, lui, a ete exclu : cette assertion n'a
+        // jamais rougi pendant les echecs.
         $this->assertFalse(
             resolve(SettingsService::class)->persistentCombatEnabled(),
             'Persistent combat was left switched on by a neighbouring test: this attack would open a combat instead of resolving.'
@@ -100,7 +102,7 @@ class GeneralWreckFieldTest extends FleetDispatchTestCase
         // Launch attack mission
         $units = new UnitCollection();
         $units->addUnit(ObjectService::getShipObjectByMachineName('cruiser'), 100);
-        $foreignPlanet = $this->sendMissionToOtherPlayerPlanet($units, new Resources(0, 0, 0, 0));
+        $foreignPlanet = $this->sendMissionToOtherPlayerCleanPlanet($units, new Resources(0, 0, 0, 0));
 
         // Get the mission
         $fleetMissionService = resolve(FleetMissionService::class, ['player' => $attacker->getPlayer()]);
@@ -192,7 +194,7 @@ class GeneralWreckFieldTest extends FleetDispatchTestCase
         // Launch attack mission
         $units = new UnitCollection();
         $units->addUnit(ObjectService::getShipObjectByMachineName('light_fighter'), 10);
-        $foreignPlanet = $this->sendMissionToOtherPlayerPlanet($units, new Resources(0, 0, 0, 0));
+        $foreignPlanet = $this->sendMissionToOtherPlayerCleanPlanet($units, new Resources(0, 0, 0, 0));
 
         // Set up: Defender with overwhelming force to destroy all attackers
         $foreignPlanet->addUnit('cruiser', 1000);
@@ -272,7 +274,7 @@ class GeneralWreckFieldTest extends FleetDispatchTestCase
         // Launch attack mission
         $units = new UnitCollection();
         $units->addUnit(ObjectService::getShipObjectByMachineName('cruiser'), 100);
-        $foreignPlanet = $this->sendMissionToOtherPlayerPlanet($units, new Resources(0, 0, 0, 0));
+        $foreignPlanet = $this->sendMissionToOtherPlayerCleanPlanet($units, new Resources(0, 0, 0, 0));
 
         // Set up: Defender with ships and space dock (required for defender wreck field)
         $foreignPlanet->addUnit('cruiser', 100);
@@ -385,7 +387,7 @@ class GeneralWreckFieldTest extends FleetDispatchTestCase
         // Launch attack mission
         $units = new UnitCollection();
         $units->addUnit(ObjectService::getShipObjectByMachineName('cruiser'), 100);
-        $foreignPlanet = $this->sendMissionToOtherPlayerPlanet($units, new Resources(0, 0, 0, 0));
+        $foreignPlanet = $this->sendMissionToOtherPlayerCleanPlanet($units, new Resources(0, 0, 0, 0));
 
         // Set up: Defender with defenses to destroy some attackers
         $foreignPlanet->addUnit('rocket_launcher', 500);
@@ -461,7 +463,7 @@ class GeneralWreckFieldTest extends FleetDispatchTestCase
         // Launch attack mission
         $units = new UnitCollection();
         $units->addUnit(ObjectService::getShipObjectByMachineName('cruiser'), 10);
-        $foreignPlanet = $this->sendMissionToOtherPlayerPlanet($units, new Resources(0, 0, 0, 0));
+        $foreignPlanet = $this->sendMissionToOtherPlayerCleanPlanet($units, new Resources(0, 0, 0, 0));
 
         // Set up: Defender with some defenses
         $foreignPlanet->addUnit('rocket_launcher', 100);
@@ -538,7 +540,7 @@ class GeneralWreckFieldTest extends FleetDispatchTestCase
         $units = new UnitCollection();
         $units->addUnit(ObjectService::getShipObjectByMachineName('cruiser'), 100);
         $units->addUnit(ObjectService::getShipObjectByMachineName('espionage_probe'), 50);
-        $foreignPlanet = $this->sendMissionToOtherPlayerPlanet($units, new Resources(0, 0, 0, 0));
+        $foreignPlanet = $this->sendMissionToOtherPlayerCleanPlanet($units, new Resources(0, 0, 0, 0));
 
         // Set up: Defender with defenses to destroy some attackers
         $foreignPlanet->addUnit('rocket_launcher', 500);
@@ -622,7 +624,7 @@ class GeneralWreckFieldTest extends FleetDispatchTestCase
         // Launch attack mission
         $units = new UnitCollection();
         $units->addUnit(ObjectService::getShipObjectByMachineName('cruiser'), 100);
-        $foreignPlanet = $this->sendMissionToOtherPlayerPlanet($units, new Resources(0, 0, 0, 0));
+        $foreignPlanet = $this->sendMissionToOtherPlayerCleanPlanet($units, new Resources(0, 0, 0, 0));
 
         // Set up: Defender with solar satellites and space dock
         $foreignPlanet->addUnit('solar_satellite', 100);

@@ -22,6 +22,7 @@ use OGame\Combat\Support\LootContextForMission;
 use OGame\Combat\Support\OperationKey;
 use OGame\Combat\Support\RefusedFleetVerdict;
 use OGame\Combat\Support\ResourceDiagnosticsJournal;
+use OGame\Combat\Support\ReturnOrder;
 use OGame\Combat\Support\SealedResourceDiagnostics;
 use OGame\Enums\FleetMissionStatus;
 use OGame\Enums\FleetSpeedType;
@@ -187,7 +188,7 @@ class AttackMission extends GameMission
             fn (FleetMission $tenue): RefusedFleetVerdict => new RefusedFleetVerdict(
                 $combat,
                 CombatReasonCode::RallyClosed,
-                RefusedFleetHomecoming::physicalArrivalOf($tenue)
+                ReturnOrder::physicalArrivalOf($tenue)
             )
         );
     }
@@ -256,7 +257,7 @@ class AttackMission extends GameMission
      */
     private function followTheMovementAlreadyDecided(FleetMission $mission): bool
     {
-        return $this->goHome($mission, null);
+        return $this->carryOutTheMovementAlreadyDecided($mission, (int)Date::now()->timestamp);
     }
 
     /**
@@ -266,24 +267,12 @@ class AttackMission extends GameMission
      */
     private function goHome(FleetMission $mission, Closure|null $juger): bool
     {
-        // **Deux instants distincts, et chacun nomme.** `consumed_at` dit quand le mouvement a
-        // ete execute — un fait d execution, donc l horloge. Le depart du retour, lui, est
-        // l arrivee : la vague a rebondi a cet instant-la, et un travailleur en retard ne la
-        // fait pas rebondir plus tard.
+        // **L'horloge ne sert qu'a dater l'execution** (`consumed_at`). Le depart du retour et
+        // sa destination viennent de l'ordre que le protocole derive de la decision.
         return resolve(RefusedFleetHomecoming::class)->sendHome(
             $mission,
             (int)Date::now()->timestamp,
-            function (FleetMission $tenue, ResolvedReturnDestination $destination): void {
-                // **Une vague refusee rebondit a son arrivee.** Elle n'a jamais stationne : son
-                // demi-tour est l'instant meme ou elle s'est presentee, et non celui ou un
-                // travailleur en retard s'en est apercu.
-                $this->startReturn(
-                    $tenue,
-                    $this->fleetMissionService->getResources($tenue),
-                    $this->fleetMissionService->getFleetUnits($tenue),
-                    destination: $destination
-                );
-            },
+            $this->returnOfARefusedFleet(),
             $juger
         );
     }

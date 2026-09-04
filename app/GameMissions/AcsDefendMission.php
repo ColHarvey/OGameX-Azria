@@ -8,11 +8,11 @@ use OGame\Combat\Services\EngagedFleetCheck;
 use OGame\Combat\Services\FleetMovementGate;
 use OGame\Combat\Services\RefusedFleetHomecoming;
 use OGame\Combat\Support\RefusedFleetVerdict;
+use OGame\Combat\Support\ReturnOrder;
 use OGame\Enums\FleetMissionStatus;
 use OGame\Enums\FleetSpeedType;
 use OGame\GameMissions\Abstracts\GameMission;
 use OGame\GameMissions\Models\MissionPossibleStatus;
-use OGame\GameMissions\Models\ResolvedReturnDestination;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
@@ -227,18 +227,9 @@ class AcsDefendMission extends GameMission
         return resolve(RefusedFleetHomecoming::class)->sendHome(
             $mission,
             $now,
-            function (FleetMission $tenue, ResolvedReturnDestination $destination) use ($now): void {
-                // **Le retour part de l'instant courant**, et se pose la ou le protocole de
-                // recours l'a decide sous verrou : le stationnement etait legitime jusqu'a ce que
-                // le verdict soit connu, et le corps de depart a pu etre rase entre-temps.
-                $this->startReturn(
-                    $tenue,
-                    $this->fleetMissionService->getResources($tenue),
-                    $this->fleetMissionService->getFleetUnits($tenue),
-                    departureAt: $now,
-                    destination: $destination
-                );
-            },
+            // Le depart et la destination viennent de l'ordre : un renfort refuse a la fermeture
+            // repart de la fermeture, quel que soit le retard du travailleur qui l'execute.
+            $this->returnOfARefusedFleet(),
             // **Jamais jugee** : elle s'est posee apres la fermeture, personne ne l'a vue. Le combat
             // decide alors, et sa decision s'ecrit avant d'etre executee — comme celle d'une
             // refusee, pour que les deux chemins se relisent de la meme facon.
@@ -248,7 +239,7 @@ class AcsDefendMission extends GameMission
                 return $combat === null ? null : new RefusedFleetVerdict(
                     $combat,
                     CombatReasonCode::RallyClosed,
-                    RefusedFleetHomecoming::physicalArrivalOf($tenue)
+                    ReturnOrder::physicalArrivalOf($tenue)
                 );
             }
         );

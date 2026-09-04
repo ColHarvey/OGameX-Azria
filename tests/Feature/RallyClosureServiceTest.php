@@ -519,11 +519,18 @@ class RallyClosureServiceTest extends TestCase
             ->first();
 
         $this->assertNotNull($message);
+
+        // **L'instant de la decision est l'echeance, jamais l'horloge du travailleur** — et l'avis
+        // devient lisible quand la flotte repart. Une candidate encore en vol a la fermeture ne
+        // peut pas rebondir d'un point qu'elle n'a pas atteint : elle se presente, trouve porte
+        // close, et repart a son arrivee. C'est le plus tardif des deux, et l'horloge du
+        // travailleur — dix mille secondes plus tard — n'apparait nulle part.
         $this->assertSame(
-            $barriere->owned_through_effect_at,
-            $message->available_at,
-            'The message took the worker clock instead of the deadline that governs the combat.'
+            max((int)$barriere->owned_through_effect_at, (int)$intruse->time_arrival),
+            (int)$message->available_at,
+            'The message took the worker clock instead of the instant the refused fleet turns back.'
         );
+        $this->assertLessThan(self::OPENING + 9_999, (int)$message->available_at, 'The worker clock leaked into the notice.');
     }
 
     /**

@@ -6,7 +6,6 @@ use Closure;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Enums\CombatCancellationCause;
-use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\FleetDispositionKind;
@@ -14,6 +13,7 @@ use OGame\Combat\Services\FleetDispositionRegistry;
 use OGame\Combat\Services\PersistentCombatAdvancer;
 use OGame\Combat\Services\RallyClosureService;
 use OGame\Combat\Support\CombatParticipantKey;
+use OGame\Combat\Support\RefusedFleetNotice;
 use OGame\Factories\GameMissionFactory;
 use OGame\GameMissions\AcsDefendMission;
 use OGame\GameMissions\AttackMission;
@@ -136,6 +136,11 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
         $this->assertSame(0, (int)$renfort->canceled, 'The server turned the fleet back as if the player had recalled it.');
         $this->assertSame(1, FleetMission::query()->where('parent_id', $renfort->id)->count(), 'The refused reinforcement is not coming home.');
         $this->assertSame(CombatReasonCode::NotAlreadyInFlight->value, $this->reasonToldTo($combat, $renfort), 'The closure reason was overwritten.');
+
+        // **Le retour part de la decision, pas du travailleur.** Refuse a la fermeture alors qu'il
+        // etait deja pose, il repart a la fermeture — le travailleur, lui, passe six secondes
+        // plus tard, et ces six secondes n'apparaissent nulle part.
+        $this->assertSame($ouverture + 19, (int)FleetMission::query()->where('parent_id', $renfort->id)->value('time_departure'), 'The return leaves at the worker clock instead of the decision instant.');
     }
 
     /**
@@ -222,13 +227,12 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
         $vague = $this->aSecondAttackAgainst($cible, $ouvreuse);
         DB::table('fleet_missions')->where('id', $vague->id)->update(['time_arrival' => $ouverture + 30]);
 
-        CombatOutboxMessage::query()->create([
-            'combat_instance_id' => $combat->id,
-            'participant_key' => CombatParticipantKey::forFleet($vague->id),
-            'kind' => CombatOutboxKind::RallyRefused->value,
-            'payload' => ['reason' => CombatReasonCode::FleetLimitReached->value, 'group_fleets' => 1],
-            'available_at' => $ouverture,
-        ]);
+        // **La disposition et l'avis, comme la fermeture les ecrit** : la decision d'abord, l'avis
+        // derive de la meme decision. Un avis seul, sans disposition, n'est pas un etat que la
+        // fermeture produit.
+        $vague->refresh();
+        (new FleetDispositionRegistry())->record($combat, $vague->id, CombatReasonCode::FleetLimitReached, $ouverture + 30, FleetDispositionKind::ReturnToOrigin);
+        RefusedFleetNotice::write($combat, $vague, CombatReasonCode::FleetLimitReached, $ouverture + 30, 1);
 
         $this->travelTo(Date::createFromTimestamp($ouverture + 40));
         $this->get('/overview')->assertStatus(200);
@@ -289,6 +293,7 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
         $this->assertSame(1, (int)$vague->processed, 'The refused wave is still waiting on a body that no longer holds a combat.');
         $this->assertCount(1, FleetMission::query()->where('parent_id', $vague->id)->get(), 'The refused wave did not come home exactly once.');
         $this->assertSame(CombatReasonCode::FleetLimitReached->value, $this->reasonToldTo($combat, $vague), 'The limit reason was replaced.');
+        $this->assertSame($ouverture + 30, (int)FleetMission::query()->where('parent_id', $vague->id)->value('time_departure'), 'A worker an hour late moved the departure of the refused wave.');
 
         $this->assertSame(
             1,
@@ -504,7 +509,9 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
             $this->fail('The refused reinforcement has no return.');
         }
 
-        $this->assertSame($apres, (int)$retour->time_departure, 'The return does not leave at the instant the disposition was consumed.');
+        // **Un travailleur en retard de plus d'une heure ecrit les memes heures qu'un travailleur
+        // ponctuel.** Le renfort etait pose depuis +5, refuse a +19 : il repart a +19.
+        $this->assertSame($ouverture + 19, (int)$retour->time_departure, 'The return leaves at the worker clock: a late worker changes when a fleet gets home.');
 
         // La raison est celle de l'admission, pas un « ralliement ferme » invente apres coup.
         $this->assertSame(CombatReasonCode::NotAlreadyInFlight->value, $this->reasonToldTo($combat, $renfort));
@@ -615,18 +622,17 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
     }
 
     /**
-     * Une flotte dont le combat a deja decide le mouvement ne se rappelle pas.
+     * Rappeler une flotte dont le combat a deja decide le mouvement execute ce verdict, tout de suite.
      *
-     * ## Ce que le rappel casserait
+     * ## Ni ignorer le clic, ni le remplacer
      *
-     * Une refusee porte sa disposition des la fermeture, et rentrera par elle — avec la raison que
-     * le joueur lira. Un rappel accorde dans cette fenetre creerait le retour **hors du protocole**,
-     * et laisserait le verdict inexecute pour toujours : la disposition resterait « en attente »,
-     * puisque l'aller serait deja traite quand le travailleur y passerait.
-     *
-     * Ce que le joueur voit ne change pas : sa flotte rentre, un peu plus tard, avec sa raison.
+     * Une refusee porte sa disposition des la fermeture, et rentrera par elle. Un rappel ordinaire
+     * dans cette fenetre creerait le retour **hors du protocole** et laisserait le verdict inexecute
+     * pour toujours. Un clic sans effet jusqu'au prochain passage du travailleur serait sur, mais
+     * deroutant. Le clic consomme donc la decision persistee par le consommateur commun : ni raison
+     * redecidee, ni `canceled`, ni rappel ordinaire — la meme chose que le travailleur, plus tot.
      */
-    public function testAFleetWhoseMovementTheCombatDecidedIsNotRecalled(): void
+    public function testRecallingAFleetWhoseMovementTheCombatDecidedCarriesOutThatVerdictAtOnce(): void
     {
         $renfort = null;
         [$combat, , , $ouverture] = $this->anOpenedCombat(true, function (PlanetService $cible, int $ouverture) use (&$renfort): void {
@@ -648,16 +654,19 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
         resolve(FleetMissionService::class)->cancelMission($renfort->refresh());
 
         $renfort->refresh();
-        $this->assertSame(0, FleetMission::query()->where('parent_id', $renfort->id)->count(), 'The recall created the return outside the movement protocol.');
-        $this->assertSame(0, (int)$renfort->canceled, 'The recall marked a fleet the combat had already decided for.');
-        $this->assertSame(0, (int)$renfort->processed);
+        $retours = FleetMission::query()->where('parent_id', $renfort->id)->get();
+        $this->assertCount(1, $retours, 'The recall did not carry out the decided movement at once.');
+        $this->assertSame(0, (int)$renfort->canceled, 'The recall became an ordinary cancellation instead of the decided movement.');
+        $this->assertSame(1, (int)$renfort->processed);
+        $this->assertSame($ouverture + 25, (int)CombatFleetDisposition::query()->where('fleet_mission_id', $renfort->id)->value('consumed_at'), 'The decision was not consumed by the click.');
+        $this->assertSame(CombatReasonCode::NotAlreadyInFlight->value, $this->reasonToldTo($combat, $renfort), 'The click redecided the reason.');
 
-        // Et le verdict s'execute normalement au passage suivant, avec sa raison.
+        // Le depart est celui de la decision — la fermeture, a +19 — et non celui du clic.
+        $this->assertSame($ouverture + 19, (int)$retours->first()?->time_departure, 'The click moved the departure of a return the combat had already dated.');
+
+        // Le travailleur qui passe ensuite ne trouve plus rien a faire.
         resolve(FleetMissionService::class)->updateMission($renfort->refresh());
-
-        $this->assertSame(1, FleetMission::query()->where('parent_id', $renfort->id)->count(), 'The decided movement was never carried out.');
-        $this->assertNotNull(CombatFleetDisposition::query()->where('fleet_mission_id', $renfort->id)->value('consumed_at'), 'The decision stayed pending forever.');
-        $this->assertSame(CombatReasonCode::NotAlreadyInFlight->value, $this->reasonToldTo($combat, $renfort), 'The fleet went home without the reason the closure gave it.');
+        $this->assertSame(1, FleetMission::query()->where('parent_id', $renfort->id)->count(), 'The worker created a second return after the click.');
     }
 
     /**
@@ -673,7 +682,7 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
      *
      * Le depart se dit maintenant explicitement, et la duree se calcule des faits intacts.
      */
-    public function testTheTurnBackKeepsTheOutboundHoursAndDepartsNow(): void
+    public function testTheTurnBackKeepsTheOutboundHoursAndDepartsAtItsDecisionInstant(): void
     {
         $renfort = null;
         [, , , $ouverture] = $this->anOpenedCombat(false, function (PlanetService $cible, int $ouverture) use (&$renfort): void {
@@ -691,8 +700,9 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
 
         // Le travailleur passe cinq secondes apres l'arrivee physique : son horloge n'est ni le
         // depart, ni l'arrivee, ni la fin du stationnement. Aucune des valeurs comparees ci-dessous
-        // ne coincide donc avec une autre.
+        // ne coincide donc avec une autre — et surtout pas l'instant de depart du retour avec elle.
         $maintenant = $ouverture + 95;
+        $decision = $ouverture + 90;
         $this->travelTo(Date::createFromTimestamp($maintenant));
         resolve(FleetMissionService::class)->updateMission($renfort->refresh());
 
@@ -704,8 +714,8 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
 
         $retour = FleetMission::query()->where('parent_id', $renfort->id)->first();
         $this->assertNotNull($retour, 'The refused reinforcement was not sent home.');
-        $this->assertSame($maintenant, (int)$retour->time_departure, 'The return did not leave at the instant it was decided.');
-        $this->assertSame($maintenant + $dureeAller, (int)$retour->time_arrival, 'The return does not take the outbound duration computed from intact facts.');
+        $this->assertSame($decision, (int)$retour->time_departure, 'The return leaves at the worker clock instead of the instant the movement was decided.');
+        $this->assertSame($decision + $dureeAller, (int)$retour->time_arrival, 'The return does not take the outbound duration computed from intact facts.');
     }
 
     /**

@@ -2,8 +2,11 @@
 
 namespace OGame\GameMissions\Abstracts;
 
+use Closure;
 use Exception;
 use Illuminate\Support\Facades\Date;
+use OGame\Combat\Services\RefusedFleetHomecoming;
+use OGame\Combat\Support\ReturnOrder;
 use OGame\Enums\FleetMissionStatus;
 use OGame\Enums\FleetSpeedType;
 use OGame\Factories\PlanetServiceFactory;
@@ -501,6 +504,46 @@ abstract class GameMission
         }
 
         return null;
+    }
+
+    /**
+     * Execute le mouvement que le combat a deja decide pour cette flotte, s'il y en a un.
+     *
+     * ## Une seule entree, pour tous les genres et tous les appelants
+     *
+     * Le travailleur qui traite l'arrivee, et le joueur qui clique « rappeler », font ici la meme
+     * chose : consommer par le protocole commun une disposition deja ecrite. Aucun des deux ne
+     * redecide la raison, ne cree un rappel ordinaire, ni ne pose `canceled` — il ne fait
+     * qu'accelerer l'execution d'une decision persistee.
+     *
+     * @return bool Vrai si la flotte est repartie par ce verdict.
+     */
+    public function carryOutTheMovementAlreadyDecided(FleetMission $mission, int $now): bool
+    {
+        return resolve(RefusedFleetHomecoming::class)->sendHome($mission, $now, $this->returnOfARefusedFleet());
+    }
+
+    /**
+     * Ce que ce genre de mission sait faire, et rien de plus : creer le retour qu'un ordre decrit.
+     *
+     * La destination et l'instant de depart sont imposes par l'ordre ; le protocole verifie ensuite
+     * qu'exactement un retour a ete cree. Les genres de mission ne choisissent plus ces deux
+     * choses : l'attaque prenait l'arrivee, la Defense ACS l'horloge du travailleur, et le retard de
+     * ce dernier changeait l'heure de retour d'un renfort.
+     *
+     * @return Closure(FleetMission, ReturnOrder): void
+     */
+    protected function returnOfARefusedFleet(): Closure
+    {
+        return function (FleetMission $tenue, ReturnOrder $ordre): void {
+            $this->startReturn(
+                $tenue,
+                $this->fleetMissionService->getResources($tenue),
+                $this->fleetMissionService->getFleetUnits($tenue),
+                departureAt: $ordre->departureAt,
+                destination: $ordre->destination
+            );
+        };
     }
 
     /**

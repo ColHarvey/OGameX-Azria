@@ -17,7 +17,6 @@ use OGame\Combat\Admission\FrozenAllianceMembership;
 use OGame\Combat\Admission\RallyGrouping;
 use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\Enums\CombatMissionKind;
-use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\FleetDispositionKind;
 use OGame\Combat\Enums\SnapshotContribution;
@@ -26,15 +25,16 @@ use OGame\Combat\Projection\SnapshotProjectionRegistry;
 use OGame\Combat\Support\ActorKindResolver;
 use OGame\Combat\Support\CombatEventIdentity;
 use OGame\Combat\Support\CombatParticipantKey;
+use OGame\Combat\Support\RefusedFleetNotice;
 use OGame\Combat\Support\SnapshotContributionSet;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
-use OGame\Models\CombatOutboxMessage;
 use OGame\Models\CombatParticipant;
 use OGame\Models\CombatSnapshotInclusion;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet;
 use OGame\Models\User;
+use RuntimeException;
 
 /**
  * La fermeture du ralliement : l'instant ou la photographie se prend.
@@ -525,26 +525,15 @@ final class RallyClosureService
                     FleetDispositionKind::ReturnToOrigin
                 );
 
-                CombatOutboxMessage::query()->updateOrCreate(
-                    [
-                        'combat_instance_id' => $combat->id,
-                        'participant_key' => CombatParticipantKey::forFleet($mission->missionId),
-                        'kind' => CombatOutboxKind::RallyRefused->value,
-                    ],
-                    [
-                        'payload' => [
-                            'reason' => $raison->value,
-                            'target_body_id' => $combat->target_planet_id,
-                            'galaxy' => $combat->galaxy,
-                            'system' => $combat->system,
-                            'position' => $combat->position,
-                            // La taille du groupe : « ta vague de cinq est repartie entiere » ne se
-                            // raconte pas comme « ta flotte est repartie ».
-                            'group_fleets' => count($admission->group->missions),
-                        ],
-                        'available_at' => $closedAt,
-                    ]
-                );
+                // **Le meme avis que le renvoi ecrira**, derive de la meme decision. La taille du
+                // groupe — « ta vague de cinq est repartie entiere » — n'est connue qu'ici.
+                $ligne = FleetMission::query()->find($mission->missionId);
+
+                if (!$ligne instanceof FleetMission) {
+                    throw new RuntimeException('La candidate ' . $mission->missionId . ' refusee par le combat ' . $combat->id . ' n existe plus.');
+                }
+
+                RefusedFleetNotice::write($combat, $ligne, $raison, $closedAt, count($admission->group->missions));
             }
         }
     }

@@ -3,14 +3,13 @@
 namespace OGame\Combat\Services;
 
 use Closure;
-use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\FleetDispositionKind;
-use OGame\Combat\Support\CombatParticipantKey;
+use OGame\Combat\Support\RefusedFleetNotice;
 use OGame\Combat\Support\RefusedFleetVerdict;
-use OGame\GameMissions\Models\ResolvedReturnDestination;
+use OGame\Combat\Support\ReturnOrder;
 use OGame\Models\CombatFleetDisposition;
-use OGame\Models\CombatOutboxMessage;
 use OGame\Models\FleetMission;
+use RuntimeException;
 
 /**
  * Le seul chemin par lequel une flotte que le combat refuse rentre chez elle.
@@ -23,8 +22,9 @@ use OGame\Models\FleetMission;
  * pour toujours, et la phrase « l'avis decoule de la disposition » etait fausse de ce cote-la.
  *
  * Deux protocoles pour un meme mouvement, c'est deux endroits ou la regle peut diverger. Celui-ci
- * est le seul, et chaque genre de mission ne fournit plus que ce qu'il est seul a savoir : comment
- * creer sa mission retour.
+ * est le seul. Les genres de mission ne choisissent plus rien : ni la destination, ni l'instant du
+ * depart — ils recoivent un `ReturnOrder` et creent le retour qu'il decrit, et le protocole verifie
+ * qu'ils en ont cree exactement un.
  *
  * ## Ce que toute flotte renvoyee traverse, dans cet ordre
  *
@@ -32,9 +32,10 @@ use OGame\Models\FleetMission;
  * 2. **sa disposition**, ecrite avant l'effet si personne ne l'avait encore jugee ;
  * 3. **sa destination**, decidee sous verrou par le protocole unique — une origine rasee ne fait
  *    pas disparaitre la flotte, elle la fait rentrer par le recours suivant ;
- * 4. **son avis**, derive de la raison persistee et non d'une raison redecidee ici ;
- * 5. **l'aller marque traite** — et rien d'autre : ses heures sont des faits ;
- * 6. **un seul retour**, dans la transaction qui pose `consumed_at`.
+ * 4. **son instant de depart**, derive de la decision et jamais de l'horloge du travailleur ;
+ * 5. **son avis**, derive de la raison persistee — et compare a celui que la fermeture a pu ecrire ;
+ * 6. **l'aller marque traite** — et rien d'autre : ses heures sont des faits ;
+ * 7. **un seul retour**, dans la transaction qui pose `consumed_at`.
  *
  * Le tout est indivisible : une panne a n'importe quelle etape laisse la flotte exactement comme
  * avant, disposition en attente comprise, et le passage suivant recommence.
@@ -51,9 +52,9 @@ final class RefusedFleetHomecoming
     /**
      * Renvoie la flotte si un mouvement lui a ete impose, et une seule fois.
      *
-     * @param Closure(FleetMission, ResolvedReturnDestination): void $creerRetour Ce que ce genre de
-     *        mission est seul a savoir faire. Il recoit la mission **tenue sous verrou** et la
-     *        destination decidee ; l'instant de depart lui appartient.
+     * @param Closure(FleetMission, ReturnOrder): void $creerRetour Ce que ce genre de mission est
+     *        seul a savoir faire : creer sa mission retour. Il recoit la mission **tenue sous
+     *        verrou** et l'ordre — destination et depart imposes —, et doit creer exactement un retour.
      * @param Closure(FleetMission): (RefusedFleetVerdict|null)|null $juger Ce que decide le combat
      *        pour une flotte que personne n'avait encore jugee. Rendre `null` : rien a faire.
      * @return bool Vrai si ce passage a renvoye la flotte.
@@ -101,9 +102,9 @@ final class RefusedFleetHomecoming
     }
 
     /**
-     * Execute le mouvement decide : destination, avis, marquage, retour.
+     * Execute le mouvement decide : destination, instant, avis, marquage, retour.
      *
-     * @param Closure(FleetMission, ResolvedReturnDestination): void $creerRetour
+     * @param Closure(FleetMission, ReturnOrder): void $creerRetour
      */
     private function carryOut(FleetMission $mission, CombatFleetDisposition $decidee, Closure $creerRetour): void
     {
@@ -111,62 +112,32 @@ final class RefusedFleetHomecoming
         // alors que rien ne subsiste n'est pas l'ordre de ces lignes mais la transaction, qui
         // ramene tout en arriere ou que la panne survienne : ni avis annonce, ni aller marque, ni
         // decision consommee. La flotte reste visible et recuperable, et le passage suivant
-        // recommence. La resoudre en premier ne fait qu ecrire le protocole dans l ordre ou on le
-        // raconte.
+        // recommence.
         $destination = $this->destinations->resolveUnderLock($mission, (int)$decidee->combat_instance_id);
 
-        $this->announce($mission, $decidee);
+        // **L'instant de depart vient de la decision, jamais de l'horloge.** Un travailleur en
+        // retard de trois heures ecrit les memes heures qu'un travailleur ponctuel.
+        $ordre = new ReturnOrder($destination, ReturnOrder::departureInstant((int)$decidee->decided_at, $mission));
+
+        // **L'avis decoule du mouvement, jamais l'inverse** — et s'il existe deja, il doit dire la
+        // meme chose. Un message est une chose que l'on affiche ; une disposition est une chose que
+        // l'on doit faire.
+        RefusedFleetNotice::write($decidee->combatInstance, $mission, $decidee->reason, (int)$decidee->decided_at);
 
         // **L'aller ne perd que son etat de traitement.** Son arrivee et son stationnement sont des
         // faits : ce que le joueur avait planifie, ce que l'admission a juge, ce que l'audit relira.
         $mission->processed = 1;
         $mission->save();
 
-        ($creerRetour)($mission, $destination);
-    }
+        // **Exactement un retour, du bon parent.** La creation appartient au genre de mission ; sa
+        // verification appartient au protocole. Zero retour ferait disparaitre la flotte, deux la
+        // feraient exister deux fois — et une fermeture arbitraire peut faire l'un comme l'autre.
+        ($creerRetour)($mission, $ordre);
 
-    /**
-     * Ecrit l'avis depuis la raison persistee.
-     *
-     * **L'avis decoule du mouvement, jamais l'inverse.** Un message est une chose que l'on affiche ;
-     * une disposition est une chose que l'on doit faire. Les ecrire dans cet ordre garantit qu'aucun
-     * refus annonce ne reste sans le mouvement qui va avec — et qu'aucune raison affichee ne diverge
-     * de celle qui a ete decidee.
-     */
-    private function announce(FleetMission $mission, CombatFleetDisposition $decidee): void
-    {
-        $combat = $decidee->combatInstance;
+        $crees = FleetMission::query()->where('parent_id', $mission->id)->count();
 
-        CombatOutboxMessage::query()->firstOrCreate(
-            [
-                'combat_instance_id' => $decidee->combat_instance_id,
-                'participant_key' => CombatParticipantKey::forFleet($mission->id),
-                'kind' => CombatOutboxKind::RallyRefused->value,
-            ],
-            [
-                'payload' => [
-                    'reason' => $decidee->reason->value,
-                    'target_body_id' => $combat->target_planet_id,
-                    'galaxy' => $combat->galaxy,
-                    'system' => $combat->system,
-                    'position' => $combat->position,
-                    'group_fleets' => 1,
-                ],
-                // L'avis est lisible depuis l'instant ou la flotte s'est posee, pas depuis celui ou
-                // un travailleur a fini par la voir.
-                'available_at' => self::physicalArrivalOf($mission),
-            ]
-        );
-    }
-
-    /**
-     * L'instant ou la flotte s'est reellement posee sur le corps.
-     *
-     * Pour une Defense ACS, `time_arrival` porte la fin du stationnement : l'arrivee physique est en
-     * amont. Pour les autres genres, le stationnement est nul et les deux se confondent.
-     */
-    public static function physicalArrivalOf(FleetMission $mission): int
-    {
-        return (int)$mission->time_arrival - (int)($mission->time_holding ?? 0);
+        if ($crees !== 1) {
+            throw new RuntimeException('Le renvoi de la flotte ' . $mission->id . ' a cree ' . $crees . ' mission(s) retour au lieu d exactement une.');
+        }
     }
 }

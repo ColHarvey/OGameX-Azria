@@ -746,11 +746,17 @@ class FleetMissionService
             return;
         }
 
-        // **Le combat a peut-etre deja decide de son mouvement.** Une flotte qui porte une
-        // disposition non consommee rentre par ce verdict-la, avec la raison que le joueur lira ;
-        // la rappeler creerait le retour hors du protocole et laisserait le verdict inexecute pour
-        // toujours. Ce que le joueur voit ne change pas : sa flotte rentre.
+        // **Le combat a peut-etre deja decide de son mouvement : le clic l'execute, il ne le
+        // remplace pas.** Une flotte qui porte une disposition non consommee rentre par ce
+        // verdict-la, avec la raison que le joueur lira — tout de suite, sans attendre le prochain
+        // passage du travailleur. Ni rappel ordinaire, ni `canceled`, ni raison redecidee : le
+        // consommateur commun, et rien d'autre.
         if (resolve(FleetDispositionRegistry::class)->pendingFor($mission) !== null) {
+            $this->gameMissionFactory->getMissionById($mission->mission_type, [
+                'fleetMissionService' => $this,
+                'messageService' => $this->messageService,
+            ])->carryOutTheMovementAlreadyDecided($mission, (int)Date::now()->timestamp);
+
             return;
         }
 
