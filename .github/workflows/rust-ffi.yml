@@ -8,10 +8,12 @@ name: Moteur Rust et couture FFI
 #
 # Le poste de developpement est sous Windows et ne possede ni Rust, ni Docker, ni WSL. Meme avec
 # Rust installe, Windows produirait un `.dll`, pas le `.so` que la couture attend. La chaine ne peut
-# donc etre eprouvee que sur Linux.
+# donc etre eprouvee que sur Linux, et **ce workflow est la preuve canonique** : un run vert sur un
+# autre hash ne valide pas le candidat.
 #
-# Ce workflow est cet environnement. Il ne deploie rien : il compile, il execute les essais qui sont
-# ignores partout ailleurs, et il dit si le moteur obligatoire est utilisable.
+# Ce qu'il ne fait pas encore, et qui est du : le banc de parite deterministe PHP/Rust, alimente par
+# la meme bande de tirages, avec les pertes defensives par participant et par periode. Il sera ajoute
+# en meme temps que le contrat qu'il compare — l'inscrire ici avant qu'il existe ne prouverait rien.
 
 on:
   push:
@@ -29,25 +31,56 @@ jobs:
       - name: Recuperer le depot
         uses: actions/checkout@v4
 
+      # **Le SHA exact, affiche d'emblee.** Un artefact ou un resume qui ne nomme pas son hash ne
+      # valide rien : la question est toujours « ce commit-la est-il bon ? ».
+      - name: Nommer le candidat
+        run: |
+          echo "SHA=${GITHUB_SHA}" >> "$GITHUB_ENV"
+          {
+            echo "## Moteur Rust et couture FFI"
+            echo ""
+            echo "| Champ | Valeur |"
+            echo "| --- | --- |"
+            echo "| SHA | \`${GITHUB_SHA}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Installer la chaine Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Compiler la bibliotheque
+      # **Le meme script que l'image de production.** Recopier une seconde commande de compilation
+      # ici ferait deriver les deux : le jour ou l'image changerait de cible, de profil ou de nom de
+      # bibliotheque, ce workflow validerait autre chose que ce qui tourne.
+      - name: Compiler par le script de production
         run: |
-          cargo build --manifest-path=rust/Cargo.toml --release
           mkdir -p storage/rust-libs
-          cp rust/target/release/libbattle_engine_ffi.so storage/rust-libs/
-          if [ -f rust/target/release/libtest_ffi.so ]; then
-            cp rust/target/release/libtest_ffi.so storage/rust-libs/
-          fi
-          ls -la storage/rust-libs/
+          chmod +x rust/compile.sh
+          ./rust/compile.sh
+
+      # **Existe, et est bien une bibliotheque ELF.** Un fichier present mais vide, ou un binaire
+      # d'une autre plateforme, se chargerait mal plus tard et l'erreur parlerait d'autre chose.
+      - name: Verifier la bibliotheque
+        run: |
+          set -euo pipefail
+          test -s storage/rust-libs/libbattle_engine_ffi.so
+          file storage/rust-libs/libbattle_engine_ffi.so | tee /tmp/so.txt
+          grep -q 'ELF .*shared object' /tmp/so.txt
+          sha256sum storage/rust-libs/*.so | tee /tmp/so-sha256.txt
 
       - name: Installer PHP avec FFI
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          # La meme version que le `Dockerfile` : eprouver la couture sous une autre ne dirait rien
+          # de celle qui tourne.
+          php-version: '8.5'
           extensions: ffi, sqlite3, pdo_sqlite, bcmath, gd, zip, intl
           ini-values: ffi.enable=1, memory_limit=2G
+
+      - name: Verifier que FFI est chargee et activee
+        run: |
+          set -euo pipefail
+          php -r 'exit(extension_loaded("FFI") ? 0 : 1);'
+          php -r 'exit(in_array(ini_get("ffi.enable"), ["1", "true", "preload"], true) ? 0 : 1);'
+          php -r '$f = FFI::cdef("", "storage/rust-libs/libbattle_engine_ffi.so"); echo "bibliotheque chargee\n";'
 
       - name: Installer les dependances
         run: composer install --no-interaction --prefer-dist --no-progress
@@ -58,18 +91,55 @@ jobs:
           php artisan key:generate --force
           touch database/database.sqlite
 
-      # Le point du workflow : ces essais sont **ignores** partout ailleurs faute de bibliotheque.
-      # Ici ils doivent tourner. Zero ignore attendu.
-      - name: Executer les essais du moteur Rust
-        run: php scripts/suite.php --filter Rust
+      # **Les essais natifs du moteur**, depuis le manifeste que le script de construction utilise.
+      # `--locked` refuse une resolution de dependances differente de celle qui est versionnee.
+      - name: Executer les essais Rust natifs
+        run: cargo test --manifest-path rust/Cargo.toml --locked --all-targets
+
+      # **Une seule execution, sequentielle, avec son rapport.** Relancer trois fois la meme
+      # selection ne prouve rien de plus, et lire du texte a la recherche du mot « ignore » se trompe
+      # des qu'il apparait dans un nom d'essai.
+      - name: Executer le groupe du moteur
+        run: php scripts/suite.php --sequentiel --filter Rust --log-junit=storage/logs/junit-rust.xml
+
+      # C'est ici que le workflow gagne son sens : ces essais sont **ignores** partout ailleurs faute
+      # de bibliotheque. Un code de sortie vert ne suffit pas — une suite entierement sautee sort
+      # verte aussi. Le rapport est lu comme une structure.
+      - name: Exiger les essais Rust executes, aucun ignore
+        run: php scripts/verifier-junit.php storage/logs/junit-rust.xml --minimum=30 --sans-ignores
 
       - name: Executer la suite complete
-        run: php scripts/suite.php
+        run: php scripts/suite.php --sequentiel --log-junit=storage/logs/junit-suite.xml
 
-      - name: Verifier qu aucun essai Rust n a ete ignore
+      - name: Exiger une suite sans ignore
+        run: php scripts/verifier-junit.php storage/logs/junit-suite.xml --sans-ignores
+
+      # **Le resume dit les compteurs, pas seulement une couleur.** Un lecteur doit pouvoir juger
+      # sans ouvrir l'artefact.
+      - name: Resumer le verdict
+        if: always()
         run: |
-          php scripts/suite.php --filter Rust --display-skipped 2>&1 | tee /tmp/rust.txt
-          if grep -qi "skipped" /tmp/rust.txt; then
-            echo "Des essais Rust ont ete ignores : la bibliotheque n a pas ete chargee."
-            exit 1
-          fi
+          {
+            echo "| PHP | \`$(php -r 'echo PHP_VERSION;')\` |"
+            echo "| Rust | \`$(rustc --version 2>/dev/null || echo absent)\` |"
+            echo "| Empreinte du .so | \`$(sha256sum storage/rust-libs/libbattle_engine_ffi.so 2>/dev/null | cut -d' ' -f1 || echo absent)\` |"
+            echo ""
+            echo '```'
+            echo "groupe Rust : $(php scripts/verifier-junit.php storage/logs/junit-rust.xml 2>&1 | head -1)"
+            echo "suite       : $(php scripts/verifier-junit.php storage/logs/junit-suite.xml 2>&1 | head -1)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # **Publie meme en echec.** Un run rouge est precisement celui qu'on veut lire, et l'artefact
+      # porte le SHA pour qu'il ne soit jamais confondu avec un autre.
+      - name: Publier l artefact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-validation-${{ github.sha }}
+          if-no-files-found: warn
+          path: |
+            storage/logs/junit-rust.xml
+            storage/logs/junit-suite.xml
+            /tmp/so.txt
+            /tmp/so-sha256.txt
