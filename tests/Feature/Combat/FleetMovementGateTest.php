@@ -527,6 +527,33 @@ class FleetMovementGateTest extends TestCase
     }
 
     /**
+     * Sortir de l'enveloppe du banc ne laisse rien, meme quand un identifiant de l'enveloppe est reutilise.
+     *
+     * ## Le trou que la photographie avant le rollback ouvrait
+     *
+     * Une ligne creee dans l'enveloppe avant l'appel disparait avec le rollback ; si la
+     * photographie des identifiants etait prise avant, cet identifiant y figurait — et la mission
+     * que l'essai cree hors transaction, qui le reutilise, paraissait « ancienne » au nettoyage.
+     * Elle restait, et polluait exactement la base que le helper devait proteger.
+     */
+    public function testLeavingTheEnvelopeCleansEvenARowWhoseIdTheEnvelopeHadUsed(): void
+    {
+        // Une ligne de l'enveloppe, condamnee par le rollback qui vient.
+        [, $condamnee] = $this->aCombatAndAFleet();
+        $identifiantCondamne = $condamnee->id;
+
+        $creee = null;
+        $this->outsideAnyTransaction(function () use (&$creee): void {
+            [, $mission] = $this->aCombatAndAFleet();
+            $creee = $mission->id;
+        });
+
+        $this->assertNotNull($creee);
+        $this->assertSame($identifiantCondamne, $creee, 'SQLite did not reuse the rolled-back id: the scenario would not be conclusive.');
+        $this->assertNull(FleetMission::query()->find($creee), 'A row written outside the envelope survived because its id had once belonged to the envelope.');
+    }
+
+    /**
      * Personne ne peut dire a la porte ou est la racine : c'est un fait de la base.
      *
      * Une premiere version acceptait un niveau « racine » a la construction. Un essai enveloppe
@@ -561,6 +588,8 @@ class FleetMovementGateTest extends TestCase
      */
     private function outsideAnyTransaction(Closure $essai): void
     {
+        // **La liste est celle des effets de ces essais**, et de rien d'autre : ce n'est pas un
+        // nettoyeur generique. Dans l'ordre des contraintes, les enfants avant les parents.
         $tables = [
             'combat_fleet_dispositions',
             'combat_participants',
@@ -572,23 +601,46 @@ class FleetMovementGateTest extends TestCase
             'users',
         ];
 
-        $plafonds = [];
-        foreach ($tables as $table) {
-            $plafonds[$table] = (int)DB::table($table)->max('id');
-        }
-
+        // **Revenir a zero d'abord, photographier ensuite.** Une ligne creee dans l'enveloppe du
+        // banc avant cet appel disparait avec le rollback ; photographiee avant, son identifiant —
+        // reutilise par l'essai hors transaction — aurait paru « ancien », et le nettoyage l'aurait
+        // laisse. La photographie est une liste d'identifiants reellement persistes, pas un maximum.
         DB::rollBack();
         $this->assertSame(0, DB::transactionLevel(), 'The test is still inside a transaction: the gate would not own its own.');
+
+        $persistes = [];
+        foreach ($tables as $table) {
+            $persistes[$table] = DB::table($table)->pluck('id')->map(static fn (mixed $id): int => (int)$id)->all();
+        }
+
+        $restes = [];
 
         try {
             $essai();
         } finally {
-            foreach ($tables as $table) {
-                DB::table($table)->where('id', '>', $plafonds[$table])->delete();
-            }
+            // **Nettoyer, puis rouvrir l'enveloppe quoi qu'il arrive.** Une exception du nettoyage
+            // ne doit pas laisser le reste du processus sans la transaction que le demontage attend.
+            try {
+                foreach ($tables as $table) {
+                    DB::table($table)->whereNotIn('id', $persistes[$table])->delete();
+                }
 
-            DB::beginTransaction();
+                foreach ($tables as $table) {
+                    $apres = DB::table($table)->pluck('id')->map(static fn (mixed $id): int => (int)$id)->all();
+                    sort($apres);
+                    $avant = $persistes[$table];
+                    sort($avant);
+
+                    if ($apres !== $avant) {
+                        $restes[] = $table;
+                    }
+                }
+            } finally {
+                DB::beginTransaction();
+            }
         }
+
+        $this->assertSame([], $restes, 'Rows written outside the transaction survived the cleanup in: ' . implode(', ', $restes));
     }
 
     private function aUnionFor(FleetMission $mission): FleetUnion

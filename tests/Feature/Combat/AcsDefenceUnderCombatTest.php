@@ -900,7 +900,8 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
         // **Au moment precis ou la porte prend les unions**, et pas avant : le travailleur charge la
         // mission plus tot, et un lien pose avant ce chargement serait tenu normalement. La requete
         // de la porte est la seule a ordonner les unions par identifiant.
-        $course = new ArrayObject(['actif' => true, 'joue' => false, 'prochaine' => false]);
+        /** @var ArrayObject<string, int|bool|null> $course */
+        $course = new ArrayObject(['actif' => true, 'flips' => 0, 'prochaine' => false, 'niveau' => null]);
         DB::listen(function ($requete) use ($course, $renfort, $union): void {
             if ($course['actif'] !== true) {
                 return;
@@ -914,10 +915,20 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
                 $course['prochaine'] = true;
             }
 
-            if ($course['joue'] === false && $course['prochaine'] === true
+            // **A chaque prise, le lien change** : la porte, qui possede sa transaction, recommence
+            // depuis la barriere avec le lien rechargé — et trouve un autre lien. Au bout de ses
+            // reprises elle renonce, le dit, et le travailleur laisse la mission au passage suivant.
+            // La premiere fois, on note aussi a quel niveau de transaction la porte travaille : un,
+            // si elle possede la transaction ; deux, si la page l'a enveloppee dans la sienne.
+            if ($course['prochaine'] === true && (int)$course['flips'] < 3
                 && str_contains($requete->sql, '"fleet_unions"') && str_contains($requete->sql, 'order by "id" asc')) {
-                $course['joue'] = true;
-                DB::table('fleet_missions')->where('id', $renfort->id)->update(['union_id' => $union->id]);
+                if ($course['niveau'] === null) {
+                    $course['niveau'] = DB::transactionLevel();
+                }
+
+                $course['prochaine'] = false;
+                $course['flips'] = (int)$course['flips'] + 1;
+                DB::table('fleet_missions')->where('id', $renfort->id)->update(['union_id' => $this->aFreshUnionLike($union)->id]);
             }
         });
 
@@ -935,11 +946,30 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
             $course['actif'] = false;
         }
 
-        $this->assertTrue($course['joue'] === true, 'The link never changed under the gate: nothing would be proved.');
+        $this->assertSame(3, (int)$course['flips'], 'The gate did not retry from the barrier the expected number of times: nothing would be proved.');
+        $this->assertSame(1, $course['niveau'], 'The worker wrapped the gate in a page transaction: the gate does not own its transaction, and the lock order is inverted.');
 
         $renfort->refresh();
         $this->assertSame(0, (int)$renfort->processed, 'The worker moved a mission whose link had changed under the gate.');
         $this->assertNull($renfort->combat_instance_id, 'The worker held a mission on a link it never locked.');
+    }
+
+    /**
+     * Une union de plus, semblable a celle-ci : chaque reprise de la porte doit trouver un lien neuf.
+     */
+    private function aFreshUnionLike(FleetUnion $modele): FleetUnion
+    {
+        return FleetUnion::create([
+            'user_id' => $modele->user_id,
+            'name' => null,
+            'galaxy_to' => $modele->galaxy_to,
+            'system_to' => $modele->system_to,
+            'position_to' => $modele->position_to,
+            'planet_type_to' => $modele->planet_type_to,
+            'time_arrival' => $modele->time_arrival,
+            'max_fleets' => 16,
+            'max_players' => 5,
+        ]);
     }
 
     /**

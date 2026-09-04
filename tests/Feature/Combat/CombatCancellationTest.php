@@ -23,6 +23,7 @@ use OGame\Combat\Services\ReturnDestinationResolver;
 use OGame\Combat\Services\ReturnPlanner;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\ReturnPlan;
+use OGame\Factories\PlayerServiceFactory;
 use OGame\GameMissions\AttackMission;
 use OGame\GameMissions\Models\ResolvedReturnDestination;
 use OGame\GameObjects\Models\Units\UnitCollection;
@@ -30,6 +31,7 @@ use OGame\Models\BattleReport;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatOutboxMessage;
+use OGame\Models\CombatParticipant;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet;
 use OGame\Models\Planet\Coordinate;
@@ -393,6 +395,114 @@ class CombatCancellationTest extends FleetDispatchTestCase
         $this->assertNotNull(CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->first(), 'The body was released.');
         $this->assertSame(0, FleetMission::query()->where('parent_id', $mission->id)->count());
         $this->assertSame(0, (int)$mission->refresh()->processed);
+    }
+
+    /**
+     * Supprimer le compte de l'attaquant annule son combat, et l'inscription survit sans son lien.
+     *
+     * ## Le cycle de vie d'une inscription
+     *
+     * Une mission inscrite dans un combat actif ne s'efface pas : la suppression annule d'abord le
+     * combat, avec la cause faite pour cela. Ensuite seulement la mission disparait — et
+     * l'inscription reste, cle de participant, proprietaire et instantane intacts, son lien vers la
+     * mission devenu nul. Un identifiant de mission reutilise ne peut plus devenir ce participant.
+     */
+    public function testDeletingTheAttackerAccountCancelsItsCombatAndKeepsTheEnrolmentWithoutItsLink(): void
+    {
+        [$combat, $mission] = $this->anActiveCombat();
+
+        $inscription = CombatParticipant::query()->where('combat_instance_id', $combat->id)->where('fleet_mission_id', $mission->id)->first();
+        $this->assertNotNull($inscription, 'The opener is not enrolled: nothing would be proved.');
+        $instantane = $inscription->units_snapshot;
+        $cle = $inscription->participant_key;
+
+        resolve(PlayerServiceFactory::class)->make($this->currentUserId, true)->delete();
+
+        $combat->refresh();
+        $this->assertSame(CombatState::Cancelled, $combat->status, 'The combat of a deleted attacker is still running.');
+        $this->assertSame(CombatCancellationCause::AttackerRemoved, $combat->cancellation_cause);
+        $this->assertStringContainsString('suppression du compte ' . $this->currentUserId, (string)$combat->cancellation_note);
+
+        $this->assertNull(FleetMission::query()->find($mission->id), 'The deleted account still owns its mission.');
+
+        $inscription->refresh();
+        $this->assertNull($inscription->fleet_mission_id, 'The enrolment still points at a mission that no longer exists.');
+        $this->assertSame($cle, $inscription->participant_key, 'The enrolment lost its identity.');
+        $this->assertSame($instantane, $inscription->units_snapshot, 'The enrolment lost its snapshot.');
+
+        // Un identifiant reutilise ne ressuscite pas l'inscription.
+        $neuve = FleetMission::forceCreate([
+            'user_id' => (int)DB::table('users')->orderBy('id')->value('id'),
+            'mission_type' => 1,
+            'time_departure' => 1_700_000_000,
+            'time_arrival' => 1_700_000_600,
+            'galaxy_to' => 1,
+            'system_to' => 1,
+            'position_to' => 1,
+            'type_to' => 1,
+            'light_fighter' => 1,
+        ]);
+        $this->assertSame(0, CombatParticipant::query()->where('fleet_mission_id', $neuve->id)->count(), 'A brand-new mission inherited a former enrolment.');
+    }
+
+    /**
+     * Supprimer le compte de la cible annule le combat : le corps attaque va disparaitre.
+     */
+    public function testDeletingTheTargetOwnerCancelsTheCombatBecauseTheTargetDisappears(): void
+    {
+        [$combat, $mission, $cible] = $this->anActiveCombat();
+        $proprietaire = (int)DB::table('planets')->where('id', $cible->getPlanetId())->value('user_id');
+
+        resolve(PlayerServiceFactory::class)->make($proprietaire, true)->delete();
+
+        $combat->refresh();
+        $this->assertSame(CombatState::Cancelled, $combat->status, 'The combat over a deleted target is still running.');
+        $this->assertSame(CombatCancellationCause::TargetDisappeared, $combat->cancellation_cause);
+
+        // **L'attaquant, lui, rentre** : sa flotte n'a rien a faire sur un corps qui n'existe plus —
+        // et elle n'est pas effacee avec le compte de sa cible. La suppression effacait toute
+        // mission qui allait vers ses planetes, quel qu'en fut le proprietaire ; la flotte d'un
+        // autre joueur disparaissait avec le compte attaque. Elle garde ses coordonnees et perd
+        // seulement le lien vers un corps qui n'est plus la.
+        $mission->refresh();
+        $this->assertSame(1, (int)$mission->processed, 'The attacking fleet was left on a body that no longer exists.');
+        $this->assertNull($mission->planet_id_to, 'The attacking mission still points at a planet that no longer exists.');
+        $retour = FleetMission::query()->where('parent_id', $mission->id)->first();
+        $this->assertNotNull($retour, 'The attacking fleet is not coming home: its return was erased with the target account.');
+        $this->assertNull($retour->planet_id_from, 'The return still points at a planet that no longer exists.');
+        $this->assertSame(350, (int)$retour->light_fighter, 'The attacking fleet lost ships to a deleted target.');
+    }
+
+    /**
+     * Supprimer le compte d'un renfort inscrit dans le combat d'un autre est refuse tant qu'il dure.
+     *
+     * Aucune cause ne dit « un allie est parti », et annuler la bataille d'un tiers parce qu'un allie
+     * efface son compte serait une decision de jeu qui n'a pas ete prise. La suppression attend ; un
+     * combat dure des heures, pas des jours.
+     */
+    public function testDeletingAnEnrolledDefenderIsRefusedWhileTheCombatLasts(): void
+    {
+        $renfort = null;
+        [$combat] = $this->anActiveCombat(function (PlanetService $cible, int $ouverture) use (&$renfort): void {
+            $renfort = $this->aDefensiveReinforcement($cible, $ouverture - 10, 100_000, $ouverture - 600);
+        });
+
+        if ($renfort === null) {
+            $this->fail('The reinforcement was never launched.');
+        }
+
+        $this->assertTrue($combat->participants()->where('fleet_mission_id', $renfort->id)->exists(), 'The reinforcement is not enrolled: nothing would be proved.');
+
+        try {
+            resolve(PlayerServiceFactory::class)->make((int)$renfort->user_id, true)->delete();
+            $this->fail('The account of an enrolled defender was deleted while the combat was running.');
+        } catch (RuntimeException $refus) {
+            $this->assertStringContainsString('renforce le combat ' . $combat->id, $refus->getMessage());
+        }
+
+        $this->assertSame(CombatState::Active, $combat->refresh()->status, 'A third party combat was cancelled because an ally left.');
+        $this->assertNotNull(FleetMission::query()->find($renfort->id), 'The refused deletion still erased the reinforcement.');
+        $this->assertNotNull(DB::table('users')->where('id', $renfort->user_id)->first(), 'The refused deletion still erased the account.');
     }
 
     /**

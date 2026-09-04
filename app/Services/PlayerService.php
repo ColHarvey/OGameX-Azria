@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use OGame\Combat\Exceptions\MovementLocksOutdated;
+use OGame\Combat\Services\AccountCombatWithdrawal;
 use OGame\GameObjects\Models\Calculations\CalculationType;
 use OGame\Models\BuildingQueue;
 use OGame\Models\FleetMission;
@@ -751,21 +752,57 @@ class PlayerService
      */
     public function updateFleetMissions(): void
     {
-        DB::transaction(function () {
+        $planetIds = $this->planets->allIds();
+        $fleetMissionService = resolve(FleetMissionService::class, ['player' => $this]);
+
+        // **Les missions que le combat gouverne entrent par la porte, et la porte possede sa
+        // transaction.** Le traitement de page verrouillait d'abord les planetes du joueur, puis
+        // chaque mission, puis appelait la porte — dont l'ordre global commence par la barriere,
+        // l'instance et l'union avant la mission. Deux sens de rotation : une fermeture ou une
+        // annulation pouvait tenir la barriere et attendre la mission pendant que la page tenait la
+        // mission et attendait la barriere. Ces missions sont donc traitees **hors de toute
+        // transaction de page**, chacune dans la transaction racine que la porte ouvre, et le
+        // double traitement est ferme par la relecture sous verrou — pas par un verrou pris avant.
+        $dues = $fleetMissionService->getArrivedMissionsByPlanetIds($planetIds);
+        $gouverneesParLeCombat = [];
+        $autres = [];
+
+        foreach ($dues as $mission) {
+            if ($this->isGovernedByTheCombatGate($mission)) {
+                $gouverneesParLeCombat[] = $mission;
+            } else {
+                $autres[] = $mission;
+            }
+        }
+
+        foreach ($gouverneesParLeCombat as $mission) {
+            try {
+                $fleetMissionService->updateMission($mission);
+            } catch (MovementLocksOutdated $perime) {
+                // **Un lien de cette mission a change plus vite que la porte ne le rattrape.** La
+                // porte a relache sa transaction et l'a dit au journal. Faire tomber la page serait
+                // la reponse instable ; la mission est laissee au passage suivant — la prochaine
+                // page, le prochain tic.
+                Log::notice('Mission laissee au passage suivant : un lien a change sous la porte des mouvements.', [
+                    'fleet_mission_id' => $mission->id,
+                    'lien' => $perime->lien,
+                ]);
+            } catch (Exception $e) {
+                throw new RuntimeException('Fleet mission service process error: Could not update fleet mission with ID ' . $mission->id . ': ' . $e->getMessage());
+            }
+        }
+
+        DB::transaction(function () use ($planetIds, $fleetMissionService, $autres) {
             // Attempt to acquire a lock on the row for this planet. This is to prevent
             // race conditions when multiple requests are updating the fleet missions for the
             // same planet and potentially doing double insertions or overwriting each other's changes.
-            $planetIds = $this->planets->allIds();
             $planetMissionUpdateLock = Planet::whereIn('id', $planetIds)
                 ->lockForUpdate()
                 ->get();
 
             if ($planetMissionUpdateLock->count() === count($planetIds)) {
                 try {
-                    $fleetMissionService = resolve(FleetMissionService::class, ['player' => $this]);
-                    $missions = $fleetMissionService->getArrivedMissionsByPlanetIds($planetIds);
-
-                    foreach ($missions as $mission) {
+                    foreach ($autres as $mission) {
                         // Attempt to acquire a lock on the row for this fleet mission. This is to prevent
                         // race conditions when multiple requests are updating the same fleet mission and
                         // potentially doing double insertions or overwriting each other's changes.
@@ -776,31 +813,12 @@ class PlayerService
                         if ($fleetMissionLock) {
                             try {
                                 $fleetMissionService->updateMission($mission);
-                            } catch (MovementLocksOutdated $perime) {
-                                // **Un lien de cette mission a change sous la porte des mouvements.**
-                                // La porte, imbriquee dans cette transaction, ne recommence pas : c'est
-                                // a ce proprietaire-ci de decider. Faire tomber la page pour une
-                                // mission dont le lien vient de bouger serait la reponse instable ;
-                                // la laisser au passage suivant — la prochaine page, le prochain tic —
-                                // est le retour differe que la porte annonce deja au journal.
-                                Log::notice('Mission laissee au passage suivant : un lien a change sous la porte des mouvements.', [
-                                    'fleet_mission_id' => $mission->id,
-                                    'lien' => $perime->lien,
-                                ]);
-
-                                continue;
                             } catch (Exception $e) {
                                 throw new Exception('Could not update fleet mission with ID ' . $mission->id . ': ' . $e->getMessage());
                             }
                         } else {
                             throw new Exception('Could not acquire update fleet mission update lock.');
                         }
-                    }
-
-                    if ($missions->count() > 0) {
-                        // Update the current player object and all child planets to make sure any changes
-                        // to the fleet missions are reflected in the player/planet objects.
-                        $this->load($this->getId());
                     }
                 } catch (Exception $e) {
                     throw new RuntimeException('Fleet mission service process error: ' . $e->getMessage());
@@ -809,6 +827,34 @@ class PlayerService
                 throw new Exception('Could not acquire update fleet mission planet lock.');
             }
         });
+
+        if ($dues->count() > 0) {
+            // Update the current player object and all child planets to make sure any changes
+            // to the fleet missions are reflected in the player/planet objects.
+            $this->load($this->getId());
+        }
+    }
+
+    /**
+     * Cette mission passe-t-elle par la porte des mouvements a son traitement ?
+     *
+     * Une Defense ACS a l'aller, toujours : sa retenue et son demi-tour se decident derriere la
+     * porte, que le combat durable soit active ou non. Une attaque a l'aller, seulement quand le
+     * combat durable est active : sans lui, son arrivee est la bataille instantanee, qui se
+     * protege par les verrous de page comme avant.
+     */
+    private function isGovernedByTheCombatGate(FleetMission $mission): bool
+    {
+        if ($mission->parent_id !== null) {
+            return false;
+        }
+
+        if ((int)$mission->mission_type === 5) {
+            return true;
+        }
+
+        return in_array((int)$mission->mission_type, [1, 2], true)
+            && resolve(SettingsService::class)->persistentCombatEnabled();
     }
 
     /**
@@ -960,22 +1006,41 @@ class PlayerService
         // Include destroyed planets still awaiting purge so related rows are cleaned up.
         $planetIds = Planet::where('user_id', $this->getId())->pluck('id');
 
+        // **Ses combats d'abord.** Une mission inscrite dans un combat actif ne s'efface pas : la
+        // bataille a ete calculee avec elle. Les combats que ce compte ouvre ou subit sont annules,
+        // avec leur cause ; s'il renforce celui d'un autre, la suppression attend.
+        resolve(AccountCombatWithdrawal::class)->withdraw(
+            $this->getId(),
+            $planetIds->map(static fn (mixed $id): int => (int)$id)->all(),
+            (int)Date::now()->timestamp
+        );
+
         foreach ($planetIds as $planetId) {
             // Delete all queue items.
             ResearchQueue::where('planet_id', $planetId)->delete();
             BuildingQueue::where('planet_id', $planetId)->delete();
             UnitQueue::where('planet_id', $planetId)->delete();
-            // Delete all fleet missions.
-            // Get all fleet missions for this planet then loop through them and delete them.
-            // TODO: this might be a performance bottleneck if there are many missions. Consider using a bulk delete compatible
-            // with the foreign key constraints instead.
-            $missions = FleetMission::where('planet_id_from', $planetId)->orWhere('planet_id_to', $planetId)->get();
+            // **Les missions du compte s'effacent ; celles des autres se detachent.** Ce code
+            // effacait toute mission qui partait de ce corps ou y allait, quel qu'en fut le
+            // proprietaire : la flotte d'un autre joueur en route vers cette planete — un
+            // transport, une attaque, un retour cree par l'annulation de son combat — disparaissait
+            // avec le compte. Les corps du compte cessent d'exister ; les missions des autres qui les
+            // nommaient gardent leurs coordonnees, et perdent seulement le lien vers un corps qui
+            // n'est plus la — exactement ce que `startReturn()` sait deja traiter.
+            $missions = FleetMission::where('user_id', $this->getId())
+                ->where(function ($query) use ($planetId) {
+                    $query->where('planet_id_from', $planetId)->orWhere('planet_id_to', $planetId);
+                })
+                ->get();
             foreach ($missions as $mission) {
                 // Delete any that have this mission as their parent.
                 FleetMission::where('parent_id', $mission->id)->delete();
                 // Delete mission itself.
                 $mission->delete();
             }
+
+            FleetMission::where('user_id', '!=', $this->getId())->where('planet_id_to', $planetId)->update(['planet_id_to' => null]);
+            FleetMission::where('user_id', '!=', $this->getId())->where('planet_id_from', $planetId)->update(['planet_id_from' => null]);
         }
 
         // Delete all messages.
