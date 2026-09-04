@@ -86,21 +86,22 @@ jobs:
       - name: Installer les dependances
         run: composer install --no-interaction --prefer-dist --no-progress
 
-      # **Une base SQLite, nommee en clair.** `.env.example` vise MariaDB (`ogamex-db`) : avec lui,
-      # le `migrate:fresh` du lanceur n'avait aucune base a vider, et le groupe du moteur tombait
-      # avant le premier essai — c'est ce que l'artefact de `f82d5c20` a fini par dire.
+      # **Le meme environnement que le poste de developpement, et rien de plus.** Le `.env` d'un
+      # poste de test tient en six lignes ; tout le reste — diffusion `log`, file `database`, cache
+      # et session en base — vient des valeurs par defaut de Laravel. Partir de `.env.example`
+      # (Reverb sur localhost:8090, MariaDB `ogamex-db`) faisait tomber vingt-deux essais qui
+      # n'ont rien a voir avec le combat, et le lanceur n'avait aucune base a vider.
       - name: Preparer l environnement
         run: |
           set -euo pipefail
-          cp .env.example .env
-          php -r '
-            $env = file_get_contents(".env");
-            foreach (["APP_ENV" => "testing", "DB_CONNECTION" => "sqlite", "DB_DATABASE" => getcwd() . "/database/database.sqlite", "QUEUE_CONNECTION" => "sync", "SESSION_DRIVER" => "file", "CACHE_DRIVER" => "file"] as $clef => $valeur) {
-              $env = preg_replace("/^" . $clef . "=.*$/m", $clef . "=" . $valeur, $env, 1, $n);
-              if ($n === 0) { $env .= "\n" . $clef . "=" . $valeur . "\n"; }
-            }
-            file_put_contents(".env", $env);
-          '
+          {
+            echo "APP_NAME=OGameX"
+            echo "APP_ENV=testing"
+            echo "APP_DEBUG=true"
+            echo "APP_KEY="
+            echo "DB_CONNECTION=sqlite"
+            echo "DB_DATABASE=${GITHUB_WORKSPACE}/database/database.sqlite"
+          } > .env
           php artisan key:generate --force
           touch database/database.sqlite
           grep -E "^(APP_ENV|DB_CONNECTION|DB_DATABASE)=" .env
@@ -169,7 +170,7 @@ jobs:
             storage/logs/console-rust.txt
             storage/logs/console-suite.txt
             storage/logs/parite-*.json
-            storage/logs/laravel.log
+            storage/logs/*.log
             storage/framework/testing/migrate-*.log
             /tmp/so.txt
             /tmp/so-sha256.txt
