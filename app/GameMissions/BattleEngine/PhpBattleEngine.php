@@ -207,7 +207,7 @@ class PhpBattleEngine extends BattleEngine
 
         // Ce que la source des rounds a tire, pour le banc de parite ; nul en jeu.
         $journal = $this->roundDraws->journal();
-        $result->drawsConsumed = $journal === null ? null : ['count' => $journal->count(), 'digest' => $journal->digest()];
+        $result->drawsConsumed = $journal === null ? null : ['count' => $journal->count(), 'raw' => $journal->rawCount(), 'digest' => $journal->digest()];
 
         // Populate per-fleet attacker results by scanning surviving units
         foreach ($result->attackerFleetResults as $fleetResult) {

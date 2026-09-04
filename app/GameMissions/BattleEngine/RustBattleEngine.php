@@ -96,7 +96,8 @@ class RustBattleEngine extends BattleEngine
         // @phpstan-ignore-next-line
         $outputPtr = $this->ffi->fight_battle_rounds($inputJson);
 
-        if ($outputPtr === null) {
+        // **Un pointeur nul se lit par le contrat FFI**, pas par `=== null` : C rend un `CData` nul.
+        if (RustEngineAnswer::isNullPointer($outputPtr)) {
             throw RustEngineContractMismatch::becauseTheAnswerIs('la bibliotheque n a rien rendu (pointeur nul)');
         }
 
@@ -117,8 +118,8 @@ class RustBattleEngine extends BattleEngine
         // Ce que la bibliotheque a tire, quand elle avait une graine : le banc de parite le compare
         // au journal du moteur PHP.
         $journal = $battleOutput['draws'] ?? null;
-        $result->drawsConsumed = is_array($journal) && isset($journal['count'], $journal['digest'])
-            ? ['count' => (int)$journal['count'], 'digest' => (string)$journal['digest']]
+        $result->drawsConsumed = is_array($journal) && isset($journal['count'], $journal['raw'], $journal['digest'])
+            ? ['count' => (int)$journal['count'], 'raw' => (int)$journal['raw'], 'digest' => (string)$journal['digest']]
             : null;
 
         // Convert Rust output back to PHP battle rounds

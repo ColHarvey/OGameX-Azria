@@ -4,6 +4,7 @@ namespace OGame\Combat\Services;
 
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use LogicException;
 use OGame\Combat\Admission\AdmissionBudget;
 use OGame\Combat\Admission\AdmissionCeiling;
 use OGame\Combat\Admission\AdmissionVerdict;
@@ -178,6 +179,7 @@ final class RallyClosureService
 
         $this->registerParticipants($combat, $cotesAttaquants, CombatParticipant::SIDE_ATTACKER);
         $this->registerParticipants($combat, $defenseurs->admitted(), CombatParticipant::SIDE_DEFENDER);
+        $this->registerTheGarrison($combat, $corps);
 
         // **Les retenues que l'admission n'a pas gardees sont liberees.** Elles ont ete tenues le
         // temps du verdict ; une fois refusees, les retenir plus longtemps les ferait stationner
@@ -313,6 +315,43 @@ final class RallyClosureService
                 );
             }
         }
+    }
+
+    /**
+     * Inscrit la garnison du corps vise comme participant, sous la clef du corps.
+     *
+     * ## Pourquoi une inscription, et non une relecture
+     *
+     * Le proprietaire de la cible voit les pertes de sa garnison pendant la bataille. Decider qui
+     * il est en relisant le corps a chaque lecture ferait dependre un droit d'un modele vivant :
+     * un corps supprime, restaure ou reattribue retirerait l'acces au defenseur photographie, ou
+     * le donnerait a un autre. Le joueur est donc fige ici, dans la transaction de la cloture, et
+     * tout lecteur ne connait plus que l'inscription. La migration prevoyait exactement cette
+     * forme : `fleet_mission_id` nul, clef `planet:<id>`, type `planet_fleet`.
+     *
+     * L'unicite sur `(combat_instance_id, participant_key)` refuse une seconde inscription, et
+     * la clef du corps n'est jamais nulle : c'est pour la garnison qu'elle existe.
+     */
+    private function registerTheGarrison(CombatInstance $combat, int $corps): void
+    {
+        $proprietaire = Planet::query()->whereKey($corps)->value('user_id');
+
+        if (!is_numeric($proprietaire) || (int)$proprietaire < 1) {
+            throw new LogicException('Le corps ' . $corps . ' vise par le combat ' . $combat->id . ' n a pas de proprietaire a inscrire comme garnison.');
+        }
+
+        CombatParticipant::query()->updateOrCreate(
+            [
+                'combat_instance_id' => $combat->id,
+                'participant_key' => CombatParticipantKey::forPlanet($corps),
+            ],
+            [
+                'player_id' => (int)$proprietaire,
+                'fleet_mission_id' => null,
+                'side' => CombatParticipant::SIDE_DEFENDER,
+                'participant_type' => CombatParticipant::TYPE_PLANET_FLEET,
+            ]
+        );
     }
 
     /**

@@ -2,11 +2,9 @@
 
 namespace OGame\Combat\Presentation;
 
-use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatParticipant;
 use OGame\Models\CombatPresentationEvent;
-use OGame\Models\Planet;
 
 /**
  * Lit le fil d'un combat pour un joueur, a un instant : seulement le passe, seulement le sien.
@@ -49,15 +47,9 @@ final class CombatPresentationTimelineReader
             ->pluck('participant_key')
             ->all();
 
-        // **La garnison n'est inscrite sous aucune mission** : ses pertes portent la clef du corps, et
-        // c'est le proprietaire du corps qui les voit. Un corps ne change pas de proprietaire ; le
-        // lire ici ne fait dependre le fil de rien qui bouge.
-        $corps = (int)$combat->target_planet_id;
-
-        if ($corps > 0 && (int)Planet::query()->whereKey($corps)->value('user_id') === $playerId) {
-            $siens[] = CombatParticipantKey::forPlanet($corps);
-        }
-
+        // **Seules les inscriptions decident.** La garnison y figure sous la clef du corps, avec le
+        // joueur photographie a la cloture : un corps supprime, restaure ou reattribue ensuite ne
+        // retire l'acces a personne et ne le donne a personne.
         if ($siens === []) {
             return [];
         }

@@ -204,11 +204,27 @@ final class CombatRosterReader
             'participant_type',
         ]);
 
-        $orphelines = $inscriptions->filter(static fn (CombatParticipant $ligne): bool => $ligne->fleet_mission_id === null)->count();
+        // **La garnison est inscrite sans mission, et ce n'est pas une orpheline.** Elle se reconnait
+        // a son type et a sa clef — le corps vise, et lui seul. Toute autre inscription sans mission
+        // est une flotte effacee, et l'effectif ne se decrit plus.
+        $garnisons = $inscriptions->filter(static fn (CombatParticipant $ligne): bool => $ligne->fleet_mission_id === null && (string)$ligne->participant_type === CombatParticipant::TYPE_PLANET_FLEET);
+        $orphelines = $inscriptions->filter(static fn (CombatParticipant $ligne): bool => $ligne->fleet_mission_id === null && (string)$ligne->participant_type !== CombatParticipant::TYPE_PLANET_FLEET)->count();
 
         if ($orphelines > 0) {
             throw IncoherentCombatEnrolment::becauseAnEnrolmentLostItsFleet((int)$combat->id, $orphelines);
         }
+
+        foreach ($garnisons as $garnison) {
+            if ((string)$garnison->participant_key !== CombatParticipantKey::forPlanet((int)$combat->target_planet_id) || (string)$garnison->side !== CombatParticipant::SIDE_DEFENDER) {
+                throw IncoherentCombatEnrolment::becauseTheGarrisonIsNotTheTarget((int)$combat->id, (string)$garnison->participant_key);
+            }
+        }
+
+        if ($garnisons->count() > 1) {
+            throw IncoherentCombatEnrolment::becauseAFleetIsEnrolledTwice((int)$combat->id, 0);
+        }
+
+        $inscriptions = $inscriptions->filter(static fn (CombatParticipant $ligne): bool => $ligne->fleet_mission_id !== null)->values();
 
         $retenues = FleetMission::query()
             ->where('combat_instance_id', $combat->id)
@@ -227,6 +243,10 @@ final class CombatRosterReader
 
         if ($inscriptions->isEmpty()) {
             throw IncoherentCombatEnrolment::becauseAClosedCombatHasNoRoster((int)$combat->id);
+        }
+
+        if ($garnisons->isEmpty()) {
+            throw IncoherentCombatEnrolment::becauseAClosedCombatHasNoGarrison((int)$combat->id);
         }
 
         $camps = [CombatParticipant::SIDE_ATTACKER => [], CombatParticipant::SIDE_DEFENDER => []];

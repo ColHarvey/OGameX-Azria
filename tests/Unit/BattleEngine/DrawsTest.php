@@ -6,8 +6,10 @@ use InvalidArgumentException;
 use OGame\GameMissions\BattleEngine\Draws\BattleDraws;
 use OGame\GameMissions\BattleEngine\Draws\Draw;
 use OGame\GameMissions\BattleEngine\Draws\DrawJournal;
+use OGame\GameMissions\BattleEngine\Draws\RawDraws;
 use OGame\GameMissions\BattleEngine\Draws\SeededDraws;
 use OGame\GameMissions\BattleEngine\Draws\SystemDraws;
+use OGame\GameMissions\BattleEngine\Draws\Xorshift32;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -44,11 +46,50 @@ class DrawsTest extends TestCase
      */
     public function testTheSeededSequenceIsTheOneTheRustEngineDraws(): void
     {
-        $tirages = new SeededDraws(1);
+        $brute = new Xorshift32(1);
 
-        $this->assertSame(270369, $tirages->next());
-        $this->assertSame(67634689, $tirages->next());
-        $this->assertSame(2647435461, $tirages->next());
+        $this->assertSame(270369, $brute->next());
+        $this->assertSame(67634689, $brute->next());
+        $this->assertSame(2647435461, $brute->next());
+    }
+
+    /**
+     * Un tirage borne rejette la queue au-dela du plus grand multiple de la borne, puis reduit ;
+     * chaque tirage brut consomme est compte, rejete ou retenu. Les memes suites dictees et les
+     * memes attendus sont affirmes cote Rust (`a_bounded_draw_rejects_the_tail_and_counts_every_raw_draw`).
+     */
+    public function testABoundedDrawRejectsTheTailAndCountsEveryRawDraw(): void
+    {
+        // Borne 3 : 2^32 % 3 = 1, la limite est 2^32 - 1 et 0xFFFFFFFF est rejete une fois.
+        $tirages = new SeededDraws($this->dictated([0xFFFFFFFF, 5]));
+        $this->assertSame(2, $tirages->targetIndex(3));
+        $this->assertSame(1, $tirages->journal()->count(), 'one semantic draw');
+        $this->assertSame(2, $tirages->journal()->rawCount(), 'two raw draws: one rejected, one kept');
+
+        // Borne 1 : jamais de rejet, toujours 0.
+        $tirages = new SeededDraws($this->dictated([0xFFFFFFFF]));
+        $this->assertSame(0, $tirages->targetIndex(1));
+        $this->assertSame(1, $tirages->journal()->rawCount());
+
+        // Borne 101 : limite 4294967228.
+        $tirages = new SeededDraws($this->dictated([4294967228, 4294967227]));
+        $this->assertSame(4294967227 % 101, $tirages->explosionPercent());
+        $this->assertSame(2, $tirages->journal()->rawCount());
+
+        // Borne 10000 : limite 4294960000.
+        $tirages = new SeededDraws($this->dictated([4294960000, 123456]));
+        $this->assertSame(1 + (123456 % 10000), $tirages->rapidfireCentipercent());
+        $this->assertSame(2, $tirages->journal()->rawCount());
+
+        // Treize cibles, une borne qui n'est pas une puissance de deux : limite 4294967287.
+        $tirages = new SeededDraws($this->dictated([4294967290, 20]));
+        $this->assertSame(20 % 13, $tirages->targetIndex(13));
+        $this->assertSame(2, $tirages->journal()->rawCount());
+
+        // Une suite dictee n'a pas de graine : le moteur Rust ne pourrait pas la rejouer.
+        $this->assertNull($tirages->seed());
+        $this->expectException(InvalidArgumentException::class);
+        $tirages->forRounds();
     }
 
     /**
@@ -156,6 +197,30 @@ class DrawsTest extends TestCase
                 $this->addToAssertionCount(1);
             }
         }
+    }
+
+    /**
+     * Une suite brute dictee, pour forcer un rejet et epingler les tirages consommes.
+     *
+     * @param array<int, int> $values
+     */
+    private function dictated(array $values): RawDraws
+    {
+        return new class ($values) implements RawDraws {
+            private int $next = 0;
+
+            /**
+             * @param array<int, int> $values
+             */
+            public function __construct(private readonly array $values)
+            {
+            }
+
+            public function next(): int
+            {
+                return $this->values[$this->next++ % count($this->values)];
+            }
+        };
     }
 
     /**

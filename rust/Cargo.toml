@@ -6,3 +6,12 @@ members = [
     "battle_engine_debug",
     "test_ffi",
 ]
+
+# Les profils se declarent ici, a la racine de l'espace de travail : Cargo ignore ceux d'un membre.
+# Une panique doit se derouler (unwind) pour que la frontiere FFI l'attrape et reponde par un
+# document d'erreur ; `abort` tuerait le processus PHP.
+[profile.release]
+panic = "unwind"
+
+[profile.dev]
+panic = "unwind"

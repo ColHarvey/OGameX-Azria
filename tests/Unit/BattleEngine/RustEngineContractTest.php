@@ -8,6 +8,7 @@ use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
 use OGame\GameMissions\BattleEngine\RustBattleEngine;
+use OGame\GameMissions\BattleEngine\RustEngineAnswer;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Resources;
 use OGame\Services\ObjectService;
@@ -99,7 +100,7 @@ class RustEngineContractTest extends UnitTestCase
         $this->assertIsArray($reponse);
         $this->assertStringContainsString('null', (string)($reponse['error'] ?? ''), 'A null input was not refused as such.');
 
-        $entree = json_encode(['schema' => RustBattleEngine::ABI_VERSION, 'provoke_panic' => true, 'attacker_fleets' => [], 'defender_fleets' => []], JSON_THROW_ON_ERROR);
+        $entree = json_encode(['schema' => RustBattleEngine::ABI_VERSION, 'bench_provoke_panic' => true, 'attacker_fleets' => [], 'defender_fleets' => []], JSON_THROW_ON_ERROR);
         // @phpstan-ignore-next-line
         $sortie = $ffi->fight_battle_rounds($entree);
         $this->assertNotNull($sortie, 'A provoked panic produced no document at all.');
@@ -115,6 +116,26 @@ class RustEngineContractTest extends UnitTestCase
         // Le processus continue : une vraie bataille se joue ensuite.
         $resultat = $this->anEngine()->simulateBattle();
         $this->assertNotSame([], $resultat->rounds, 'The engine no longer fights after a caught panic.');
+    }
+
+    /**
+     * Un `char*` reellement nul, rendu par une bibliotheque : la valeur PHP `null` ne le prouve pas.
+     *
+     * Le moteur de combat ne rend jamais nul ; c'est la petite bibliotheque d'essai qui le fait.
+     * L'essai etablit que `=== null` le laisserait passer, et que le jugement du client le voit.
+     */
+    public function testAGenuinelyNullPointerIsRecognisedByTheContractNotByThePhpNull(): void
+    {
+        $this->skipWhenTheRustLibraryIsUnavailable('libtest_ffi.so');
+
+        $ffi = FFI::cdef('char* rust_null_string(void);', base_path('storage/rust-libs/libtest_ffi.so'));
+
+        // @phpstan-ignore-next-line
+        $pointeur = $ffi->rust_null_string();
+
+        $this->assertNotNull($pointeur, 'A null C pointer came back as the PHP null: the check under test would be trivially right.');
+        $this->assertTrue(FFI::isNull($pointeur));
+        $this->assertTrue(RustEngineAnswer::isNullPointer($pointeur), 'The client does not recognise a genuinely null pointer.');
     }
 
     private function anEngine(): RustBattleEngine

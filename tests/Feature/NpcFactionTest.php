@@ -269,9 +269,12 @@ class NpcFactionTest extends AccountTestCase
 
         $baseCoordinate = $base->getPlanetCoordinates();
 
+        // Les corps detruits ne comptent pas : le placement les ignore a bon droit, et un ordre de
+        // passage qui en laisse dans la galaxie ne doit pas faire mentir l'essai.
         $humans = DB::table('planets')
             ->join('users', 'users.id', '=', 'planets.user_id')
             ->where('users.is_npc', false)
+            ->where('planets.destroyed', 0)
             ->where('planets.galaxy', $baseCoordinate->galaxy)
             ->select('planets.system')
             ->get();

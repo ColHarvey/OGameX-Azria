@@ -11,10 +11,18 @@ name: Moteur Rust et couture FFI
 # donc etre eprouvee que sur Linux, et **ce workflow est la preuve canonique** : un run vert sur un
 # autre hash ne valide pas le candidat.
 #
-# Le groupe Rust comprend le banc de parite deterministe PHP/Rust (`RustParityBenchTest`) : une
-# seule entree gelee, une seule bande de tirages (`SeededDraws`), deux moteurs, une projection
-# canonique comparee champ par champ. Une divergence nomme le premier chemin divergent et laisse les
-# deux projections dans `storage/logs/parite-*.json`, publiees avec l'artefact.
+# Deux jobs, deux verdicts lisibles separement, sur le meme SHA :
+#
+#   - `moteur-rust` : compilation par le script de production, essais Rust natifs, groupe PHP du
+#     moteur (FFI, contrat, pertes par participant, banc de parite) avec zero ignore exige. Quelques
+#     minutes. Un vert ici ne fait pas un candidat.
+#   - `suite-complete` : toute la suite du jeu, par le lanceur `scripts/suite.php`, parallelisee sur
+#     les coeurs du runner — chaque processus a sa base SQLite, sa remise a zero protegee par le
+#     verrou, et le JUnit agrege est verifie. Une quarantaine de minutes en sequentiel ; bien moins
+#     ici. La validation complete reste requise sur le candidat final.
+#
+# Les deux jobs compilent la bibliotheque par le meme script, sur le meme SHA ; chacun publie
+# l'empreinte du `.so` pour qu'on puisse verifier qu'ils ont eprouve la meme.
 
 on:
   push:
@@ -26,6 +34,7 @@ on:
 
 jobs:
   moteur-rust:
+    name: Rust, FFI et parite
     runs-on: ubuntu-latest
 
     steps:
@@ -36,9 +45,8 @@ jobs:
       # valide rien : la question est toujours « ce commit-la est-il bon ? ».
       - name: Nommer le candidat
         run: |
-          echo "SHA=${GITHUB_SHA}" >> "$GITHUB_ENV"
           {
-            echo "## Moteur Rust et couture FFI"
+            echo "## Rust, FFI et parite"
             echo ""
             echo "| Champ | Valeur |"
             echo "| --- | --- |"
@@ -111,37 +119,22 @@ jobs:
       - name: Executer les essais Rust natifs
         run: cargo test --manifest-path rust/Cargo.toml --locked --all-targets
 
-      # **Une seule execution, sequentielle, avec son rapport.** Relancer trois fois la meme
-      # selection ne prouve rien de plus, et lire du texte a la recherche du mot « ignore » se trompe
-      # des qu'il apparait dans un nom d'essai.
-      # La sortie console est conservee dans l'artefact : un run rouge sans JUnit ne laissait
-      # aucun moyen de nommer l'essai fautif sans se connecter a GitHub. Le code de sortie reste
-      # celui du lanceur, jamais celui de tee.
+      # **Une seule execution, sequentielle, avec son rapport.** Le groupe est court ; le lire comme
+      # une structure evite de chercher le mot « ignore » dans du texte. La sortie console est
+      # conservee dans l'artefact, et le code de sortie reste celui du lanceur, jamais celui de tee.
       - name: Executer le groupe du moteur
         shell: bash
         run: |
           set -o pipefail
           php scripts/suite.php --sequentiel --filter Rust --log-junit=storage/logs/junit-rust.xml 2>&1 | tee storage/logs/console-rust.txt
 
-      # C'est ici que le workflow gagne son sens : ces essais sont **ignores** partout ailleurs faute
-      # de bibliotheque. Un code de sortie vert ne suffit pas — une suite entierement sautee sort
-      # verte aussi. Le rapport est lu comme une structure.
+      # C'est ici que le job gagne son sens : ces essais sont **ignores** partout ailleurs faute de
+      # bibliotheque. Un code de sortie vert ne suffit pas — une suite entierement sautee sort verte
+      # aussi. 42 : les 30 essais historiques du moteur, les pertes par participant (2), le contrat
+      # FFI (4) et le banc de parite (6). Un fichier d'essai qui disparaitrait ferait tomber le compte.
       - name: Exiger les essais Rust executes, aucun ignore
-        # 41 : les 30 essais historiques du moteur, plus les pertes par participant (2), le contrat
-        # FFI (3) et le banc de parite (6). Un fichier d'essai qui disparaitrait ferait tomber le compte.
-        run: php scripts/verifier-junit.php storage/logs/junit-rust.xml --minimum=41 --sans-ignores
+        run: php scripts/verifier-junit.php storage/logs/junit-rust.xml --minimum=42 --sans-ignores
 
-      - name: Executer la suite complete
-        shell: bash
-        run: |
-          set -o pipefail
-          php scripts/suite.php --sequentiel --log-junit=storage/logs/junit-suite.xml 2>&1 | tee storage/logs/console-suite.txt
-
-      - name: Exiger une suite sans ignore
-        run: php scripts/verifier-junit.php storage/logs/junit-suite.xml --sans-ignores
-
-      # **Le resume dit les compteurs, pas seulement une couleur.** Un lecteur doit pouvoir juger
-      # sans ouvrir l'artefact.
       - name: Resumer le verdict
         if: always()
         run: |
@@ -152,7 +145,6 @@ jobs:
             echo ""
             echo '```'
             echo "groupe Rust : $(php scripts/verifier-junit.php storage/logs/junit-rust.xml 2>&1 | head -1)"
-            echo "suite       : $(php scripts/verifier-junit.php storage/logs/junit-suite.xml 2>&1 | head -1)"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -166,11 +158,110 @@ jobs:
           if-no-files-found: warn
           path: |
             storage/logs/junit-rust.xml
-            storage/logs/junit-suite.xml
             storage/logs/console-rust.txt
-            storage/logs/console-suite.txt
             storage/logs/parite-*.json
             storage/logs/*.log
             storage/framework/testing/migrate-*.log
             /tmp/so.txt
+            /tmp/so-sha256.txt
+
+  suite-complete:
+    name: Suite complete du jeu
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Recuperer le depot
+        uses: actions/checkout@v4
+
+      - name: Nommer le candidat
+        run: |
+          {
+            echo "## Suite complete du jeu"
+            echo ""
+            echo "| Champ | Valeur |"
+            echo "| --- | --- |"
+            echo "| SHA | \`${GITHUB_SHA}\` |"
+            echo "| Coeurs | \`$(nproc)\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Installer la chaine Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # La meme bibliotheque que l'autre job : meme script, meme SHA. L'empreinte publiee permet de
+      # verifier que les deux ont eprouve le meme `.so`.
+      - name: Compiler par le script de production
+        run: |
+          mkdir -p storage/rust-libs
+          chmod +x rust/compile.sh
+          ./rust/compile.sh
+          sha256sum storage/rust-libs/*.so | tee /tmp/so-sha256.txt
+
+      - name: Installer PHP avec FFI
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: ffi, sqlite3, pdo_sqlite, bcmath, gd, zip, intl
+          ini-values: ffi.enable=1, memory_limit=2G
+
+      - name: Installer les dependances
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Preparer l environnement
+        run: |
+          set -euo pipefail
+          {
+            echo "APP_NAME=OGameX"
+            echo "APP_ENV=testing"
+            echo "APP_DEBUG=true"
+            echo "APP_KEY="
+            echo "DB_CONNECTION=sqlite"
+            echo "DB_DATABASE=${GITHUB_WORKSPACE}/database/database.sqlite"
+          } > .env
+          php artisan key:generate --force
+          touch database/database.sqlite
+
+      # **Toute la suite, par le lanceur, sur les coeurs du runner.** Le lanceur prend le verrou,
+      # remet a zero une base par processus, puis lance ParaTest : chaque processus garde sa propre
+      # base SQLite et ses ressources ; rien ne contourne la remise a zero protegee. Le nombre de
+      # processus est celui des coeurs du runner, pas les seize du poste local. La duree murale est
+      # mesuree et publiee, avec le JUnit agrege — c'est lui qui compte les essais, pas la console.
+      - name: Executer la suite complete
+        shell: bash
+        run: |
+          set -o pipefail
+          debut=$(date +%s)
+          php scripts/suite.php --processus="$(nproc)" --log-junit=storage/logs/junit-suite.xml 2>&1 | tee storage/logs/console-suite.txt
+          code=$?
+          echo "DUREE_SUITE=$(( $(date +%s) - debut ))" >> "$GITHUB_ENV"
+          exit $code
+
+      # **Le JUnit agrege compte toute la suite** : 2 188 essais au 4 septembre 2026, et aucun ignore
+      # — la bibliotheque existe ici, donc les essais Rust s'executent dans la suite aussi. Un
+      # rapport qui en compterait moins signalerait des essais perdus dans la parallelisation.
+      - name: Exiger une suite entiere sans ignore
+        run: php scripts/verifier-junit.php storage/logs/junit-suite.xml --minimum=2100 --sans-ignores
+
+      - name: Resumer le verdict
+        if: always()
+        run: |
+          {
+            echo "| Empreinte du .so | \`$(cut -d' ' -f1 /tmp/so-sha256.txt 2>/dev/null | head -1 || echo absent)\` |"
+            echo "| Duree murale de la suite | \`${DUREE_SUITE:-inconnue} s\` |"
+            echo ""
+            echo '```'
+            echo "suite : $(php scripts/verifier-junit.php storage/logs/junit-suite.xml 2>&1 | head -1)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publier l artefact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: suite-complete-${{ github.sha }}
+          if-no-files-found: warn
+          path: |
+            storage/logs/junit-suite.xml
+            storage/logs/console-suite.txt
+            storage/logs/*.log
+            storage/framework/testing/migrate-*.log
             /tmp/so-sha256.txt

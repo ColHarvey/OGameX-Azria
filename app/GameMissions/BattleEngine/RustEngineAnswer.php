@@ -2,6 +2,8 @@
 
 namespace OGame\GameMissions\BattleEngine;
 
+use FFI;
+use FFI\CData;
 use OGame\Combat\Exceptions\RustEngineContractMismatch;
 
 /**
@@ -22,6 +24,23 @@ use OGame\Combat\Exceptions\RustEngineContractMismatch;
  */
 final class RustEngineAnswer
 {
+    /**
+     * Un `char*` nul est-il revenu ?
+     *
+     * Un pointeur nul rendu par C arrive en PHP comme un objet `FFI\CData` nul, pas comme la valeur
+     * `null` : un client qui teste `=== null` le laisse passer jusqu'a `FFI::string()`. Le contrat
+     * FFI se lit par `FFI::isNull()` ; la valeur PHP `null` est admise aussi, pour une couture de
+     * banc qui ne rendrait rien.
+     */
+    public static function isNullPointer(mixed $pointer): bool
+    {
+        if ($pointer === null) {
+            return true;
+        }
+
+        return $pointer instanceof CData && FFI::isNull($pointer);
+    }
+
     /**
      * Le document de bataille, ou un refus qui nomme la raison.
      *

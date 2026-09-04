@@ -355,8 +355,11 @@ class PlanetService
             PlanetMove::where('planet_id', $this->planet->id)->delete();
 
             // Update the player's current planet if it is the planet being abandoned.
+            // **La planete courante se lit sur la ligne, pas par `getCurrentPlanetId()`** : celle-ci
+            // leve « Player has no planets » quand ce corps detruit etait le dernier du compte, et le
+            // nettoyage planifie rendait alors un echec en laissant le corps derriere lui.
             $player = $this->getPlayer();
-            if ($player !== null && $player->getCurrentPlanetId() === $this->planet->id) {
+            if ($player !== null && (int)$player->getUser()->planet_current === (int)$this->planet->id) {
                 $player->setCurrentPlanetId(0);
             }
 

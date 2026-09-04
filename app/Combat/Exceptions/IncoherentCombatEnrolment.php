@@ -35,6 +35,34 @@ use RuntimeException;
 class IncoherentCombatEnrolment extends RuntimeException
 {
     /**
+     * Une inscription sans mission qui ne designe pas la garnison du corps vise.
+     *
+     * La garnison est le seul participant sans mission, et elle porte la clef du corps attaque.
+     * Toute autre forme signifie que l'effectif decrit une bataille qui n'est pas celle-ci.
+     */
+    public static function becauseTheGarrisonIsNotTheTarget(int $combatInstanceId, string $participantKey): self
+    {
+        return new self(
+            'Le combat ' . $combatInstanceId . ' inscrit une garnison sous la clef ' . $participantKey
+            . ' qui n est pas le corps vise, ou pas au camp defenseur. L effectif ne se decrit plus.'
+        );
+    }
+
+    /**
+     * Un combat clos dont la photographie n'a pas inscrit la garnison du corps.
+     *
+     * Le proprietaire de la cible tient son droit de voir ses pertes de cette inscription, et de
+     * rien d'autre : sans elle, personne ne pourrait plus les lui montrer.
+     */
+    public static function becauseAClosedCombatHasNoGarrison(int $combatInstanceId): self
+    {
+        return new self(
+            'Le combat ' . $combatInstanceId . ' est clos sans garnison inscrite : la photographie a ete prise'
+            . ' sans le proprietaire du corps, et personne ne pourrait voir ses pertes.'
+        );
+    }
+
+    /**
      * @param int $combatInstanceId
      * @param int $orphelines
      * @return self

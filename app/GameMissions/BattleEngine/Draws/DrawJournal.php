@@ -26,6 +26,8 @@ final class DrawJournal
 
     private int $count = 0;
 
+    private int $rawCount = 0;
+
     private int $digest = self::OFFSET;
 
     /**
@@ -35,6 +37,21 @@ final class DrawJournal
     {
         $this->count++;
         $this->digest = self::absorb($this->digest, $kind . ':' . $bound . ':' . $value . ';');
+    }
+
+    /**
+     * Compte un tirage brut consomme — rejete ou retenu. L'empreinte ne le voit pas : elle ne
+     * decrit que la bande semantique ; le compte, lui, dit si les deux moteurs ont consomme la
+     * suite brute de la meme facon, rejets compris.
+     */
+    public function recordRawDraw(): void
+    {
+        $this->rawCount++;
+    }
+
+    public function rawCount(): int
+    {
+        return $this->rawCount;
     }
 
     /**

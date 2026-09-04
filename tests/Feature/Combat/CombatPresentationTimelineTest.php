@@ -205,6 +205,50 @@ class CombatPresentationTimelineTest extends FleetDispatchTestCase
     }
 
     /**
+     * Le droit de voir les pertes de la garnison vient de l'inscription, pas du corps vivant.
+     *
+     * ## Ce que la relecture vivante laissait faire
+     *
+     * Le lecteur demandait au corps son proprietaire pour decider qui voit sa garnison. Un corps
+     * reattribue — suppression et restauration administrative, evolution future — aurait retire
+     * l'acces au defenseur qui a subi la bataille, et l'aurait donne a un autre. Le fil est fige :
+     * son autorisation doit l'etre aussi.
+     */
+    public function testTheGarrisonAccessComesFromTheEnrolmentNotFromTheLivingBody(): void
+    {
+        $combat = $this->anEngagedCombat();
+        $lecteur = new CombatPresentationTimelineReader();
+        $echeance = (int)$combat->ends_at;
+
+        $proprietaire = (int)DB::table('planets')->where('id', $combat->target_planet_id)->value('user_id');
+        $avant = $lecteur->visibleTo($combat, $proprietaire, $echeance);
+        $this->assertNotSame([], $avant, 'The photographed defender sees nothing: the scenario would prove nothing.');
+
+        // **Le corps change de proprietaire apres la cloture.**
+        $tiers = (int)DB::table('users')->whereNotIn('id', [$proprietaire, $this->currentUserId])->orderByDesc('id')->value('id');
+        $this->assertGreaterThan(0, $tiers, 'No third player exists to receive the body.');
+        DB::table('planets')->where('id', $combat->target_planet_id)->update(['user_id' => $tiers]);
+
+        $this->assertSame(
+            array_map(static fn (PresentationEvent $e): array => $e->toRow(), $avant),
+            array_map(static fn (PresentationEvent $e): array => $e->toRow(), $lecteur->visibleTo($combat, $proprietaire, $echeance)),
+            'The photographed defender lost access when the body changed hands.'
+        );
+        $this->assertSame([], $lecteur->visibleTo($combat, $tiers, $echeance), 'The new owner was given the losses of a battle it did not fight.');
+
+        // **Et le corps disparait.** L'inscription, elle, reste.
+        DB::table('planets')->where('id', $combat->target_planet_id)->update(['user_id' => $proprietaire]);
+        DB::table('combat_instances')->where('id', $combat->id)->update(['target_planet_id' => null]);
+        $combat->refresh();
+
+        $this->assertSame(
+            array_map(static fn (PresentationEvent $e): array => $e->toRow(), $avant),
+            array_map(static fn (PresentationEvent $e): array => $e->toRow(), $lecteur->visibleTo($combat, $proprietaire, $echeance)),
+            'The photographed defender lost access when the body vanished.'
+        );
+    }
+
+    /**
      * Une flotte ecrasante contre une garnison qui perd quelque chose, sur une planete propre.
      */
     private function anEngagedCombat(): CombatInstance

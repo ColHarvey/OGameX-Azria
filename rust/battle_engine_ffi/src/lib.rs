@@ -65,7 +65,11 @@ trait Draws {
 /// What a seeded source drew: how many times, and a digest over kind, bound and value.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 struct DrawJournal {
+    /// Semantic draws: one per target, explosion or rapidfire decision.
     count: u64,
+    /// Raw draws consumed, rejections included. The digest does not see them; the count says
+    /// whether both engines consumed the raw sequence the same way.
+    raw: u64,
     /// FNV-1a over `kind:bound:value;` for every draw, in order, as a hexadecimal string.
     digest: String,
 }
@@ -77,15 +81,15 @@ struct SystemDraws {
 
 impl Draws for SystemDraws {
     fn target_index(&mut self, count: usize) -> usize {
-        (self.rng.random::<u32>() as usize) % count
+        self.rng.random_range(0..count)
     }
 
     fn explosion_percent(&mut self) -> u32 {
-        self.rng.random::<u32>() % 101
+        self.rng.random_range(0..=100)
     }
 
     fn rapidfire_centipercent(&mut self) -> u32 {
-        1 + self.rng.random::<u32>() % 10000
+        self.rng.random_range(1..=10000)
     }
 
     fn journal(&self) -> Option<DrawJournal> {
@@ -93,19 +97,17 @@ impl Draws for SystemDraws {
     }
 }
 
-/// Replayable draws: a thirty-two bit xorshift from a seed, identical to PHP's `SeededDraws`,
-/// with a journal of every draw made.
-struct SeededDraws {
-    state: u32,
-    count: u64,
-    digest: u64,
+/// A raw sequence of uniform thirty-two bit integers: the material a seeded source draws from.
+trait RawDraws {
+    fn next(&mut self) -> u32;
 }
 
-impl SeededDraws {
-    fn new(seed: u32) -> Self {
-        SeededDraws { state: seed, count: 0, digest: FNV_OFFSET }
-    }
+/// A thirty-two bit xorshift from a non-zero seed, identical to PHP's `Xorshift32`.
+struct Xorshift32 {
+    state: u32,
+}
 
+impl RawDraws for Xorshift32 {
     fn next(&mut self) -> u32 {
         let mut x = self.state;
         x ^= x << 13;
@@ -113,6 +115,44 @@ impl SeededDraws {
         x ^= x << 5;
         self.state = x;
         x
+    }
+}
+
+/// Replayable draws: a raw sequence — a seeded xorshift, or one dictated by a test — bounded
+/// **by rejection**, with a journal of every semantic draw and a count of every raw draw.
+///
+/// A uniform integer over 2^32 values reduced by `% n` is uniform only when `n` divides 2^32:
+/// neither thirteen targets, nor 101, nor 10000 do. The largest bound `l`, a multiple of `n` and
+/// at most 2^32, is computed; a raw draw `>= l` is rejected and another is drawn; the first draw
+/// under `l` is reduced by `% n`. PHP's `SeededDraws::bounded()` is the same algorithm.
+struct SeededDraws {
+    raw: Box<dyn RawDraws>,
+    count: u64,
+    raw_count: u64,
+    digest: u64,
+}
+
+const RANGE: u64 = 1 << 32;
+
+impl SeededDraws {
+    fn new(seed: u32) -> Self {
+        SeededDraws::over(Box::new(Xorshift32 { state: seed }))
+    }
+
+    fn over(raw: Box<dyn RawDraws>) -> Self {
+        SeededDraws { raw, count: 0, raw_count: 0, digest: FNV_OFFSET }
+    }
+
+    /// A uniform integer from 0 to `bound - 1`, by rejection — the same algorithm as PHP.
+    fn bounded(&mut self, bound: u64) -> u64 {
+        let limit = RANGE - (RANGE % bound);
+        loop {
+            let raw = self.raw.next() as u64;
+            self.raw_count += 1;
+            if raw < limit {
+                return raw % bound;
+            }
+        }
     }
 
     fn record(&mut self, kind: &str, bound: u64, value: u64) {
@@ -129,25 +169,25 @@ const FNV_PRIME: u64 = 0x100000001b3;
 
 impl Draws for SeededDraws {
     fn target_index(&mut self, count: usize) -> usize {
-        let value = (self.next() as usize) % count;
-        self.record("target", count as u64, value as u64);
-        value
+        let value = self.bounded(count as u64);
+        self.record("target", count as u64, value);
+        value as usize
     }
 
     fn explosion_percent(&mut self) -> u32 {
-        let value = self.next() % 101;
-        self.record("explosion", 101, value as u64);
-        value
+        let value = self.bounded(101);
+        self.record("explosion", 101, value);
+        value as u32
     }
 
     fn rapidfire_centipercent(&mut self) -> u32 {
-        let value = 1 + self.next() % 10000;
-        self.record("rapidfire", 10000, value as u64);
-        value
+        let value = 1 + self.bounded(10000);
+        self.record("rapidfire", 10000, value);
+        value as u32
     }
 
     fn journal(&self) -> Option<DrawJournal> {
-        Some(DrawJournal { count: self.count, digest: format!("{:016x}", self.digest) })
+        Some(DrawJournal { count: self.count, raw: self.raw_count, digest: format!("{:016x}", self.digest) })
     }
 }
 
@@ -176,11 +216,12 @@ pub struct BattleInput {
     /// generator at zero forever.
     #[serde(default)]
     seed: Option<u32>,
-    /// A test seam: panics inside the simulation, after the input was decoded. It exists so that a
-    /// real FFI test can prove that a panic comes back as an error document instead of aborting the
-    /// process. A game client never sets it.
+    /// A bench seam, private to the test benches: panics inside the simulation, after the input was
+    /// decoded, so that a real FFI test can prove that a panic comes back as an error document
+    /// instead of aborting the process. The only client of this library is `RustBattleEngine`,
+    /// which never writes it; no external input reaches the library directly.
     #[serde(default)]
-    provoke_panic: bool,
+    bench_provoke_panic: bool,
     attacker_fleets: Vec<AttackerFleetInput>,
     defender_fleets: Vec<DefenderFleetInput>,
 }
@@ -440,7 +481,7 @@ fn process_battle_rounds(input: BattleInput) -> BattleOutput {
     let mut peak_memory = 0;
     let mut rounds = Vec::new();
 
-    if input.provoke_panic {
+    if input.bench_provoke_panic {
         panic!("panic provoked by the test seam, after the input was decoded");
     }
 
@@ -855,7 +896,7 @@ mod tests {
     }
 
     fn input(attacker_fleets: Vec<AttackerFleetInput>, defender_fleets: Vec<DefenderFleetInput>, seed: Option<u32>) -> BattleInput {
-        BattleInput { schema: ABI_VERSION, seed, provoke_panic: false, attacker_fleets, defender_fleets }
+        BattleInput { schema: ABI_VERSION, seed, bench_provoke_panic: false, attacker_fleets, defender_fleets }
     }
 
     /// A garrison of rocket launchers, a reinforcement of light fighters, and an attack that
@@ -1073,7 +1114,7 @@ mod tests {
         assert!(answer["error"].as_str().unwrap().contains("null"));
 
         let mut battle = a_battle_with_a_garrison_and_a_reinforcement();
-        battle.provoke_panic = true;
+        battle.bench_provoke_panic = true;
         let text = CString::new(serde_json::to_string(&battle).unwrap()).unwrap();
         let output = fight_battle_rounds(text.as_ptr());
         let answer: serde_json::Value = serde_json::from_str(unsafe { CStr::from_ptr(output) }.to_str().unwrap()).unwrap();
@@ -1111,10 +1152,51 @@ mod tests {
     #[test]
     fn the_xorshift_matches_the_php_sequence() {
         // Computed by hand from the algorithm; the PHP test asserts the same three values.
-        let mut draws = SeededDraws::new(1);
-        assert_eq!(270369, draws.next());
-        assert_eq!(67634689, draws.next());
-        assert_eq!(2647435461, draws.next());
+        let mut raw = Xorshift32 { state: 1 };
+        assert_eq!(270369, raw.next());
+        assert_eq!(67634689, raw.next());
+        assert_eq!(2647435461, raw.next());
+    }
+
+    /// A dictated raw sequence, to force a rejection and pin how many raw draws are consumed.
+    struct Dictated {
+        values: Vec<u32>,
+        next: usize,
+    }
+
+    impl RawDraws for Dictated {
+        fn next(&mut self) -> u32 {
+            let value = self.values[self.next % self.values.len()];
+            self.next += 1;
+            value
+        }
+    }
+
+    /// The bounded draw rejects the tail above the largest multiple of the bound, then reduces.
+    /// PHP asserts the same values and the same raw counts (`DrawsTest`).
+    #[test]
+    fn a_bounded_draw_rejects_the_tail_and_counts_every_raw_draw() {
+        // Bound 3: 2^32 % 3 = 1, so the limit is 2^32 - 1 and 0xFFFFFFFF is rejected once.
+        let mut draws = SeededDraws::over(Box::new(Dictated { values: vec![0xFFFFFFFF, 5], next: 0 }));
+        assert_eq!(2, draws.target_index(3));
+        let journal = draws.journal().unwrap();
+        assert_eq!(1, journal.count, "one semantic draw");
+        assert_eq!(2, journal.raw, "two raw draws: one rejected, one kept");
+
+        // Bound 1 never rejects and always answers 0; bound 101 rejects 2^32 - (2^32 % 101) = 4294967228 and above.
+        let mut draws = SeededDraws::over(Box::new(Dictated { values: vec![0xFFFFFFFF], next: 0 }));
+        assert_eq!(0, draws.target_index(1));
+        assert_eq!(1, draws.journal().unwrap().raw);
+        let mut draws = SeededDraws::over(Box::new(Dictated { values: vec![4294967228, 4294967227], next: 0 }));
+        assert_eq!((4294967227u64 % 101) as u32, draws.explosion_percent());
+        assert_eq!(2, draws.journal().unwrap().raw);
+
+        // Bound 10000: 2^32 % 10000 = 7296, limit 4294960000; and a target count that is no power of two.
+        let mut draws = SeededDraws::over(Box::new(Dictated { values: vec![4294960000, 123456], next: 0 }));
+        assert_eq!(1 + (123456 % 10000), draws.rapidfire_centipercent());
+        let mut draws = SeededDraws::over(Box::new(Dictated { values: vec![4294967290, 20], next: 0 }));
+        assert_eq!(20 % 13, draws.target_index(13), "limit for 13 is 4294967287: 4294967290 must be rejected");
+        assert_eq!(2, draws.journal().unwrap().raw);
     }
 
     /// The digest names kind, bound and value: the same raw numbers consumed as other kinds, or in
