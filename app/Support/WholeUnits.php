@@ -25,6 +25,11 @@ use OGame\Exceptions\UnrepresentableWholeUnits;
  * `>= 2^63` — exactement representable, et hors du domaine d'un entier signe de soixante-quatre
  * bits — puis la conversion verifie son **propre resultat** par un aller-retour.
  *
+ * **Les deux bornes ne sont pas symetriques.** Un entier signe de soixante-quatre bits va de `-2^63`
+ * a `2^63 - 1` : la borne haute s'exclut, la borne basse s'inclut. `-2^63` est exactement
+ * `PHP_INT_MIN` ; le refuser rejetterait une valeur que la plateforme porte parfaitement, et cette
+ * classe juge le domaine, pas le signe.
+ *
  * Sans cette borne, une valeur comme `1e30` traversait : finie, positive, egale a son plancher. Le
  * transtypage la rendait negative ou nulle selon la plateforme, et un credit disparaissait — ou pire,
  * devenait un debit.
@@ -55,7 +60,12 @@ final class WholeUnits
             throw UnrepresentableWholeUnits::becauseItIsNotFinite($field, $amount);
         }
 
-        if ($amount <= -self::INTEGER_DOMAIN_LIMIT || $amount >= self::INTEGER_DOMAIN_LIMIT) {
+        // **Les deux bornes ne sont pas symetriques, et c'est le domaine qui le veut.** Un entier
+        // signe de soixante-quatre bits va de `-2^63` a `2^63 - 1` : la borne haute est donc exclue,
+        // la borne basse **incluse**. `-2^63` est exactement `PHP_INT_MIN`, representable en
+        // flottant, et son aller-retour est exact — le refuser rejetterait une valeur que la
+        // plateforme porte parfaitement.
+        if ($amount < -self::INTEGER_DOMAIN_LIMIT || $amount >= self::INTEGER_DOMAIN_LIMIT) {
             throw UnrepresentableWholeUnits::becauseItLeavesTheIntegerDomain($field, $amount);
         }
 
@@ -83,7 +93,7 @@ final class WholeUnits
             return false;
         }
 
-        if ($amount <= -self::INTEGER_DOMAIN_LIMIT || $amount >= self::INTEGER_DOMAIN_LIMIT) {
+        if ($amount < -self::INTEGER_DOMAIN_LIMIT || $amount >= self::INTEGER_DOMAIN_LIMIT) {
             return false;
         }
 

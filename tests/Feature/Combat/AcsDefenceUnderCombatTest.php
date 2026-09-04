@@ -307,16 +307,7 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
 
         // **La projection d'avant**, gelee avant l'appel : c'est a elle que l'etat final se compare.
         $combat->refresh();
-        $avant = [
-            'status' => $combat->status->value,
-            'battle_result' => $combat->battle_result,
-            'frozen_settings' => $combat->frozen_settings,
-            'ends_at' => $combat->ends_at,
-            'participants' => CombatParticipant::query()->where('combat_instance_id', $combat->id)->count(),
-            'inclusions' => DB::table('combat_snapshot_inclusions')->where('combat_instance_id', $combat->id)->count(),
-            'dispositions' => CombatFleetDisposition::query()->where('combat_instance_id', $combat->id)->count(),
-            'outbox' => CombatOutboxMessage::query()->where('combat_instance_id', $combat->id)->count(),
-        ];
+        $avant = $this->everythingTheClosureCouldWrite($combat);
 
         $fermeture = new RallyClosureService(
             engagement: new CombatEngagementService(faits: new class () implements CombatApplicationContext {
@@ -391,18 +382,51 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
 
         // **Exactement l'etat d'avant** : ni photographie, ni fermeture a moitie faite.
         $combat->refresh();
-        $apres = [
+
+        $this->assertSame($avant, $this->everythingTheClosureCouldWrite($combat), 'The refused closure left something behind.');
+    }
+
+    /**
+     * Tout ce que la fermeture peut ecrire, **ligne par ligne** et non par son nombre.
+     *
+     * ## Ce qu'un compte laissait passer
+     *
+     * Comparer le nombre d'inscriptions, d'inclusions, de dispositions et d'avis prouve qu'aucune
+     * ligne n'a ete **ajoutee**. Une ecriture qui modifierait une disposition existante — sa
+     * raison, son instant, son mouvement — ou le contenu d'un avis deja la, passerait sans etre
+     * vue : le compte serait le meme.
+     *
+     * Les lignes sont donc projetees entieres, colonnes triees et lignes triees par identite
+     * stable, pour que deux lectures du meme etat donnent exactement la meme structure.
+     *
+     * @return array<string, mixed>
+     */
+    private function everythingTheClosureCouldWrite(CombatInstance $combat): array
+    {
+        $lignes = static function (string $table, string $ordre) use ($combat): array {
+            $tout = [];
+
+            foreach (DB::table($table)->where('combat_instance_id', $combat->id)->orderBy($ordre)->get() as $ligne) {
+                $colonnes = (array)$ligne;
+                ksort($colonnes);
+                $tout[] = $colonnes;
+            }
+
+            return $tout;
+        };
+
+        return [
             'status' => $combat->status->value,
             'battle_result' => $combat->battle_result,
             'frozen_settings' => $combat->frozen_settings,
             'ends_at' => $combat->ends_at,
-            'participants' => CombatParticipant::query()->where('combat_instance_id', $combat->id)->count(),
-            'inclusions' => DB::table('combat_snapshot_inclusions')->where('combat_instance_id', $combat->id)->count(),
-            'dispositions' => CombatFleetDisposition::query()->where('combat_instance_id', $combat->id)->count(),
-            'outbox' => CombatOutboxMessage::query()->where('combat_instance_id', $combat->id)->count(),
+            'duration_seconds' => $combat->duration_seconds,
+            'round_schedule' => $combat->round_schedule,
+            'participants' => $lignes('combat_participants', 'participant_key'),
+            'inclusions' => $lignes('combat_snapshot_inclusions', 'event_identity'),
+            'dispositions' => $lignes('combat_fleet_dispositions', 'fleet_mission_id'),
+            'outbox' => $lignes('combat_outbox', 'participant_key'),
         ];
-
-        $this->assertSame($avant, $apres, 'The refused closure left something behind.');
     }
 
     /**

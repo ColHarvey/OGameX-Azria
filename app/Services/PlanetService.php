@@ -2092,7 +2092,7 @@ class PlanetService
         if (!is_finite($montant) || $montant < 0.0 || floor($montant) !== $montant) {
             throw new InvalidArgumentException(
                 'Le credit « ' . $champ . ' » vaut ' . var_export($montant, true) . ' : un credit se compte en unites '
-                . 'entieres et positives. Le transtyper perdrait la fraction, et un negatif serait ignore en silence.'
+                . 'entieres et non negatives. Le transtyper perdrait la fraction, et un negatif serait ignore en silence.'
             );
         }
 

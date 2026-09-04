@@ -64,12 +64,17 @@ class WholeUnitsTest extends UnitTestCase
     }
 
     /**
-     * La valeur representable suivante est refusee aussi.
+     * Le voisin immediatement superieur est refuse aussi.
+     *
+     * Le pas de la representation vaut 2048 a cette echelle : c'est la premiere valeur distincte
+     * au-dessus de la borne, et non son double. Un essai qui doublerait la borne prouverait quelque
+     * chose de bien plus large, et laisserait le voisin — le cas qui compte — hors de portee.
      */
-    public function testTheNextRepresentableValueIsRefused(): void
+    public function testTheNextRepresentableValueAboveTheLimitIsRefused(): void
     {
-        $suivant = WholeUnits::INTEGER_DOMAIN_LIMIT * 2.0;
+        $suivant = WholeUnits::INTEGER_DOMAIN_LIMIT + 2048.0;
 
+        $this->assertNotSame(WholeUnits::INTEGER_DOMAIN_LIMIT, $suivant, 'The chosen step is smaller than the representation allows: this is not the next value.');
         $this->assertFalse(WholeUnits::representable($suivant));
 
         $this->expectException(UnrepresentableWholeUnits::class);
@@ -91,14 +96,34 @@ class WholeUnitsTest extends UnitTestCase
     }
 
     /**
-     * Le cote negatif du domaine est borne de la meme facon.
+     * Le plus petit entier de la plateforme passe : la borne basse est **incluse**.
+     *
+     * Un entier signe de soixante-quatre bits va de `-2^63` a `2^63 - 1`. Les deux bornes ne sont
+     * donc pas symetriques, et refuser `-2^63` rejetterait `PHP_INT_MIN` — une valeur que la
+     * plateforme porte parfaitement, dont l'aller-retour est exact. Cette classe juge le domaine,
+     * pas le signe.
      */
-    public function testTheNegativeSideOfTheDomainIsBoundedToo(): void
+    public function testTheSmallestIntegerOfThePlatformIsAccepted(): void
     {
-        $this->assertFalse(WholeUnits::representable(-WholeUnits::INTEGER_DOMAIN_LIMIT));
+        $plancher = (float)PHP_INT_MIN;
+
+        $this->assertSame(-WholeUnits::INTEGER_DOMAIN_LIMIT, $plancher, 'PHP_INT_MIN is not exactly -2^63 here: the bound would mean something else.');
+        $this->assertTrue(WholeUnits::representable($plancher));
+        $this->assertSame(PHP_INT_MIN, WholeUnits::of($plancher, 'metal'));
+    }
+
+    /**
+     * Au-dela de la borne basse, le refus revient.
+     */
+    public function testBelowTheSmallestIntegerTheDomainRefusesAgain(): void
+    {
+        $trop = -WholeUnits::INTEGER_DOMAIN_LIMIT - 2048.0;
+
+        $this->assertNotSame(-WholeUnits::INTEGER_DOMAIN_LIMIT, $trop, 'The chosen step is smaller than the representation allows.');
+        $this->assertFalse(WholeUnits::representable($trop));
 
         $this->expectException(UnrepresentableWholeUnits::class);
-        WholeUnits::of(-WholeUnits::INTEGER_DOMAIN_LIMIT, 'metal');
+        WholeUnits::of($trop, 'metal');
     }
 
     /**

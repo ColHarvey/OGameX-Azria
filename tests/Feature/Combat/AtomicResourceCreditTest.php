@@ -177,7 +177,7 @@ class AtomicResourceCreditTest extends TestCase
                 $service->addResourcesAtomic($credit);
                 $this->fail("A credit carrying a {$quoi} was accepted.");
             } catch (InvalidArgumentException $refus) {
-                $this->assertStringContainsString('unites entieres et positives', $refus->getMessage());
+                $this->assertStringContainsString('unites entieres et non negatives', $refus->getMessage());
             }
         }
 
