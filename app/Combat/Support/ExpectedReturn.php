@@ -47,9 +47,12 @@ final readonly class ExpectedReturn
 
     /**
      * @param array<string, int|null> $imposees Colonne -> valeur attendue.
+     * @param ResourceNormalizationDiagnostics $diagnostics Ce que la frontiere a signale en chemin.
      */
-    private function __construct(public array $imposees)
-    {
+    private function __construct(
+        public array $imposees,
+        public ResourceNormalizationDiagnostics $diagnostics,
+    ) {
     }
 
     /**
@@ -59,11 +62,18 @@ final readonly class ExpectedReturn
     {
         $service = resolve(FleetMissionService::class);
 
+        // **Ce que la frontiere signale se garde, au lieu d'etre jete.** Chaque conversion peut
+        // rendre un diagnostic — une fortune au-dela de deux puissance cinquante-trois traverse
+        // legitimement, mais elle doit se voir. Ne garder que l'entier faisait disparaitre
+        // l'incident : le protocole acceptait le retour, et le journal unique de l'operation
+        // n'apprenait rien.
+        $diagnostics = ResourceNormalizationDiagnostics::none();
+
         // **Les colonnes de l'aller doivent porter des entiers, et le refus vient avant tout.**
         // Une cargaison est posee entiere au depart de la flotte, et le carburant consomme aussi ;
         // rien ne les fait produire en vol. Une fraction dessus est une donnee abimee, et un
         // transtypage entier l'aurait perdue en silence des deux cotes de la comparaison.
-        self::refuseAnyBrokenColumnOf($aller);
+        $diagnostics = $diagnostics->mergedWith(self::diagnoseTheColumnsOf($aller));
 
         $ressources = $service->getResources($aller);
 
@@ -114,9 +124,9 @@ final readonly class ExpectedReturn
             // comparaison. La regle du demi-carburant reste ou elle est — `getResources()` en est le
             // seul auteur — et son demi restant est plancher **nomme**, par la meme frontiere que le
             // reste du pipeline economique.
-            'metal' => self::wholeUnitsOf($aller, $ressources->metal->get(), 'metal'),
-            'crystal' => self::wholeUnitsOf($aller, $ressources->crystal->get(), 'crystal'),
-            'deuterium' => self::wholeUnitsOf($aller, $ressources->deuterium->get(), 'deuterium'),
+            'metal' => self::wholeUnitsOf($aller, $ressources->metal->get(), 'metal', $diagnostics),
+            'crystal' => self::wholeUnitsOf($aller, $ressources->crystal->get(), 'crystal', $diagnostics),
+            'deuterium' => self::wholeUnitsOf($aller, $ressources->deuterium->get(), 'deuterium', $diagnostics),
             'interplanetary_missile' => 0,
             'crawler' => 0,
         ];
@@ -138,7 +148,7 @@ final readonly class ExpectedReturn
             }
         }
 
-        return new self($imposees);
+        return new self($imposees, $diagnostics);
     }
 
     /**
@@ -154,19 +164,26 @@ final readonly class ExpectedReturn
      * la cargaison et le carburant sont poses entiers au lancement de la flotte, et rien en vol ne
      * les fait avancer par fractions. Une fraction dessus n'a pas d'auteur legitime.
      *
+     * Elle rend ce que la frontiere a signale, au lieu de le jeter : au-dela de deux puissance
+     * cinquante-trois une colonne passe legitimement, mais l'incident doit remonter au journal.
+     *
      * @param FleetMission $aller
-     * @return void
+     * @return ResourceNormalizationDiagnostics
      */
-    private static function refuseAnyBrokenColumnOf(FleetMission $aller): void
+    private static function diagnoseTheColumnsOf(FleetMission $aller): ResourceNormalizationDiagnostics
     {
+        $diagnostics = ResourceNormalizationDiagnostics::none();
+
         foreach (['metal', 'crystal', 'deuterium', 'deuterium_consumption'] as $colonne) {
-            ResourceBoundary::wholeUnitsOfCarriedCargo(
+            $diagnostics = $diagnostics->mergedWith(ResourceBoundary::wholeUnitsOfCarriedCargo(
                 (float)($aller->{$colonne} ?? 0),
                 $colonne,
                 self::PHASE,
                 'mission ' . $aller->id
-            );
+            )->diagnostics);
         }
+
+        return $diagnostics;
     }
 
     /**
@@ -180,16 +197,21 @@ final readonly class ExpectedReturn
      * @param FleetMission $aller
      * @param float $montant
      * @param string $champ
+     * @param ResourceNormalizationDiagnostics $diagnostics Enrichi de ce que cette conversion signale.
      * @return int
      */
-    private static function wholeUnitsOf(FleetMission $aller, float $montant, string $champ): int
+    private static function wholeUnitsOf(FleetMission $aller, float $montant, string $champ, ResourceNormalizationDiagnostics &$diagnostics): int
     {
-        return ResourceBoundary::wholeUnitsOfLivingStock(
+        $normalise = ResourceBoundary::wholeUnitsOfLivingStock(
             $montant,
             $champ,
             self::PHASE,
             'mission ' . $aller->id
-        )->units;
+        );
+
+        $diagnostics = $diagnostics->mergedWith($normalise->diagnostics);
+
+        return $normalise->units;
     }
 
     /**

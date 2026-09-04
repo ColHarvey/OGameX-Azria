@@ -3,12 +3,16 @@
 namespace OGame\Combat\Services;
 
 use Closure;
+use Illuminate\Support\Facades\DB;
 use OGame\Combat\Enums\FleetDispositionKind;
 use OGame\Combat\Exceptions\ReturnDoesNotMatchTheOrder;
 use OGame\Combat\Support\ExpectedReturn;
+use OGame\Combat\Support\OperationKey;
 use OGame\Combat\Support\RefusedFleetNotice;
 use OGame\Combat\Support\RefusedFleetVerdict;
+use OGame\Combat\Support\ResourceDiagnosticsJournal;
 use OGame\Combat\Support\ReturnOrder;
+use OGame\Combat\Support\SealedResourceDiagnostics;
 use OGame\Models\CombatFleetDisposition;
 use OGame\Models\FleetMission;
 
@@ -167,6 +171,27 @@ final class RefusedFleetHomecoming
 
         if ($ecart !== null) {
             throw new ReturnDoesNotMatchTheOrder($mission->id, $ecart);
+        }
+
+        // **Ce que la frontiere a signale remonte au journal unique, apres le commit.**
+        //
+        // La projection convertit trois soldes et controle quatre colonnes ; chaque conversion peut
+        // rendre un diagnostic. Une fortune au-dela de deux puissance cinquante-trois traverse
+        // legitimement — sa precision est degradee, pas fausse —, mais l'incident doit se voir. Ne
+        // garder que l'entier le faisait disparaitre : le retour etait accepte, et personne
+        // n'apprenait rien.
+        //
+        // `afterCommit` place la ligne apres la validation de la transaction **la plus exterieure**,
+        // et ne l'ecrit pas du tout si elle est annulee : un journal qui affirmerait un retour que la
+        // base n'a pas garde serait pire que pas de journal. Hors transaction, elle part tout de
+        // suite. Une seule ligne par operation, quel que soit le nombre de conversions.
+        if ($attendu->diagnostics->any()) {
+            $scelle = SealedResourceDiagnostics::seal(OperationKey::forFleetMission($mission), $attendu->diagnostics);
+            $identite = ['fleet_mission_id' => (int)$mission->id, 'return_id' => (int)$retour->id];
+
+            DB::afterCommit(static function () use ($scelle, $identite): void {
+                ResourceDiagnosticsJournal::report($scelle, $identite);
+            });
         }
     }
 }

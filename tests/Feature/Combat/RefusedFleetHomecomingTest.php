@@ -4,6 +4,7 @@ namespace Tests\Feature\Combat;
 
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
@@ -17,8 +18,12 @@ use OGame\Combat\Services\RefusedFleetHomecoming;
 use OGame\Combat\Services\ReturnPlanner;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\ExpectedReturn;
+use OGame\Combat\Support\OperationKey;
 use OGame\Combat\Support\RefusedFleetNotice;
+use OGame\Combat\Support\ResourceDiagnosticsJournal;
+use OGame\Combat\Support\ResourceNormalizationDiagnostics;
 use OGame\Combat\Support\ReturnOrder;
+use OGame\Combat\Support\SealedResourceDiagnostics;
 use OGame\GameMissions\Models\ResolvedReturnDestination;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatOutboxMessage;
@@ -27,6 +32,7 @@ use OGame\Models\FleetUnion;
 use OGame\Models\Planet;
 use OGame\Models\User;
 use OGame\Services\FleetMissionService;
+use ReflectionClass;
 use Tests\TestCase;
 
 /**
@@ -583,6 +589,112 @@ class RefusedFleetHomecomingTest extends TestCase
 
         $retour = FleetMission::query()->where('parent_id', $mission->id)->firstOrFail();
         $this->assertSame($porte, (float)$retour->metal, 'The fortune lost units on the way home.');
+    }
+
+    /**
+     * Ce que la frontiere signale suit le retour jusqu'au journal unique de l'operation.
+     *
+     * ## L'incident qui disparaissait
+     *
+     * La projection convertit trois soldes et controle quatre colonnes. Chaque conversion peut
+     * rendre un diagnostic — au-dela de deux puissance cinquante-trois, la valeur traverse
+     * legitimement mais sa precision est degradee. Seul l'entier etait garde : le retour etait
+     * accepte, et l'incident n'atteignait personne.
+     *
+     * L'essai verifie les deux moities. La projection **porte** les diagnostics fusionnes ; et la
+     * ligne de journal part **apres le commit** — donc pas pendant que la transaction peut encore
+     * etre annulee, ce qui affirmerait un retour que la base n'aurait pas garde.
+     */
+    public function testWhatTheBoundaryReportsReachesTheSingleJournalAfterTheCommit(): void
+    {
+        [$combat, $mission] = $this->aCombatAndAFleet();
+        DB::table('fleet_missions')->where('id', $mission->id)->update(['metal' => 9007199254740992.0]);
+        $mission->refresh();
+
+        // La projection porte ce que la frontiere a signale.
+        $ordre = new ReturnOrder($this->theOriginAsDestinationOf($mission), 1_700_000_600);
+        $attendu = ExpectedReturn::of($mission, $ordre);
+
+        $this->assertTrue($attendu->diagnostics->any(), 'The projection dropped what the boundary reported.');
+        $this->assertTrue(
+            $attendu->diagnostics->includes(ResourceNormalizationDiagnostics::PRECISION_DEGRADED),
+            'The degraded precision of a fortune beyond two to the fifty-third was not reported.'
+        );
+
+        // **Ce que chaque ligne dit, ramene a une chaine** : les codes signales et la flotte qu'elle
+        // nomme. Comparer des tableaux entiers evite d'indexer une collection que rien ne garantit
+        // remplie, et dit la meme chose.
+        $lignes = [];
+        Log::partialMock()
+            ->shouldReceive('warning')
+            ->andReturnUsing(function (mixed $message, mixed $contexte) use (&$lignes): void {
+                if ($message !== 'Frontiere des ressources : conversions signalees.' || !is_array($contexte)) {
+                    return;
+                }
+
+                $codes = $contexte['diagnostics'] ?? [];
+                $lignes[] = implode(',', is_array($codes) ? array_keys($codes) : [])
+                    . ' pour la flotte ' . (string)($contexte['fleet_mission_id'] ?? '');
+            });
+
+        (new FleetDispositionRegistry())->record($combat, $mission->id, CombatReasonCode::RallyClosed, 1_700_000_600, FleetDispositionKind::ReturnToOrigin);
+
+        $this->assertTrue((new RefusedFleetHomecoming())->sendHome($mission, 1_700_000_900, function (FleetMission $tenue, ReturnOrder $ordre): void {
+            $this->aFaithfulReturnOf($tenue, $ordre);
+        }));
+
+        $this->assertGreaterThan(0, DB::transactionLevel(), 'The bench is not inside a transaction: the deferral would prove nothing.');
+        $this->assertSame([], $lignes, 'The journal line was written while the transaction could still roll back.');
+
+        // Et ce que la ligne porte quand elle part : la meme enveloppe scellee, sous la meme
+        // operation, avec le code que la frontiere a signale.
+        ResourceDiagnosticsJournal::report(
+            SealedResourceDiagnostics::seal(OperationKey::forFleetMission($mission), $attendu->diagnostics),
+            ['fleet_mission_id' => (int)$mission->id]
+        );
+
+        $this->assertSame(
+            [ResourceNormalizationDiagnostics::PRECISION_DEGRADED . ' pour la flotte ' . $mission->id],
+            $lignes,
+            'The journal line does not carry the degraded precision, or does not name the fleet it describes.'
+        );
+    }
+
+    /**
+     * Le renvoi remet sa ligne de journal apres le commit, et ne l'ecrit pas dedans.
+     *
+     * ## Pourquoi une garde de source, et non une observation
+     *
+     * Le banc vit dans une transaction qui n'est jamais validee : un rappel remis a `afterCommit`
+     * n'y part donc jamais, et l'essai d'execution ne peut pas distinguer « remis a plus tard » de
+     * « pas ecrit du tout ». Il montre que rien ne part pendant la transaction ; celle-ci montre que
+     * quelque chose est bien remis, et par quel moyen.
+     *
+     * Elle ne prouve pas que le rappel s'execute : cela demande un vrai commit, et cette epreuve
+     * appartient a MariaDB. Elle prouve qu'un futur passage ne remettra pas la ligne dans la
+     * transaction — la ou un echec tardif laisserait un journal affirmant un retour que la base n'a
+     * pas garde.
+     */
+    public function testTheHomecomingDefersItsJournalLineToTheCommit(): void
+    {
+        $fichier = (new ReflectionClass(RefusedFleetHomecoming::class))->getFileName();
+        $this->assertNotFalse($fichier);
+
+        $source = preg_replace('/\s+/', ' ', (string)file_get_contents($fichier));
+        $this->assertNotNull($source);
+
+        $this->assertStringContainsString(
+            'DB::afterCommit(static function () use ($scelle, $identite): void { ResourceDiagnosticsJournal::report($scelle, $identite); });',
+            $source,
+            'The homecoming no longer defers its journal line to the commit.'
+        );
+
+        // Et elle ne l'ecrit nulle part ailleurs : une seule mention du journal dans ce fichier.
+        $this->assertSame(
+            1,
+            substr_count($source, 'ResourceDiagnosticsJournal::report('),
+            'The homecoming writes its journal line somewhere else as well.'
+        );
     }
 
     private function theOriginAsDestinationOf(FleetMission $mission): ResolvedReturnDestination

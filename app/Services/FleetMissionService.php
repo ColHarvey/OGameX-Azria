@@ -428,7 +428,19 @@ class FleetMissionService
         return new Resources(
             $mission->metal,
             $mission->crystal,
-            $mission->deuterium + ($mission->deuterium_consumption / 2),  //if mission deployment: Add half of the consumed deuterium
+            // **La moitie du carburant consomme est rendue, pour tous les genres de mission.**
+            //
+            // Le commentaire qui vivait ici disait « si deploiement » et decrivait donc une regle
+            // plus etroite que le code : aucune condition ne porte sur `mission_type`, et une
+            // attaque, un transport ou une expedition recoivent ce remboursement exactement comme un
+            // deploiement. Documenter la regle etroite laissait croire qu'un genre n'y avait pas
+            // droit, et un futur passage aurait pu « corriger » le code vers le commentaire.
+            //
+            // La valeur produite est fractionnaire quand la consommation est impaire : c'est voulu,
+            // et c'est la seule fraction legitime de tout ce calcul. Les colonnes qui l'alimentent,
+            // elles, portent des entiers. Si un jour seul le deploiement doit recevoir ce
+            // remboursement, ce sera un changement de regle a part entiere, pas un ajustement.
+            $mission->deuterium + ($mission->deuterium_consumption / 2),
             0
         );
     }
