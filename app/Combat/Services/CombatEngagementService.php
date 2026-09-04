@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Date;
 use LogicException;
 use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Allocation\LootAllocatorRegistry;
+use OGame\Combat\Application\CombatApplicationContext;
 use OGame\Combat\Application\FrozenCombatApplicationContext;
 use OGame\Combat\Application\LiveCombatApplicationContext;
 use OGame\Combat\Replay\BattleResultCodec;
@@ -45,11 +46,19 @@ use OGame\Services\SettingsService;
  */
 final class CombatEngagementService
 {
+    /**
+     * @param CombatApplicationContext|null $faits La source des faits d'application photographies.
+     *        Elle vaut `LiveCombatApplicationContext` en production ; un banc la remplace pour
+     *        eprouver ce que la cloture fait d'une source qui refuse — la construire ici en dur
+     *        rendait ce chemin inatteignable, et l'essai devait alors se contenter d'appeler la
+     *        source directement, sans jamais traverser la cloture.
+     */
     public function __construct(
         private CombatRosterReader $roster = new CombatRosterReader(),
         private SettingsService|null $settings = null,
         private CombatDurationEstimator|null $estimator = null,
         private LootAllocatorRegistry|null $allocators = null,
+        private CombatApplicationContext|null $faits = null,
     ) {
     }
 
@@ -114,7 +123,7 @@ final class CombatEngagementService
         // pendant les heures que dure le combat, et chacun changerait ce que l'application ecrit.
         $combat->frozen_settings = FrozenCombatApplicationContext::photograph(
             $effectif,
-            new LiveCombatApplicationContext(resolve(CharacterClassService::class), $this->settings()),
+            $this->faits ??= new LiveCombatApplicationContext(resolve(CharacterClassService::class), $this->settings()),
             CombatResolutionService::NPC_MOTIVE_VARIATIONS,
             // **L'instant d'application est l'echeance**, fixee ici meme : un travailleur en retard
             // n'y change rien, et un champ d'epaves ne vit pas plus longtemps parce que le serveur a

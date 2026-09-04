@@ -7,6 +7,7 @@ use Closure;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use OGame\Combat\Application\CombatApplicationContext;
 use OGame\Combat\Application\FrozenCombatApplicationContext;
 use OGame\Combat\Application\LiveCombatApplicationContext;
 use OGame\Combat\Enums\CombatCancellationCause;
@@ -15,12 +16,15 @@ use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\FleetDispositionKind;
 use OGame\Combat\Exceptions\CorruptedFrozenApplicationContext;
 use OGame\Combat\Exceptions\MissingHeldFleetCargo;
+use OGame\Combat\Replay\BattleResultCodec;
+use OGame\Combat\Services\CombatEngagementService;
 use OGame\Combat\Services\CombatRosterReader;
 use OGame\Combat\Services\FleetDispositionRegistry;
 use OGame\Combat\Services\PersistentCombatAdvancer;
 use OGame\Combat\Services\RallyClosureService;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\RefusedFleetNotice;
+use OGame\Enums\CharacterClass;
 use OGame\Factories\GameMissionFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameMissions\AcsDefendMission;
@@ -43,6 +47,7 @@ use OGame\Services\FleetMissionService;
 use OGame\Services\MessageService;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
+use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
 use Tests\FleetDispatchTestCase;
 
@@ -273,6 +278,134 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
     }
 
     /**
+     * Une source de faits qui refuse arrete la cloture, et la transaction ne laisse rien.
+     *
+     * ## Pourquoi cet essai, alors que le refus est deja eprouve
+     *
+     * L'essai direct montre qu'une mission absente n'est pas une cargaison vide. Il appelle la source
+     * lui-meme : il ne montre donc ni que la cloture **atteint** ce refus, ni que ses ecritures
+     * anterieures sont annulees. Or la cloture ecrit beaucoup avant de photographier — inscriptions,
+     * inclusions, dispositions, avis — et une fermeture a moitie faite serait pire qu'un refus.
+     *
+     * ## Pourquoi une couture, et pas une mission effacee
+     *
+     * Effacer la mission avant la cloture la retirerait aussi de l'effectif : il n'y aurait plus de
+     * renfort annonce, donc plus rien a photographier, et le refus ne serait jamais atteint. La
+     * source de faits est donc remplacee au point exact ou la photographie la lit — l'effectif
+     * annonce le renfort, et la source refuse.
+     */
+    public function testAFactSourceThatRefusesStopsTheClosureAndLeavesNothing(): void
+    {
+        $renfort = null;
+        [$combat, , , $ouverture] = $this->anOpenedCombat(true, function (PlanetService $cible, int $ouverture) use (&$renfort): void {
+            $renfort = $this->aDefensiveReinforcement($cible, $ouverture + 5, 30, $ouverture - 600);
+        });
+
+        if ($renfort === null) {
+            $this->fail('The reinforcement was never launched.');
+        }
+
+        // **La projection d'avant**, gelee avant l'appel : c'est a elle que l'etat final se compare.
+        $combat->refresh();
+        $avant = [
+            'status' => $combat->status->value,
+            'battle_result' => $combat->battle_result,
+            'frozen_settings' => $combat->frozen_settings,
+            'ends_at' => $combat->ends_at,
+            'participants' => CombatParticipant::query()->where('combat_instance_id', $combat->id)->count(),
+            'inclusions' => DB::table('combat_snapshot_inclusions')->where('combat_instance_id', $combat->id)->count(),
+            'dispositions' => CombatFleetDisposition::query()->where('combat_instance_id', $combat->id)->count(),
+            'outbox' => CombatOutboxMessage::query()->where('combat_instance_id', $combat->id)->count(),
+        ];
+
+        $fermeture = new RallyClosureService(
+            engagement: new CombatEngagementService(faits: new class () implements CombatApplicationContext {
+                public function isGeneral(PlayerService $player): bool
+                {
+                    return false;
+                }
+
+                public function reaperDebrisCollectionPercentage(PlayerService $player): float
+                {
+                    return 0.0;
+                }
+
+                public function characterClassOf(PlayerService $player): CharacterClass|null
+                {
+                    return null;
+                }
+
+                public function spaceDockLevelFor(PlanetService $originBody): int
+                {
+                    return 1;
+                }
+
+                public function heldFleetCargo(int $fleetMissionId): Resources
+                {
+                    throw MissingHeldFleetCargo::because($fleetMissionId);
+                }
+
+                public function wreckFieldMinResourcesLoss(): int
+                {
+                    return 150_000;
+                }
+
+                public function wreckFieldMinFleetPercentage(): int
+                {
+                    return 5;
+                }
+
+                public function debrisFieldFromShips(): int
+                {
+                    return 30;
+                }
+
+                public function wreckFieldLifetimeHours(): int
+                {
+                    return 72;
+                }
+
+                public function applicationInstant(): int
+                {
+                    return 1;
+                }
+
+                public function npcMotiveAgainst(PlayerService $defender): string|null
+                {
+                    return null;
+                }
+
+                public function npcNarrativeVariation(int $variations): int
+                {
+                    return 1;
+                }
+            })
+        );
+
+        try {
+            $fermeture->close($combat->id, $ouverture + 19);
+            $this->fail('The closure went through although the fact source refused.');
+        } catch (MissingHeldFleetCargo $refus) {
+            $this->assertStringContainsString((string)$renfort->id, $refus->getMessage());
+        }
+
+        // **Exactement l'etat d'avant** : ni photographie, ni fermeture a moitie faite.
+        $combat->refresh();
+        $apres = [
+            'status' => $combat->status->value,
+            'battle_result' => $combat->battle_result,
+            'frozen_settings' => $combat->frozen_settings,
+            'ends_at' => $combat->ends_at,
+            'participants' => CombatParticipant::query()->where('combat_instance_id', $combat->id)->count(),
+            'inclusions' => DB::table('combat_snapshot_inclusions')->where('combat_instance_id', $combat->id)->count(),
+            'dispositions' => CombatFleetDisposition::query()->where('combat_instance_id', $combat->id)->count(),
+            'outbox' => CombatOutboxMessage::query()->where('combat_instance_id', $combat->id)->count(),
+        ];
+
+        $this->assertSame($avant, $apres, 'The refused closure left something behind.');
+    }
+
+    /**
      * Un renfort qui survit a la bataille recoit **exactement** sa cargaison gelee.
      *
      * ## La traversee que les gardes de source ne donnaient pas
@@ -282,12 +415,19 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
      * montre — la cargaison est gelee a la cloture, la ligne de la mission est **modifiee ensuite**,
      * et le reglement ecrit la valeur gelee.
      *
-     * ## Pourquoi l'issue est fixee, et ce que cela ne cache pas
+     * ## L'essai lit l'issue, il ne la predit pas
      *
-     * La cargaison d'un survivant est reduite en proportion de sa capacite restante : il faut donc
-     * qu'il survive, et le moteur tire des des. Un renfort ecrasant contre une vague minuscule rend
-     * l'issue certaine et la proportion egale a un — ce qui rend la valeur attendue **exactement**
-     * la valeur gelee, et non un produit qu'un arrondi rendrait indistinct du hasard.
+     * La cargaison d'un survivant est reduite en proportion de sa capacite restante. Une premiere
+     * version de cet essai affirmait « quatre cents cuirassiers survivent entierement, donc la
+     * proportion vaut un ». C'etait une **attente d'issue du moteur** : une flotte tres superieure
+     * rend la perte improbable, elle n'en fait pas un fait mathematique, et `AGENTS.md` interdit de
+     * figer des survivants en presence de tirages.
+     *
+     * L'essai lit donc la capacite survivante **dans le resultat gele que le moteur a reellement
+     * produit**, et en deduit l'attendu. Il exige seulement qu'elle soit strictement positive — sans
+     * survivant, la regle de cargaison n'est jamais atteinte et la mutation ne serait pas
+     * observable. Le calcul de l'attendu est ecrit ici plutot que repris de la production : reutiliser
+     * la methode eprouvee lui ferait porter le meme defaut qu'elle.
      */
     public function testASurvivingReinforcementReceivesExactlyItsFrozenCargo(): void
     {
@@ -325,13 +465,43 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
         $this->travelTo(Date::createFromTimestamp((int)$combat->ends_at));
         $this->assertSame(1, (new PersistentCombatAdvancer())->advance((int)$combat->ends_at)->settled, 'The combat did not settle.');
 
+        // **L'issue se lit dans le resultat gele**, elle ne se suppose pas. La capacite survivante
+        // que le moteur a reellement produite est la seule source legitime de l'attendu.
+        $combat->refresh();
+        $resultat = BattleResultCodec::fromStorage($combat->battle_result);
+
+        $issue = null;
+
+        foreach ($resultat->defenderFleetResults as $candidat) {
+            if ((int)$candidat->fleetMissionId === (int)$renfort->id) {
+                $issue = $candidat;
+                break;
+            }
+        }
+
+        $this->assertNotNull($issue, 'The frozen result does not describe this reinforcement at all.');
+
+        $proprietaire = resolve(PlayerServiceFactory::class)->make((int)$renfort->user_id, true);
+        $capaciteDepart = $issue->unitsStart->getTotalCargoCapacity($proprietaire);
+        $capaciteRestante = $issue->unitsResult->getTotalCargoCapacity($proprietaire);
+
+        $this->assertGreaterThan(0, $capaciteDepart, 'The reinforcement carried no cargo capacity at all.');
+        $this->assertGreaterThan(
+            0,
+            $capaciteRestante,
+            'No cargo capacity survived: the cargo rule was never reached, and the mutation would not be observable.'
+        );
+
+        // La proportion, ecrite ici et non reprise de la production : la reutiliser lui ferait
+        // porter le meme defaut que celui qu'on eprouve.
+        $part = $capaciteRestante / $capaciteDepart;
+
         $renfort->refresh();
         $this->assertSame(0, (int)$renfort->processed, 'The reinforcement left before its hold was over: the scenario changed.');
-        $this->assertGreaterThan(0, (int)$renfort->battle_ship, 'The reinforcement did not survive: the cargo rule was never reached.');
 
-        $this->assertSame(4_200, (int)$renfort->metal, 'The settlement wrote the cargo it re-read live, not the one it had frozen.');
-        $this->assertSame(1_300, (int)$renfort->crystal, 'The settlement wrote the cargo it re-read live, not the one it had frozen.');
-        $this->assertSame(700, (int)$renfort->deuterium, 'The settlement wrote the cargo it re-read live, not the one it had frozen.');
+        $this->assertSame(max(0, (int)(4_200 * $part)), (int)$renfort->metal, 'The settlement wrote the cargo it re-read live, not the one it had frozen.');
+        $this->assertSame(max(0, (int)(1_300 * $part)), (int)$renfort->crystal, 'The settlement wrote the cargo it re-read live, not the one it had frozen.');
+        $this->assertSame(max(0, (int)(700 * $part)), (int)$renfort->deuterium, 'The settlement wrote the cargo it re-read live, not the one it had frozen.');
     }
 
     /**

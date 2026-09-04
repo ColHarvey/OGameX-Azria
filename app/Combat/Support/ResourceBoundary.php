@@ -4,6 +4,8 @@ namespace OGame\Combat\Support;
 
 use OGame\Combat\Exceptions\CorruptedResourceAmount;
 use OGame\Combat\Exceptions\UnrepresentableResourceAmount;
+use OGame\Exceptions\UnrepresentableWholeUnits;
+use OGame\Support\WholeUnits;
 
 /**
  * Le seul endroit autorise a recevoir un solde flottant venu de la base.
@@ -252,16 +254,15 @@ final class ResourceBoundary
      */
     private static function safeIntegerOf(float $arrondi, string $field): int
     {
-        if ($arrondi >= self::INTEGER_DOMAIN_LIMIT) {
-            throw UnrepresentableResourceAmount::because($field, $arrondi);
+        // **Le domaine entier est une question de plateforme, pas d'economie.** Il vivait ici, et le
+        // credit d'un corps en avait besoin aussi : deux definitions auraient fini par diverger, et
+        // la plus indulgente aurait fait autorite le jour ou un nombre passerait par elle. La
+        // primitive neutre repond ; cette frontiere garde le sens metier — arrondi, tolerance,
+        // diagnostics — et traduit le refus dans son propre vocabulaire.
+        try {
+            return WholeUnits::of($arrondi, $field);
+        } catch (UnrepresentableWholeUnits $hors) {
+            throw UnrepresentableResourceAmount::because($field, $arrondi, $hors);
         }
-
-        $entier = (int)$arrondi;
-
-        if ((float)$entier !== $arrondi) {
-            throw UnrepresentableResourceAmount::because($field, $arrondi);
-        }
-
-        return $entier;
     }
 }

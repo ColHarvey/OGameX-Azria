@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
+use OGame\Exceptions\UnrepresentableWholeUnits;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameObjects\Models\Abstracts\GameObject;
@@ -25,6 +26,7 @@ use OGame\Models\ResearchQueue;
 use OGame\Models\Resource;
 use OGame\Models\Resources;
 use OGame\Models\UnitQueue;
+use OGame\Support\WholeUnits;
 use RuntimeException;
 use Throwable;
 
@@ -2036,7 +2038,17 @@ class PlanetService
             return;
         }
 
-        Planet::where('id', $this->getPlanetId())->update($updates);
+        // **Une ligne doit avoir ete touchee.** Zero ligne affectee veut dire que le corps a disparu
+        // sous le credit : le rendre silencieusement rendrait un succes qui n'a rien credite, et les
+        // ressources s'evaporeraient sans erreur.
+        $touchees = Planet::where('id', $this->getPlanetId())->update($updates);
+
+        if ($touchees < 1) {
+            throw new RuntimeException(
+                'Le corps ' . $this->getPlanetId() . ' n existe plus : le credit n a touche aucune ligne, et le '
+                . 'declarer reussi ferait disparaitre les ressources sans trace.'
+            );
+        }
 
         // **Le modele se relit sur la ligne, il ne se recalcule pas.**
         //
@@ -2046,11 +2058,16 @@ class PlanetService
         // exactement la perte que l'addition atomique venait d'empecher.
         $ligne = Planet::where('id', $this->getPlanetId())->first(['metal', 'crystal', 'deuterium']);
 
-        if ($ligne instanceof Planet) {
-            $this->planet->metal = $ligne->metal;
-            $this->planet->crystal = $ligne->crystal;
-            $this->planet->deuterium = $ligne->deuterium;
+        if (!$ligne instanceof Planet) {
+            throw new RuntimeException(
+                'Le corps ' . $this->getPlanetId() . ' a disparu entre le credit et sa relecture : le modele en '
+                . 'memoire ne peut plus suivre la ligne, et le sauver plus tard reecrirait un etat invente.'
+            );
         }
+
+        $this->planet->metal = $ligne->metal;
+        $this->planet->crystal = $ligne->crystal;
+        $this->planet->deuterium = $ligne->deuterium;
     }
 
     /**
@@ -2079,7 +2096,20 @@ class PlanetService
             );
         }
 
-        return (int)$montant;
+        // **Le domaine entier n'est pas redit ici.** `1e30` est fini, positif et egal a son
+        // plancher : il traversait les trois controles ci-dessus, puis le transtypage le rendait
+        // negatif ou nul, et un credit devenait un debit. La question « cette plateforme porte-t-elle
+        // cet entier ? » appartient a une primitive neutre, partagee avec la frontiere economique —
+        // deux definitions auraient fini par diverger, et la plus indulgente aurait fait autorite.
+        try {
+            return WholeUnits::of($montant, $champ);
+        } catch (UnrepresentableWholeUnits $hors) {
+            throw new InvalidArgumentException(
+                'Le credit « ' . $champ . ' » vaut ' . $montant . ' : ' . $hors->getMessage(),
+                0,
+                $hors
+            );
+        }
     }
 
     public function deductResourcesAtomic(Resources $resources): bool

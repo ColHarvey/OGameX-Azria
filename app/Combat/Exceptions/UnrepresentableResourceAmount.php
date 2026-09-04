@@ -3,6 +3,7 @@
 namespace OGame\Combat\Exceptions;
 
 use RuntimeException;
+use Throwable;
 
 /**
  * Un solde de ressources trop grand pour tenir dans un entier de la plateforme.
@@ -30,14 +31,17 @@ class UnrepresentableResourceAmount extends RuntimeException
     /**
      * @param string $field
      * @param float $amount
+     * @param Throwable|null $cause Le refus de la primitive neutre, quand il en vient un.
      * @return self
      */
-    public static function because(string $field, float $amount): self
+    public static function because(string $field, float $amount, Throwable|null $cause = null): self
     {
         return new self(
             'Le solde « ' . $field . ' » vaut ' . $amount . ', au-dela de ce qu un entier de la plateforme peut '
             . 'porter. La quantite est reelle, mais le domaine entier ne la represente pas : aucune sortie '
-            . 'operationnelle n a encore ete decidee pour ce cas.'
+            . 'operationnelle n a encore ete decidee pour ce cas.',
+            0,
+            $cause
         );
     }
 }

@@ -10,6 +10,7 @@ use OGame\Models\Planet;
 use OGame\Models\Resources;
 use OGame\Models\User;
 use ReflectionClass;
+use RuntimeException;
 use Tests\TestCase;
 
 /**
@@ -184,6 +185,56 @@ class AtomicResourceCreditTest extends TestCase
         $this->assertNotNull($ligne);
         $this->assertSame(10, (int)$ligne->metal, 'A refused credit still wrote to the planet.');
         $this->assertSame(10, (int)$ligne->crystal, 'A refused credit still wrote to the planet.');
+    }
+
+    /**
+     * Un credit hors du domaine entier de la plateforme est refuse avant toute ecriture.
+     *
+     * ## Ce que « fini, positif, entier » laissait passer
+     *
+     * `1e30` est fini, positif, et egal a son plancher : il traversait les trois controles, puis le
+     * transtypage le rendait negatif ou nul selon la plateforme. La condition « superieur a zero »
+     * le laissait alors tomber en silence — ou pire, un credit devenait un debit.
+     *
+     * La question « cette plateforme porte-t-elle cet entier ? » appartient a une primitive neutre,
+     * partagee avec la frontiere economique ; ce service ne la redit pas.
+     */
+    public function testACreditOutsideTheIntegerDomainIsRefused(): void
+    {
+        $corps = $this->aBodyWith(10, 10, 10);
+        $service = resolve(PlanetServiceFactory::class)->make($corps->id, true);
+        $this->assertNotNull($service);
+
+        try {
+            $service->addResourcesAtomic(new Resources(1e30, 0, 0, 0));
+            $this->fail('A credit outside the integer domain was accepted.');
+        } catch (InvalidArgumentException $refus) {
+            $this->assertStringContainsString('hors du domaine des entiers signes', $refus->getMessage());
+        }
+
+        $ligne = DB::table('planets')->where('id', $corps->id)->first();
+        $this->assertNotNull($ligne);
+        $this->assertSame(10, (int)$ligne->metal, 'A refused credit still wrote to the planet.');
+    }
+
+    /**
+     * Un corps disparu sous le credit leve, au lieu de rendre un succes qui n'a rien credite.
+     *
+     * `if ($ligne instanceof Planet)` transformait la disparition concurrente en credit perdu sans
+     * erreur : l'appelant croyait avoir credite, et les ressources s'evaporaient.
+     */
+    public function testACreditOnABodyThatDisappearedRaisesInsteadOfSucceeding(): void
+    {
+        $corps = $this->aBodyWith(10, 10, 10);
+        $service = resolve(PlanetServiceFactory::class)->make($corps->id, true);
+        $this->assertNotNull($service);
+
+        DB::table('planets')->where('id', $corps->id)->delete();
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('n existe plus');
+
+        $service->addResourcesAtomic(new Resources(5, 0, 0, 0));
     }
 
     /**
