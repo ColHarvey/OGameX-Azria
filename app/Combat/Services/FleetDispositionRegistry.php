@@ -6,6 +6,7 @@ use Closure;
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\FleetDispositionKind;
+use OGame\Combat\Exceptions\ContradictoryFleetDisposition;
 use OGame\Models\CombatFleetDisposition;
 use OGame\Models\CombatInstance;
 use OGame\Models\FleetMission;
@@ -38,9 +39,17 @@ final class FleetDispositionRegistry
      * appelant ne dise ce qu il decide, et le jour ou un second mouvement existerait, tous les
      * appels anciens continueraient a signifier le premier sans que personne l ait choisi.
      *
-     * **Idempotent.** Une fermeture rejouee ne remplace pas une decision prise : la premiere raison
-     * prononcee est celle que le joueur lira, et une seconde ecriture n'aurait aucune raison d'etre
-     * plus juste que la premiere.
+     * **Idempotent pour un rejeu, refus pour une contradiction.** Une fermeture rejouee prononce le
+     * meme mouvement et ne change rien. Mais la cle unique ne prouve qu'une chose — qu'il n'existe
+     * qu'une ligne ; elle ne prouve pas que cette ligne dit ce que ce passage-ci croit ecrire.
+     *
+     * Rendre silencieusement la ligne existante ferait de « la premiere ecriture a forcement
+     * raison » une regle du systeme. Si la fermeture prononce « limite atteinte » et qu'un
+     * travailleur non synchronise prononce « ralliement ferme », le desaccord disparaitrait — alors
+     * qu'il signale une course que l'ordre des verrous devrait avoir fermee, ou une reparation
+     * manuelle incoherente. Chaque champ est donc compare, et une divergence leve.
+     *
+     * @throws ContradictoryFleetDisposition Si une decision differente est deja inscrite.
      */
     public function record(
         CombatInstance $combat,
@@ -49,7 +58,7 @@ final class FleetDispositionRegistry
         int $decidedAt,
         FleetDispositionKind $movement,
     ): void {
-        CombatFleetDisposition::query()->firstOrCreate(
+        $inscrite = CombatFleetDisposition::query()->firstOrCreate(
             ['fleet_mission_id' => $fleetMissionId],
             [
                 'combat_instance_id' => $combat->id,
@@ -58,6 +67,26 @@ final class FleetDispositionRegistry
                 'decided_at' => $decidedAt,
             ]
         );
+
+        if ($inscrite->wasRecentlyCreated) {
+            return;
+        }
+
+        // **L'instant de decision compte autant que la raison.** Deux passages qui prononcent le
+        // meme verdict a deux instants differents ne decrivent pas le meme evenement : l'un des deux
+        // a decide sur un etat qui n'etait plus le bon.
+        $attendus = [
+            'le combat' => [(string)$inscrite->combat_instance_id, (string)$combat->id],
+            'le mouvement' => [$inscrite->movement->value, $movement->value],
+            'la raison' => [$inscrite->reason->value, $reason->value],
+            'l instant de decision' => [(string)$inscrite->decided_at, (string)$decidedAt],
+        ];
+
+        foreach ($attendus as $champ => [$dejaLa, $prononce]) {
+            if ($dejaLa !== $prononce) {
+                throw new ContradictoryFleetDisposition($fleetMissionId, $champ, $dejaLa, $prononce);
+            }
+        }
     }
 
     /**

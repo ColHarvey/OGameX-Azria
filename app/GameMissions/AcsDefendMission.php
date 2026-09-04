@@ -214,11 +214,15 @@ class AcsDefendMission extends GameMission
                 return false;
             }
 
+            // **L'instant de decision est l'arrivee physique, pas l'horloge du travailleur.** Une
+            // decision datee de l'horloge changerait de valeur a chaque passage : le registre
+            // refuserait alors comme une contradiction ce qui n'est qu'un rejeu, et l'audit lirait
+            // le retard du travailleur au lieu de l'instant ou la flotte s'est posee.
             $registre->record(
                 $combat,
                 $mission->id,
                 CombatReasonCode::RallyClosed,
-                $now,
+                $this->physicalArrivalOf($mission),
                 FleetDispositionKind::ReturnToOrigin
             );
             $disposition = $registre->pendingFor($mission);
@@ -291,14 +295,17 @@ class AcsDefendMission extends GameMission
                     'position' => $combat->position,
                     'group_fleets' => 1,
                 ],
-                'available_at' => $now,
+                // L'avis est lisible depuis l'instant ou la flotte s'est posee, pas depuis celui ou
+                // un travailleur a fini par la voir.
+                'available_at' => $this->physicalArrivalOf($mission),
             ]
         );
 
-        $arriveePhysique = $mission->time_arrival - ($mission->time_holding ?? 0);
-
-        $mission->time_arrival = $now;
-        $mission->time_holding = 0;
+        // **L'aller ne perd que son etat de traitement.** Son arrivee et sa duree de stationnement
+        // sont des faits : ce que le joueur avait planifie, ce que l'admission a juge, ce que
+        // l'audit relira. Les reecrire pour faire partir le retour « maintenant » etait le meme
+        // defaut que l'annulation a retire — une heure autoritative transformee en variable de
+        // travail. Le depart se dit explicitement, et la duree se calcule des faits intacts.
         $mission->processed = 1;
         $mission->save();
 
@@ -306,8 +313,20 @@ class AcsDefendMission extends GameMission
             $mission,
             $this->fleetMissionService->getResources($mission),
             $this->fleetMissionService->getFleetUnits($mission),
-            $arriveePhysique - $now
+            departureAt: $now
         );
+    }
+
+    /**
+     * L'instant ou la flotte s'est reellement posee sur le corps.
+     *
+     * Pour une Defense ACS, `time_arrival` porte la fin du stationnement : l'arrivee physique est en
+     * amont. C'est cet instant-la qui date la decision et rend l'avis lisible, et non l'horloge du
+     * travailleur qui, elle, depend du retard.
+     */
+    private function physicalArrivalOf(FleetMission $mission): int
+    {
+        return (int)$mission->time_arrival - (int)($mission->time_holding ?? 0);
     }
 
     /**

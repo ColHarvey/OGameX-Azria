@@ -375,6 +375,135 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
     }
 
     /**
+     * La decision est datee de l'arrivee physique, pas de l'horloge du travailleur.
+     *
+     * ## Pourquoi l'instant compte
+     *
+     * Une decision datee de l'horloge changerait de valeur a chaque passage : le registre refuserait
+     * alors comme une contradiction ce qui n'est qu'un rejeu, et l'audit lirait le retard du
+     * travailleur au lieu de l'instant ou la flotte s'est posee. Le travailleur passe ici cinq
+     * secondes apres l'arrivee physique, pour que les deux valeurs ne coincident pas.
+     */
+    public function testTheDecisionIsDatedFromThePhysicalArrivalNotTheWorkerClock(): void
+    {
+        $renfort = null;
+        [, , , $ouverture] = $this->anOpenedCombat(false, function (PlanetService $cible, int $ouverture) use (&$renfort): void {
+            $renfort = $this->aDefensiveReinforcement($cible, $ouverture + 90, 600, $ouverture - 600);
+        });
+
+        if ($renfort === null) {
+            $this->fail('The reinforcement was never launched.');
+        }
+
+        $this->travelTo(Date::createFromTimestamp($ouverture + 95));
+        resolve(FleetMissionService::class)->updateMission($renfort->refresh());
+
+        $decidee = CombatFleetDisposition::query()->where('fleet_mission_id', $renfort->id)->first();
+        $this->assertNotNull($decidee, 'The late reinforcement went home without a decision being written.');
+        $this->assertSame($ouverture + 90, (int)$decidee->decided_at, 'The decision was dated from the worker clock instead of the physical arrival.');
+
+        $avis = CombatOutboxMessage::query()
+            ->where('participant_key', CombatParticipantKey::forFleet($renfort->id))
+            ->first();
+        $this->assertNotNull($avis);
+        $this->assertSame($ouverture + 90, (int)$avis->available_at, 'The notice becomes readable at the worker clock instead of the arrival.');
+    }
+
+    /**
+     * Une flotte dont le combat a deja decide le mouvement ne se rappelle pas.
+     *
+     * ## Ce que le rappel casserait
+     *
+     * Une refusee porte sa disposition des la fermeture, et rentrera par elle — avec la raison que
+     * le joueur lira. Un rappel accorde dans cette fenetre creerait le retour **hors du protocole**,
+     * et laisserait le verdict inexecute pour toujours : la disposition resterait « en attente »,
+     * puisque l'aller serait deja traite quand le travailleur y passerait.
+     *
+     * Ce que le joueur voit ne change pas : sa flotte rentre, un peu plus tard, avec sa raison.
+     */
+    public function testAFleetWhoseMovementTheCombatDecidedIsNotRecalled(): void
+    {
+        $renfort = null;
+        [$combat, , , $ouverture] = $this->anOpenedCombat(true, function (PlanetService $cible, int $ouverture) use (&$renfort): void {
+            $renfort = $this->aDefensiveReinforcement($cible, $ouverture + 15, 30, $ouverture);
+        });
+
+        if ($renfort === null) {
+            $this->fail('The reinforcement was never launched.');
+        }
+
+        $this->assertTrue((new RallyClosureService())->close($combat->id, $ouverture + 19)->closed, 'The rally did not close.');
+
+        $decidee = CombatFleetDisposition::query()->where('fleet_mission_id', $renfort->id)->first();
+        $this->assertNotNull($decidee, 'The closure refused the reinforcement without writing its movement.');
+        $this->assertNull($decidee->consumed_at, 'The decision was already carried out.');
+
+        // Le joueur rappelle pendant le stationnement, avant que le travailleur ait execute le verdict.
+        $this->travelTo(Date::createFromTimestamp($ouverture + 25));
+        resolve(FleetMissionService::class)->cancelMission($renfort->refresh());
+
+        $renfort->refresh();
+        $this->assertSame(0, FleetMission::query()->where('parent_id', $renfort->id)->count(), 'The recall created the return outside the movement protocol.');
+        $this->assertSame(0, (int)$renfort->canceled, 'The recall marked a fleet the combat had already decided for.');
+        $this->assertSame(0, (int)$renfort->processed);
+
+        // Et le verdict s'execute normalement au passage suivant, avec sa raison.
+        resolve(FleetMissionService::class)->updateMission($renfort->refresh());
+
+        $this->assertSame(1, FleetMission::query()->where('parent_id', $renfort->id)->count(), 'The decided movement was never carried out.');
+        $this->assertNotNull(CombatFleetDisposition::query()->where('fleet_mission_id', $renfort->id)->value('consumed_at'), 'The decision stayed pending forever.');
+        $this->assertSame(CombatReasonCode::NotAlreadyInFlight->value, $this->reasonToldTo($combat, $renfort), 'The fleet went home without the reason the closure gave it.');
+    }
+
+    /**
+     * Le demi-tour ne touche pas aux heures de l'aller, et le retour part de l'instant courant.
+     *
+     * ## Une heure autoritative n'est pas une variable de travail
+     *
+     * Le renvoi reecrivait `time_arrival` a l'heure du travailleur et `time_holding` a zero, puis
+     * corrigeait la duree du retour par un ecart arithmetique. Le resultat visible etait juste, et
+     * l'aller perdait pourtant son arrivee et son stationnement planifies : ce que le joueur avait
+     * decide, ce que l'admission avait juge, ce que l'audit relira. C'est le meme defaut que
+     * l'annulation a retire.
+     *
+     * Le depart se dit maintenant explicitement, et la duree se calcule des faits intacts.
+     */
+    public function testTheTurnBackKeepsTheOutboundHoursAndDepartsNow(): void
+    {
+        $renfort = null;
+        [, , , $ouverture] = $this->anOpenedCombat(false, function (PlanetService $cible, int $ouverture) use (&$renfort): void {
+            $renfort = $this->aDefensiveReinforcement($cible, $ouverture + 90, 600, $ouverture - 600);
+        });
+
+        if ($renfort === null) {
+            $this->fail('The reinforcement was never launched.');
+        }
+
+        $arriveePlanifiee = (int)$renfort->time_arrival;
+        $stationnement = (int)$renfort->time_holding;
+        $depart = (int)$renfort->time_departure;
+        $dureeAller = ($arriveePlanifiee - $stationnement) - $depart;
+
+        // Le travailleur passe cinq secondes apres l'arrivee physique : son horloge n'est ni le
+        // depart, ni l'arrivee, ni la fin du stationnement. Aucune des valeurs comparees ci-dessous
+        // ne coincide donc avec une autre.
+        $maintenant = $ouverture + 95;
+        $this->travelTo(Date::createFromTimestamp($maintenant));
+        resolve(FleetMissionService::class)->updateMission($renfort->refresh());
+
+        $renfort->refresh();
+        $this->assertSame(1, (int)$renfort->processed, 'The reinforcement was not sent home.');
+        $this->assertSame($arriveePlanifiee, (int)$renfort->time_arrival, 'The turn back rewrote the planned arrival of the outbound leg.');
+        $this->assertSame($stationnement, (int)$renfort->time_holding, 'The turn back rewrote the planned hold of the outbound leg.');
+        $this->assertSame($depart, (int)$renfort->time_departure, 'The turn back rewrote the departure of the outbound leg.');
+
+        $retour = FleetMission::query()->where('parent_id', $renfort->id)->first();
+        $this->assertNotNull($retour, 'The refused reinforcement was not sent home.');
+        $this->assertSame($maintenant, (int)$retour->time_departure, 'The return did not leave at the instant it was decided.');
+        $this->assertSame($maintenant + $dureeAller, (int)$retour->time_arrival, 'The return does not take the outbound duration computed from intact facts.');
+    }
+
+    /**
      * Un rappel n'accorde pas un second retour a une flotte deja renvoyee.
      *
      * ## La course, telle qu'elle se produit en jeu

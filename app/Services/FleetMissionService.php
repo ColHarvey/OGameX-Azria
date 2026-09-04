@@ -6,6 +6,7 @@ use Exception;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Date;
 use OGame\Combat\Services\EngagedFleetCheck;
+use OGame\Combat\Services\FleetDispositionRegistry;
 use OGame\Combat\Services\FleetMovementGate;
 use OGame\Enums\FleetSpeedType;
 use OGame\Factories\GameMissionFactory;
@@ -744,6 +745,23 @@ class FleetMissionService
         // avec elle, et un rappel la ferait a la fois combattre et rentrer. Le filet est ici, dans
         // le chemin que tout rappel emprunte — l'interface n'est jamais la protection.
         if (resolve(EngagedFleetCheck::class)->isEngaged($mission)) {
+            return;
+        }
+
+        // **Un aller qui a deja son retour ne repart pas une seconde fois.** L'invariant vaut pour
+        // tout genre de mission : le retour est la trace que la flotte est partie, et en creer un
+        // second ferait exister ses vaisseaux deux fois. Les gardes d'heure ci-dessous ne le
+        // couvraient que par accident — un demi-tour qui reecrivait `time_arrival` les faisait
+        // tomber juste, et cesser de reecrire ce fait historique a rouvert le defaut.
+        if (FleetMission::query()->where('parent_id', $mission->id)->exists()) {
+            return;
+        }
+
+        // **Le combat a peut-etre deja decide de son mouvement.** Une flotte qui porte une
+        // disposition non consommee rentre par ce verdict-la, avec la raison que le joueur lira ;
+        // la rappeler creerait le retour hors du protocole et laisserait le verdict inexecute pour
+        // toujours. Ce que le joueur voit ne change pas : sa flotte rentre.
+        if (resolve(FleetDispositionRegistry::class)->pendingFor($mission) !== null) {
             return;
         }
 

@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\DB;
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\FleetDispositionKind;
+use OGame\Combat\Exceptions\ContradictoryFleetDisposition;
 use OGame\Combat\Services\FleetDispositionRegistry;
 use OGame\Models\CombatFleetDisposition;
 use OGame\Models\CombatInstance;
@@ -48,22 +49,70 @@ class FleetDispositionRegistryTest extends TestCase
     }
 
     /**
-     * Une seconde ecriture ne remplace pas la decision : la premiere raison tient.
+     * Un rejeu de la meme decision ne fait rien, et n'en cree pas une seconde.
      */
-    public function testASecondWriteDoesNotReplaceTheDecision(): void
+    public function testReplayingTheSameDecisionChangesNothing(): void
     {
         [$combat, $mission] = $this->aCombatAndAFleet();
         $registre = new FleetDispositionRegistry();
 
         $registre->record($combat, $mission->id, CombatReasonCode::PlayerLimitReached, 1_700_000_100, FleetDispositionKind::ReturnToOrigin);
-        $registre->record($combat, $mission->id, CombatReasonCode::RallyClosed, 1_700_000_200, FleetDispositionKind::ReturnToOrigin);
+        $registre->record($combat, $mission->id, CombatReasonCode::PlayerLimitReached, 1_700_000_100, FleetDispositionKind::ReturnToOrigin);
 
-        $this->assertSame(1, CombatFleetDisposition::query()->where('fleet_mission_id', $mission->id)->count(), 'A second write created a second decision.');
+        $this->assertSame(1, CombatFleetDisposition::query()->where('fleet_mission_id', $mission->id)->count(), 'A replay created a second decision.');
 
         $decidee = $registre->pendingFor($mission);
         $this->assertNotNull($decidee);
-        $this->assertSame(CombatReasonCode::PlayerLimitReached, $decidee->reason, 'The second write overwrote the reason the player was told.');
+        $this->assertSame(CombatReasonCode::PlayerLimitReached, $decidee->reason);
         $this->assertSame(1_700_000_100, (int)$decidee->decided_at);
+    }
+
+    /**
+     * Deux decisions differentes pour une meme flotte s'arretent, champ par champ.
+     *
+     * ## Ce que la cle unique ne prouvait pas
+     *
+     * `firstOrCreate()` rend la ligne existante sans regarder son contenu. La contrainte empeche
+     * bien deux lignes ; elle ne dit rien de ce que la ligne gagnante contient. « La premiere
+     * ecriture a forcement raison » devenait donc une regle du systeme, et un desaccord — course
+     * que l'ordre des verrous aurait du fermer, ou reparation manuelle incoherente — disparaissait
+     * en silence.
+     *
+     * Chaque champ est eprouve separement : comparer les quatre en bloc laisserait passer trois
+     * divergences sur quatre.
+     */
+    public function testTwoDifferentDecisionsForOneFleetStop(): void
+    {
+        [$combat, $mission] = $this->aCombatAndAFleet();
+        $autre = $this->anotherCombat($combat);
+        $registre = new FleetDispositionRegistry();
+
+        $divergences = [
+            'le combat' => [$autre, CombatReasonCode::PlayerLimitReached, 1_700_000_100],
+            'la raison' => [$combat, CombatReasonCode::RallyClosed, 1_700_000_100],
+            'l instant de decision' => [$combat, CombatReasonCode::PlayerLimitReached, 1_700_000_200],
+        ];
+
+        foreach ($divergences as $champ => [$sur, $raison, $instant]) {
+            $registre->record($combat, $mission->id, CombatReasonCode::PlayerLimitReached, 1_700_000_100, FleetDispositionKind::ReturnToOrigin);
+
+            try {
+                $registre->record($sur, $mission->id, $raison, $instant, FleetDispositionKind::ReturnToOrigin);
+                $this->fail("A contradictory decision on « {$champ} » was accepted as a replay.");
+            } catch (ContradictoryFleetDisposition $refus) {
+                $this->assertSame($champ, $refus->champ);
+                $this->assertSame($mission->id, $refus->fleetMissionId);
+            }
+
+            // La decision inscrite n'a pas bouge : le refus n'ecrit rien.
+            $decidee = $registre->pendingFor($mission);
+            $this->assertNotNull($decidee);
+            $this->assertSame($combat->id, (int)$decidee->combat_instance_id);
+            $this->assertSame(CombatReasonCode::PlayerLimitReached, $decidee->reason);
+            $this->assertSame(1_700_000_100, (int)$decidee->decided_at);
+
+            CombatFleetDisposition::query()->where('fleet_mission_id', $mission->id)->delete();
+        }
     }
 
     /**
@@ -140,6 +189,20 @@ class FleetDispositionRegistryTest extends TestCase
         ]);
 
         return [$combat, $mission];
+    }
+
+    private function anotherCombat(CombatInstance $premier): CombatInstance
+    {
+        return CombatInstance::create([
+            'status' => CombatState::Rallying,
+            'mission_id' => $premier->mission_id,
+            'target_planet_id' => $premier->target_planet_id,
+            'target_type' => 1,
+            'galaxy' => $premier->galaxy,
+            'system' => $premier->system,
+            'position' => $premier->position + 1,
+            'started_at' => 1_700_000_000,
+        ]);
     }
 
     private function aBodyOf(User $owner): Planet
