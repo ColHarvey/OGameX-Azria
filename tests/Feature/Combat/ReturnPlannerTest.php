@@ -25,6 +25,15 @@ use Tests\TestCase;
  */
 class ReturnPlannerTest extends TestCase
 {
+    /**
+     * L'horodatage d'une destruction reelle.
+     *
+     * **Pas `1`.** La colonne porte l'instant de la destruction, et un essai qui y ecrit `1`
+     * laisserait passer un planificateur qui compare a `1` — c'est exactement le defaut que ces
+     * essais existent pour attraper.
+     */
+    private const int DESTROYED_AT = 1_700_000_500;
+
     private int $bodies = 0;
 
     protected function setUp(): void
@@ -67,7 +76,7 @@ class ReturnPlannerTest extends TestCase
         $lune = $this->aMoonOver($planete);
 
         $mission = $this->aMissionFrom($joueur, $lune);
-        DB::table('planets')->where('id', $lune->id)->update(['destroyed' => 1]);
+        DB::table('planets')->where('id', $lune->id)->update(['destroyed' => self::DESTROYED_AT]);
 
         $plan = (new ReturnPlanner())->planFor($mission);
 
@@ -88,8 +97,8 @@ class ReturnPlannerTest extends TestCase
         $mission = $this->aMissionFrom($joueur, $lune);
 
         // La lune et sa planete disparaissent toutes deux : il ne reste que la mere.
-        DB::table('planets')->where('id', $lune->id)->update(['destroyed' => 1]);
-        DB::table('planets')->where('id', $ailleurs->id)->update(['destroyed' => 1]);
+        DB::table('planets')->where('id', $lune->id)->update(['destroyed' => self::DESTROYED_AT]);
+        DB::table('planets')->where('id', $ailleurs->id)->update(['destroyed' => self::DESTROYED_AT]);
 
         $plan = (new ReturnPlanner())->planFor($mission);
 
@@ -124,13 +133,44 @@ class ReturnPlannerTest extends TestCase
         $origine = $this->aBodyOf($joueur, PlanetType::Planet);
 
         $mission = $this->aMissionFrom($joueur, $origine);
-        DB::table('planets')->where('user_id', $joueur->id)->update(['destroyed' => 1]);
+        DB::table('planets')->where('user_id', $joueur->id)->update(['destroyed' => self::DESTROYED_AT]);
 
         $plan = (new ReturnPlanner())->planFor($mission);
 
         $this->assertSame(ReturnDestinationKind::None, $plan->kind);
         $this->assertFalse($plan->isPossible());
         $this->assertNull($plan->planetId);
+    }
+
+    /**
+     * La ligne de la lune a ete purgee, mais la mission garde ses coordonnees de depart.
+     *
+     * La suppression definitive d'un corps detruit efface sa ligne. Dependre d'elle ferait sauter la
+     * planete associee — pourtant toujours la — pour aller droit a la planete mere.
+     */
+    public function testAPurgedMoonStillFallsBackToItsAssociatedPlanet(): void
+    {
+        $joueur = $this->aPlayer();
+        $mere = $this->aBodyOf($joueur, PlanetType::Planet);
+        $planete = $this->aBodyOf($joueur, PlanetType::Planet);
+        $lune = $this->aMoonOver($planete);
+
+        $mission = $this->aMissionFrom($joueur, $lune);
+
+        // La lune est supprimee pour de bon : la mission perd son corps de depart — c est ce que
+        // fait la purge en production — et il ne lui reste que ses coordonnees.
+        DB::table('fleet_missions')->where('id', $mission->id)->update([
+            'planet_id_from' => null,
+            'planet_id_to' => $planete->id,
+        ]);
+        DB::table('planets')->where('id', $lune->id)->delete();
+        $mission->refresh();
+
+        $plan = (new ReturnPlanner())->planFor($mission);
+
+        $this->assertSame(ReturnDestinationKind::AssociatedPlanet, $plan->kind, 'A purged moon jumped straight to the homeworld.');
+        $this->assertSame($planete->id, $plan->planetId);
+        $this->assertNotSame($mere->id, $plan->planetId);
     }
 
     private function aMissionFrom(User $owner, Planet $origine): FleetMission

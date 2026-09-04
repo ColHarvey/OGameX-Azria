@@ -54,18 +54,33 @@ final class ReturnPlanner
             );
         }
 
-        // Une lune disparue ramene sur sa planete : memes coordonnees, meme proprietaire.
-        if ($origine instanceof Planet && $this->genreDe($origine) === PlanetType::Moon) {
-            $associee = Planet::query()
-                ->where('galaxy', $origine->galaxy)
-                ->where('system', $origine->system)
-                ->where('planet', $origine->planet)
-                ->where('planet_type', PlanetType::Planet->value)
-                ->where('user_id', $proprietaire)
-                ->first();
+        // **Une lune disparue ramene sur sa planete** : memes coordonnees, meme proprietaire.
+        //
+        // Les coordonnees viennent de la ligne quand elle existe encore, et **des faits que la
+        // mission porte** quand elle a deja ete purgee. Dependre de la seule ligne vivante ferait
+        // sauter directement a la planete mere des que la suppression definitive est passee — alors
+        // que la planete associee, elle, est toujours la.
+        $origineEtaitUneLune = $origine instanceof Planet
+            ? $this->genreDe($origine) === PlanetType::Moon
+            : (int)$mission->type_from === PlanetType::Moon->value;
 
-            if ($associee instanceof Planet && !$this->estDetruit($associee)) {
-                return ReturnPlan::toAssociatedPlanet((int)$associee->id, $this->coordonneesDe($associee), $proprietaire);
+        if ($origineEtaitUneLune) {
+            $coordonnees = $origine instanceof Planet
+                ? $this->coordonneesDe($origine)
+                : $this->coordonneesDuDepart($mission);
+
+            if ($coordonnees !== null) {
+                $associee = Planet::query()
+                    ->where('galaxy', $coordonnees->galaxy)
+                    ->where('system', $coordonnees->system)
+                    ->where('planet', $coordonnees->position)
+                    ->where('planet_type', PlanetType::Planet->value)
+                    ->where('user_id', $proprietaire)
+                    ->first();
+
+                if ($associee instanceof Planet && !$this->estDetruit($associee)) {
+                    return ReturnPlan::toAssociatedPlanet((int)$associee->id, $this->coordonneesDe($associee), $proprietaire);
+                }
             }
         }
 
@@ -73,8 +88,10 @@ final class ReturnPlanner
         $mere = Planet::query()
             ->where('user_id', $proprietaire)
             ->where('planet_type', PlanetType::Planet->value)
+            // Meme regle que le modele : la colonne porte un horodatage, donc « pas detruit »
+            // veut dire nul ou zero, jamais « different de un ».
             ->where(function ($requete): void {
-                $requete->whereNull('destroyed')->orWhere('destroyed', 0);
+                $requete->whereNull('destroyed')->orWhere('destroyed', '<=', 0);
             })
             ->orderBy('id')
             ->first();
@@ -86,6 +103,18 @@ final class ReturnPlanner
         return ReturnPlan::cannotReturn(CombatReasonCode::NoReturnDestination);
     }
 
+    /**
+     * Les coordonnees de depart que la mission porte, quand la ligne du corps n'existe plus.
+     */
+    private function coordonneesDuDepart(FleetMission $mission): Coordinate|null
+    {
+        if ($mission->galaxy_from === null || $mission->system_from === null || $mission->position_from === null) {
+            return null;
+        }
+
+        return new Coordinate((int)$mission->galaxy_from, (int)$mission->system_from, (int)$mission->position_from);
+    }
+
     private function coordonneesDe(Planet $corps): Coordinate
     {
         return new Coordinate((int)$corps->galaxy, (int)$corps->system, (int)$corps->planet);
@@ -93,10 +122,14 @@ final class ReturnPlanner
 
     /**
      * Un corps marque detruit n'accueille plus rien : il attend sa suppression definitive.
+     *
+     * La regle est celle du modele, et il n'y en a qu'une : la colonne porte l'horodatage de la
+     * destruction, pas un drapeau. La comparer a `1` ne reconnaitrait qu'un corps detruit pendant
+     * la premiere seconde de 1970 — et laisserait donc une flotte revenir sur une lune rasee.
      */
     private function estDetruit(Planet $corps): bool
     {
-        return (int)($corps->destroyed ?? 0) === 1;
+        return $corps->isDestroyed();
     }
 
     private function genreDe(Planet $corps): PlanetType

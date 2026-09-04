@@ -183,4 +183,17 @@ class Planet extends Model
     {
         return $this->belongsTo('OGame\Models\Planet');
     }
+
+    /**
+     * Ce corps a-t-il ete marque detruit ?
+     *
+     * **La colonne porte un horodatage, pas un drapeau.** `PlanetService::applyDestroyedFlag()` y
+     * ecrit l'instant de la destruction ; la comparer a `1` ne reconnaitrait qu'un corps detruit
+     * pendant la premiere seconde de 1970. La regle est donc « strictement positif », et elle vit
+     * ici pour que le service et tout ce qui lit le modele en aient une seule.
+     */
+    public function isDestroyed(): bool
+    {
+        return (int)$this->destroyed > 0;
+    }
 }

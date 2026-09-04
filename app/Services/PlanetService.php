@@ -419,7 +419,9 @@ class PlanetService
      */
     public function isDestroyed(): bool
     {
-        return (int) $this->planet->destroyed > 0;
+        // La regle vit sur le modele : le service, le planificateur de retour et toute lecture
+        // directe en partagent une seule, et la colonne porte un horodatage, pas un drapeau.
+        return $this->planet->isDestroyed();
     }
 
     /**
