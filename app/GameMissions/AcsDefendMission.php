@@ -2,23 +2,20 @@
 
 namespace OGame\GameMissions;
 
-use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
-use OGame\Combat\Enums\FleetDispositionKind;
 use OGame\Combat\Services\EngagedFleetCheck;
-use OGame\Combat\Services\FleetDispositionRegistry;
 use OGame\Combat\Services\FleetMovementGate;
-use OGame\Combat\Support\CombatParticipantKey;
+use OGame\Combat\Services\RefusedFleetHomecoming;
+use OGame\Combat\Support\RefusedFleetVerdict;
 use OGame\Enums\FleetMissionStatus;
 use OGame\Enums\FleetSpeedType;
 use OGame\GameMissions\Abstracts\GameMission;
 use OGame\GameMissions\Models\MissionPossibleStatus;
+use OGame\GameMissions\Models\ResolvedReturnDestination;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\CelestialBodyCombatBarrier;
-use OGame\Models\CombatFleetDisposition;
 use OGame\Models\CombatInstance;
-use OGame\Models\CombatOutboxMessage;
 use OGame\Models\CombatParticipant;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
@@ -201,44 +198,38 @@ class AcsDefendMission extends GameMission
             return false;
         }
 
-        $registre = resolve(FleetDispositionRegistry::class);
-        $disposition = $registre->pendingFor($mission);
-
-        if ($disposition === null) {
-            // **Jamais jugee** : elle s'est posee apres la fermeture, personne ne l'a vue. Le combat
-            // decide maintenant, et la decision s'ecrit avant d'etre executee — comme celle d'une
-            // refusee, pour que les deux chemins se relisent de la meme facon.
-            $combat = $this->theCombatThatHasNoPlaceForIt($mission);
-
-            if ($combat === null) {
-                return false;
-            }
-
-            // **L'instant de decision est l'arrivee physique, pas l'horloge du travailleur.** Une
-            // decision datee de l'horloge changerait de valeur a chaque passage : le registre
-            // refuserait alors comme une contradiction ce qui n'est qu'un rejeu, et l'audit lirait
-            // le retard du travailleur au lieu de l'instant ou la flotte s'est posee.
-            $registre->record(
-                $combat,
-                $mission->id,
-                CombatReasonCode::RallyClosed,
-                $this->physicalArrivalOf($mission),
-                FleetDispositionKind::ReturnToOrigin
-            );
-            $disposition = $registre->pendingFor($mission);
-
-            if ($disposition === null) {
-                return false;
-            }
-        }
-
         // **La disposition suffit, meme si le combat est termine et la barriere levee.** C'est tout
         // l'objet de l'avoir ecrite : une flotte dont le stationnement s'acheve longtemps apres la
         // bataille retrouve sa decision, et ne stationne pas hors photographie faute de barriere a
         // interroger.
-        return $registre->consume($disposition, $now, function (CombatFleetDisposition $decidee) use ($mission, $now): void {
-            $this->announceAndSendHome($mission, $decidee, $now);
-        });
+        return resolve(RefusedFleetHomecoming::class)->sendHome(
+            $mission,
+            $now,
+            function (FleetMission $tenue, ResolvedReturnDestination $destination) use ($now): void {
+                // **Le retour part de l'instant courant**, et se pose la ou le protocole de
+                // recours l'a decide sous verrou : le stationnement etait legitime jusqu'a ce que
+                // le verdict soit connu, et le corps de depart a pu etre rase entre-temps.
+                $this->startReturn(
+                    $tenue,
+                    $this->fleetMissionService->getResources($tenue),
+                    $this->fleetMissionService->getFleetUnits($tenue),
+                    departureAt: $now,
+                    destination: $destination
+                );
+            },
+            // **Jamais jugee** : elle s'est posee apres la fermeture, personne ne l'a vue. Le combat
+            // decide alors, et sa decision s'ecrit avant d'etre executee — comme celle d'une
+            // refusee, pour que les deux chemins se relisent de la meme facon.
+            function (FleetMission $tenue): RefusedFleetVerdict|null {
+                $combat = $this->theCombatThatHasNoPlaceForIt($tenue);
+
+                return $combat === null ? null : new RefusedFleetVerdict(
+                    $combat,
+                    CombatReasonCode::RallyClosed,
+                    RefusedFleetHomecoming::physicalArrivalOf($tenue)
+                );
+            }
+        );
     }
 
     /**
@@ -267,66 +258,6 @@ class AcsDefendMission extends GameMission
             ->exists();
 
         return $inscrite ? null : $combat;
-    }
-
-    /**
-     * Ecrit l'avis depuis la decision, puis fait rentrer la flotte.
-     *
-     * **L'avis decoule du mouvement, jamais l'inverse.** Un message est une chose que l'on affiche ;
-     * une disposition est une chose que l'on doit faire. Les ecrire dans cet ordre garantit qu'aucun
-     * refus annonce ne reste sans le mouvement qui va avec.
-     */
-    private function announceAndSendHome(FleetMission $mission, CombatFleetDisposition $decidee, int $now): void
-    {
-        $combat = $decidee->combatInstance;
-
-        CombatOutboxMessage::query()->firstOrCreate(
-            [
-                'combat_instance_id' => $decidee->combat_instance_id,
-                'participant_key' => CombatParticipantKey::forFleet($mission->id),
-                'kind' => CombatOutboxKind::RallyRefused->value,
-            ],
-            [
-                'payload' => [
-                    'reason' => $decidee->reason->value,
-                    'target_body_id' => $combat->target_planet_id,
-                    'galaxy' => $combat->galaxy,
-                    'system' => $combat->system,
-                    'position' => $combat->position,
-                    'group_fleets' => 1,
-                ],
-                // L'avis est lisible depuis l'instant ou la flotte s'est posee, pas depuis celui ou
-                // un travailleur a fini par la voir.
-                'available_at' => $this->physicalArrivalOf($mission),
-            ]
-        );
-
-        // **L'aller ne perd que son etat de traitement.** Son arrivee et sa duree de stationnement
-        // sont des faits : ce que le joueur avait planifie, ce que l'admission a juge, ce que
-        // l'audit relira. Les reecrire pour faire partir le retour « maintenant » etait le meme
-        // defaut que l'annulation a retire — une heure autoritative transformee en variable de
-        // travail. Le depart se dit explicitement, et la duree se calcule des faits intacts.
-        $mission->processed = 1;
-        $mission->save();
-
-        $this->startReturn(
-            $mission,
-            $this->fleetMissionService->getResources($mission),
-            $this->fleetMissionService->getFleetUnits($mission),
-            departureAt: $now
-        );
-    }
-
-    /**
-     * L'instant ou la flotte s'est reellement posee sur le corps.
-     *
-     * Pour une Defense ACS, `time_arrival` porte la fin du stationnement : l'arrivee physique est en
-     * amont. C'est cet instant-la qui date la decision et rend l'avis lisible, et non l'horloge du
-     * travailleur qui, elle, depend du retard.
-     */
-    private function physicalArrivalOf(FleetMission $mission): int
-    {
-        return (int)$mission->time_arrival - (int)($mission->time_holding ?? 0);
     }
 
     /**

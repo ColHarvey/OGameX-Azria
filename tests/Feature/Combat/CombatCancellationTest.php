@@ -18,6 +18,7 @@ use OGame\Combat\Services\CombatOpeningService;
 use OGame\Combat\Services\PersistentCombatAdvance;
 use OGame\Combat\Services\PersistentCombatAdvancer;
 use OGame\Combat\Services\RallyClosureService;
+use OGame\Combat\Services\ReturnDestinationResolver;
 use OGame\Combat\Services\ReturnPlanner;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\ReturnPlan;
@@ -521,7 +522,7 @@ class CombatCancellationTest extends FleetDispatchTestCase
         $avant = $this->stockOf($cible);
 
         try {
-            (new CombatCancellationService(planner: $planificateur))->cancel(
+            (new CombatCancellationService(destinations: new ReturnDestinationResolver($planificateur)))->cancel(
                 $combat->id,
                 CombatCancellationCause::AdministrativeDecision,
                 function (): void {
@@ -569,20 +570,34 @@ class CombatCancellationTest extends FleetDispatchTestCase
             'union' => 'FleetUnion::query()->whereKey($combat->union_id)->lockForUpdate()',
             'missions' => "->orderBy('id') ->lockForUpdate()",
             // Les corps ou les flottes vont se poser : sans eux, une destination peut changer entre
-            // le choix et l'ecriture.
-            'destinations' => (new ReflectionClass(Planet::class))->getShortName() . "::query()->whereIn('id', \$corpsDeRetour)->orderBy('id')->lockForUpdate()",
+            // le choix et l'ecriture. Le verrou lui-meme vit dans le resolveur — un seul protocole
+            // de destination pour tout le systeme —, et l'annulation le demande par ce nom.
+            'destinations' => '$this->destinations->holdTheDecidingBodies($corpsDeRetour);',
         ];
 
         foreach ($verrous as $quoi => $declaration) {
             $this->assertStringContainsString($declaration, $source, "The cancellation no longer declares the lock on the {$quoi}.");
         }
 
-        // **Ce que l'on verrouille vient du planificateur.** Tenir la seule destination retenue
+        // **Le verrou que ce nom recouvre.** Deleguer ne doit pas faire disparaitre la declaration :
+        // la garde suit le code jusqu'ou il est.
+        $resolveur = (new ReflectionClass(ReturnDestinationResolver::class))->getFileName();
+        $this->assertNotFalse($resolveur);
+
+        $sourceDuResolveur = preg_replace('/\s+/', ' ', (string)file_get_contents($resolveur));
+        $this->assertNotNull($sourceDuResolveur);
+        $this->assertStringContainsString(
+            (new ReflectionClass(Planet::class))->getShortName() . "::query()->whereIn('id', \$identifiants)->orderBy('id')->lockForUpdate()",
+            $sourceDuResolveur,
+            'The destination protocol no longer holds the bodies it decides on.'
+        );
+
+        // **Ce que l'on verrouille, c'est ce qui decide.** Tenir la seule destination retenue
         // rendrait sa ligne stable sans figer la raison pour laquelle elle a ete choisie.
         $this->assertStringContainsString(
-            '$this->planner->bodiesThatDecideFor($mission),',
-            $source,
-            'The cancellation does not lock the facts that decide the fallback, only the winner.'
+            '$this->planner->bodiesThatDecideFor($mission)',
+            $sourceDuResolveur,
+            'The destination protocol does not lock the facts that decide the fallback, only the winner.'
         );
 
         // **Les destinations apres les missions.** L'ordre global est le meme partout : barriere,
@@ -595,7 +610,7 @@ class CombatCancellationTest extends FleetDispatchTestCase
 
         // **La seconde passe decide, la premiere ne fait que designer les lignes a tenir.**
         $this->assertLessThan(
-            strpos($source, 'foreach ($aRendre as $identifiant => [$mission, $trajet, $pressenti, $corpsPressentis])'),
+            strpos($source, '$this->destinations->confirm($mission, $pressenti, $combat->id)'),
             strpos($source, $verrous['destinations']),
             'The cancellation decides before holding the destinations: the plan is not taken under lock.'
         );
@@ -632,7 +647,7 @@ class CombatCancellationTest extends FleetDispatchTestCase
         };
 
         try {
-            (new CombatCancellationService(planner: $planificateur))->cancel(
+            (new CombatCancellationService(destinations: new ReturnDestinationResolver($planificateur)))->cancel(
                 $combat->id,
                 CombatCancellationCause::AdministrativeDecision,
                 function (): void {

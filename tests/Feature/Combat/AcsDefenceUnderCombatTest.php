@@ -10,6 +10,7 @@ use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\FleetDispositionKind;
+use OGame\Combat\Services\FleetDispositionRegistry;
 use OGame\Combat\Services\PersistentCombatAdvancer;
 use OGame\Combat\Services\RallyClosureService;
 use OGame\Combat\Support\CombatParticipantKey;
@@ -234,6 +235,208 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
         $this->assertSame(1, (int)$vague->processed, 'The refused wave is still waiting.');
         $this->assertSame(1, FleetMission::query()->where('parent_id', $vague->id)->count());
         $this->assertSame(CombatReasonCode::FleetLimitReached->value, $this->reasonToldTo($combat, $vague), 'The closure reason was overwritten by « rally closed ».');
+    }
+
+    /**
+     * Une vague refusee par une limite rentre apres la fin du combat, une seule fois, avec sa raison.
+     *
+     * ## Le defaut que cet essai ferme
+     *
+     * La fermeture ecrit une disposition pour **chaque** flotte refusee, vagues attaquantes
+     * comprises. Seule la Defense ACS la consommait : l'attaque ecrivait son avis, marquait l'aller
+     * et creait son retour de son cote, et le verdict attaquant restait « en attente » pour toujours.
+     *
+     * Pire, une vague touchee apres le reglement trouvait le corps libre — barriere levee — et
+     * **ouvrait un second combat** : celui-la meme que son refus existait pour empecher.
+     */
+    public function testARefusedWaveStillGoesHomeAfterTheCombatIsOverAndOnlyOnce(): void
+    {
+        [$combat, $ouvreuse, , $ouverture, $cible] = $this->anOpenedCombat(false);
+        $this->assertSame(CombatState::Active, $combat->refresh()->status);
+
+        $vague = $this->aSecondAttackAgainst($cible, $ouvreuse);
+        DB::table('fleet_missions')->where('id', $vague->id)->update(['time_arrival' => $ouverture + 30]);
+        $vague->refresh();
+
+        // Ce que la fermeture ecrit pour une vague qu'elle refuse : le mouvement, et sa raison.
+        (new FleetDispositionRegistry())->record(
+            $combat,
+            $vague->id,
+            CombatReasonCode::FleetLimitReached,
+            $ouverture + 30,
+            FleetDispositionKind::ReturnToOrigin
+        );
+
+        // **Personne ne la touche entre la fermeture et le reglement.**
+        $combat->refresh();
+        $this->travelTo(Date::createFromTimestamp((int)$combat->ends_at));
+        $this->assertSame(1, (new PersistentCombatAdvancer())->advance((int)$combat->ends_at)->settled, 'The combat did not settle.');
+
+        $combat->refresh();
+        $this->assertSame(CombatState::Resolved, $combat->status);
+        $this->assertNull(
+            CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->first(),
+            'The barrier is still there: the test would not prove that the disposition survives it.'
+        );
+
+        $apres = (int)$combat->ends_at + 3_600;
+        $this->travelTo(Date::createFromTimestamp($apres));
+        resolve(FleetMissionService::class)->updateMission($vague->refresh());
+
+        $vague->refresh();
+        $this->assertSame(1, (int)$vague->processed, 'The refused wave is still waiting on a body that no longer holds a combat.');
+        $this->assertCount(1, FleetMission::query()->where('parent_id', $vague->id)->get(), 'The refused wave did not come home exactly once.');
+        $this->assertSame(CombatReasonCode::FleetLimitReached->value, $this->reasonToldTo($combat, $vague), 'The limit reason was replaced.');
+
+        $this->assertSame(
+            1,
+            CombatInstance::query()->count(),
+            'The late wave opened a second combat on the body its refusal had freed.'
+        );
+
+        $decidee = CombatFleetDisposition::query()->where('fleet_mission_id', $vague->id)->first();
+        $this->assertNotNull($decidee);
+        $this->assertFalse($decidee->isPending(), 'The attacking verdict stayed pending forever.');
+        $this->assertSame($apres, (int)$decidee->consumed_at);
+
+        // Rejeu du travailleur : toujours un seul retour.
+        resolve(FleetMissionService::class)->updateMission($vague->refresh());
+        $this->assertCount(1, FleetMission::query()->where('parent_id', $vague->id)->get(), 'A replay of the worker created a second return.');
+    }
+
+    /**
+     * Une vague que personne n'a jugee, arrivee apres la fermeture, ecrit sa decision puis rentre.
+     *
+     * Elle n'a jamais ete candidate : la photographie etait prise, les budgets consommes, la
+     * bataille calculee. Sa raison est « ralliement ferme », et elle s'ecrit **avant** d'etre
+     * executee — comme celle d'une refusee, pour que les deux chemins se relisent de la meme facon.
+     */
+    public function testAWaveNeverJudgedWritesItsDecisionBeforeGoingHome(): void
+    {
+        [$combat, $ouvreuse, , $ouverture, $cible] = $this->anOpenedCombat(false);
+        $this->assertSame(CombatState::Active, $combat->refresh()->status);
+
+        $vague = $this->aSecondAttackAgainst($cible, $ouvreuse);
+        DB::table('fleet_missions')->where('id', $vague->id)->update(['time_arrival' => $ouverture + 30]);
+
+        $this->assertNull(
+            CombatFleetDisposition::query()->where('fleet_mission_id', $vague->id)->first(),
+            'The wave already carried a decision: nothing would be proved about the never-judged case.'
+        );
+
+        $this->travelTo(Date::createFromTimestamp($ouverture + 40));
+        $this->get('/overview')->assertStatus(200);
+
+        $vague->refresh();
+        $this->assertSame(1, (int)$vague->processed, 'The never-judged wave is still waiting.');
+        $this->assertCount(1, FleetMission::query()->where('parent_id', $vague->id)->get());
+        $this->assertSame(CombatReasonCode::RallyClosed->value, $this->reasonToldTo($combat, $vague));
+
+        $decidee = CombatFleetDisposition::query()->where('fleet_mission_id', $vague->id)->first();
+        $this->assertNotNull($decidee, 'The wave went home without its movement ever being written.');
+        $this->assertSame(CombatReasonCode::RallyClosed, $decidee->reason);
+        $this->assertSame(FleetDispositionKind::ReturnToOrigin, $decidee->movement);
+
+        // L'instant de decision est l'arrivee, non l'horloge du travailleur qui passe dix secondes plus tard.
+        $this->assertSame($ouverture + 30, (int)$decidee->decided_at, 'The decision was dated from the worker clock.');
+        $this->assertFalse($decidee->isPending(), 'The decision was written and never carried out.');
+    }
+
+    /**
+     * Une vague refusee dont le corps de depart a ete rase rentre elle aussi par le recours suivant.
+     *
+     * Le meme trou que du cote defensif, et il se ferme au meme endroit : les deux genres passent
+     * par le protocole commun, qui resout la destination sous verrou. Sans lui, la vague repartait
+     * vers `planet_id_from` — un corps qui n'existe plus.
+     */
+    public function testARefusedWaveWhoseOriginWasRazedComesHomeSomewhereReal(): void
+    {
+        [$combat, $ouvreuse, , $ouverture, $cible] = $this->anOpenedCombat(false);
+        $this->assertSame(CombatState::Active, $combat->refresh()->status);
+
+        $vague = $this->aSecondAttackAgainst($cible, $ouvreuse);
+        DB::table('fleet_missions')->where('id', $vague->id)->update(['time_arrival' => $ouverture + 30]);
+        $vague->refresh();
+
+        $origine = (int)$vague->planet_id_from;
+
+        // L'attaquant garde un autre foyer, et son corps de depart est rase pendant que la vague vole.
+        $libre = (int)Planet::query()->where('galaxy', 6)->max('system') + 1;
+        Planet::factory()->create([
+            'user_id' => $vague->user_id,
+            'galaxy' => 6,
+            'system' => max(300, $libre),
+            'planet' => 7,
+        ]);
+        DB::table('planets')->where('id', $origine)->update(['destroyed' => $ouverture - 10]);
+
+        $this->travelTo(Date::createFromTimestamp($ouverture + 40));
+        resolve(FleetMissionService::class)->updateMission($vague->refresh());
+
+        $retour = FleetMission::query()->where('parent_id', $vague->id)->first();
+        $this->assertNotNull($retour, 'The refused wave did not come home at all.');
+        $this->assertNotSame($origine, (int)$retour->planet_id_to, 'The wave was sent back to a body that no longer exists.');
+
+        $foyer = Planet::query()->find($retour->planet_id_to);
+        $this->assertNotNull($foyer, 'The return targets a body that is not in the database.');
+        $this->assertSame((int)$vague->user_id, (int)$foyer->user_id, 'The wave was sent to somebody else.');
+        $this->assertSame(0, (int)($foyer->destroyed ?? 0), 'The wave was sent to a razed body.');
+        $this->assertSame((int)$foyer->galaxy, (int)$retour->galaxy_to);
+        $this->assertSame((int)$foyer->system, (int)$retour->system_to);
+        $this->assertSame((int)$foyer->planet, (int)$retour->position_to);
+    }
+
+    /**
+     * Un renfort dont le corps de depart a ete rase rentre par le recours suivant, pas dans le vide.
+     *
+     * ## Pourquoi le demi-tour a besoin d'une destination decidee
+     *
+     * Le renvoi creait son retour sans destination explicite : la mission repartait vers
+     * `planet_id_from`, c'est-a-dire vers le corps d'ou elle etait partie — meme rase entre-temps.
+     * L'annulation avait deja ferme ce trou avec le protocole de recours ; le demi-tour, lui, ne
+     * l'utilisait pas, et deux protocoles de destination auraient fini par diverger.
+     */
+    public function testARefusedReinforcementWhoseOriginWasRazedComesHomeSomewhereReal(): void
+    {
+        $renfort = null;
+        [, , , $ouverture] = $this->anOpenedCombat(false, function (PlanetService $cible, int $ouverture) use (&$renfort): void {
+            $renfort = $this->aDefensiveReinforcement($cible, $ouverture + 90, 600, $ouverture - 600);
+        });
+
+        if ($renfort === null) {
+            $this->fail('The reinforcement was never launched.');
+        }
+
+        $origine = (int)$renfort->planet_id_from;
+
+        // L'allie garde un autre foyer, et son corps de depart est rase pendant que la flotte vole.
+        $libre = (int)Planet::query()->where('galaxy', 7)->max('system') + 1;
+        Planet::factory()->create([
+            'user_id' => $renfort->user_id,
+            'galaxy' => 7,
+            'system' => max(400, $libre),
+            'planet' => 4,
+        ]);
+        DB::table('planets')->where('id', $origine)->update(['destroyed' => $ouverture - 10]);
+
+        $this->travelTo(Date::createFromTimestamp($ouverture + 95));
+        resolve(FleetMissionService::class)->updateMission($renfort->refresh());
+
+        $retour = FleetMission::query()->where('parent_id', $renfort->id)->first();
+        $this->assertNotNull($retour, 'The refused reinforcement did not come home at all.');
+
+        $this->assertNotSame($origine, (int)$retour->planet_id_to, 'The fleet was sent back to a body that no longer exists.');
+
+        $foyer = Planet::query()->find($retour->planet_id_to);
+        $this->assertNotNull($foyer, 'The return targets a body that is not in the database.');
+        $this->assertSame((int)$renfort->user_id, (int)$foyer->user_id, 'The fleet was sent to somebody else.');
+        $this->assertSame(0, (int)($foyer->destroyed ?? 0), 'The fleet was sent to a razed body.');
+
+        // Les coordonnees suivent la destination : les relire ailleurs exposerait a un atterrissage
+        // qui ne correspond pas au corps decide.
+        $this->assertSame((int)$foyer->galaxy, (int)$retour->galaxy_to);
+        $this->assertSame((int)$foyer->system, (int)$retour->system_to);
+        $this->assertSame((int)$foyer->planet, (int)$retour->position_to);
     }
 
     /**

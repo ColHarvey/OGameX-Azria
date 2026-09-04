@@ -2,11 +2,11 @@
 
 namespace OGame\GameMissions;
 
+use Closure;
 use Illuminate\Support\Facades\Date;
 use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Application\LiveCombatApplicationContext;
 use OGame\Combat\Enums\CombatCancellationCause;
-use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Services\CombatCancellationOutcome;
@@ -15,9 +15,11 @@ use OGame\Combat\Services\CombatOpeningService;
 use OGame\Combat\Services\CombatResolutionService;
 use OGame\Combat\Services\CombatSettlementOutcome;
 use OGame\Combat\Services\CombatSettlementService;
+use OGame\Combat\Services\RefusedFleetHomecoming;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\LootContextForMission;
 use OGame\Combat\Support\OperationKey;
+use OGame\Combat\Support\RefusedFleetVerdict;
 use OGame\Combat\Support\ResourceDiagnosticsJournal;
 use OGame\Combat\Support\SealedResourceDiagnostics;
 use OGame\Enums\FleetMissionStatus;
@@ -28,7 +30,6 @@ use OGame\GameMissions\Models\MissionPossibleStatus;
 use OGame\GameMissions\Models\ResolvedReturnDestination;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\CombatInstance;
-use OGame\Models\CombatOutboxMessage;
 use OGame\Models\CombatParticipant;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
@@ -174,34 +175,67 @@ class AttackMission extends GameMission
      */
     private function sendItHomeAfterTheRallyClosed(FleetMission $mission, CombatInstance $combat): void
     {
-        // **La raison de la fermeture, si elle l'a jugee, n'est pas reecrite** : une vague refusee
-        // pour sa limite de flottes doit lire « limite atteinte », pas « ralliement ferme ».
-        CombatOutboxMessage::query()->firstOrCreate(
-            [
-                'combat_instance_id' => $combat->id,
-                'participant_key' => CombatParticipantKey::forFleet($mission->id),
-                'kind' => CombatOutboxKind::RallyRefused->value,
-            ],
-            [
-                'payload' => [
-                    'reason' => CombatReasonCode::RallyClosed->value,
-                    'target_body_id' => $combat->target_planet_id,
-                    'galaxy' => $combat->galaxy,
-                    'system' => $combat->system,
-                    'position' => $combat->position,
-                    'group_fleets' => 1,
-                ],
-                'available_at' => $mission->time_arrival,
-            ]
-        );
-
-        $mission->processed = 1;
-        $mission->save();
-
-        $this->startReturn(
+        // **Le meme chemin que toute autre refusee.** L'attaque ecrivait son avis, marquait l'aller
+        // et creait son retour de son cote ; la disposition que la fermeture avait ecrite pour elle
+        // restait « en attente » pour toujours, et deux protocoles decidaient d'un meme mouvement.
+        //
+        // La raison lue est celle qui a ete decidee — une vague refusee pour sa limite de flottes
+        // lit « limite atteinte », pas « ralliement ferme ».
+        $this->goHome(
             $mission,
-            $this->fleetMissionService->getResources($mission),
-            $this->fleetMissionService->getFleetUnits($mission)
+            fn (FleetMission $tenue): RefusedFleetVerdict => new RefusedFleetVerdict(
+                $combat,
+                CombatReasonCode::RallyClosed,
+                RefusedFleetHomecoming::physicalArrivalOf($tenue)
+            )
+        );
+    }
+
+    /**
+     * Suit le mouvement que le combat a deja decide pour cette vague, s'il y en a un.
+     *
+     * ## Pourquoi avant toute ouverture
+     *
+     * Une vague refusee a la fermeture porte sa disposition ; si le travailleur ne la touche
+     * qu'apres le reglement, la barriere a disparu et le corps est libre. Ouvrir alors un combat
+     * ferait de cette vague **l'ouvreuse d'une seconde bataille** — celle-la meme que le refus
+     * existe pour empecher — et son verdict resterait « en attente » pour toujours.
+     *
+     * La disposition suffit, et c'est tout l'objet de l'avoir ecrite.
+     *
+     * @return bool Vrai si la vague est repartie, et qu'il n'y a plus rien a traiter.
+     */
+    private function followTheMovementAlreadyDecided(FleetMission $mission): bool
+    {
+        return $this->goHome($mission, null);
+    }
+
+    /**
+     * Le renvoi lui-meme, commun aux deux entrees.
+     *
+     * @param Closure(FleetMission): (RefusedFleetVerdict|null)|null $juger
+     */
+    private function goHome(FleetMission $mission, Closure|null $juger): bool
+    {
+        // **Deux instants distincts, et chacun nomme.** `consumed_at` dit quand le mouvement a
+        // ete execute — un fait d execution, donc l horloge. Le depart du retour, lui, est
+        // l arrivee : la vague a rebondi a cet instant-la, et un travailleur en retard ne la
+        // fait pas rebondir plus tard.
+        return resolve(RefusedFleetHomecoming::class)->sendHome(
+            $mission,
+            (int)Date::now()->timestamp,
+            function (FleetMission $tenue, ResolvedReturnDestination $destination): void {
+                // **Une vague refusee rebondit a son arrivee.** Elle n'a jamais stationne : son
+                // demi-tour est l'instant meme ou elle s'est presentee, et non celui ou un
+                // travailleur en retard s'en est apercu.
+                $this->startReturn(
+                    $tenue,
+                    $this->fleetMissionService->getResources($tenue),
+                    $this->fleetMissionService->getFleetUnits($tenue),
+                    destination: $destination
+                );
+            },
+            $juger
         );
     }
 
@@ -264,6 +298,12 @@ class AttackMission extends GameMission
         // retard ouvrirait sinon un combat plus tard qu'il n'a commence, et decalerait de la meme
         // duree l'echeance du ralliement — donc les flottes admises.
         if ($this->settings->persistentCombatEnabled()) {
+            // **Un mouvement deja decide prime sur toute ouverture.** Sans cela, une vague refusee
+            // traitee apres le reglement ouvrirait un second combat sur un corps redevenu libre.
+            if ($this->followTheMovementAlreadyDecided($mission)) {
+                return;
+            }
+
             $combat = resolve(CombatOpeningService::class)->openOrJoin(
                 $mission,
                 $defenderPlanet->getPlanetId(),

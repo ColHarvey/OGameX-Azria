@@ -8,18 +8,14 @@ use Illuminate\Support\Facades\Log;
 use OGame\Combat\Enums\CombatCancellationCause;
 use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatState;
-use OGame\Combat\Exceptions\FleetHasNowhereToReturn;
-use OGame\Combat\Exceptions\ReturnDestinationMoved;
 use OGame\Combat\Exceptions\UnreturnableFleet;
 use OGame\Combat\Support\CombatParticipantKey;
-use OGame\GameMissions\Models\ResolvedReturnDestination;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatOutboxMessage;
 use OGame\Models\CombatParticipant;
 use OGame\Models\FleetMission;
 use OGame\Models\FleetUnion;
-use OGame\Models\Planet;
 use OGame\Services\FleetMissionService;
 use RuntimeException;
 
@@ -61,7 +57,7 @@ final class CombatCancellationService
 {
     public function __construct(
         private CombatRosterReader $roster = new CombatRosterReader(),
-        private ReturnPlanner $planner = new ReturnPlanner(),
+        private ReturnDestinationResolver $destinations = new ReturnDestinationResolver(),
         private FleetMissionService|null $fleetMissions = null,
     ) {
     }
@@ -139,8 +135,7 @@ final class CombatCancellationService
                 $aRendre[$mission->id] = [
                     $mission,
                     $trajet,
-                    $this->planner->planFor($mission),
-                    $this->planner->bodiesThatDecideFor($mission),
+                    $this->destinations->foreseeFor($mission),
                 ];
             }
 
@@ -151,8 +146,8 @@ final class CombatCancellationService
             // gagnant rendrait sa ligne stable sans figer la raison pour laquelle il a gagne.
             $decisifs = [];
 
-            foreach ($aRendre as [, , , $corps]) {
-                foreach ($corps as $identifiant) {
+            foreach ($aRendre as [, , $pressenti]) {
+                foreach ($pressenti->decidingBodyIds as $identifiant) {
                     $decisifs[$identifiant] = true;
                 }
             }
@@ -160,30 +155,19 @@ final class CombatCancellationService
             $corpsDeRetour = array_keys($decisifs);
             sort($corpsDeRetour);
 
-            if ($corpsDeRetour !== []) {
-                Planet::query()->whereIn('id', $corpsDeRetour)->orderBy('id')->lockForUpdate()->get();
-            }
+            // **L'union de tous les corps decisifs, d'un seul coup.** Verrouiller mission par
+            // mission romprait l'ordre croissant global : deux annulations concurrentes
+            // s'attendraient mutuellement. C'est la seule raison pour laquelle ce chemin compose
+            // les trois etapes au lieu d'appeler la resolution complete.
+            $this->destinations->holdTheDecidingBodies($corpsDeRetour);
 
             $plans = [];
 
-            foreach ($aRendre as $identifiant => [$mission, $trajet, $pressenti, $corpsPressentis]) {
-                // **L'ensemble des faits decisifs a-t-il bouge ?** Un corps apparu ou disparu entre
-                // les deux passes deplacerait le verdict sans qu'aucune ligne tenue n'ait change.
-                if ($this->planner->bodiesThatDecideFor($mission) !== $corpsPressentis) {
-                    throw new ReturnDestinationMoved($combat->id, $identifiant, $pressenti->planetId, null);
-                }
-
-                $plan = $this->planner->planFor($mission);
-
-                if (!$plan->isPossible() || $plan->planetId === null) {
-                    throw new FleetHasNowhereToReturn($combat->id, $identifiant, $plan->reason?->value);
-                }
-
-                if ($plan->planetId !== $pressenti->planetId || $plan->kind !== $pressenti->kind) {
-                    throw new ReturnDestinationMoved($combat->id, $identifiant, $pressenti->planetId, $plan->planetId);
-                }
-
-                $plans[$identifiant] = [$plan, $trajet];
+            foreach ($aRendre as $identifiant => [$mission, $trajet, $pressenti]) {
+                $plans[$identifiant] = [
+                    $this->destinations->confirm($mission, $pressenti, $combat->id),
+                    $trajet,
+                ];
             }
 
             $combat->status = CombatState::Cancelled;
@@ -230,7 +214,7 @@ final class CombatCancellationService
                 // l'instant d'annulation, dure le trajet aller, et se pose la ou son plan le dit ; la
                 // mission aller garde son heure d'arrivee, qui est un fait de l'admission, de l'ordre
                 // causal et de l'audit.
-                [$plan, $trajet] = $plans[$mission->id];
+                [$destination, $trajet] = $plans[$mission->id];
 
                 $mission->processed = 1;
                 $mission->save();
@@ -241,7 +225,7 @@ final class CombatCancellationService
                     $this->fleetMissions()->getFleetUnits($mission),
                     $trajet,
                     $now,
-                    ResolvedReturnDestination::from($plan, $mission)
+                    $destination
                 );
 
                 $rendues++;
