@@ -4,7 +4,9 @@ namespace OGame\Combat\Application;
 
 use OGame\Combat\Exceptions\CorruptedFrozenApplicationContext;
 use OGame\Combat\Services\CombatRoster;
+use OGame\Combat\Support\ResourceBoundary;
 use OGame\Enums\CharacterClass;
+use OGame\Models\Resources;
 use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
 
@@ -54,7 +56,7 @@ use OGame\Services\PlayerService;
  */
 final readonly class FrozenCombatApplicationContext implements CombatApplicationContext
 {
-    private const array KEYS = ['schema', 'applied_at', 'players', 'space_docks', 'wreck_field', 'npc_narrative'];
+    private const array KEYS = ['schema', 'applied_at', 'players', 'space_docks', 'held_fleet_cargo', 'wreck_field', 'npc_narrative'];
 
     private const array NARRATIVE_KEYS = ['motive', 'variation', 'variations'];
 
@@ -62,21 +64,28 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
 
     private const array WRECK_FIELD_KEYS = ['min_resources_loss', 'min_fleet_percentage', 'debris_field_from_ships', 'lifetime_hours'];
 
+    private const array CARGO_KEYS = ['metal', 'crystal', 'deuterium'];
+
     /**
      * Le schema 2 ajoute l'instant d'application, la part de debris et la duree de vie des epaves,
-     * et ne tire une variante narrative que pour un raid de faction. Aucun document du schema 1 n'a
-     * jamais ete ecrit hors des essais : il se refuse, il ne se convertit pas.
+     * et ne tire une variante narrative que pour un raid de faction. Le schema 3 y ajoute la
+     * cargaison des renforts retenus, que l'application relisait vivante. Aucun document des
+     * schemas anterieurs n'a jamais ete ecrit hors des essais : ils se refusent, ils ne se
+     * convertissent pas.
      */
-    public const int SCHEMA = 2;
+    public const int SCHEMA = 3;
 
     /**
      * @param array<int, array{is_general: bool, reaper_debris_percentage: float, character_class: int|null}> $players
      * @param array<int, int> $spaceDocks Niveau de chantier spatial, par identifiant de corps d'origine.
+     * @param array<int, array{metal: int, crystal: int, deuterium: int}> $heldFleetCargo La cargaison
+     *        de chaque renfort retenu, par identifiant de mission.
      */
     private function __construct(
         private int $appliedAt,
         private array $players,
         private array $spaceDocks,
+        private array $heldFleetCargo,
         private int $minResourcesLoss,
         private int $minFleetPercentage,
         private int $debrisFieldFromShips,
@@ -115,6 +124,31 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
             $chantiers[$identifiant] = $live->spaceDockLevelFor($corps);
         }
 
+        // **La cargaison des renforts retenus entre dans la photographie.** L'application la
+        // relisait sur la mission au moment ou elle ecrivait : des heures apres le calcul, ce
+        // n'etait plus la valeur sur laquelle la bataille avait ete faite, et deux rejeux du meme
+        // combat ne rendaient pas la meme cargaison.
+        //
+        // Elle passe par la frontiere economique canonique : une colonne fractionnaire arrete la
+        // cloture au lieu d'etre gelee de travers, exactement comme pour un retour refuse.
+        $cargaisons = [];
+
+        foreach ($roster->defenders as $renfort) {
+            $identifiant = (int)$renfort->fleetMissionId;
+
+            if ($identifiant < 1) {
+                // La garnison du corps n'a pas de mission, donc pas de cargaison a geler.
+                continue;
+            }
+
+            $portee = $live->heldFleetCargo($identifiant);
+            $cargaisons[$identifiant] = [
+                'metal' => self::wholeUnits($portee->metal->get(), 'metal', $identifiant),
+                'crystal' => self::wholeUnits($portee->crystal->get(), 'crystal', $identifiant),
+                'deuterium' => self::wholeUnits($portee->deuterium->get(), 'deuterium', $identifiant),
+            ];
+        }
+
         // **Le recit ne se tire que pour un raid de faction.** Le motif lu a l'echeance
         // expliquerait un raid par une provocation survenue pendant la bataille ; la variante tiree
         // a l'echeance donnerait une histoire differente a chaque rejeu. Pour un combat entre
@@ -125,6 +159,7 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
             $appliedAt,
             $joueurs,
             $chantiers,
+            $cargaisons,
             $live->wreckFieldMinResourcesLoss(),
             $live->wreckFieldMinFleetPercentage(),
             $live->debrisFieldFromShips(),
@@ -145,6 +180,7 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
             'applied_at' => $this->appliedAt,
             'players' => $this->players,
             'space_docks' => $this->spaceDocks,
+            'held_fleet_cargo' => $this->heldFleetCargo,
             'wreck_field' => [
                 'min_resources_loss' => $this->minResourcesLoss,
                 'min_fleet_percentage' => $this->minFleetPercentage,
@@ -229,6 +265,29 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
             $chantiers[$corps] = $niveau;
         }
 
+        $cargaisons = [];
+        foreach (self::structure($stored, 'held_fleet_cargo', 'contexte') as $flotte => $portee) {
+            if (!is_int($flotte) || $flotte < 1) {
+                throw new CorruptedFrozenApplicationContext('« held_fleet_cargo » porte une flotte dont l identifiant est ' . self::describe($flotte) . ' et non un entier positif', $stored);
+            }
+
+            $chemin = 'contexte.held_fleet_cargo[' . $flotte . ']';
+
+            if (!is_array($portee)) {
+                throw new CorruptedFrozenApplicationContext('« ' . $chemin . ' » est un ' . get_debug_type($portee) . ' et non une structure', $stored);
+            }
+
+            self::refuseUnknownKeys($portee, self::CARGO_KEYS, $chemin);
+
+            // Les trois champs nommes un par un : une boucle rendrait une structure dont personne
+            // ne peut affirmer qu'elle porte les trois.
+            $cargaisons[$flotte] = [
+                'metal' => self::cargoField($portee, 'metal', $chemin, $stored),
+                'crystal' => self::cargoField($portee, 'crystal', $chemin, $stored),
+                'deuterium' => self::cargoField($portee, 'deuterium', $chemin, $stored),
+            ];
+        }
+
         $epaves = self::structure($stored, 'wreck_field', 'contexte');
         self::refuseUnknownKeys($epaves, self::WRECK_FIELD_KEYS, 'contexte.wreck_field');
 
@@ -291,6 +350,7 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
             $instant,
             $joueurs,
             $chantiers,
+            $cargaisons,
             $perteMinimale,
             $partMinimale,
             $partDebris,
@@ -324,6 +384,26 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
             );
         }
 
+        $renfortsAttendus = [];
+
+        foreach ($roster->defenders as $renfort) {
+            if ((int)$renfort->fleetMissionId > 0) {
+                $renfortsAttendus[] = (int)$renfort->fleetMissionId;
+            }
+        }
+
+        $renfortsFiges = array_keys($this->heldFleetCargo);
+        sort($renfortsAttendus);
+        sort($renfortsFiges);
+
+        if ($renfortsFiges !== $renfortsAttendus) {
+            throw new CorruptedFrozenApplicationContext(
+                'la photographie porte les cargaisons des flottes ' . implode(', ', $renfortsFiges)
+                . ' alors que l effectif compte les renforts ' . implode(', ', $renfortsAttendus),
+                $this->heldFleetCargo
+            );
+        }
+
         $corpsAttendus = array_keys(self::bodiesOf($roster));
         $corpsFiges = array_keys($this->spaceDocks);
         sort($corpsAttendus);
@@ -336,6 +416,59 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
                 $this->spaceDocks
             );
         }
+    }
+
+    /**
+     * La cargaison figee de ce renfort, ou un refus s'il n'est pas dans la photographie.
+     *
+     * Un fait demande pour une flotte absente n'est pas un repli sur le monde vivant : ce serait
+     * exactement le defaut que cette photographie existe pour fermer.
+     */
+    public function heldFleetCargo(int $fleetMissionId): Resources
+    {
+        if (!array_key_exists($fleetMissionId, $this->heldFleetCargo)) {
+            throw new CorruptedFrozenApplicationContext(
+                'la photographie ne porte pas la cargaison de la flotte ' . $fleetMissionId,
+                $this->heldFleetCargo
+            );
+        }
+
+        $portee = $this->heldFleetCargo[$fleetMissionId];
+
+        return new Resources((float)$portee['metal'], (float)$portee['crystal'], (float)$portee['deuterium'], 0);
+    }
+
+    /**
+     * Un champ de cargaison relu, entier et jamais negatif.
+     *
+     * @param array<mixed> $portee
+     * @param mixed $stored
+     */
+    private static function cargoField(array $portee, string $champ, string $chemin, mixed $stored): int
+    {
+        $valeur = self::int($portee, $champ, $chemin);
+
+        if ($valeur < 0) {
+            throw new CorruptedFrozenApplicationContext(
+                '« ' . $chemin . '.' . $champ . ' » vaut ' . $valeur . ' : une cargaison ne se compte pas en negatif',
+                $stored
+            );
+        }
+
+        return $valeur;
+    }
+
+    /**
+     * Une cargaison en unites entieres, par la frontiere economique canonique.
+     */
+    private static function wholeUnits(float $montant, string $champ, int $fleetMissionId): int
+    {
+        return ResourceBoundary::wholeUnitsOfCarriedCargo(
+            $montant,
+            $champ,
+            'held_fleet_cargo_photograph',
+            'mission ' . $fleetMissionId
+        )->units;
     }
 
     public function applicationInstant(): int

@@ -4,6 +4,8 @@ namespace OGame\Combat\Application;
 
 use Illuminate\Support\Facades\Date;
 use OGame\Enums\CharacterClass;
+use OGame\Models\FleetMission;
+use OGame\Models\Resources;
 use OGame\Services\CharacterClassService;
 use OGame\Services\Npc\NpcThreatService;
 use OGame\Services\PlanetService;
@@ -48,6 +50,23 @@ final class LiveCombatApplicationContext implements CombatApplicationContext
         $porteur = $originBody->isMoon() ? $originBody->planet() : $originBody;
 
         return max(1, $porteur->getObjectLevel('space_dock'));
+    }
+
+    /**
+     * La cargaison du renfort, lue maintenant.
+     *
+     * C'est le comportement d'origine du chemin instantane, et il y est juste : la bataille vient
+     * d'etre calculee, et rien n'a pu toucher ces colonnes entre-temps.
+     */
+    public function heldFleetCargo(int $fleetMissionId): Resources
+    {
+        $mission = FleetMission::query()->whereKey($fleetMissionId)->first();
+
+        if (!$mission instanceof FleetMission) {
+            return new Resources(0, 0, 0, 0);
+        }
+
+        return new Resources((float)$mission->metal, (float)$mission->crystal, (float)$mission->deuterium, 0);
     }
 
     public function wreckFieldMinResourcesLoss(): int

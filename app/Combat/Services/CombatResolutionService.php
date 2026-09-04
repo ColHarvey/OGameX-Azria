@@ -209,10 +209,21 @@ class CombatResolutionService
                             $defendMission->{$unit->unitObject->machine_name} = $unit->amount;
                         }
 
-                        // Update resources to the proportionally surviving amounts
-                        $defendMission->metal = max(0, (int)($defendMission->metal * $survivalRate));
-                        $defendMission->crystal = max(0, (int)($defendMission->crystal * $survivalRate));
-                        $defendMission->deuterium = max(0, (int)($defendMission->deuterium * $survivalRate));
+                        // **La cargaison de depart vient du contexte, pas de la ligne.**
+                        //
+                        // Elle etait relue sur la mission au moment de l'ecriture. Sur le chemin
+                        // instantane c'est juste — quelques millisecondes separent le calcul de
+                        // l'application. Sur le chemin durable, des heures les separent : la valeur
+                        // lue n'est plus celle sur laquelle la bataille a ete calculee, et deux
+                        // rejeux du meme combat ne rendraient pas la meme cargaison.
+                        //
+                        // Le contexte gele la porte depuis la cloture ; le contexte vivant la lit
+                        // maintenant, comme avant. Un seul applicateur, deux sources de faits.
+                        $cargaisonDeDepart = $context->heldFleetCargo((int)$defendMission->id);
+
+                        $defendMission->metal = max(0, (int)($cargaisonDeDepart->metal->get() * $survivalRate));
+                        $defendMission->crystal = max(0, (int)($cargaisonDeDepart->crystal->get() * $survivalRate));
+                        $defendMission->deuterium = max(0, (int)($cargaisonDeDepart->deuterium->get() * $survivalRate));
 
                         $defendMission->save();
                     }

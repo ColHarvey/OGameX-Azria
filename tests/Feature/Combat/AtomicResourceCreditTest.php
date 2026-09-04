@@ -21,9 +21,9 @@ use Tests\TestCase;
  * une construction : ces ecritures-la ne prennent aucun verrou de combat, donc rien ne les retient,
  * et la somme recalculee les efface.
  *
- * Le Faucheur defenseur creditait ainsi la cible a la fin d'une bataille. C'est la seule des deux
- * ecritures economiques relues vivantes qui touchait un corps ; l'autre est la cargaison d'une
- * Defense ACS.
+ * Le Faucheur defenseur creditait ainsi la cible a la fin d'une bataille. C'est la premiere des deux
+ * ecritures economiques que l'application relisait vivantes ; la seconde est la cargaison d'une
+ * Defense ACS, reduite en proportion de sa capacite survivante, et cette classe garde les deux.
  *
  * ## Ce que cet essai fait, et pourquoi ainsi
  *
@@ -149,6 +149,43 @@ class AtomicResourceCreditTest extends TestCase
             $source,
             'The resolution no longer credits the defender Reapers at all.'
         );
+    }
+
+    /**
+     * La cargaison d'un renfort vient du contexte, jamais de la ligne de la mission.
+     *
+     * ## Pourquoi une garde de source ici aussi
+     *
+     * L'observer de bout en bout demanderait une bataille reglee dont un renfort **survit** : une
+     * issue que le moteur tire, et qu'un essai ne peut fixer sans devenir une epreuve du moteur
+     * plutot que de la couture. Cette preuve-la appartient au lot des simulations, ou l'issue se
+     * commande.
+     *
+     * Ce que l'on tient ici : la resolution demande la cargaison de depart au contexte
+     * d'application — gele sur le chemin durable, vivant sur le chemin instantane — et ne relit plus
+     * les colonnes de la mission au moment ou elle les reecrit.
+     */
+    public function testTheResolutionAsksTheContextForAHeldFleetCargo(): void
+    {
+        $fichier = (new ReflectionClass(CombatResolutionService::class))->getFileName();
+        $this->assertNotFalse($fichier);
+
+        $source = preg_replace('/\s+/', ' ', (string)file_get_contents($fichier));
+        $this->assertNotNull($source);
+
+        $this->assertStringContainsString(
+            '$cargaisonDeDepart = $context->heldFleetCargo((int)$defendMission->id);',
+            $source,
+            'The resolution no longer asks the context for the cargo a reinforcement was carrying.'
+        );
+
+        foreach (['metal', 'crystal', 'deuterium'] as $champ) {
+            $this->assertStringNotContainsString(
+                '$defendMission->' . $champ . ' * $survivalRate',
+                $source,
+                'The resolution scales the ' . $champ . ' it re-read from the mission row.'
+            );
+        }
     }
 
     private function aBodyWith(int $metal, int $crystal, int $deuterium): Planet

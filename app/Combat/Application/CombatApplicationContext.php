@@ -3,6 +3,7 @@
 namespace OGame\Combat\Application;
 
 use OGame\Enums\CharacterClass;
+use OGame\Models\Resources;
 use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
 
@@ -57,6 +58,26 @@ interface CombatApplicationContext
      * c'est cette resolution-la qui est figee, pas le corps.
      */
     public function spaceDockLevelFor(PlanetService $originBody): int;
+
+    /**
+     * La cargaison qu'une Defense ACS retenue portait, telle que ce contexte la connait.
+     *
+     * ## Pourquoi ce fait passe par le contexte
+     *
+     * A la fin d'une bataille, la cargaison d'un renfort survivant est reduite en proportion de sa
+     * capacite restante. L'application lisait pour cela les colonnes de la mission **au moment ou
+     * elle ecrivait** : sur le chemin instantane c'est juste, quelques millisecondes separent le
+     * calcul de l'application. Sur le chemin durable, des heures les separent, et la valeur lue
+     * n'est plus celle sur laquelle la bataille a ete calculee — un rejeu ne redonnerait pas le
+     * meme retour.
+     *
+     * La photographie prise a la cloture porte donc cette cargaison, et l'application la demande
+     * ici plutot que de la relire.
+     *
+     * @param int $fleetMissionId La mission du renfort retenu.
+     * @return Resources
+     */
+    public function heldFleetCargo(int $fleetMissionId): Resources;
 
     /**
      * La perte minimale, en ressources, au-dessous de laquelle aucun champ d'epaves n'existe.

@@ -7,10 +7,13 @@ use Closure;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use OGame\Combat\Application\FrozenCombatApplicationContext;
 use OGame\Combat\Enums\CombatCancellationCause;
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\FleetDispositionKind;
+use OGame\Combat\Exceptions\CorruptedFrozenApplicationContext;
+use OGame\Combat\Services\CombatRosterReader;
 use OGame\Combat\Services\FleetDispositionRegistry;
 use OGame\Combat\Services\PersistentCombatAdvancer;
 use OGame\Combat\Services\RallyClosureService;
@@ -215,6 +218,68 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
         $renfort->refresh();
         $this->assertSame(1, (int)$renfort->processed, 'The hold of a reinforcement outlived the combat.');
         $this->assertSame(1, FleetMission::query()->where('parent_id', $renfort->id)->count());
+    }
+
+    /**
+     * La cloture gele la cargaison d'un renfort admis, et le reglement exige de la retrouver.
+     *
+     * ## Ce que l'application relisait vivant
+     *
+     * A la fin d'une bataille, la cargaison d'un renfort survivant est reduite en proportion de sa
+     * capacite restante. L'application lisait pour cela les colonnes de la mission **au moment ou
+     * elle les reecrivait** : des heures apres le calcul, ce n'etait plus la valeur sur laquelle la
+     * bataille avait ete faite, et deux rejeux du meme combat ne rendaient pas la meme cargaison.
+     *
+     * La photographie prise a la cloture la porte donc, et le reglement refuse une photographie qui
+     * ne couvre pas exactement les renforts de l'effectif — une photographie amputee ferait
+     * disparaitre la cargaison d'un allie sans que rien ne le dise.
+     */
+    public function testTheClosureFreezesTheCargoOfAnAdmittedReinforcement(): void
+    {
+        $renfort = null;
+        [$combat, , , $ouverture] = $this->anOpenedCombat(true, function (PlanetService $cible, int $ouverture) use (&$renfort): void {
+            $renfort = $this->aDefensiveReinforcement($cible, $ouverture + 5, 30, $ouverture - 600);
+        });
+
+        if ($renfort === null) {
+            $this->fail('The reinforcement was never launched.');
+        }
+
+        // **Une cargaison reelle** : a zero, geler et ne rien geler donneraient le meme document, et
+        // l'essai ne prouverait rien.
+        DB::table('fleet_missions')->where('id', $renfort->id)->update([
+            'metal' => 4_200,
+            'crystal' => 1_300,
+            'deuterium' => 700,
+        ]);
+
+        $this->assertTrue((new RallyClosureService())->close($combat->id, $ouverture + 19)->closed, 'The rally did not close.');
+        $this->assertTrue($this->isADefendingParticipant($combat, $renfort), 'The reinforcement was not admitted: nothing would be proved.');
+
+        $combat->refresh();
+        $photographie = $combat->frozen_settings;
+        $this->assertIsArray($photographie);
+        $this->assertArrayHasKey('held_fleet_cargo', $photographie, 'The photograph carries no cargo at all.');
+
+        $this->assertSame(
+            ['metal' => 4_200, 'crystal' => 1_300, 'deuterium' => 700],
+            $photographie['held_fleet_cargo'][$renfort->id] ?? null,
+            'The photograph did not freeze the cargo the reinforcement was carrying.'
+        );
+
+        // **Et la couverture exige exactement les renforts de l'effectif.** Une photographie amputee
+        // du renfort passerait, et sa cargaison serait perdue au reglement.
+        $amputee = $photographie;
+        unset($amputee['held_fleet_cargo'][$renfort->id]);
+
+        $effectif = (new CombatRosterReader())->forCombat($combat);
+
+        try {
+            FrozenCombatApplicationContext::fromStorage($amputee)->assertCovers($effectif);
+            $this->fail('A photograph missing a reinforcement was accepted.');
+        } catch (CorruptedFrozenApplicationContext $refus) {
+            $this->assertStringContainsString('cargaisons des flottes', $refus->getMessage());
+        }
     }
 
     /**

@@ -285,6 +285,76 @@ class FrozenCombatApplicationContextTest extends UnitTestCase
     }
 
     /**
+     * La cargaison d'un renfort se relit telle qu'elle a ete photographiee.
+     *
+     * ## Ce que l'application relisait vivant
+     *
+     * A la fin d'une bataille, la cargaison d'un renfort survivant est reduite en proportion de sa
+     * capacite restante. L'application lisait pour cela les colonnes de la mission **au moment ou
+     * elle ecrivait** : des heures apres le calcul, ce n'etait plus la valeur sur laquelle la
+     * bataille avait ete faite, et deux rejeux du meme combat ne rendaient pas la meme cargaison.
+     */
+    public function testAHeldFleetCargoIsReadAsItWasPhotographed(): void
+    {
+        $contexte = FrozenCombatApplicationContext::fromStorage($this->aSnapshot());
+
+        $portee = $contexte->heldFleetCargo(11);
+
+        $this->assertSame(1_000.0, $portee->metal->get());
+        $this->assertSame(500.0, $portee->crystal->get());
+        $this->assertSame(250.0, $portee->deuterium->get());
+    }
+
+    /**
+     * Une flotte absente de la photographie est un refus, pas un repli sur le monde vivant.
+     *
+     * C'est la regle de toute cette photographie : un fait demande pour quelqu'un qu'elle ne porte
+     * pas ne se devine pas. Retomber sur la ligne serait exactement le defaut qu'elle ferme.
+     */
+    public function testAFleetAbsentFromThePhotographIsRefused(): void
+    {
+        $contexte = FrozenCombatApplicationContext::fromStorage($this->aSnapshot());
+
+        $this->expectException(CorruptedFrozenApplicationContext::class);
+        $this->expectExceptionMessage('ne porte pas la cargaison de la flotte 12');
+
+        $contexte->heldFleetCargo(12);
+    }
+
+    /**
+     * Une cargaison negative est refusee a la relecture.
+     */
+    public function testANegativeHeldCargoIsRefused(): void
+    {
+        $document = $this->aSnapshot();
+        $document['held_fleet_cargo'][11]['crystal'] = -1;
+
+        $this->assertRefused($document, 'held_fleet_cargo[11].crystal');
+    }
+
+    /**
+     * Une cargaison dont un champ manque est refusee.
+     */
+    public function testAHeldCargoMissingAFieldIsRefused(): void
+    {
+        $document = $this->aSnapshot();
+        unset($document['held_fleet_cargo'][11]['deuterium']);
+
+        $this->assertRefused($document, 'held_fleet_cargo[11].deuterium');
+    }
+
+    /**
+     * Une flotte dont l'identifiant n'est pas un entier positif est refusee.
+     */
+    public function testAHeldCargoUnderAnInvalidFleetIdentifierIsRefused(): void
+    {
+        $document = $this->aSnapshot();
+        $document['held_fleet_cargo'][0] = ['metal' => 1, 'crystal' => 1, 'deuterium' => 1];
+
+        $this->assertRefused($document, 'held_fleet_cargo');
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function aSnapshot(): array
@@ -297,6 +367,11 @@ class FrozenCombatApplicationContextTest extends UnitTestCase
                 4 => ['is_general' => false, 'reaper_debris_percentage' => 0.3, 'character_class' => null],
             ],
             'space_docks' => [7 => 4, 9 => 1],
+            // La cargaison des renforts retenus, gelee a la cloture : l'application la relisait
+            // vivante, et deux rejeux du meme combat ne rendaient pas la meme.
+            'held_fleet_cargo' => [
+                11 => ['metal' => 1_000, 'crystal' => 500, 'deuterium' => 250],
+            ],
             'wreck_field' => [
                 'min_resources_loss' => 150_000,
                 'min_fleet_percentage' => 5,
