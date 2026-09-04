@@ -22,6 +22,7 @@ use OGame\Combat\Services\ReturnPlanner;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\ReturnPlan;
 use OGame\GameMissions\AttackMission;
+use OGame\GameMissions\Models\ResolvedReturnDestination;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\BattleReport;
 use OGame\Models\CelestialBodyCombatBarrier;
@@ -265,8 +266,11 @@ class CombatCancellationTest extends FleetDispatchTestCase
         $trajet = $arriveeInitiale - $depart;
         $this->assertGreaterThan(0, $trajet, 'The outbound trip took no time: nothing would be compared.');
 
-        // Deux heures de combat, puis une annulation.
+        // Deux heures de combat, puis une annulation. **L'horloge y est aussi** : sans cela, le
+        // controle d'echeance interne de la creation du retour ne verrait pas la situation de
+        // production, et un depart passe pourrait s'y glisser sans que rien ne le dise.
         $annulation = $arriveeInitiale + 7_200;
+        $this->travelTo(Date::createFromTimestamp($annulation));
         $issue = resolve(AttackMission::class)->cancelPersistentCombat($combat->id, CombatCancellationCause::AdministrativeDecision, $annulation);
         $this->assertTrue($issue->cancelled, 'The cancellation did nothing: ' . $issue->reason);
 
@@ -279,6 +283,7 @@ class CombatCancellationTest extends FleetDispatchTestCase
         $this->assertSame($annulation, (int)$retour->time_departure, 'The return leaves from the original arrival instead of the cancellation.');
         $this->assertSame($annulation + $trajet, (int)$retour->time_arrival, 'The return does not take the time the outbound trip took.');
         $this->assertSame(0, (int)$retour->processed, 'The return was already processed: it was created in the past.');
+        $this->assertGreaterThan((int)Date::now()->timestamp, (int)$retour->time_arrival, 'The return is already due at the very instant it was created.');
 
         // **L aller garde son histoire.** Son heure d arrivee est un fait de l admission, de l ordre
         // causal et de l audit : une sortie d exploitation ne la reecrit pas pour piloter un retour.
@@ -340,17 +345,49 @@ class CombatCancellationTest extends FleetDispatchTestCase
         ];
 
         $appels = 0;
+        $premierRetour = null;
 
         try {
             (new CombatCancellationService())->cancel(
                 $combat->id,
                 CombatCancellationCause::AdministrativeDecision,
-                function () use (&$appels): void {
+                function (FleetMission $retourDe, Resources $ressources, UnitCollection $unites, int $duree, int $departA, ResolvedReturnDestination $ou) use (&$appels, &$premierRetour): void {
                     $appels++;
 
                     if ($appels === 2) {
+                        // **La ligne du premier retour existe a cet instant precis.** Sans cette
+                        // verification, l'assertion finale « aucun retour » partirait de zero et y
+                        // resterait, avec ou sans transaction.
+                        $this->assertNotNull($premierRetour, 'The first return was never created.');
+                        $this->assertSame(1, FleetMission::query()->whereKey($premierRetour)->count(), 'The first return does not exist when the failure strikes.');
+
                         throw new RuntimeException('La creation du deuxieme retour echoue.');
                     }
+
+                    // Un vrai retour, avec ses contraintes : c'est lui qui doit disparaitre.
+                    $retour = FleetMission::forceCreate([
+                        'parent_id' => $retourDe->id,
+                        'user_id' => $retourDe->user_id,
+                        'planet_id_from' => $retourDe->planet_id_to,
+                        'type_from' => $retourDe->type_to,
+                        'galaxy_from' => $retourDe->galaxy_to,
+                        'system_from' => $retourDe->system_to,
+                        'position_from' => $retourDe->position_to,
+                        'planet_id_to' => $ou->bodyId,
+                        'type_to' => $ou->type->value,
+                        'galaxy_to' => $ou->coordinate->galaxy,
+                        'system_to' => $ou->coordinate->system,
+                        'position_to' => $ou->coordinate->position,
+                        'mission_type' => $retourDe->mission_type,
+                        'time_departure' => $departA,
+                        'time_arrival' => $departA + $duree,
+                        'light_fighter' => $unites->getAmountByMachineName('light_fighter'),
+                        'metal' => (int)$ressources->metal->get(),
+                        'crystal' => (int)$ressources->crystal->get(),
+                        'deuterium' => (int)$ressources->deuterium->get(),
+                    ]);
+
+                    $premierRetour = $retour->id;
                 },
                 (int)$combat->ends_at
             );
@@ -360,6 +397,8 @@ class CombatCancellationTest extends FleetDispatchTestCase
         }
 
         $this->assertSame(2, $appels, 'The cancellation did not reach the second return: the test would prove nothing.');
+        $this->assertNotNull($premierRetour, 'No first return was ever created.');
+        $this->assertSame(0, FleetMission::query()->whereKey($premierRetour)->count(), 'The first return survived the rollback.');
 
         $combat->refresh();
         $this->assertSame($avant['etat'], $combat->status, 'The combat stayed cancelled though the returns were rolled back.');
