@@ -83,5 +83,14 @@ final class RefusedFleetNotice
         if ((int)$avis->available_at !== $lisibleDes) {
             throw new ContradictoryRefusalNotice($mission->id, 'available_at', (string)$avis->available_at, (string)$lisibleDes);
         }
+
+        // **La taille du groupe : comparee quand l'ecrivain la connait, preservee quand il ne la
+        // connait pas.** Ce n'est pas un fait du mouvement, mais c'est un contenu que le joueur lit :
+        // une fermeture rejouee avec une autre taille ne raconte plus le meme refus, et un
+        // `firstOrCreate()` n'a pas a l'arbitrer. Le consommateur, lui, ne la connait pas — il ne
+        // pretend pas la revalider, et la laisse telle que la fermeture l'a ecrite.
+        if ($groupFleets !== null && (string)($inscrit['group_fleets'] ?? '') !== (string)$groupFleets) {
+            throw new ContradictoryRefusalNotice($mission->id, 'group_fleets', (string)($inscrit['group_fleets'] ?? ''), (string)$groupFleets);
+        }
     }
 }

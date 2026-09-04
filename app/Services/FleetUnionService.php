@@ -3,6 +3,7 @@
 namespace OGame\Services;
 
 use Exception;
+use Illuminate\Support\Facades\Log;
 use OGame\Combat\Services\FleetDispositionRegistry;
 use OGame\Combat\Services\FleetMovementGate;
 use OGame\Models\CombatParticipant;
@@ -115,17 +116,26 @@ class FleetUnionService
      */
     private function refuseIfTheCombatHoldsIt(FleetMission $tenue): void
     {
-        if ($tenue->combat_instance_id !== null) {
-            throw new Exception(__('t_acs.error_mission_not_active'));
+        // **Le joueur lit un seul message ; l'exploitation lit le lien.** Trois liens differents
+        // donnent le meme refus au joueur — c'est juste, pour lui la flotte n'est plus disponible.
+        // Mais lequel a joue est un fait d'exploitation : le journal le nomme, avec la mission.
+        $lien = match (true) {
+            $tenue->combat_instance_id !== null => 'combat ' . $tenue->combat_instance_id . ' rattache a l arrivee',
+            CombatParticipant::query()->where('fleet_mission_id', $tenue->id)->exists() => 'inscription par la fermeture',
+            resolve(FleetDispositionRegistry::class)->pendingFor($tenue) !== null => 'disposition en attente',
+            default => null,
+        };
+
+        if ($lien === null) {
+            return;
         }
 
-        if (CombatParticipant::query()->where('fleet_mission_id', $tenue->id)->exists()) {
-            throw new Exception(__('t_acs.error_mission_not_active'));
-        }
+        Log::info('Union refusee : le combat tient la flotte.', [
+            'fleet_mission_id' => $tenue->id,
+            'lien' => $lien,
+        ]);
 
-        if (resolve(FleetDispositionRegistry::class)->pendingFor($tenue) !== null) {
-            throw new Exception(__('t_acs.error_mission_not_active'));
-        }
+        throw new Exception(__('t_acs.error_mission_not_active'));
     }
 
     /**

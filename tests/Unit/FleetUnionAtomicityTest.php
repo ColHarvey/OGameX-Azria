@@ -75,10 +75,16 @@ class FleetUnionAtomicityTest extends TestCase
      */
     private int $bodies = 0;
 
+    /**
+     * La cible de cet essai, creee a la premiere attaque et partagee par toutes les siennes.
+     */
+    private Planet|null $cible = null;
+
     protected function setUp(): void
     {
         parent::setUp();
 
+        $this->cible = null;
         $this->service = app(FleetUnionService::class);
         $this->writeLevels = new ArrayObject();
 
@@ -540,15 +546,24 @@ class FleetUnionAtomicityTest extends TestCase
     }
 
     /**
-     * Une attaque simple en vol, visant toujours la meme cible.
+     * Une attaque simple en vol, visant toujours la meme cible — celle de cet essai.
+     *
+     * ## Une flotte fraiche, et la preuve qu'elle l'est
+     *
+     * Cinq essais de cette classe ont rougi une fois sur deux passages paralleles le 4 septembre
+     * 2026 — « cette flotte est deja arrivee ou a ete rappelee » sur une mission qui venait d'etre
+     * creee. La jointure lit desormais, sur la ligne tenue, le combat rattache, l'inscription et la
+     * disposition : une ligne laissee par un voisin du meme processus sous un identifiant reutilise
+     * produirait exactement ce symptome. Chaque lien est donc affirme vide ici, avec son nom.
      *
      * @param array{0: User, 1: Planet} $player
      */
     private function anAttackMission(array $player): FleetMission
     {
         [$utilisateur, $planete] = $player;
+        $cible = $this->theTarget();
 
-        return FleetMission::forceCreate([
+        $mission = FleetMission::forceCreate([
             'user_id' => $utilisateur->id,
             'planet_id_from' => $planete->id,
             'mission_type' => 1,
@@ -557,36 +572,44 @@ class FleetUnionAtomicityTest extends TestCase
             // **Un corps vise, pas seulement des coordonnees.** La porte des mouvements prend la
             // barriere de ce corps en premier ; une mission sans corps n'aurait rien a tenir, et
             // l'ordre des verrous ne se verrait pas.
-            'planet_id_to' => $this->theTargetBodyId(),
-            'galaxy_to' => 1,
-            'system_to' => 1,
-            'position_to' => 1,
+            'planet_id_to' => $cible->id,
+            'galaxy_to' => $cible->galaxy,
+            'system_to' => $cible->system,
+            'position_to' => $cible->planet,
             'type_to' => 1,
             'light_fighter' => 10,
         ]);
+
+        $ligne = FleetMission::query()->findOrFail($mission->id);
+        $this->assertSame(0, (int)$ligne->processed, "A brand-new mission {$mission->id} is already processed: the row was polluted.");
+        $this->assertSame(0, (int)$ligne->canceled, "A brand-new mission {$mission->id} is already canceled: the row was polluted.");
+        $this->assertNull($ligne->combat_instance_id, "A brand-new mission {$mission->id} is already bound to a combat.");
+        $this->assertSame(0, CombatParticipant::query()->where('fleet_mission_id', $mission->id)->count(), "A participant row already references the brand-new mission {$mission->id}: a neighbour left it under a reused id.");
+        $this->assertNull((new FleetDispositionRegistry())->pendingFor($ligne), "A disposition already references the brand-new mission {$mission->id}: a neighbour left it under a reused id.");
+
+        return $mission;
     }
 
     /**
-     * Le corps que toutes les attaques de ces essais visent, en 1:1:1.
+     * Le corps que toutes les attaques de cet essai visent : cree pour lui, jamais partage.
+     *
+     * Un corps partage entre classes d'un meme processus porte ce que les voisins y laissent — une
+     * barriere, un combat. La porte les tiendrait sans mal, mais un essai qui compte sur un corps
+     * libre doit le creer.
      */
-    private function theTargetBodyId(): int
+    private function theTarget(): Planet
     {
-        $existant = Planet::query()
-            ->where('galaxy', 1)
-            ->where('system', 1)
-            ->where('planet', 1)
-            ->where('planet_type', 1)
-            ->value('id');
+        if ($this->cible === null) {
+            $this->bodies++;
 
-        if ($existant !== null) {
-            return (int)$existant;
+            $this->cible = Planet::factory()->create([
+                'user_id' => User::factory()->create()->id,
+                'galaxy' => 2,
+                'system' => 100 + intdiv($this->bodies, 15),
+                'planet' => ($this->bodies % 15) + 1,
+            ]);
         }
 
-        return (int)Planet::factory()->create([
-            'user_id' => User::factory()->create()->id,
-            'galaxy' => 1,
-            'system' => 1,
-            'planet' => 1,
-        ])->id;
+        return $this->cible;
     }
 }

@@ -8,17 +8,19 @@ use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\FleetDispositionKind;
 use OGame\Combat\Exceptions\ContradictoryRefusalNotice;
 use OGame\Combat\Exceptions\FleetHasNowhereToReturn;
+use OGame\Combat\Exceptions\ReturnDoesNotMatchTheOrder;
 use OGame\Combat\Services\FleetDispositionRegistry;
 use OGame\Combat\Services\RefusedFleetHomecoming;
+use OGame\Combat\Services\ReturnPlanner;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\RefusedFleetNotice;
 use OGame\Combat\Support\ReturnOrder;
+use OGame\GameMissions\Models\ResolvedReturnDestination;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatOutboxMessage;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet;
 use OGame\Models\User;
-use RuntimeException;
 use Tests\TestCase;
 
 /**
@@ -194,7 +196,7 @@ class RefusedFleetHomecomingTest extends TestCase
     }
 
     /**
-     * Le protocole exige exactement un retour du genre de mission, et le verifie.
+     * Le protocole exige exactement un nouveau retour du genre de mission, et le verifie.
      *
      * La creation appartient au genre de mission ; une fermeture arbitraire peut en creer zero —
      * la flotte disparait — ou deux — elle existe deux fois. Ni l'un ni l'autre ne sort de la
@@ -214,14 +216,120 @@ class RefusedFleetHomecomingTest extends TestCase
                     }
                 });
                 $this->fail("A homecoming that created {$combien} returns was accepted.");
-            } catch (RuntimeException $refus) {
-                $this->assertStringContainsString((string)$combien, $refus->getMessage());
+            } catch (ReturnDoesNotMatchTheOrder $refus) {
+                $this->assertStringContainsString((string)$combien, $refus->ecart);
             }
 
             $this->assertSame(0, (int)$mission->refresh()->processed, "With {$combien} returns the fleet was still marked as processed.");
             $this->assertNotNull($registre->pendingFor($mission), "With {$combien} returns the decision was consumed.");
             $this->assertSame(0, FleetMission::query()->where('parent_id', $mission->id)->count(), "With {$combien} returns something survived the rollback.");
         }
+    }
+
+    /**
+     * Un retour deja present avant l'appel n'est pas pris pour celui que l'ordre demande.
+     *
+     * ## Ce que compter les enfants laissait passer
+     *
+     * Un enfant preexistant et une fermeture qui ne fait rien donnaient un total de un : l'aller
+     * etait marque, la decision consommee, et le retour « execute » etait une ligne d'avant. Le
+     * protocole photographie les retours avant l'appel et exige un seul **nouveau**.
+     */
+    public function testAReturnThatExistedBeforeTheCallIsNotTakenForTheOneOrdered(): void
+    {
+        [$combat, $mission] = $this->aCombatAndAFleet();
+        $registre = new FleetDispositionRegistry();
+        $registre->record($combat, $mission->id, CombatReasonCode::RallyClosed, 1_700_000_600, FleetDispositionKind::ReturnToOrigin);
+
+        // Un retour d'avant, de forme parfaitement plausible.
+        $this->aReturnOf($mission, new ReturnOrder($this->theOriginAsDestinationOf($mission), 1_700_000_600));
+
+        try {
+            (new RefusedFleetHomecoming())->sendHome($mission, 1_700_000_900, function (): void {
+                // La fermeture ne cree rien : elle compte sur ce qui existe.
+            });
+            $this->fail('A pre-existing return was accepted as the one the order asked for.');
+        } catch (ReturnDoesNotMatchTheOrder $refus) {
+            $this->assertStringContainsString('existe deja', $refus->ecart);
+        }
+
+        $this->assertSame(0, (int)$mission->refresh()->processed);
+        $this->assertNotNull($registre->pendingFor($mission), 'The decision was consumed on a return that predates it.');
+    }
+
+    /**
+     * Un retour unique qui ne suit pas l'ordre est refuse, champ par champ.
+     *
+     * Le genre de mission recoit un ordre — destination, depart — et l'aller dit ce que la flotte
+     * porte. Un retour qui en differe sur l'un de ces points n'est pas le retour demande : la flotte
+     * se poserait ailleurs, plus tot, ou amputee.
+     */
+    public function testASingleReturnThatDoesNotFollowTheOrderIsRefused(): void
+    {
+        $ecarts = [
+            'time_departure' => fn (ReturnOrder $ordre): array => ['time_departure' => $ordre->departureAt + 1],
+            'time_arrival' => fn (ReturnOrder $ordre): array => ['time_arrival' => $ordre->departureAt + 601],
+            'planet_id_to' => fn (ReturnOrder $ordre): array => ['planet_id_to' => $ordre->destination->bodyId + 1],
+            'galaxy_to' => fn (ReturnOrder $ordre): array => ['galaxy_to' => $ordre->destination->coordinate->galaxy + 1],
+            'light_fighter' => fn (ReturnOrder $ordre): array => ['light_fighter' => 5],
+            'metal' => fn (ReturnOrder $ordre): array => ['metal' => 1],
+        ];
+
+        foreach ($ecarts as $champ => $ecart) {
+            [$combat, $mission] = $this->aCombatAndAFleet();
+            $registre = new FleetDispositionRegistry();
+            $registre->record($combat, $mission->id, CombatReasonCode::RallyClosed, 1_700_000_600, FleetDispositionKind::ReturnToOrigin);
+
+            try {
+                (new RefusedFleetHomecoming())->sendHome($mission, 1_700_000_900, function (FleetMission $tenue, ReturnOrder $ordre) use ($ecart): void {
+                    $this->aReturnOf($tenue, $ordre, $ecart($ordre));
+                });
+                $this->fail("A return with a wrong {$champ} was accepted.");
+            } catch (ReturnDoesNotMatchTheOrder $refus) {
+                $this->assertStringStartsWith($champ . ' vaut ', $refus->ecart, "The refusal did not name {$champ}.");
+            }
+
+            $this->assertSame(0, (int)$mission->refresh()->processed, "A return with a wrong {$champ} marked the outbound leg.");
+            $this->assertNotNull($registre->pendingFor($mission), "A return with a wrong {$champ} consumed the decision.");
+            $this->assertSame(0, FleetMission::query()->where('parent_id', $mission->id)->count());
+        }
+
+        // Une flotte dupliquee est aussi un ecart : ses vaisseaux existeraient en plus grand nombre.
+        [$combat, $mission] = $this->aCombatAndAFleet();
+        (new FleetDispositionRegistry())->record($combat, $mission->id, CombatReasonCode::RallyClosed, 1_700_000_600, FleetDispositionKind::ReturnToOrigin);
+
+        try {
+            (new RefusedFleetHomecoming())->sendHome($mission, 1_700_000_900, function (FleetMission $tenue, ReturnOrder $ordre): void {
+                $this->aReturnOf($tenue, $ordre, ['light_fighter' => 20]);
+            });
+            $this->fail('A return carrying twice the ships was accepted.');
+        } catch (ReturnDoesNotMatchTheOrder $refus) {
+            $this->assertStringStartsWith('light_fighter vaut 20', $refus->ecart);
+        }
+    }
+
+    /**
+     * Une fermeture rejouee avec une autre taille de groupe est une contradiction.
+     *
+     * La taille n'est pas un fait du mouvement, mais c'est un contenu que le joueur lit : « ta
+     * vague de trois » et « ta vague de quatre » ne racontent pas le meme refus. Quand l'ecrivain la
+     * connait, elle est comparee ; quand il ne la connait pas, elle est preservee.
+     */
+    public function testAReplayedClosureWithAnotherGroupSizeIsAContradiction(): void
+    {
+        [$combat, $mission] = $this->aCombatAndAFleet();
+
+        RefusedFleetNotice::write($combat, $mission, CombatReasonCode::RallyClosed, 1_700_000_600, 3);
+
+        try {
+            RefusedFleetNotice::write($combat, $mission, CombatReasonCode::RallyClosed, 1_700_000_600, 4);
+            $this->fail('A replayed closure changed the group size the player will read.');
+        } catch (ContradictoryRefusalNotice $refus) {
+            $this->assertSame('group_fleets', $refus->champ);
+        }
+
+        $avis = CombatOutboxMessage::query()->where('participant_key', CombatParticipantKey::forFleet($mission->id))->first();
+        $this->assertSame(3, (int)($avis?->payload['group_fleets'] ?? 0), 'The persisted size was replaced.');
     }
 
     /**
@@ -248,9 +356,20 @@ class RefusedFleetHomecomingTest extends TestCase
         $this->assertSame($origine->id, $recu->destination->bodyId);
     }
 
-    private function aReturnOf(FleetMission $parent, ReturnOrder $ordre): void
+    /**
+     * La destination que l'ordre donnerait a une flotte dont l'origine est intacte.
+     */
+    private function theOriginAsDestinationOf(FleetMission $mission): ResolvedReturnDestination
     {
-        FleetMission::forceCreate([
+        return ResolvedReturnDestination::from((new ReturnPlanner())->planFor($mission), $mission);
+    }
+
+    /**
+     * @param array<string, int> $ecarts Ce que le genre de mission aurait ecrit de travers.
+     */
+    private function aReturnOf(FleetMission $parent, ReturnOrder $ordre, array $ecarts = []): void
+    {
+        FleetMission::forceCreate($ecarts + [
             'parent_id' => $parent->id,
             'user_id' => $parent->user_id,
             'planet_id_from' => $parent->planet_id_to,

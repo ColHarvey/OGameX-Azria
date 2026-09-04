@@ -43,6 +43,17 @@ final readonly class ReturnOrder
     }
 
     /**
+     * La duree du trajet aller, lue sur les faits intacts de la mission.
+     *
+     * C'est la duree que le retour doit prendre : le protocole l'attend de l'enfant cree, et un
+     * retour plus court ou plus long ne correspond pas a l'ordre.
+     */
+    public static function tripDurationOf(FleetMission $mission): int
+    {
+        return self::physicalArrivalOf($mission) - (int)$mission->time_departure;
+    }
+
+    /**
      * L'instant ou la flotte s'est reellement posee sur le corps.
      *
      * Pour une Defense ACS, `time_arrival` porte la fin du stationnement : l'arrivee physique est en
