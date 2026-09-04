@@ -28,12 +28,20 @@ return new class () extends Migration {
         });
     }
 
+    /**
+     * **L'elargissement ne se defait pas, et c'est voulu.**
+     *
+     * Redescendre les cargaisons en simple precision perdrait des unites : une valeur ecrite
+     * legalement sous DOUBLE peut ne plus tenir dans un FLOAT, et le rollback la tronquerait en
+     * silence. Une migration qui detruit des donnees pour revenir en arriere n'est pas un retour en
+     * arriere.
+     *
+     * Un binaire plus ancien sait lire une colonne DOUBLE : laisser le type elargi ne casse rien de
+     * ce que le rollback cherche a retrouver. La descente est donc explicitement sans effet, plutot
+     * que destructive — et l'epreuve « migrate, rollback, migrate » verifie qu'aucune unite n'est
+     * perdue, pas seulement que les commandes reussissent.
+     */
     public function down(): void
     {
-        Schema::table('fleet_missions', function (Blueprint $table) {
-            $table->float('metal')->default(0)->change();
-            $table->float('crystal')->default(0)->change();
-            $table->float('deuterium')->default(0)->change();
-        });
     }
 };
