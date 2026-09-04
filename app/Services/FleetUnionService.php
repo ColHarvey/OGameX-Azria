@@ -67,6 +67,14 @@ class FleetUnionService
                 throw new Exception(__('t_acs.error_mission_not_active'));
             }
 
+            // **Un retour ne fonde pas d'union.** `startReturn()` recopie le genre du parent : un
+            // retour d'attaque porte `mission_type = 1`, est actif, et n'est dans aucune union. Il
+            // franchissait donc tout — et pouvait devenir une attaque groupee en rentrant. La
+            // jointure le refusait deja ; la creation, non.
+            if ($tenue->parent_id !== null) {
+                throw new Exception(__('t_acs.error_returning_fleet'));
+            }
+
             // Validate mission is not already in a union
             if ($tenue->isInUnion()) {
                 throw new Exception(__('t_acs.error_already_in_union'));

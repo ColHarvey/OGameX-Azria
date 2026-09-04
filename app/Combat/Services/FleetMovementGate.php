@@ -57,6 +57,11 @@ use RuntimeException;
  * transaction**. Imbriquee, elle fait une seule prise, et une divergence remonte au proprietaire de
  * la transaction — qui, tenant deja la mission, ne devrait jamais la voir.
  *
+ * « Posseder la transaction » est un fait de la base — aucune transaction ouverte a l'entree — et
+ * rien d'autre. Une premiere version laissait l'appelant declarer un niveau « racine » : un essai
+ * enveloppe dans sa transaction pouvait ainsi faire passer un point de sauvegarde pour une
+ * racine, et la garantie devenait contournable. Le constructeur ne prend rien.
+ *
  * Quand la porte renonce, elle le dit au journal d'exploitation avant de lever : le travail sera
  * repris au passage suivant, avec l'attente que ce passage impose, et personne ne bouclera sans
  * alerte.
@@ -79,15 +84,6 @@ final class FleetMovementGate
     private const int BACKOFF_MICROSECONDS = 20_000;
 
     /**
-     * @param int $rootLevel Le niveau de transaction auquel la porte possede la transaction. Zero
-     *        en production ; un essai qui enveloppe tout dans sa propre transaction le dit ici,
-     *        pour que la porte le traite comme la racine qu'il est pour lui.
-     */
-    public function __construct(private readonly int $rootLevel = 0)
-    {
-    }
-
-    /**
      * Ouvre la section critique, puis laisse decider sur une mission relue sous verrou.
      *
      * @template TValeur
@@ -102,7 +98,7 @@ final class FleetMovementGate
      */
     public function decideUnderLock(FleetMission $mission, Closure $decider, array $alsoHoldingUnionIds = []): mixed
     {
-        if (DB::transactionLevel() > $this->rootLevel) {
+        if (DB::transactionLevel() > 0) {
             // **Imbriquee, une seule prise.** Un retour au point de sauvegarde ne relacherait pas
             // les verrous de la transaction exterieure ; recommencer ici serait un mensonge.
             try {
@@ -144,7 +140,7 @@ final class FleetMovementGate
             'tenu' => $perime->tenu,
             'courant' => $perime->courant,
             'tentatives' => $tentatives,
-            'imbriquee' => DB::transactionLevel() > $this->rootLevel,
+            'imbriquee' => DB::transactionLevel() > 0,
         ]);
     }
 

@@ -9,6 +9,8 @@ use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatParticipant;
+use OGame\Models\FleetMission;
+use OGame\Models\User;
 use OGame\Services\SettingsService;
 use Tests\UnitTestCase;
 
@@ -174,12 +176,13 @@ class CombatInstanceSchemaTest extends UnitTestCase
     public function testDeletingACombatThatStillHasParticipantsIsRefused(): void
     {
         $combat = CombatInstance::create($this->unCombat([]));
+        $mission = $this->uneMission();
 
         CombatParticipant::create([
             'combat_instance_id' => $combat->id,
             'player_id' => 1,
-            'fleet_mission_id' => 77,
-            'participant_key' => CombatParticipantKey::forFleet(77),
+            'fleet_mission_id' => $mission,
+            'participant_key' => CombatParticipantKey::forFleet($mission),
             'side' => CombatParticipant::SIDE_ATTACKER,
             'participant_type' => CombatParticipant::TYPE_ATTACK_FLEET,
             'units_snapshot' => ['light_fighter' => 10],
@@ -199,12 +202,13 @@ class CombatInstanceSchemaTest extends UnitTestCase
     public function testTheSameFleetCannotBeRegisteredTwiceInOneCombat(): void
     {
         $combat = CombatInstance::create($this->unCombat([]));
+        $mission = $this->uneMission();
 
         $inscrire = fn (): CombatParticipant => CombatParticipant::create([
             'combat_instance_id' => $combat->id,
             'player_id' => 1,
-            'fleet_mission_id' => 42,
-            'participant_key' => CombatParticipantKey::forFleet(42),
+            'fleet_mission_id' => $mission,
+            'participant_key' => CombatParticipantKey::forFleet($mission),
             'side' => CombatParticipant::SIDE_ATTACKER,
             'participant_type' => CombatParticipant::TYPE_ATTACK_FLEET,
             'units_snapshot' => ['light_fighter' => 10],
@@ -258,12 +262,13 @@ class CombatInstanceSchemaTest extends UnitTestCase
     public function testAGarrisonAndAFleetCanCoexistInTheSameCombat(): void
     {
         $combat = CombatInstance::create($this->unCombat([]));
+        $mission = $this->uneMission();
 
         CombatParticipant::create([
             'combat_instance_id' => $combat->id,
             'player_id' => 1,
-            'fleet_mission_id' => 88,
-            'participant_key' => CombatParticipantKey::forFleet(88),
+            'fleet_mission_id' => $mission,
+            'participant_key' => CombatParticipantKey::forFleet($mission),
             'side' => CombatParticipant::SIDE_ATTACKER,
             'participant_type' => CombatParticipant::TYPE_ATTACK_FLEET,
             'units_snapshot' => ['light_fighter' => 200],
@@ -336,6 +341,29 @@ class CombatInstanceSchemaTest extends UnitTestCase
      * @param array<string, mixed> $remplace
      * @return array<string, mixed>
      */
+    /**
+     * Une mission qui existe vraiment : une inscription ne peut plus pointer vers un identifiant
+     * invente, et c'est voulu — une inscription orpheline sous un identifiant reutilise faisait
+     * passer une mission neuve pour une inscrite.
+     */
+    private function uneMission(): int
+    {
+        $joueur = User::query()->orderBy('id')->value('id');
+        $this->assertNotNull($joueur, 'No user exists to own a fleet mission.');
+
+        return (int)FleetMission::forceCreate([
+            'user_id' => (int)$joueur,
+            'mission_type' => 1,
+            'time_departure' => 1_700_000_000,
+            'time_arrival' => 1_700_000_600,
+            'galaxy_to' => 2,
+            'system_to' => 265,
+            'position_to' => 8,
+            'type_to' => 1,
+            'light_fighter' => 10,
+        ])->id;
+    }
+
     private function unCombat(array $remplace): array
     {
         return array_merge([

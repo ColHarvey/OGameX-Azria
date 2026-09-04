@@ -7,6 +7,8 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use OGame\Combat\Exceptions\MovementLocksOutdated;
 use OGame\GameObjects\Models\Calculations\CalculationType;
 use OGame\Models\BuildingQueue;
 use OGame\Models\FleetMission;
@@ -774,6 +776,19 @@ class PlayerService
                         if ($fleetMissionLock) {
                             try {
                                 $fleetMissionService->updateMission($mission);
+                            } catch (MovementLocksOutdated $perime) {
+                                // **Un lien de cette mission a change sous la porte des mouvements.**
+                                // La porte, imbriquee dans cette transaction, ne recommence pas : c'est
+                                // a ce proprietaire-ci de decider. Faire tomber la page pour une
+                                // mission dont le lien vient de bouger serait la reponse instable ;
+                                // la laisser au passage suivant — la prochaine page, le prochain tic —
+                                // est le retour differe que la porte annonce deja au journal.
+                                Log::notice('Mission laissee au passage suivant : un lien a change sous la porte des mouvements.', [
+                                    'fleet_mission_id' => $mission->id,
+                                    'lien' => $perime->lien,
+                                ]);
+
+                                continue;
                             } catch (Exception $e) {
                                 throw new Exception('Could not update fleet mission with ID ' . $mission->id . ': ' . $e->getMessage());
                             }

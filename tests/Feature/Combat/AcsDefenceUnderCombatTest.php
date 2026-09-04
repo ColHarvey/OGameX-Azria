@@ -2,9 +2,11 @@
 
 namespace Tests\Feature\Combat;
 
+use ArrayObject;
 use Closure;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use OGame\Combat\Enums\CombatCancellationCause;
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
@@ -15,6 +17,7 @@ use OGame\Combat\Services\RallyClosureService;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\RefusedFleetNotice;
 use OGame\Factories\GameMissionFactory;
+use OGame\Factories\PlayerServiceFactory;
 use OGame\GameMissions\AcsDefendMission;
 use OGame\GameMissions\AttackMission;
 use OGame\GameObjects\Models\Units\UnitCollection;
@@ -25,6 +28,7 @@ use OGame\Models\CombatOutboxMessage;
 use OGame\Models\CombatParticipant;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
+use OGame\Models\FleetUnion;
 use OGame\Models\Planet;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
@@ -853,6 +857,89 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
         $this->assertSame(0, CombatInstance::query()->count(), 'A recalled fleet opened a combat: it is gone and engaged at the same time.');
         $this->assertNull(FleetMission::query()->findOrFail($ouvreuse->id)->combat_instance_id, 'A recalled fleet was bound to a combat.');
         $this->assertSame(1, FleetMission::query()->where('parent_id', $ouvreuse->id)->count(), 'The fleet got a second return.');
+    }
+
+    /**
+     * Le travailleur des pages laisse au passage suivant une mission dont un lien a change sous la porte.
+     *
+     * ## Ce que le proprietaire de la transaction fait d'une divergence
+     *
+     * Le travailleur enveloppe toutes les missions arrivees dans une transaction : la porte y est
+     * imbriquee et ne recommence pas. Une divergence remonte donc a lui. La faire tomber ferait
+     * echouer la page du joueur pour une mission dont un lien vient de bouger ; l'avaler laisserait
+     * une mission sans mouvement sans que personne le sache. Il la laisse au passage suivant, le
+     * dit au journal, et la page continue.
+     */
+    public function testTheWorkerLeavesAMissionWhoseLinkChangedUnderTheGateToTheNextPass(): void
+    {
+        $renfort = null;
+        [$combat, , , $ouverture, $cible] = $this->anOpenedCombat(true, function (PlanetService $cible, int $ouverture) use (&$renfort): void {
+            $renfort = $this->aDefensiveReinforcement($cible, $ouverture + 5, 60, $ouverture - 600);
+        });
+
+        if ($renfort === null) {
+            $this->fail('The reinforcement was never launched.');
+        }
+
+        $this->assertSame(CombatState::Rallying, $combat->refresh()->status);
+
+        // Une union apparait sur la ligne au moment ou la porte prend les unions : le lien relu ne
+        // sera pas tenu. L'ecouteur ne joue qu'une fois, et se desarme a la fin de l'essai.
+        $union = FleetUnion::create([
+            'user_id' => $renfort->user_id,
+            'name' => null,
+            'galaxy_to' => $renfort->galaxy_to,
+            'system_to' => $renfort->system_to,
+            'position_to' => $renfort->position_to,
+            'planet_type_to' => $renfort->type_to,
+            'time_arrival' => $renfort->time_arrival,
+            'max_fleets' => 16,
+            'max_players' => 5,
+        ]);
+
+        // **Au moment precis ou la porte prend les unions**, et pas avant : le travailleur charge la
+        // mission plus tot, et un lien pose avant ce chargement serait tenu normalement. La requete
+        // de la porte est la seule a ordonner les unions par identifiant.
+        $course = new ArrayObject(['actif' => true, 'joue' => false, 'prochaine' => false]);
+        DB::listen(function ($requete) use ($course, $renfort, $union): void {
+            if ($course['actif'] !== true) {
+                return;
+            }
+
+            // La porte de **cette** mission : elle lit d'abord les inscriptions de la mission, puis
+            // prend les unions. Le travailleur traite d'autres missions avant, et leurs portes ne
+            // sont pas la bonne fenetre — un lien pose pendant l'une d'elles serait relu et tenu
+            // normalement par la suivante.
+            if (str_contains($requete->sql, '"combat_participants"') && $requete->bindings === [$renfort->id]) {
+                $course['prochaine'] = true;
+            }
+
+            if ($course['joue'] === false && $course['prochaine'] === true
+                && str_contains($requete->sql, '"fleet_unions"') && str_contains($requete->sql, 'order by "id" asc')) {
+                $course['joue'] = true;
+                DB::table('fleet_missions')->where('id', $renfort->id)->update(['union_id' => $union->id]);
+            }
+        });
+
+        Log::partialMock()->shouldReceive('notice')->once();
+        Log::partialMock()->shouldReceive('warning')->once();
+
+        $this->travelTo(Date::createFromTimestamp($ouverture + 6));
+
+        try {
+            // Le proprietaire du corps vise fait passer le travailleur : c'est lui qui traite les
+            // renforts poses sur ses planetes.
+            $proprietaire = (int)DB::table('planets')->where('id', $cible->getPlanetId())->value('user_id');
+            resolve(PlayerServiceFactory::class)->make($proprietaire, true)->updateFleetMissions();
+        } finally {
+            $course['actif'] = false;
+        }
+
+        $this->assertTrue($course['joue'] === true, 'The link never changed under the gate: nothing would be proved.');
+
+        $renfort->refresh();
+        $this->assertSame(0, (int)$renfort->processed, 'The worker moved a mission whose link had changed under the gate.');
+        $this->assertNull($renfort->combat_instance_id, 'The worker held a mission on a link it never locked.');
     }
 
     /**

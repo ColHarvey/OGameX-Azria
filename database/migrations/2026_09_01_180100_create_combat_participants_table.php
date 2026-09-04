@@ -54,6 +54,16 @@ return new class () extends Migration {
             // `bigint` comme `fleet_missions.id`.
             $table->unsignedBigInteger('fleet_mission_id')->nullable();
 
+            // **Une inscription ne survit pas a sa mission.** Sans cette contrainte, une ligne
+            // pouvait rester inscrite sous un identifiant de mission disparu ; quand SQLite
+            // reutilisait cet identifiant pour une mission neuve, celle-ci se retrouvait « inscrite »
+            // a un combat qu'elle n'avait jamais vu — et refusee d'union pour cette raison. La
+            // photographie fait foi : on ne supprime pas une mission qu'un combat a inscrite.
+            $table->foreign('fleet_mission_id', 'combat_part_mission_fk')
+                ->references('id')
+                ->on('fleet_missions')
+                ->restrictOnDelete();
+
             // L'identite du participant, toujours renseignee : « fleet:1234 » pour une flotte,
             // « planet:567 » pour la garnison stationnaire.
             //

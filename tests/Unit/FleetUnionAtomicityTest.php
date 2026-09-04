@@ -11,8 +11,8 @@ use Illuminate\Support\Facades\Lang;
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\FleetDispositionKind;
+use OGame\Combat\Exceptions\MovementLocksOutdated;
 use OGame\Combat\Services\FleetDispositionRegistry;
-use OGame\Combat\Services\FleetMovementGate;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatParticipant;
@@ -97,13 +97,6 @@ class FleetUnionAtomicityTest extends TestCase
         });
 
         DB::beginTransaction();
-
-        // **La porte telle que la production la connait : elle possede sa transaction.** L'essai
-        // enveloppe tout dans la sienne ; sans le dire a la porte, celle-ci se croirait imbriquee et
-        // ne recommencerait jamais depuis la barriere — et un modele perime dont le lien a change
-        // sortirait par le refus de la porte au lieu de celui du service, qui est ce que le joueur
-        // lit.
-        $this->app->instance(FleetMovementGate::class, new FleetMovementGate(rootLevel: DB::transactionLevel()));
     }
 
     protected function tearDown(): void
@@ -258,9 +251,17 @@ class FleetUnionAtomicityTest extends TestCase
 
             $rendreIndisponible($mission);
 
+            // **Deux refus possibles, aucune union dans les deux cas.** L'essai vit dans sa propre
+            // transaction : la porte, imbriquee, ne recommence pas, et un lien apparu sur la ligne
+            // remonte comme `MovementLocksOutdated` au proprietaire — ici l'essai. A la racine, la
+            // porte reprendrait avec le lien a jour, et c'est le service qui refuserait, avec le
+            // message que le joueur lit. Les deux issues sont justes ; ce qui ne l'est pas, c'est
+            // une union.
             try {
                 $this->service->createUnion($perime);
                 $this->fail("A union was founded for a fleet that {$comment}.");
+            } catch (MovementLocksOutdated $perimee) {
+                $this->assertSame($mission->id, $perimee->fleetMissionId);
             } catch (Exception $refus) {
                 $attendu = __('t_acs.error_mission_not_active');
                 $this->assertIsString($attendu);
@@ -294,6 +295,8 @@ class FleetUnionAtomicityTest extends TestCase
             try {
                 $this->service->joinUnion($union, $perime);
                 $this->fail("A fleet that {$comment} joined a union.");
+            } catch (MovementLocksOutdated $perimee) {
+                $this->assertSame($second->id, $perimee->fleetMissionId);
             } catch (Exception $refus) {
                 $attendu = __('t_acs.error_mission_not_active');
                 $this->assertIsString($attendu);
@@ -304,6 +307,39 @@ class FleetUnionAtomicityTest extends TestCase
             $this->assertSame($horaireUnion, (int)$union->refresh()->time_arrival, "The union was rescheduled for a fleet that {$comment}.");
             $this->assertSame($horairesMembres, $union->activeFleetMissions()->pluck('time_arrival', 'id')->all(), "A member was rescheduled for a fleet that {$comment}.");
         }
+    }
+
+    /**
+     * Un retour d'attaque ne fonde pas d'union.
+     *
+     * `startReturn()` recopie le genre du parent : un retour d'attaque porte `mission_type = 1`,
+     * est actif et n'est dans aucune union. La jointure le refusait ; la creation le laissait
+     * devenir une attaque groupee en rentrant chez lui.
+     */
+    public function testAFleetOnItsWayHomeCannotFoundAUnion(): void
+    {
+        [$union, $second] = $this->aUnionAndASecondAttack();
+        $fondatrice = FleetMission::where('union_id', $union->id)->orderBy('union_slot')->first();
+
+        // Le retour de la fondatrice : meme genre, meme proprietaire, mais il prolonge une mission.
+        $retour = $this->anAttackMission($this->aPlayerWithAPlanet());
+        DB::table('fleet_missions')->where('id', $retour->id)->update(['parent_id' => $fondatrice?->id, 'user_id' => $fondatrice?->user_id]);
+        $retour->refresh();
+
+        $this->assertNotNull($retour->parent_id);
+
+        try {
+            $this->service->createUnion($retour);
+            $this->fail('A fleet on its way home founded a union.');
+        } catch (Exception $refus) {
+            $attendu = __('t_acs.error_returning_fleet');
+            $this->assertIsString($attendu);
+            $this->assertSame($attendu, $refus->getMessage());
+        }
+
+        $this->assertNull(FleetMission::query()->findOrFail($retour->id)->union_id);
+        $this->assertSame(1, (int)FleetMission::query()->findOrFail($retour->id)->mission_type, 'The return was converted into an ACS attack.');
+        unset($second);
     }
 
     /**

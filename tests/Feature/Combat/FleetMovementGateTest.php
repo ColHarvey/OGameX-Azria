@@ -3,6 +3,7 @@
 namespace Tests\Feature\Combat;
 
 use ArrayObject;
+use Closure;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use OGame\Combat\Enums\CombatState;
@@ -281,28 +282,29 @@ class FleetMovementGateTest extends TestCase
      */
     public function testALinkThatChangedUnderTheGateIsHeldOnTheRetry(): void
     {
-        [, $mission] = $this->aCombatAndAFleet();
-        $union = $this->aUnionFor($mission);
+        $this->outsideAnyTransaction(function (): void {
+            [, $mission] = $this->aCombatAndAFleet();
+            $union = $this->aUnionFor($mission);
 
-        // Le modele que l'appelant tient ne connait aucune union ; la ligne, si.
-        $perime = FleetMission::query()->findOrFail($mission->id);
-        DB::table('fleet_missions')->where('id', $mission->id)->update(['union_id' => $union->id]);
+            // Le modele que l'appelant tient ne connait aucune union ; la ligne, si.
+            $perime = FleetMission::query()->findOrFail($mission->id);
+            DB::table('fleet_missions')->where('id', $mission->id)->update(['union_id' => $union->id]);
 
-        $unionsDemandees = [];
-        DB::listen(function ($requete) use (&$unionsDemandees): void {
-            if (str_contains($requete->sql, '"fleet_unions"')) {
-                $unionsDemandees[] = $requete->bindings;
-            }
+            $unionsDemandees = [];
+            DB::listen(function ($requete) use (&$unionsDemandees): void {
+                if (str_contains($requete->sql, '"fleet_unions"')) {
+                    $unionsDemandees[] = $requete->bindings;
+                }
+            });
+
+            $vu = (new FleetMovementGate())->decideUnderLock(
+                $perime,
+                fn (FleetMission $tenue): int|null => $tenue->union_id === null ? null : (int)$tenue->union_id
+            );
+
+            $this->assertSame($union->id, $vu, 'The decision did not see the current union.');
+            $this->assertContains([$union->id], $unionsDemandees, 'The gate decided on a union it never held.');
         });
-
-        // **La porte possede la transaction** : l'essai enveloppe tout dans la sienne, et le dit.
-        $vu = $this->aRootGate()->decideUnderLock(
-            $perime,
-            fn (FleetMission $tenue): int|null => $tenue->union_id === null ? null : (int)$tenue->union_id
-        );
-
-        $this->assertSame($union->id, $vu, 'The decision did not see the current union.');
-        $this->assertContains([$union->id], $unionsDemandees, 'The gate decided on a union it never held.');
     }
 
     /**
@@ -315,27 +317,29 @@ class FleetMovementGateTest extends TestCase
      */
     public function testACombatBoundUnderTheGateIsHeldOnTheRetry(): void
     {
-        [$combat, $mission] = $this->aCombatAndAFleet();
+        $this->outsideAnyTransaction(function (): void {
+            [$combat, $mission] = $this->aCombatAndAFleet();
 
-        // Aucune barriere ne designe ce combat : seule la mission le nomme, et le modele de
-        // l'appelant ne le sait pas encore.
-        $perime = FleetMission::query()->findOrFail($mission->id);
-        DB::table('fleet_missions')->where('id', $mission->id)->update(['combat_instance_id' => $combat->id]);
+            // Aucune barriere ne designe ce combat : seule la mission le nomme, et le modele de
+            // l'appelant ne le sait pas encore.
+            $perime = FleetMission::query()->findOrFail($mission->id);
+            DB::table('fleet_missions')->where('id', $mission->id)->update(['combat_instance_id' => $combat->id]);
 
-        $combatsDemandes = [];
-        DB::listen(function ($requete) use (&$combatsDemandes): void {
-            if (str_contains($requete->sql, '"combat_instances"')) {
-                $combatsDemandes[] = $requete->bindings;
-            }
+            $combatsDemandes = [];
+            DB::listen(function ($requete) use (&$combatsDemandes): void {
+                if (str_contains($requete->sql, '"combat_instances"')) {
+                    $combatsDemandes[] = $requete->bindings;
+                }
+            });
+
+            $vu = (new FleetMovementGate())->decideUnderLock(
+                $perime,
+                fn (FleetMission $tenue): int|null => $tenue->combat_instance_id === null ? null : (int)$tenue->combat_instance_id
+            );
+
+            $this->assertSame($combat->id, $vu, 'The decision did not see the current combat.');
+            $this->assertContains([$combat->id], $combatsDemandes, 'The gate decided on a combat it never held.');
         });
-
-        $vu = $this->aRootGate()->decideUnderLock(
-            $perime,
-            fn (FleetMission $tenue): int|null => $tenue->combat_instance_id === null ? null : (int)$tenue->combat_instance_id
-        );
-
-        $this->assertSame($combat->id, $vu, 'The decision did not see the current combat.');
-        $this->assertContains([$combat->id], $combatsDemandes, 'The gate decided on a combat it never held.');
     }
 
     /**
@@ -346,6 +350,13 @@ class FleetMovementGateTest extends TestCase
      * puis un refus que l'appelant voit.
      */
     public function testLinksThatKeepChangingExhaustTheRetriesInsteadOfDecidingOnAnUnheldOne(): void
+    {
+        $this->outsideAnyTransaction(function (): void {
+            $this->linksThatKeepChangingExhaustTheRetries();
+        });
+    }
+
+    private function linksThatKeepChangingExhaustTheRetries(): void
     {
         [, $mission] = $this->aCombatAndAFleet();
 
@@ -374,7 +385,7 @@ class FleetMovementGateTest extends TestCase
         Log::partialMock()->shouldReceive('warning')->once();
 
         try {
-            $this->aRootGate()->decideUnderLock($mission, function (FleetMission $tenue) use (&$decide): int {
+            (new FleetMovementGate())->decideUnderLock($mission, function (FleetMission $tenue) use (&$decide): int {
                 $decide = true;
 
                 return $tenue->id;
@@ -516,11 +527,68 @@ class FleetMovementGateTest extends TestCase
     }
 
     /**
-     * La porte telle que l'essai la possede : sa transaction est la racine.
+     * Personne ne peut dire a la porte ou est la racine : c'est un fait de la base.
+     *
+     * Une premiere version acceptait un niveau « racine » a la construction. Un essai enveloppe
+     * dans sa transaction pouvait ainsi faire passer un point de sauvegarde pour une racine —
+     * et MariaDB, lui, aurait garde les verrous du niveau exterieur pendant la reprise.
      */
-    private function aRootGate(): FleetMovementGate
+    public function testNobodyCanTellTheGateWhereTheRootIs(): void
     {
-        return new FleetMovementGate(rootLevel: DB::transactionLevel());
+        $constructeur = (new ReflectionClass(FleetMovementGate::class))->getConstructor();
+
+        $this->assertTrue(
+            $constructeur === null || $constructeur->getNumberOfParameters() === 0,
+            'The gate accepts a construction parameter: a caller could redefine what a root transaction is.'
+        );
+
+        $source = $this->sourceOf(FleetMovementGate::class);
+        $this->assertStringContainsString('if (DB::transactionLevel() > 0) {', $source, 'The gate no longer decides root or nested from the database fact alone.');
+        $this->assertStringNotContainsString('rootLevel', $source);
+    }
+
+    /**
+     * Joue l'essai hors de toute transaction : la porte y possede la sienne et peut recommencer.
+     *
+     * ## Pourquoi sortir de l'enveloppe du banc
+     *
+     * Le banc enveloppe chaque essai dans une transaction, et la porte, imbriquee, ne recommence
+     * jamais. Pour eprouver la reprise il faut une vraie racine — pas un niveau declare. Ce que
+     * l'essai ecrit est donc reellement valide dans la base ; tout est efface ensuite, dans l'ordre
+     * des cles etrangeres, et l'enveloppe du banc est rouverte pour que le demontage la trouve.
+     *
+     * @param Closure(): void $essai
+     */
+    private function outsideAnyTransaction(Closure $essai): void
+    {
+        $tables = [
+            'combat_fleet_dispositions',
+            'combat_participants',
+            'celestial_body_combat_barriers',
+            'combat_instances',
+            'fleet_missions',
+            'fleet_unions',
+            'planets',
+            'users',
+        ];
+
+        $plafonds = [];
+        foreach ($tables as $table) {
+            $plafonds[$table] = (int)DB::table($table)->max('id');
+        }
+
+        DB::rollBack();
+        $this->assertSame(0, DB::transactionLevel(), 'The test is still inside a transaction: the gate would not own its own.');
+
+        try {
+            $essai();
+        } finally {
+            foreach ($tables as $table) {
+                DB::table($table)->where('id', '>', $plafonds[$table])->delete();
+            }
+
+            DB::beginTransaction();
+        }
     }
 
     private function aUnionFor(FleetMission $mission): FleetUnion
