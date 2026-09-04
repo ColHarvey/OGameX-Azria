@@ -17,11 +17,9 @@ use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatOutboxMessage;
 use OGame\Models\CombatParticipant;
-use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\FleetUnion;
 use OGame\Models\Planet;
-use OGame\Models\Planet\Coordinate;
 use OGame\Services\FleetMissionService;
 use RuntimeException;
 
@@ -54,7 +52,9 @@ use RuntimeException;
  *
  * ## L'ordre des verrous
  *
- * Le meme que partout : barriere -> instance -> union -> missions par identifiant croissant.
+ * Le meme que partout : barriere -> instance -> union -> missions par identifiant croissant, puis
+ * **les corps qui decident du retour** — origine, planete associee, planetes du proprietaire —, eux
+ * aussi par identifiant croissant.
  * Aucun corps n'est ecrit — les retours ne creditent rien avant d'arriver.
  */
 final class CombatCancellationService
@@ -136,19 +136,28 @@ final class CombatCancellationService
                     throw new UnreturnableFleet($combat->id, $mission->id, $trajet);
                 }
 
-                $aRendre[$mission->id] = [$mission, $trajet, $this->planner->planFor($mission)];
+                $aRendre[$mission->id] = [
+                    $mission,
+                    $trajet,
+                    $this->planner->planFor($mission),
+                    $this->planner->bodiesThatDecideFor($mission),
+                ];
             }
 
-            // 5. **Les corps de destination**, par identifiant croissant, apres les missions.
-            $destinations = [];
+            // 5. **Les corps qui decident du retour**, par identifiant croissant, apres les missions.
+            //
+            // Pas seulement la destination retenue : **tout ce dont l'etat a fait pencher le choix**.
+            // Le recours suit un ordre — origine, planete associee, planete mere — et tenir le seul
+            // gagnant rendrait sa ligne stable sans figer la raison pour laquelle il a gagne.
+            $decisifs = [];
 
-            foreach ($aRendre as [, , $pressenti]) {
-                if ($pressenti->planetId !== null) {
-                    $destinations[$pressenti->planetId] = true;
+            foreach ($aRendre as [, , , $corps]) {
+                foreach ($corps as $identifiant) {
+                    $decisifs[$identifiant] = true;
                 }
             }
 
-            $corpsDeRetour = array_keys($destinations);
+            $corpsDeRetour = array_keys($decisifs);
             sort($corpsDeRetour);
 
             if ($corpsDeRetour !== []) {
@@ -157,7 +166,13 @@ final class CombatCancellationService
 
             $plans = [];
 
-            foreach ($aRendre as $identifiant => [$mission, $trajet, $pressenti]) {
+            foreach ($aRendre as $identifiant => [$mission, $trajet, $pressenti, $corpsPressentis]) {
+                // **L'ensemble des faits decisifs a-t-il bouge ?** Un corps apparu ou disparu entre
+                // les deux passes deplacerait le verdict sans qu'aucune ligne tenue n'ait change.
+                if ($this->planner->bodiesThatDecideFor($mission) !== $corpsPressentis) {
+                    throw new ReturnDestinationMoved($combat->id, $identifiant, $pressenti->planetId, null);
+                }
+
                 $plan = $this->planner->planFor($mission);
 
                 if (!$plan->isPossible() || $plan->planetId === null) {
@@ -226,12 +241,7 @@ final class CombatCancellationService
                     $this->fleetMissions()->getFleetUnits($mission),
                     $trajet,
                     $now,
-                    new ResolvedReturnDestination(
-                        (int)$plan->planetId,
-                        $plan->bodyType ?? PlanetType::Planet,
-                        $plan->coordinate ?? new Coordinate(0, 0, 0),
-                        (int)$plan->ownerId
-                    )
+                    ResolvedReturnDestination::from($plan, $mission)
                 );
 
                 $rendues++;

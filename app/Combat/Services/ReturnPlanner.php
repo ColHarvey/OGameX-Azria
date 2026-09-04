@@ -110,6 +110,50 @@ class ReturnPlanner
     }
 
     /**
+     * Les corps dont l'etat decide du recours retenu, pour cette mission.
+     *
+     * ## Pourquoi le gagnant ne suffit pas
+     *
+     * Le choix suit un ordre : corps d'origine, planete associee, premiere planete du compte. Tenir
+     * la seule ligne finalement choisie rend cette ligne stable, mais pas **la raison pour laquelle
+     * elle a ete choisie** : une origine absente qui reapparait, une planete associee qui change de
+     * mains, une planete plus ancienne qui redevient eligible — chacune deplacerait le verdict sans
+     * qu'aucune ligne tenue n'ait bouge.
+     *
+     * Cette liste est donc ce qu'il faut verrouiller **avant** de decider : le corps de depart, et
+     * toutes les planetes du proprietaire, parmi lesquelles se trouvent la planete associee et la
+     * planete mere.
+     *
+     * **Ce qu'elle ne couvre pas** : l'apparition d'une ligne qui n'existait pas au moment de la
+     * lecture. Verrouiller une ligne existante n'empeche pas un fantome ; il y faut un verrou de
+     * portee, et c'est une epreuve MariaDB.
+     *
+     * @return array<int, int> Identifiants, tries, sans doublon.
+     */
+    public function bodiesThatDecideFor(FleetMission $mission): array
+    {
+        $identifiants = [];
+
+        if ($mission->planet_id_from !== null) {
+            $identifiants[(int)$mission->planet_id_from] = true;
+        }
+
+        $planetes = Planet::query()
+            ->where('user_id', (int)$mission->user_id)
+            ->pluck('id')
+            ->all();
+
+        foreach ($planetes as $identifiant) {
+            $identifiants[(int)$identifiant] = true;
+        }
+
+        $liste = array_keys($identifiants);
+        sort($liste);
+
+        return $liste;
+    }
+
+    /**
      * Les coordonnees de depart que la mission porte, quand la ligne du corps n'existe plus.
      */
     private function coordonneesDuDepart(FleetMission $mission): Coordinate|null

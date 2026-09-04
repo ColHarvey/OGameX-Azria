@@ -577,6 +577,14 @@ class CombatCancellationTest extends FleetDispatchTestCase
             $this->assertStringContainsString($declaration, $source, "The cancellation no longer declares the lock on the {$quoi}.");
         }
 
+        // **Ce que l'on verrouille vient du planificateur.** Tenir la seule destination retenue
+        // rendrait sa ligne stable sans figer la raison pour laquelle elle a ete choisie.
+        $this->assertStringContainsString(
+            '$this->planner->bodiesThatDecideFor($mission),',
+            $source,
+            'The cancellation does not lock the facts that decide the fallback, only the winner.'
+        );
+
         // **Les destinations apres les missions.** L'ordre global est le meme partout : barriere,
         // instance, union, missions, corps. L'inverser rouvrirait l'interblocage que cet ordre ferme.
         $this->assertLessThan(
@@ -587,10 +595,60 @@ class CombatCancellationTest extends FleetDispatchTestCase
 
         // **La seconde passe decide, la premiere ne fait que designer les lignes a tenir.**
         $this->assertLessThan(
-            strpos($source, 'foreach ($aRendre as $identifiant => [$mission, $trajet, $pressenti])'),
+            strpos($source, 'foreach ($aRendre as $identifiant => [$mission, $trajet, $pressenti, $corpsPressentis])'),
             strpos($source, $verrous['destinations']),
             'The cancellation decides before holding the destinations: the plan is not taken under lock.'
         );
+    }
+
+    /**
+     * Un fait qui decide du recours, apparu entre les deux passes, arrete l'annulation.
+     *
+     * ## Ce que la comparaison de plans ne voyait pas
+     *
+     * Comparer les deux plans attrape un changement de destination. Elle ne voit pas un corps
+     * **apparu ou disparu** parmi ceux qui font pencher le choix : le verdict peut rester le meme
+     * par hasard, alors que la raison pour laquelle il a ete rendu n'est plus la meme. Et surtout,
+     * le verrou pose a la premiere passe ne couvrirait pas cette ligne-la.
+     */
+    public function testAFactThatDecidesTheFallbackAppearingBetweenThePassesStopsTheCancellation(): void
+    {
+        [$combat, $mission] = $this->anActiveCombat();
+
+        $planificateur = new class () extends ReturnPlanner {
+            private int $appels = 0;
+
+            /**
+             * @return array<int, int>
+             */
+            public function bodiesThatDecideFor(FleetMission $mission): array
+            {
+                $this->appels++;
+                $corps = parent::bodiesThatDecideFor($mission);
+
+                // Au second appel — celui pris sous verrou —, une planete de plus decide.
+                return $this->appels === 1 ? $corps : array_merge($corps, [999_999]);
+            }
+        };
+
+        try {
+            (new CombatCancellationService(planner: $planificateur))->cancel(
+                $combat->id,
+                CombatCancellationCause::AdministrativeDecision,
+                function (): void {
+                    $this->fail('A return was created though the facts behind the fallback had changed.');
+                },
+                (int)$combat->ends_at
+            );
+            $this->fail('The cancellation decided on facts it had never locked.');
+        } catch (ReturnDestinationMoved $refus) {
+            $this->assertSame($mission->id, $refus->fleetMissionId);
+        }
+
+        $combat->refresh();
+        $this->assertSame(CombatState::Active, $combat->status);
+        $this->assertNotNull(CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->first());
+        $this->assertSame(0, FleetMission::query()->where('parent_id', $mission->id)->count());
     }
 
     /**
