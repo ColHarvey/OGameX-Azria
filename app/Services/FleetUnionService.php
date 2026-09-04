@@ -6,6 +6,8 @@ use Exception;
 use Illuminate\Support\Facades\Log;
 use OGame\Combat\Services\FleetDispositionRegistry;
 use OGame\Combat\Services\FleetMovementGate;
+use OGame\Enums\UnionRefusalReason;
+use OGame\Exceptions\UnionRefused;
 use OGame\Models\CombatParticipant;
 use OGame\Models\FleetMission;
 use OGame\Models\FleetUnion;
@@ -59,12 +61,18 @@ class FleetUnionService
         return resolve(FleetMovementGate::class)->decideUnderLock($mission, function (FleetMission $tenue) use ($mission, $name): FleetUnion {
             // Validate mission type (must be attack - type 1)
             if ($tenue->mission_type !== 1) {
-                throw new Exception(__('t_acs.error_invalid_mission_type'));
+                throw new UnionRefused(UnionRefusalReason::NotAnAttack);
             }
 
-            // Validate mission is still in flight
-            if ($tenue->processed || $tenue->canceled) {
-                throw new Exception(__('t_acs.error_mission_not_active'));
+            // **Rappelee ou deja traitee** : deux raisons, un meme message pour le joueur — et deux
+            // faits distincts pour l'exploitation. Une rappelee est aussi traitee ; le rappel se
+            // lit d'abord, parce qu'il dit plus.
+            if ($tenue->canceled) {
+                throw new UnionRefused(UnionRefusalReason::Recalled);
+            }
+
+            if ($tenue->processed) {
+                throw new UnionRefused(UnionRefusalReason::AlreadyProcessed);
             }
 
             // **Un retour ne fonde pas d'union.** `startReturn()` recopie le genre du parent : un
@@ -72,12 +80,12 @@ class FleetUnionService
             // franchissait donc tout — et pouvait devenir une attaque groupee en rentrant. La
             // jointure le refusait deja ; la creation, non.
             if ($tenue->parent_id !== null) {
-                throw new Exception(__('t_acs.error_returning_fleet'));
+                throw new UnionRefused(UnionRefusalReason::ReturningFleet);
             }
 
             // Validate mission is not already in a union
             if ($tenue->isInUnion()) {
-                throw new Exception(__('t_acs.error_already_in_union'));
+                throw new UnionRefused(UnionRefusalReason::AlreadyInUnion);
             }
 
             $this->refuseIfTheCombatHoldsIt($tenue);
@@ -127,23 +135,24 @@ class FleetUnionService
         // **Le joueur lit un seul message ; l'exploitation lit le lien.** Trois liens differents
         // donnent le meme refus au joueur — c'est juste, pour lui la flotte n'est plus disponible.
         // Mais lequel a joue est un fait d'exploitation : le journal le nomme, avec la mission.
-        $lien = match (true) {
-            $tenue->combat_instance_id !== null => 'combat ' . $tenue->combat_instance_id . ' rattache a l arrivee',
-            CombatParticipant::query()->where('fleet_mission_id', $tenue->id)->exists() => 'inscription par la fermeture',
-            resolve(FleetDispositionRegistry::class)->pendingFor($tenue) !== null => 'disposition en attente',
+        $raison = match (true) {
+            $tenue->combat_instance_id !== null => UnionRefusalReason::BoundToACombat,
+            CombatParticipant::query()->where('fleet_mission_id', $tenue->id)->exists() => UnionRefusalReason::EnrolledInACombat,
+            resolve(FleetDispositionRegistry::class)->pendingFor($tenue) !== null => UnionRefusalReason::MovementAlreadyDecided,
             default => null,
         };
 
-        if ($lien === null) {
+        if ($raison === null) {
             return;
         }
 
         Log::info('Union refusee : le combat tient la flotte.', [
             'fleet_mission_id' => $tenue->id,
-            'lien' => $lien,
+            'raison' => $raison->value,
+            'combat_instance_id' => $tenue->combat_instance_id,
         ]);
 
-        throw new Exception(__('t_acs.error_mission_not_active'));
+        throw new UnionRefused($raison);
     }
 
     /**
@@ -191,7 +200,7 @@ class FleetUnionService
             $mission,
             function (FleetMission $tenue) use ($union, $mission): void {
                 if (FleetUnion::query()->whereKey($union->getKey())->doesntExist()) {
-                    throw new Exception(__('t_acs.error_not_found'));
+                    throw new UnionRefused(UnionRefusalReason::UnionNotFound);
                 }
 
                 // L'instance de l'appelant porte desormais l'etat verrouille : les compteurs lus
@@ -226,12 +235,16 @@ class FleetUnionService
         // Seule une attaque rejoint une union : simple (type 1), qu'on convertit, ou deja etiquetee
         // attaque groupee (type 2) par l'envoi qui vient de la creer.
         if ($mission->mission_type !== 1 && $mission->mission_type !== 2) {
-            throw new Exception(__('t_acs.error_invalid_mission_type'));
+            throw new UnionRefused(UnionRefusalReason::NotAnAttack);
         }
 
-        // Une mission arrivee ou annulee n'a plus rien a rejoindre.
-        if ($mission->processed || $mission->canceled) {
-            throw new Exception(__('t_acs.error_mission_not_active'));
+        // Une mission rappelee ou arrivee n'a plus rien a rejoindre — deux faits, un message.
+        if ($mission->canceled) {
+            throw new UnionRefused(UnionRefusalReason::Recalled);
+        }
+
+        if ($mission->processed) {
+            throw new UnionRefused(UnionRefusalReason::AlreadyProcessed);
         }
 
         // **Un retour ne rejoint pas une union.** `startReturn()` recopie le `mission_type` du
@@ -242,12 +255,12 @@ class FleetUnionService
         //
         // Le lien vers la mission prolongee est le seul fait qui distingue les deux.
         if ($mission->parent_id !== null) {
-            throw new Exception(__('t_acs.error_returning_fleet'));
+            throw new UnionRefused(UnionRefusalReason::ReturningFleet);
         }
 
         // Deja dans une union : la deplacer laisserait un creneau vide dans la premiere.
         if ($mission->isInUnion()) {
-            throw new Exception(__('t_acs.error_already_in_union'));
+            throw new UnionRefused(UnionRefusalReason::AlreadyInUnion);
         }
 
         // Tenue par un combat — rattachee, inscrite ou deja renvoyee — elle ne rejoint rien.
@@ -255,7 +268,7 @@ class FleetUnionService
 
         // Validate union hasn't reached max fleets
         if ($union->hasReachedMaxFleets()) {
-            throw new Exception(__('t_acs.error_max_fleets_reached'));
+            throw new UnionRefused(UnionRefusalReason::MaxFleetsReached);
         }
 
         // Validate union hasn't reached max players (if this is a new player)
@@ -264,7 +277,7 @@ class FleetUnionService
             ->exists();
 
         if ($isNewPlayer && $union->hasReachedMaxPlayers()) {
-            throw new Exception(__('t_acs.error_max_players_reached'));
+            throw new UnionRefused(UnionRefusalReason::MaxPlayersReached);
         }
 
         // Validate player is ally or buddy of union creator
@@ -272,7 +285,7 @@ class FleetUnionService
         $joiningUserId = $mission->user_id;
 
         if (!$this->isAllyOrBuddy($creatorUserId, $joiningUserId)) {
-            throw new Exception(__('t_acs.error_not_buddy_or_ally'));
+            throw new UnionRefused(UnionRefusalReason::NotBuddyOrAlly);
         }
 
         // Validate fleet targets the same location as the union
@@ -280,13 +293,13 @@ class FleetUnionService
             || $mission->system_to !== $union->system_to
             || $mission->position_to !== $union->position_to
             || $mission->type_to !== $union->planet_type_to) {
-            throw new Exception(__('t_ingame.fleet.err_union_target_mismatch'));
+            throw new UnionRefused(UnionRefusalReason::TargetMismatch);
         }
 
         // Validate fleet can arrive within delay limit
         $maxArrival = $union->time_arrival + $this->getMaxDelayTime($union);
         if ($mission->time_arrival > $maxArrival) {
-            throw new Exception(__('t_acs.error_exceeds_delay_limit'));
+            throw new UnionRefused(UnionRefusalReason::ExceedsDelayLimit);
         }
 
         // Get next available slot

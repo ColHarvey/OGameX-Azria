@@ -3,6 +3,7 @@
 namespace Tests\Feature\Combat;
 
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use OGame\Combat\Enums\CombatCancellationCause;
 use OGame\Combat\Enums\CombatState;
@@ -28,6 +29,39 @@ use Tests\UnitTestCase;
  */
 class CombatInstanceSchemaTest extends UnitTestCase
 {
+    /**
+     * Les inscriptions qui existaient avant l'essai : aucune des siennes ne doit survivre.
+     */
+    private int $inscriptionsAvant = 0;
+
+    /**
+     * **Chaque essai vit dans sa transaction, et n'en laisse rien.** Cette classe ecrivait des
+     * inscriptions sous des identifiants de mission inventes et ne les effacait pas ; SQLite
+     * reutilisait ces identifiants pour des missions neuves d'autres classes du meme processus, qui
+     * se retrouvaient « inscrites » a un combat jamais vu. La cle etrangere rend l'invention
+     * impossible ; l'isolation rend la trace impossible ; l'assertion du demontage le prouve.
+     */
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->inscriptionsAvant = CombatParticipant::query()->count();
+        DB::beginTransaction();
+    }
+
+    protected function tearDown(): void
+    {
+        DB::rollBack();
+
+        $this->assertSame(
+            $this->inscriptionsAvant,
+            CombatParticipant::query()->count(),
+            'This test left combat participants behind: a neighbouring test could inherit them under a reused mission id.'
+        );
+
+        parent::tearDown();
+    }
+
     /**
      * Assert that a combat keeps the duration model that produced it.
      *

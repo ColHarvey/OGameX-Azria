@@ -14,6 +14,8 @@ use OGame\Combat\Enums\FleetDispositionKind;
 use OGame\Combat\Exceptions\MovementLocksOutdated;
 use OGame\Combat\Services\FleetDispositionRegistry;
 use OGame\Combat\Support\CombatParticipantKey;
+use OGame\Enums\UnionRefusalReason;
+use OGame\Exceptions\UnionRefused;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatParticipant;
 use OGame\Models\FleetMission;
@@ -262,7 +264,10 @@ class FleetUnionAtomicityTest extends TestCase
                 $this->fail("A union was founded for a fleet that {$comment}.");
             } catch (MovementLocksOutdated $perimee) {
                 $this->assertSame($mission->id, $perimee->fleetMissionId);
-            } catch (Exception $refus) {
+            } catch (UnionRefused $refus) {
+                // **La raison typee, pas seulement le message.** Cinq faits donnent le meme message
+                // au joueur ; un essai qui rougit doit dire lequel a joue.
+                $this->assertSame($this->reasonExpectedFor($comment), $refus->reason, "The refusal for a fleet that {$comment} names the wrong reason.");
                 $attendu = __('t_acs.error_mission_not_active');
                 $this->assertIsString($attendu);
                 $this->assertSame($attendu, $refus->getMessage(), "The refusal for a fleet that {$comment} does not say the fleet is unavailable.");
@@ -297,7 +302,8 @@ class FleetUnionAtomicityTest extends TestCase
                 $this->fail("A fleet that {$comment} joined a union.");
             } catch (MovementLocksOutdated $perimee) {
                 $this->assertSame($second->id, $perimee->fleetMissionId);
-            } catch (Exception $refus) {
+            } catch (UnionRefused $refus) {
+                $this->assertSame($this->reasonExpectedFor($comment), $refus->reason, "The refusal for a fleet that {$comment} names the wrong reason.");
                 $attendu = __('t_acs.error_mission_not_active');
                 $this->assertIsString($attendu);
                 $this->assertSame($attendu, $refus->getMessage());
@@ -399,6 +405,20 @@ class FleetUnionAtomicityTest extends TestCase
                 (new FleetDispositionRegistry())->record($this->aCombatOver($mission), $mission->id, CombatReasonCode::RallyClosed, (int)$mission->time_arrival, FleetDispositionKind::ReturnToOrigin);
             },
         ];
+    }
+
+    /**
+     * La raison typee que chaque facon de devenir indisponible doit produire.
+     */
+    private function reasonExpectedFor(string $comment): UnionRefusalReason
+    {
+        return match ($comment) {
+            'was recalled' => UnionRefusalReason::Recalled,
+            'was bound to a combat by its arrival' => UnionRefusalReason::BoundToACombat,
+            'was enrolled by a closure' => UnionRefusalReason::EnrolledInACombat,
+            'carries a refusal decision' => UnionRefusalReason::MovementAlreadyDecided,
+            default => $this->fail("No expected reason for a fleet that {$comment}."),
+        };
     }
 
     private function aCombatOver(FleetMission $mission): CombatInstance

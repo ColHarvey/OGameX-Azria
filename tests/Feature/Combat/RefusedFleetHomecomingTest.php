@@ -2,7 +2,9 @@
 
 namespace Tests\Feature\Combat;
 
+use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\FleetDispositionKind;
@@ -13,12 +15,14 @@ use OGame\Combat\Services\FleetDispositionRegistry;
 use OGame\Combat\Services\RefusedFleetHomecoming;
 use OGame\Combat\Services\ReturnPlanner;
 use OGame\Combat\Support\CombatParticipantKey;
+use OGame\Combat\Support\ExpectedReturn;
 use OGame\Combat\Support\RefusedFleetNotice;
 use OGame\Combat\Support\ReturnOrder;
 use OGame\GameMissions\Models\ResolvedReturnDestination;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatOutboxMessage;
 use OGame\Models\FleetMission;
+use OGame\Models\FleetUnion;
 use OGame\Models\Planet;
 use OGame\Models\User;
 use Tests\TestCase;
@@ -44,6 +48,12 @@ class RefusedFleetHomecomingTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // **L'horloge vit a l'epoque des faits.** Un retour dont l'arrivee est deja passee a sa
+        // creation est traite aussitot par `startReturn()`, et la projection l'impose. Les missions
+        // de cette classe partent a 1 700 000 000 ; une horloge d'aujourd'hui les ferait toutes
+        // « arriver » avant d'exister, et chaque retour serait attendu traite.
+        $this->travelTo(Date::createFromTimestamp(1_700_000_650));
 
         DB::beginTransaction();
     }
@@ -273,6 +283,16 @@ class RefusedFleetHomecomingTest extends TestCase
             'galaxy_to' => fn (ReturnOrder $ordre): array => ['galaxy_to' => $ordre->destination->coordinate->galaxy + 1],
             'light_fighter' => fn (ReturnOrder $ordre): array => ['light_fighter' => 5],
             'metal' => fn (ReturnOrder $ordre): array => ['metal' => 1],
+            // **L'origine, les rattachements, le stationnement, le carburant** : un enfant unique
+            // qui part d'un autre corps, reste inscrit quelque part, stationne ou recredite du
+            // carburant n'est pas le retour demande.
+            'planet_id_from' => fn (ReturnOrder $ordre): array => ['planet_id_from' => null],
+            'time_holding' => fn (ReturnOrder $ordre): array => ['time_holding' => 5],
+            'deuterium_consumption' => fn (ReturnOrder $ordre): array => ['deuterium_consumption' => 1],
+            'processed' => fn (ReturnOrder $ordre): array => ['processed' => 1],
+            // Une fraction n'est pas un entier : `0.5` n'est pas `0`, et une conversion entiere
+            // l'y aurait ramenee en silence — exactement la valeur attendue, par accident.
+            'crystal' => fn (ReturnOrder $ordre): array => ['crystal' => 0.5],
         ];
 
         foreach ($ecarts as $champ => $ecart) {
@@ -286,7 +306,7 @@ class RefusedFleetHomecomingTest extends TestCase
                 });
                 $this->fail("A return with a wrong {$champ} was accepted.");
             } catch (ReturnDoesNotMatchTheOrder $refus) {
-                $this->assertStringStartsWith($champ . ' vaut ', $refus->ecart, "The refusal did not name {$champ}.");
+                $this->assertStringStartsWith($champ . ' ', $refus->ecart, "The refusal did not name {$champ}.");
             }
 
             $this->assertSame(0, (int)$mission->refresh()->processed, "A return with a wrong {$champ} marked the outbound leg.");
@@ -306,6 +326,97 @@ class RefusedFleetHomecomingTest extends TestCase
         } catch (ReturnDoesNotMatchTheOrder $refus) {
             $this->assertStringStartsWith('light_fighter vaut 20', $refus->ecart);
         }
+    }
+
+    /**
+     * Le retour attendu se fige avant l'appel : amputer l'aller puis creer un enfant ampute ne passe pas.
+     *
+     * ## Ce que relire l'aller apres l'appel laissait passer
+     *
+     * Le verificateur comparait l'enfant a l'aller relu **apres** la fermeture. Une fermeture
+     * defectueuse pouvait donc reduire l'aller, creer un enfant a sa nouvelle mesure, et passer :
+     * les deux lignes se ressemblaient, et les vaisseaux avaient disparu. La projection se fige
+     * avant l'appel ; la transaction ramene l'aller et l'enfant en arriere.
+     */
+    public function testAmputatingTheOutboundLegThenReturningAnAmputatedFleetIsRefusedAndUndone(): void
+    {
+        [$combat, $mission] = $this->aCombatAndAFleet();
+        $registre = new FleetDispositionRegistry();
+        $registre->record($combat, $mission->id, CombatReasonCode::RallyClosed, 1_700_000_600, FleetDispositionKind::ReturnToOrigin);
+
+        $this->assertSame(10, (int)$mission->light_fighter);
+
+        try {
+            (new RefusedFleetHomecoming())->sendHome($mission, 1_700_000_900, function (FleetMission $tenue, ReturnOrder $ordre): void {
+                DB::table('fleet_missions')->where('id', $tenue->id)->update(['light_fighter' => 5]);
+                $this->aReturnOf($tenue, $ordre, ['light_fighter' => 5]);
+            });
+            $this->fail('An amputated fleet was accepted because the outbound leg had been amputated to match.');
+        } catch (ReturnDoesNotMatchTheOrder $refus) {
+            $this->assertStringStartsWith('light_fighter ', $refus->ecart);
+        }
+
+        $this->assertSame(10, (int)$mission->refresh()->light_fighter, 'The amputation of the outbound leg survived the rollback.');
+        $this->assertSame(0, (int)$mission->processed);
+        $this->assertNotNull($registre->pendingFor($mission));
+        $this->assertSame(0, FleetMission::query()->where('parent_id', $mission->id)->count());
+    }
+
+    /**
+     * Un retour rattache a une union n'est pas le retour demande.
+     */
+    public function testAReturnStillBoundToAUnionIsRefused(): void
+    {
+        [$combat, $mission] = $this->aCombatAndAFleet();
+        (new FleetDispositionRegistry())->record($combat, $mission->id, CombatReasonCode::RallyClosed, 1_700_000_600, FleetDispositionKind::ReturnToOrigin);
+
+        $union = FleetUnion::create([
+            'user_id' => $mission->user_id,
+            'name' => null,
+            'galaxy_to' => $mission->galaxy_to,
+            'system_to' => $mission->system_to,
+            'position_to' => $mission->position_to,
+            'planet_type_to' => $mission->type_to,
+            'time_arrival' => $mission->time_arrival,
+            'max_fleets' => 16,
+            'max_players' => 5,
+        ]);
+
+        try {
+            (new RefusedFleetHomecoming())->sendHome($mission, 1_700_000_900, function (FleetMission $tenue, ReturnOrder $ordre) use ($union): void {
+                $this->aReturnOf($tenue, $ordre, ['union_id' => $union->id, 'union_slot' => 2, 'mission_type' => 2]);
+            });
+            $this->fail('A return still bound to a union was accepted.');
+        } catch (ReturnDoesNotMatchTheOrder $refus) {
+            $this->assertMatchesRegularExpression('/^(mission_type|union_id|union_slot) /', $refus->ecart);
+        }
+
+        $this->assertSame(0, FleetMission::query()->where('parent_id', $mission->id)->count());
+    }
+
+    /**
+     * La projection est fermee : une colonne que personne n'a classee fait refuser le retour.
+     *
+     * Une liste de champs oublie le prochain champ. La projection compare chaque colonne de la table
+     * a une valeur imposee, ou la declare sans effet ; une colonne ajoutee demain sans etre classee
+     * rougit ici, au lieu d'ouvrir un trou.
+     */
+    public function testEveryColumnOfAFleetMissionIsEitherImposedOrDeclaredWithoutEffect(): void
+    {
+        [, $mission, $origine] = $this->aCombatAndAFleet();
+        $ordre = new ReturnOrder($this->theOriginAsDestinationOf($mission), 1_700_000_600);
+
+        $projection = ExpectedReturn::of($mission, $ordre);
+        $sansEffet = ['id', 'created_at', 'updated_at', 'target_priority', 'retreat_after_defender_retreat'];
+
+        foreach (Schema::getColumnListing('fleet_missions') as $colonne) {
+            $this->assertTrue(
+                in_array($colonne, $sansEffet, true) || array_key_exists($colonne, $projection->imposees),
+                "The column {$colonne} is neither imposed nor declared without effect: a return could differ on it and pass."
+            );
+        }
+
+        unset($origine);
     }
 
     /**
@@ -365,7 +476,9 @@ class RefusedFleetHomecomingTest extends TestCase
     }
 
     /**
-     * @param array<string, int> $ecarts Ce que le genre de mission aurait ecrit de travers.
+     * Le retour tel qu'un genre de mission correct le cree, avec ce qu'il aurait pu ecrire de travers.
+     *
+     * @param array<string, int|float|null> $ecarts Ce que le genre de mission aurait ecrit de travers.
      */
     private function aReturnOf(FleetMission $parent, ReturnOrder $ordre, array $ecarts = []): void
     {
@@ -373,7 +486,10 @@ class RefusedFleetHomecomingTest extends TestCase
             'parent_id' => $parent->id,
             'user_id' => $parent->user_id,
             'planet_id_from' => $parent->planet_id_to,
-            'type_from' => 1,
+            'type_from' => $parent->type_to,
+            'galaxy_from' => $parent->galaxy_to,
+            'system_from' => $parent->system_to,
+            'position_from' => $parent->position_to,
             'planet_id_to' => $ordre->destination->bodyId,
             'type_to' => $ordre->destination->type->value,
             'galaxy_to' => $ordre->destination->coordinate->galaxy,

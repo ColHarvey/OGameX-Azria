@@ -5,13 +5,12 @@ namespace OGame\Combat\Services;
 use Closure;
 use OGame\Combat\Enums\FleetDispositionKind;
 use OGame\Combat\Exceptions\ReturnDoesNotMatchTheOrder;
+use OGame\Combat\Support\ExpectedReturn;
 use OGame\Combat\Support\RefusedFleetNotice;
 use OGame\Combat\Support\RefusedFleetVerdict;
 use OGame\Combat\Support\ReturnOrder;
 use OGame\Models\CombatFleetDisposition;
 use OGame\Models\FleetMission;
-use OGame\Services\FleetMissionService;
-use OGame\Services\ObjectService;
 
 /**
  * Le seul chemin par lequel une flotte que le combat refuse rentre chez elle.
@@ -143,6 +142,10 @@ final class RefusedFleetHomecoming
             throw new ReturnDoesNotMatchTheOrder($mission->id, 'un retour existe deja avant l appel (' . implode(', ', $avant) . ')');
         }
 
+        // **Le retour attendu se fige avant l'appel.** Compare a l'aller relu apres, une fermeture
+        // defectueuse pouvait amputer l'aller, creer un enfant ampute, et passer.
+        $attendu = ExpectedReturn::of($mission, $ordre);
+
         ($creerRetour)($mission, $ordre);
 
         $nouveaux = array_values(array_diff(
@@ -160,58 +163,10 @@ final class RefusedFleetHomecoming
             throw new ReturnDoesNotMatchTheOrder($mission->id, 'le retour cree ne se relit pas');
         }
 
-        $this->refuseIfTheReturnDiffersFromTheOrder($mission, $retour, $ordre);
-    }
+        $ecart = $attendu->firstDifferenceWith($retour);
 
-    /**
-     * Le retour relu, champ par champ, contre l'ordre et contre l'aller.
-     *
-     * Parent, proprietaire, genre, destination complete, depart, arrivee, unites et ressources :
-     * tout ce qu'un genre de mission aurait pu choisir a sa guise est verifie ici. Comparer en bloc
-     * laisserait passer plusieurs ecarts a la fois ; chaque champ nomme son ecart.
-     */
-    private function refuseIfTheReturnDiffersFromTheOrder(FleetMission $aller, FleetMission $retour, ReturnOrder $ordre): void
-    {
-        // **Ce que l'aller porte, tel que le service le definit** — et non ses colonnes brutes : le
-        // retour ramene aussi la moitie du carburant consomme, et les missiles comptent parmi les
-        // unites. C'est la meme lecture que le createur fait ; comparer a autre chose refuserait
-        // un retour juste.
-        $service = resolve(FleetMissionService::class);
-        $ressources = $service->getResources($aller);
-
-        $attendu = [
-            'parent_id' => (int)$aller->id,
-            'user_id' => (int)$aller->user_id,
-            'mission_type' => (int)$aller->mission_type,
-            'planet_id_to' => $ordre->destination->bodyId,
-            'type_to' => $ordre->destination->type->value,
-            'galaxy_to' => $ordre->destination->coordinate->galaxy,
-            'system_to' => $ordre->destination->coordinate->system,
-            'position_to' => $ordre->destination->coordinate->position,
-            'time_departure' => $ordre->departureAt,
-            'time_arrival' => $ordre->departureAt + ReturnOrder::tripDurationOf($aller),
-            'metal' => (int)$ressources->metal->get(),
-            'crystal' => (int)$ressources->crystal->get(),
-            'deuterium' => (int)$ressources->deuterium->get(),
-        ];
-
-        foreach (ObjectService::getShipObjects() as $vaisseau) {
-            $attendu[$vaisseau->machine_name] = 0;
-        }
-
-        $attendu['interplanetary_missile'] = 0;
-
-        foreach ($service->getFleetUnits($aller)->units as $unite) {
-            $attendu[$unite->unitObject->machine_name] = (int)$unite->amount;
-        }
-
-        foreach ($attendu as $champ => $valeur) {
-            if ((int)$retour->{$champ} !== (int)$valeur) {
-                throw new ReturnDoesNotMatchTheOrder(
-                    $aller->id,
-                    $champ . ' vaut ' . (int)$retour->{$champ} . ' au lieu de ' . (int)$valeur
-                );
-            }
+        if ($ecart !== null) {
+            throw new ReturnDoesNotMatchTheOrder($mission->id, $ecart);
         }
     }
 }
