@@ -273,6 +273,68 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
     }
 
     /**
+     * Un renfort qui survit a la bataille recoit **exactement** sa cargaison gelee.
+     *
+     * ## La traversee que les gardes de source ne donnaient pas
+     *
+     * La photographie porte la cargaison, la couverture refuse un document ampute, le contexte gele
+     * refuse une flotte absente : trois garanties, aucune ne montrant le trajet entier. Celui-ci le
+     * montre — la cargaison est gelee a la cloture, la ligne de la mission est **modifiee ensuite**,
+     * et le reglement ecrit la valeur gelee.
+     *
+     * ## Pourquoi l'issue est fixee, et ce que cela ne cache pas
+     *
+     * La cargaison d'un survivant est reduite en proportion de sa capacite restante : il faut donc
+     * qu'il survive, et le moteur tire des des. Un renfort ecrasant contre une vague minuscule rend
+     * l'issue certaine et la proportion egale a un — ce qui rend la valeur attendue **exactement**
+     * la valeur gelee, et non un produit qu'un arrondi rendrait indistinct du hasard.
+     */
+    public function testASurvivingReinforcementReceivesExactlyItsFrozenCargo(): void
+    {
+        $renfort = null;
+        [$combat, , , $ouverture] = $this->anOpenedCombat(true, function (PlanetService $cible, int $ouverture) use (&$renfort): void {
+            $renfort = $this->aDefensiveReinforcement($cible, $ouverture + 5, 100_000, $ouverture - 600);
+        });
+
+        if ($renfort === null) {
+            $this->fail('The reinforcement was never launched.');
+        }
+
+        // **Un renfort ecrasant** : l'issue ne depend plus du tirage, et il survit entier.
+        DB::table('fleet_missions')->where('id', $renfort->id)->update([
+            'light_fighter' => 0,
+            'battle_ship' => 400,
+            'metal' => 4_200,
+            'crystal' => 1_300,
+            'deuterium' => 700,
+        ]);
+        $renfort->refresh();
+
+        $this->assertTrue((new RallyClosureService())->close($combat->id, $ouverture + 19)->closed, 'The rally did not close.');
+        $this->assertTrue($this->isADefendingParticipant($combat, $renfort), 'The reinforcement was not admitted: nothing would be proved.');
+
+        // **La ligne change apres le gel.** C'est ce que le chemin durable rend possible : des heures
+        // separent la cloture du reglement. Une relecture vivante ecrirait ces valeurs-la.
+        DB::table('fleet_missions')->where('id', $renfort->id)->update([
+            'metal' => 999_999,
+            'crystal' => 999_999,
+            'deuterium' => 999_999,
+        ]);
+
+        $combat->refresh();
+        $this->travelTo(Date::createFromTimestamp((int)$combat->ends_at));
+        $this->assertSame(1, (new PersistentCombatAdvancer())->advance((int)$combat->ends_at)->settled, 'The combat did not settle.');
+
+        $renfort->refresh();
+        $this->assertSame(0, (int)$renfort->processed, 'The reinforcement left before its hold was over: the scenario changed.');
+        $this->assertGreaterThan(0, (int)$renfort->battle_ship, 'The reinforcement did not survive: the cargo rule was never reached.');
+
+        $this->assertSame(4_200, (int)$renfort->metal, 'The settlement wrote the cargo it re-read live, not the one it had frozen.');
+        $this->assertSame(1_300, (int)$renfort->crystal, 'The settlement wrote the cargo it re-read live, not the one it had frozen.');
+        $this->assertSame(700, (int)$renfort->deuterium, 'The settlement wrote the cargo it re-read live, not the one it had frozen.');
+    }
+
+    /**
      * La cloture gele la cargaison d'un renfort admis, et le reglement exige de la retrouver.
      *
      * ## Ce que l'application relisait vivant
