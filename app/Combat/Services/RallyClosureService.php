@@ -30,6 +30,7 @@ use OGame\Models\CombatInstance;
 use OGame\Models\CombatOutboxMessage;
 use OGame\Models\CombatParticipant;
 use OGame\Models\CombatSnapshotInclusion;
+use OGame\Models\FleetMission;
 use OGame\Models\Planet;
 use OGame\Models\User;
 
@@ -174,6 +175,12 @@ final class RallyClosureService
 
         $this->registerParticipants($combat, $cotesAttaquants, CombatParticipant::SIDE_ATTACKER);
         $this->registerParticipants($combat, $defenseurs->admitted(), CombatParticipant::SIDE_DEFENDER);
+
+        // **Les retenues que l'admission n'a pas gardees sont liberees.** Elles ont ete tenues le
+        // temps du verdict ; une fois refusees, les retenir plus longtemps les ferait stationner
+        // hors photographie — ce que la regle interdit. Le travailleur les renvoie ensuite, avec la
+        // raison que l'admission vient d'ecrire.
+        $this->releaseReinforcementsNotAdmitted($combat, $defenseurs);
 
         $this->recordInclusions($combat, $cotesAttaquants, SnapshotContribution::AttackingFleet);
         $this->recordInclusions($combat, $defenseurs->admitted(), SnapshotContribution::DefendingFleet);
@@ -323,6 +330,30 @@ final class RallyClosureService
      *
      * @param array<int, AttackCandidateGroup> $groups
      */
+    /**
+     * Libere les renforts retenus a l'ouverture ou a leur arrivee que l'admission n'a pas gardes.
+     *
+     * Le filtre sur le genre de mission est ce qui protege les attaquantes : leur lien vient de leur
+     * propre arrivee, et il ne se leve jamais.
+     */
+    private function releaseReinforcementsNotAdmitted(CombatInstance $combat, AdmissionVerdict $verdict): void
+    {
+        $admises = [];
+
+        foreach ($verdict->admitted() as $groupe) {
+            foreach ($groupe->missions as $mission) {
+                $admises[] = $mission->missionId;
+            }
+        }
+
+        FleetMission::query()
+            ->where('combat_instance_id', $combat->id)
+            ->where('mission_type', 5)
+            ->whereNull('parent_id')
+            ->whereNotIn('id', $admises === [] ? [0] : $admises)
+            ->update(['combat_instance_id' => null]);
+    }
+
     private function recordInclusions(
         CombatInstance $combat,
         array $groups,

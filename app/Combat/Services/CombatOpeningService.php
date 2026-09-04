@@ -239,6 +239,12 @@ final class CombatOpeningService
         // La fermeture prend la barriere puis l'instance, dans le meme ordre que partout ailleurs,
         // et sa transaction s'imbrique dans celle-ci : si elle echoue, l'ouverture disparait avec
         // elle. Un combat a demi ouvert ne s'ecrit pas.
+        // **Les renforts deja poses sur le corps sont retenus des l'ouverture.** Ils font partie
+        // de l'etat du corps : ni un rappel, ni la fin de leur stationnement ne peut les faire
+        // partir avant que l'admission ait prononce son verdict. Ceux qui volent encore seront
+        // retenus a leur arrivee physique, par le meme lien.
+        $this->holdReinforcementsAlreadyPresent($combat, $targetBodyId, $openedAt, $appartenances);
+
         if ($this->closure()->close($combat->id, $openedAt)->closed) {
             $combat->refresh();
         }
@@ -293,6 +299,44 @@ final class CombatOpeningService
      * planete pour un cout derisoire. Elle tombe desormais a l'ouverture s'il n'y a personne a
      * attendre.
      */
+    /**
+     * Retient les Defenses ACS deja presentes sur le corps a l'ouverture.
+     *
+     * Presente veut dire : arrivee physique atteinte, stationnement non acheve. L'analogie avec une
+     * vague attaquante rappelee avant la fermeture ne tient pas — cette vague vole encore, le renfort
+     * est pose. Le lien est celui que l'arrivee d'une attaque pose deja ; il est leve a la fermeture
+     * pour les refusees, et devient une participation pour les admises.
+     */
+    private function holdReinforcementsAlreadyPresent(
+        CombatInstance $combat,
+        int $targetBodyId,
+        int $openedAt,
+        FrozenAllianceMembership $membership,
+    ): void {
+        $candidates = $this->reader->read($targetBodyId, $openedAt, $membership, 0);
+
+        foreach (DefensiveRallyCandidate::ofAll($candidates) as $renfort) {
+            $candidate = $renfort->mission;
+
+            // **Rappelee, elle est deja repartie** : la retenir immobiliserait une flotte que le
+            // joueur a rappelee avant que ce combat existe.
+            if ($candidate->recalled) {
+                continue;
+            }
+
+            if ($candidate->scheduledArrivalAt > $openedAt || !$candidate->isStillHoldingAt($openedAt)) {
+                continue;
+            }
+
+            // **Jamais par-dessus un lien existant** : une flotte deja rattachee a un combat
+            // appartient a celui-la, et le lui reprendre la ferait disparaitre de sa photographie.
+            FleetMission::query()
+                ->whereKey($candidate->missionId)
+                ->whereNull('combat_instance_id')
+                ->update(['combat_instance_id' => $combat->id]);
+        }
+    }
+
     private function closingTime(
         FleetMission $opener,
         int $targetBodyId,

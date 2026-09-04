@@ -157,6 +157,11 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
         $this->assertSame(1, (int)$renfort->processed, 'A late reinforcement is holding outside the photograph.');
         $this->assertSame(1, FleetMission::query()->where('parent_id', $renfort->id)->count());
         $this->assertSame(CombatReasonCode::RallyClosed->value, $this->reasonToldTo($combat, $renfort), 'The late reinforcement went home without being told why.');
+
+        // **La retenue ne vaut que pendant le ralliement.** Retenir une flotte arrivee apres la
+        // fermeture la ferait passer pour engagee alors qu elle rentre : `EngagedFleetCheck` la
+        // verrait, et son propre retour serait bloque.
+        $this->assertNull($renfort->combat_instance_id, 'A reinforcement that landed after the closure was held by the combat.');
     }
 
     /**
@@ -224,6 +229,43 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
         $this->assertSame(1, (int)$vague->processed, 'The refused wave is still waiting.');
         $this->assertSame(1, FleetMission::query()->where('parent_id', $vague->id)->count());
         $this->assertSame(CombatReasonCode::FleetLimitReached->value, $this->reasonToldTo($combat, $vague), 'The closure reason was overwritten by « rally closed ».');
+    }
+
+    /**
+     * Un renfort qui se pose pendant le ralliement est retenu, et son stationnement n'expire pas.
+     *
+     * C'est la moitie que la fermeture ne couvrait pas : entre son arrivee physique et le verdict,
+     * la flotte est sur le corps sans etre encore inscrite. Rien ne la retenait.
+     */
+    public function testAReinforcementLandingDuringTheRallyIsHeldAtOnce(): void
+    {
+        $renfort = null;
+        [$combat, , , $ouverture] = $this->anOpenedCombat(true, function (PlanetService $cible, int $ouverture) use (&$renfort): void {
+            // Arrivee physique cinq secondes apres l'ouverture, stationnement de dix secondes : il se
+            // pose pendant le ralliement, et sa fin de stationnement tombe avant la fermeture.
+            $renfort = $this->aDefensiveReinforcement($cible, $ouverture + 5, 10, $ouverture - 600);
+        });
+
+        if ($renfort === null) {
+            $this->fail('The reinforcement was never launched.');
+        }
+
+        $this->assertSame(CombatState::Rallying, $combat->refresh()->status, 'The rally closed at once.');
+        $this->assertNull($renfort->refresh()->combat_instance_id, 'The reinforcement was held before it landed.');
+
+        // Il se pose : le travailleur le retient.
+        $this->travelTo(Date::createFromTimestamp($ouverture + 6));
+        resolve(FleetMissionService::class)->updateMission($renfort->refresh());
+
+        $this->assertSame($combat->id, (int)$renfort->refresh()->combat_instance_id, 'A reinforcement landing during the rally was not held.');
+
+        // Son stationnement expire avant la fermeture : il ne part pas pour autant.
+        $this->travelTo(Date::createFromTimestamp($ouverture + 16));
+        resolve(FleetMissionService::class)->updateMission($renfort->refresh());
+
+        $renfort->refresh();
+        $this->assertSame(0, (int)$renfort->processed, 'The hold expired and the fleet left before the verdict.');
+        $this->assertSame(0, FleetMission::query()->where('parent_id', $renfort->id)->count());
     }
 
     /**

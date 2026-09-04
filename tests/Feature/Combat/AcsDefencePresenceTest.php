@@ -10,6 +10,7 @@ use OGame\Combat\Admission\FrozenAllianceMembership;
 use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Services\CombatOpeningService;
+use OGame\Combat\Services\EngagedFleetCheck;
 use OGame\Combat\Services\RallyCandidateReader;
 use OGame\Combat\Services\RallyClosureService;
 use OGame\Models\CelestialBodyCombatBarrier;
@@ -149,6 +150,11 @@ class AcsDefencePresenceTest extends TestCase
         $this->assertNotNull($barriere);
         $this->assertSame(self::OPENING + 21, (int)$barriere->owned_through_effect_at, 'The window does not close one tick after the last admitted arrival of both sides.');
 
+        // **Elle vole encore : rien ne la retient.** La retenue ne vise que ce qui est pose sur le
+        // corps ; immobiliser une flotte en vol l empecherait d etre rappelee alors que son
+        // proprietaire en a encore le droit.
+        $this->assertNull($renfort->refresh()->combat_instance_id, 'A reinforcement still in flight was held before it landed.');
+
         $this->assertTrue((new RallyClosureService())->close($combat->id, self::OPENING + 21)->closed);
         $this->assertTrue($this->isADefendingParticipant($combat, $renfort), 'The awaited reinforcement was not registered as a defender.');
     }
@@ -167,6 +173,133 @@ class AcsDefencePresenceTest extends TestCase
 
         $this->assertSame(CombatState::Active, $combat->status, 'A present fleet kept the rally open: it has nothing to await.');
         $this->assertTrue($this->isADefendingParticipant($combat, $presente), 'A fleet holding at the opening is absent from the photograph.');
+    }
+
+    /**
+     * Une Defense ACS deja posee sur le corps est retenue des l'ouverture.
+     *
+     * Elle fait partie de l'etat du corps : ni un rappel, ni la fin de son stationnement ne doit la
+     * faire partir avant que l'admission ait prononce son verdict. Le lien est celui que l'arrivee
+     * d'une attaque pose deja, et `EngagedFleetCheck` le lit.
+     */
+    public function testAReinforcementAlreadyPresentIsHeldFromTheOpening(): void
+    {
+        $corps = $this->aPlanetOwnedBy($this->aPlayer())->id;
+        $presente = $this->anAcsDefence($this->aPlayer(), $corps, self::OPENING - 300, 3600);
+        // **Deux vagues du meme joueur** : la seconde est admissible, donc elle prolonge la fenetre
+        // et le ralliement reste ouvert — sans quoi la retenue ne serait pas observable.
+        $attaquant = $this->aPlayer();
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $attaquant);
+        $this->anAttackAt($corps, self::OPENING + 20, $attaquant);
+
+        $combat = (new CombatOpeningService())->openOrJoin($ouvreur, $corps, self::OPENING);
+
+        $this->assertSame(CombatState::Rallying, $combat->refresh()->status, 'The rally closed at once: the hold would not be observable.');
+        $this->assertSame($combat->id, (int)$presente->refresh()->combat_instance_id, 'A reinforcement already on the body was not held.');
+        $this->assertTrue((new EngagedFleetCheck())->isEngaged($presente), 'The held reinforcement is not seen as engaged: recall and hold expiry would still let it leave.');
+    }
+
+    /**
+     * Une flotte rappelee avant l'ouverture n'est pas retenue : elle est deja repartie.
+     */
+    public function testARecalledReinforcementIsNotHeld(): void
+    {
+        $corps = $this->aPlanetOwnedBy($this->aPlayer())->id;
+        $rappelee = $this->anAcsDefence($this->aPlayer(), $corps, self::OPENING - 300, 3600);
+        $rappelee->canceled = 1;
+        $rappelee->save();
+        $attaquant = $this->aPlayer();
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $attaquant);
+        $this->anAttackAt($corps, self::OPENING + 20, $attaquant);
+
+        $combat = (new CombatOpeningService())->openOrJoin($ouvreur, $corps, self::OPENING);
+
+        $this->assertSame(CombatState::Rallying, $combat->refresh()->status);
+        $this->assertNull($rappelee->refresh()->combat_instance_id, 'A fleet recalled before the opening was held by the combat.');
+    }
+
+    /**
+     * La fermeture garde les admises et libere les refusees.
+     *
+     * Cinq joueurs defenseurs au plus, proprietaire compris : le cinquieme renfort exterieur est
+     * refuse pour la limite de joueurs. Il a ete retenu le temps du verdict, il ne l'est plus apres.
+     */
+    public function testTheClosureKeepsTheAdmittedAndReleasesTheRefused(): void
+    {
+        $defenseur = $this->aPlayer();
+        $corps = $this->aPlanetOwnedBy($defenseur)->id;
+
+        $renforts = [];
+        for ($i = 0; $i < 5; $i++) {
+            $renforts[] = $this->anAcsDefence($this->aPlayer(), $corps, self::OPENING - 300 - $i, 3600);
+        }
+
+        $attaquant = $this->aPlayer();
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $attaquant);
+        $this->anAttackAt($corps, self::OPENING + 20, $attaquant);
+
+        $combat = (new CombatOpeningService())->openOrJoin($ouvreur, $corps, self::OPENING);
+        $this->assertSame(CombatState::Rallying, $combat->refresh()->status);
+
+        // L attaquante porte le lien que son arrivee lui pose en jeu : la fermeture ne doit jamais
+        // le lui reprendre, quel que soit le sort des renforts.
+        $ouvreur->combat_instance_id = $combat->id;
+        $ouvreur->save();
+
+        foreach ($renforts as $renfort) {
+            $this->assertSame($combat->id, (int)$renfort->refresh()->combat_instance_id, 'A present reinforcement was not held before the verdict.');
+        }
+
+        $this->assertTrue((new RallyClosureService())->close($combat->id, self::OPENING + 21)->closed, 'The rally did not close.');
+
+        $retenues = 0;
+        $liberees = 0;
+
+        foreach ($renforts as $renfort) {
+            if ($this->isADefendingParticipant($combat, $renfort)) {
+                $this->assertSame($combat->id, (int)$renfort->refresh()->combat_instance_id, 'An admitted reinforcement lost its hold.');
+                $retenues++;
+
+                continue;
+            }
+
+            $this->assertNull($renfort->refresh()->combat_instance_id, 'A refused reinforcement is still held: it would stand outside the photograph.');
+            $liberees++;
+        }
+
+        $this->assertSame($combat->id, (int)$ouvreur->refresh()->combat_instance_id, 'The closure released an attacking fleet: its link comes from its own arrival.');
+        $this->assertSame(4, $retenues, 'The defensive player budget did not admit exactly four outsiders.');
+        $this->assertSame(1, $liberees, 'No reinforcement was refused: the test would prove nothing about release.');
+    }
+
+    /**
+     * Une flotte deja rattachee a un combat n est jamais reprise par un autre.
+     *
+     * Le lien dit a quelle photographie la flotte appartient. Le lui reprendre la ferait disparaitre
+     * de celle ou elle est deja inscrite — et apparaitre dans une ou personne ne l a jugee.
+     */
+    public function testAFleetAlreadyBoundToACombatIsNeverTakenByAnother(): void
+    {
+        $ailleurs = $this->aPlanetOwnedBy($this->aPlayer())->id;
+        $premier = (new CombatOpeningService())->openOrJoin(
+            $this->anAttackAt($ailleurs, self::OPENING, $this->aPlayer()),
+            $ailleurs,
+            self::OPENING
+        );
+
+        $corps = $this->aPlanetOwnedBy($this->aPlayer())->id;
+        $presente = $this->anAcsDefence($this->aPlayer(), $corps, self::OPENING - 300, 3600);
+        $presente->combat_instance_id = $premier->id;
+        $presente->save();
+
+        $attaquant = $this->aPlayer();
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $attaquant);
+        $this->anAttackAt($corps, self::OPENING + 20, $attaquant);
+
+        $second = (new CombatOpeningService())->openOrJoin($ouvreur, $corps, self::OPENING);
+
+        $this->assertNotSame($premier->id, $second->id, 'Both attacks opened the same combat: the test would prove nothing.');
+        $this->assertSame($premier->id, (int)$presente->refresh()->combat_instance_id, 'A second combat took a fleet that already belonged to another.');
     }
 
     /**

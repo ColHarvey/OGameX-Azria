@@ -125,6 +125,41 @@ class AcsDefendMission extends GameMission
     }
 
     /**
+     * Retient la flotte si le corps qu'elle rejoint est en ralliement.
+     *
+     * ## Pourquoi a l'arrivee physique, et pas a la fermeture
+     *
+     * Des qu'elle est posee sur le corps, la flotte fait partie de l'etat de ce corps : la laisser
+     * partir — rappelee par son proprietaire, ou parce que son stationnement s'acheve — la ferait
+     * disparaitre d'une photographie qu'elle a contribue a composer. Le verdict d'admission viendra a
+     * la fermeture ; jusque-la elle est tenue, et la fermeture libere celles qu'elle refuse.
+     *
+     * Le lien est celui que l'arrivee d'une attaque pose deja : `EngagedFleetCheck` le lit, donc le
+     * rappel et l'expiration sont fermes par la meme porte.
+     */
+    public function holdIfTheBodyIsRallying(FleetMission $mission): void
+    {
+        if ($mission->planet_id_to === null || $mission->combat_instance_id !== null) {
+            return;
+        }
+
+        $barriere = CelestialBodyCombatBarrier::query()->where('target_body_id', $mission->planet_id_to)->first();
+
+        if ($barriere === null) {
+            return;
+        }
+
+        $combat = CombatInstance::query()->find($barriere->combat_instance_id);
+
+        if ($combat === null || $combat->status !== CombatState::Rallying) {
+            return;
+        }
+
+        $mission->combat_instance_id = $combat->id;
+        $mission->save();
+    }
+
+    /**
      * Renvoie la flotte si le combat sur sa cible n'a pas de place pour elle.
      *
      * Une Defense ACS ne stationne jamais hors photographie : refusee a la fermeture, ou arrivee

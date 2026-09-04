@@ -625,9 +625,13 @@ class FleetMissionService
                 'messageService' => $this->messageService,
             ]);
 
-            if ($defense instanceof AcsDefendMission
-                && $defense->turnBackIfTheCombatHasNoPlaceForIt($mission, (int)Date::now()->timestamp)) {
-                return;
+            if ($defense instanceof AcsDefendMission) {
+                // Posee sur un corps en ralliement : retenue jusqu'au verdict de l'admission.
+                $defense->holdIfTheBodyIsRallying($mission);
+
+                if ($defense->turnBackIfTheCombatHasNoPlaceForIt($mission, (int)Date::now()->timestamp)) {
+                    return;
+                }
             }
         }
 
