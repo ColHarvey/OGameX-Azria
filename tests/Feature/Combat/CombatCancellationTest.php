@@ -12,9 +12,11 @@ use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Exceptions\FleetHasNowhereToReturn;
 use OGame\Combat\Exceptions\UnreturnableFleet;
 use OGame\Combat\Services\CombatCancellationOutcome;
+use OGame\Combat\Services\CombatCancellationService;
 use OGame\Combat\Services\CombatOpeningService;
 use OGame\Combat\Services\PersistentCombatAdvance;
 use OGame\Combat\Services\PersistentCombatAdvancer;
+use OGame\Combat\Services\RallyClosureService;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\GameMissions\AttackMission;
 use OGame\GameObjects\Models\Units\UnitCollection;
@@ -28,6 +30,7 @@ use OGame\Models\Resources;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
 use OGame\Services\SettingsService;
+use RuntimeException;
 use Tests\FleetDispatchTestCase;
 
 /**
@@ -307,6 +310,64 @@ class CombatCancellationTest extends FleetDispatchTestCase
     }
 
     /**
+     * Une panne au deuxieme retour ramene tout en arriere.
+     *
+     * ## Ce que cet essai protege
+     *
+     * L'annulation rend plusieurs flottes dans une seule transaction. Si la creation du deuxieme
+     * retour echoue — un corps disparu entre-temps, une contrainte violee —, le premier retour ne
+     * doit pas subsister seul : il y aurait alors une flotte rentree, une flotte perdue, un combat
+     * a moitie annule et un corps libere pour rien.
+     *
+     * La panne est injectee dans la fermeture que la mission prete, exactement la ou une vraie
+     * defaillance se produirait.
+     */
+    public function testAFailureOnTheSecondReturnRollsEverythingBack(): void
+    {
+        [$combat, $missions] = $this->anActiveCombatWithTwoFleets();
+
+        $avant = [
+            'etat' => $combat->status,
+            'barriere' => CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->count(),
+            'traitees' => FleetMission::query()->whereIn('id', array_map(static fn (FleetMission $m): int => $m->id, $missions))->where('processed', 1)->count(),
+            'retours' => FleetMission::query()->whereIn('parent_id', array_map(static fn (FleetMission $m): int => $m->id, $missions))->count(),
+            'avis' => CombatOutboxMessage::query()->where('combat_instance_id', $combat->id)->count(),
+        ];
+
+        $appels = 0;
+
+        try {
+            (new CombatCancellationService())->cancel(
+                $combat->id,
+                CombatCancellationCause::AdministrativeDecision,
+                function () use (&$appels): void {
+                    $appels++;
+
+                    if ($appels === 2) {
+                        throw new RuntimeException('La creation du deuxieme retour echoue.');
+                    }
+                },
+                (int)$combat->ends_at
+            );
+            $this->fail('The cancellation swallowed a failure while returning fleets.');
+        } catch (RuntimeException $panne) {
+            $this->assertStringContainsString('deuxieme retour', $panne->getMessage());
+        }
+
+        $this->assertSame(2, $appels, 'The cancellation did not reach the second return: the test would prove nothing.');
+
+        $combat->refresh();
+        $this->assertSame($avant['etat'], $combat->status, 'The combat stayed cancelled though the returns were rolled back.');
+        $this->assertNull($combat->cancellation_cause, 'The cause survived a rolled back cancellation.');
+        $this->assertSame($avant['barriere'], CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->count(), 'The barrier was lifted by a cancellation that failed.');
+
+        $identifiants = array_map(static fn (FleetMission $m): int => $m->id, $missions);
+        $this->assertSame($avant['traitees'], FleetMission::query()->whereIn('id', $identifiants)->where('processed', 1)->count(), 'A fleet stayed marked processed after the rollback.');
+        $this->assertSame($avant['retours'], FleetMission::query()->whereIn('parent_id', $identifiants)->count(), 'A return survived the rollback.');
+        $this->assertSame($avant['avis'], CombatOutboxMessage::query()->where('combat_instance_id', $combat->id)->count(), 'A notice survived the rollback.');
+    }
+
+    /**
      * Une flotte sans destination arrete l'annulation, et le corps reste tenu.
      *
      * Les recours sont ordonnes — corps d'origine, planete associee, planete mere — et les epuiser
@@ -391,6 +452,76 @@ class CombatCancellationTest extends FleetDispatchTestCase
         $combat->refresh();
         $this->assertSame(CombatState::Cancelled, $combat->status);
         $this->assertNull(CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->first(), 'The body is still held.');
+    }
+
+    /**
+     * Un combat actif avec deux flottes attaquantes du meme joueur.
+     *
+     * Deux flottes envoyees a la suite arrivent au meme instant : la fenetre attend la seconde, et
+     * la fermeture est donc appelee explicitement. C'est le seul moyen d'obtenir deux retours a
+     * creer dans la meme transaction.
+     *
+     * @return array{0: CombatInstance, 1: array<int, FleetMission>, 2: PlanetService}
+     */
+    private function anActiveCombatWithTwoFleets(): array
+    {
+        for ($i = 0; $i < 6; $i++) {
+            $this->createAndLoginUser();
+        }
+
+        $this->basicSetup();
+
+        $cible = null;
+
+        for ($i = 0; $i < 2; $i++) {
+            $units = new UnitCollection();
+            $units->addUnit(ObjectService::getUnitObjectByMachineName('small_cargo'), 25);
+            $units->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 150);
+
+            $envoyeeVers = $this->sendMissionToOtherPlayerPlanet($units, new Resources(0, 0, 0, 0));
+
+            if ($cible !== null && $envoyeeVers->getPlanetId() !== $cible->getPlanetId()) {
+                $this->fail('The second fleet was sent to another planet.');
+            }
+
+            $cible = $envoyeeVers;
+        }
+
+        $missions = FleetMission::query()
+            ->where('processed', 0)
+            ->where('user_id', $this->currentUserId)
+            ->orderBy('id')
+            ->get()
+            ->all();
+
+        $this->assertCount(2, $missions, 'Not every dispatched fleet became a mission.');
+
+        DB::table('planets')->where('id', $cible->getPlanetId())->update([
+            'metal' => 500_000,
+            'crystal' => 300_000,
+            'deuterium' => 100_000,
+            'rocket_launcher' => 20,
+            'time_last_update' => (int)now()->timestamp + 86_400,
+        ]);
+        $cible->reloadPlanet();
+
+        $combat = (new CombatOpeningService())->openOrJoin($missions[0], $cible->getPlanetId(), (int)$missions[0]->time_arrival);
+        $barriere = CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->first();
+
+        if ($barriere === null) {
+            $this->fail('The opening left no barrier.');
+        }
+
+        $combat->refresh();
+
+        if ($combat->status === CombatState::Rallying) {
+            $this->assertTrue((new RallyClosureService())->close($combat->id, (int)$barriere->owned_through_effect_at)->closed, 'The rally did not close.');
+            $combat->refresh();
+        }
+
+        $this->assertSame(CombatState::Active, $combat->status);
+
+        return [$combat, $missions, $cible];
     }
 
     /**
