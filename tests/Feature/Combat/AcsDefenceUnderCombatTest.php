@@ -375,6 +375,93 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
     }
 
     /**
+     * Un rappel n'accorde pas un second retour a une flotte deja renvoyee.
+     *
+     * ## La course, telle qu'elle se produit en jeu
+     *
+     * La page du joueur affiche sa flotte en stationnement ; il clique « rappeler ». Entre le rendu
+     * de la page et le clic, le travailleur d'un autre joueur a touche la meme mission et l'a
+     * renvoyee — refusee par un combat qui n'a pas de place pour elle.
+     *
+     * Le rappel portait alors le modele d'avant : stationnement en cours, mission non traitee. Il
+     * creait **une seconde mission retour pour la meme flotte**, et les vaisseaux existaient deux
+     * fois. Aucune des deux ecritures n'etait fautive prise seule ; c'est de les avoir laissees
+     * decider chacune sur son propre souvenir que naissait la duplication.
+     *
+     * La porte relit la ligne : le rappel voit une flotte deja partie, et refuse.
+     */
+    public function testARecallDoesNotGrantASecondReturnToAFleetAlreadySentHome(): void
+    {
+        $renfort = null;
+        [, , , $ouverture] = $this->anOpenedCombat(false, function (PlanetService $cible, int $ouverture) use (&$renfort): void {
+            $renfort = $this->aDefensiveReinforcement($cible, $ouverture + 90, 600, $ouverture - 600);
+        });
+
+        if ($renfort === null) {
+            $this->fail('The reinforcement was never launched.');
+        }
+
+        $this->travelTo(Date::createFromTimestamp($ouverture + 95));
+
+        // **Le modele que le joueur tient**, charge avant le demi-tour. C'est celui que son rappel
+        // portera, et il decrira un passe des la ligne suivante.
+        $perime = FleetMission::query()->findOrFail($renfort->id);
+
+        $service = resolve(FleetMissionService::class);
+        $service->updateMission($renfort->refresh());
+
+        $this->assertSame(1, FleetMission::query()->where('parent_id', $renfort->id)->count(), 'The turn back did not send the fleet home.');
+        $this->assertSame(0, (int)$perime->processed, 'The stale model was expected to still describe the hold.');
+
+        $service->cancelMission($perime);
+
+        $this->assertSame(
+            1,
+            FleetMission::query()->where('parent_id', $renfort->id)->count(),
+            'A recall granted a second return to a fleet already sent home: its ships exist twice.'
+        );
+    }
+
+    /**
+     * Une flotte que la retenue vient d'inscrire ne se rappelle plus, meme lue avant l'inscription.
+     *
+     * L'autre sens de la meme course. La retenue pose `combat_instance_id` a l'arrivee physique ;
+     * un rappel qui a lu la mission une seconde plus tot ne voit ni ce lien ni aucune inscription —
+     * le ralliement n'en a pas encore ecrit. Il laissait donc partir une flotte qui compose deja la
+     * photographie du corps, et le combat se calculait avec des vaisseaux repartis.
+     */
+    public function testARecallIsRefusedForAFleetTheHoldJustBoundToTheCombat(): void
+    {
+        $renfort = null;
+        [$combat, , , $ouverture] = $this->anOpenedCombat(true, function (PlanetService $cible, int $ouverture) use (&$renfort): void {
+            $renfort = $this->aDefensiveReinforcement($cible, $ouverture + 5, 60, $ouverture - 600);
+        });
+
+        if ($renfort === null) {
+            $this->fail('The reinforcement was never launched.');
+        }
+
+        $this->assertSame(CombatState::Rallying, $combat->refresh()->status, 'The rally closed at once.');
+
+        $this->travelTo(Date::createFromTimestamp($ouverture + 6));
+
+        $perime = FleetMission::query()->findOrFail($renfort->id);
+        $this->assertNull($perime->combat_instance_id, 'The fleet was bound before it landed.');
+
+        $service = resolve(FleetMissionService::class);
+        $service->updateMission($renfort->refresh());
+
+        $this->assertSame($combat->id, (int)$renfort->refresh()->combat_instance_id, 'The landing fleet was not held.');
+
+        $service->cancelMission($perime);
+
+        $renfort->refresh();
+        $this->assertSame(0, FleetMission::query()->where('parent_id', $renfort->id)->count(), 'A fleet already counted in the photograph was recalled on a stale read.');
+        $this->assertSame(0, (int)$renfort->processed, 'The recall marked a held fleet as processed.');
+        $this->assertSame($combat->id, (int)$renfort->combat_instance_id, 'The recall unbound a held fleet.');
+    }
+
+    /**
      * Un combat ouvert par une vraie attaque, traitee par la route reelle a la seconde de son arrivee.
      *
      * @param bool $secondeVague Une seconde vague du meme joueur, attendue dix-huit secondes plus tard.

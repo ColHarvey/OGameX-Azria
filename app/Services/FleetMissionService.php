@@ -6,6 +6,7 @@ use Exception;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Date;
 use OGame\Combat\Services\EngagedFleetCheck;
+use OGame\Combat\Services\FleetMovementGate;
 use OGame\Enums\FleetSpeedType;
 use OGame\Factories\GameMissionFactory;
 use OGame\Factories\PlanetServiceFactory;
@@ -626,12 +627,29 @@ class FleetMissionService
             ]);
 
             if ($defense instanceof AcsDefendMission) {
-                // Posee sur un corps en ralliement : retenue jusqu'au verdict de l'admission.
-                $defense->holdIfTheBodyIsRallying($mission);
+                // **Retenue et demi-tour se decident derriere la meme porte que le rappel**, sur une
+                // mission relue sous verrou. Sans elle, un rappel simultane accordait un second
+                // retour a une flotte deja renvoyee, et une flotte que la retenue venait d'inscrire
+                // partait quand meme parce que le rappel lisait un modele d'avant l'inscription.
+                $renvoyee = resolve(FleetMovementGate::class)->decideUnderLock(
+                    $mission,
+                    function (FleetMission $tenue) use ($defense): bool {
+                        // Posee sur un corps en ralliement : retenue jusqu'au verdict de l'admission.
+                        $defense->holdIfTheBodyIsRallying($tenue);
 
-                if ($defense->turnBackIfTheCombatHasNoPlaceForIt($mission, (int)Date::now()->timestamp)) {
+                        return $defense->turnBackIfTheCombatHasNoPlaceForIt($tenue, (int)Date::now()->timestamp);
+                    }
+                );
+
+                if ($renvoyee) {
                     return;
                 }
+
+                // **Pas de relecture ici, et c'est voulu.** L'objet que ce code tient decrit peut-etre
+                // un passe, mais aucune ecriture ne s'en deduit : tout ce qui suit ne fait que decider
+                // s'il faut *tenter* le traitement d'arrivee, lequel repasse par la porte et relit la
+                // ligne avant d'ecrire. Une relecture de plus ici couterait une requete et donnerait
+                // l'illusion que c'est elle qui protege.
             }
         }
 
@@ -705,6 +723,23 @@ class FleetMissionService
             return;
         }
 
+        // **Le rappel entre par la meme porte que le demi-tour et l'expiration**, et decide sur une
+        // mission relue sous verrou. Il lisait auparavant l'objet charge par l'appelant : une flotte
+        // renvoyee ou inscrite dans l'intervalle etait rappelee quand meme, et deux missions retour
+        // pouvaient naitre d'une seule flotte.
+        resolve(FleetMovementGate::class)->decideUnderLock($mission, function (FleetMission $tenue): void {
+            $this->recallIfNothingHoldsIt($tenue);
+        });
+    }
+
+    /**
+     * Rappelle la flotte, si rien ne la retient.
+     *
+     * Appele **uniquement** derriere `FleetMovementGate`, sur la mission tenue sous verrou : chacune
+     * de ces lectures decide d'une ecriture, et aucune ne vaut sur un modele charge plus tot.
+     */
+    private function recallIfNothingHoldsIt(FleetMission $mission): void
+    {
         // Une flotte engagee dans un combat durable ne se rappelle plus : la bataille est calculee
         // avec elle, et un rappel la ferait a la fois combattre et rentrer. Le filet est ici, dans
         // le chemin que tout rappel emprunte — l'interface n'est jamais la protection.

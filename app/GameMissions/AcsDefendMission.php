@@ -8,6 +8,7 @@ use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\FleetDispositionKind;
 use OGame\Combat\Services\EngagedFleetCheck;
 use OGame\Combat\Services\FleetDispositionRegistry;
+use OGame\Combat\Services\FleetMovementGate;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Enums\FleetMissionStatus;
 use OGame\Enums\FleetSpeedType;
@@ -106,10 +107,32 @@ class AcsDefendMission extends GameMission
      */
     protected function processArrival(FleetMission $mission): void
     {
+        // **L'expiration du stationnement passe par la meme porte que le rappel et le demi-tour.**
+        // Les trois creent un retour ; les laisser lire chacun son propre modele en laissait deux
+        // creer deux retours pour une seule flotte.
+        resolve(FleetMovementGate::class)->decideUnderLock($mission, function (FleetMission $tenue): void {
+            $this->sendHomeWhenTheHoldIsOver($tenue);
+        });
+    }
+
+    /**
+     * Renvoie la flotte au bout de son stationnement, si rien ne l'a deja fait partir.
+     *
+     * Appele **uniquement** derriere `FleetMovementGate`, sur la mission tenue sous verrou.
+     */
+    private function sendHomeWhenTheHoldIsOver(FleetMission $mission): void
+    {
         // **Le stationnement d'une flotte engagee ne s'acheve pas avant le combat.** La bataille est
         // calculee avec elle a la fermeture et appliquee a l'echeance ; la renvoyer entre les deux la
         // ferait combattre et rentrer. Le travailleur repassera : le combat termine, elle rentre.
         if (resolve(EngagedFleetCheck::class)->isEngaged($mission)) {
+            return;
+        }
+
+        // **Une flotte deja partie ne repart pas.** Un rappel ou un demi-tour accorde entre le
+        // chargement du modele et ce verrou a pose ce drapeau ; le lire ici est tout l'objet de la
+        // relecture, et sans lui la flotte recevrait une seconde mission retour.
+        if ((int)$mission->processed === 1) {
             return;
         }
 
