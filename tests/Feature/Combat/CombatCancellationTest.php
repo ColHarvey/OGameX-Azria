@@ -10,6 +10,7 @@ use OGame\Combat\Enums\CombatCancellationCause;
 use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Exceptions\FleetHasNowhereToReturn;
+use OGame\Combat\Exceptions\ReturnDestinationMoved;
 use OGame\Combat\Exceptions\UnreturnableFleet;
 use OGame\Combat\Services\CombatCancellationOutcome;
 use OGame\Combat\Services\CombatCancellationService;
@@ -17,7 +18,9 @@ use OGame\Combat\Services\CombatOpeningService;
 use OGame\Combat\Services\PersistentCombatAdvance;
 use OGame\Combat\Services\PersistentCombatAdvancer;
 use OGame\Combat\Services\RallyClosureService;
+use OGame\Combat\Services\ReturnPlanner;
 use OGame\Combat\Support\CombatParticipantKey;
+use OGame\Combat\Support\ReturnPlan;
 use OGame\GameMissions\AttackMission;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\BattleReport;
@@ -26,10 +29,12 @@ use OGame\Models\CombatInstance;
 use OGame\Models\CombatOutboxMessage;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet;
+use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
 use OGame\Services\SettingsService;
+use ReflectionClass;
 use RuntimeException;
 use Tests\FleetDispatchTestCase;
 
@@ -426,6 +431,127 @@ class CombatCancellationTest extends FleetDispatchTestCase
         $this->assertSame((int)$mere->galaxy, (int)$retour->galaxy_to);
         $this->assertSame((int)$mere->system, (int)$retour->system_to);
         $this->assertSame((int)$mere->planet, (int)$retour->position_to);
+    }
+
+    /**
+     * Une destination qui bouge entre le choix et le verrou arrete l'annulation.
+     *
+     * ## La course, et pourquoi elle se joue par un double
+     *
+     * Choisir une destination demande de lire des corps qu'on ne tient pas encore : c'est ce qui dit
+     * quelles lignes verrouiller. Une fois tenues, la decision est reprise. Entre les deux, une
+     * transaction concurrente peut transferer ou raser le corps choisi.
+     *
+     * SQLite n'a pas de transactions concurrentes : le double rend un plan different au second
+     * appel, ce qui est exactement ce que la course produirait. La preuve reelle est MariaDB ; ici
+     * on prouve que le service **compare** les deux passes et refuse quand elles divergent.
+     */
+    public function testADestinationThatMovesBetweenChoiceAndLockStopsTheCancellation(): void
+    {
+        [$combat, $mission, $cible] = $this->anActiveCombat();
+
+        $ailleurs = DB::table('planets')
+            ->where('user_id', $mission->user_id)
+            ->where('id', '!=', $mission->planet_id_from)
+            ->where('planet_type', 1)
+            ->orderBy('id')
+            ->first();
+        $this->assertNotNull($ailleurs, 'The attacker owns a single body: the plan could not change.');
+
+        $planificateur = new class ((int)$ailleurs->id) extends ReturnPlanner {
+            private int $appels = 0;
+
+            public function __construct(private int $ailleurs)
+            {
+            }
+
+            public function planFor(FleetMission $mission): ReturnPlan
+            {
+                $this->appels++;
+                $plan = parent::planFor($mission);
+
+                // Au second appel — celui pris sous verrou —, le corps a bouge.
+                if ($this->appels === 1) {
+                    return $plan;
+                }
+
+                return ReturnPlan::toHomeworld($this->ailleurs, new Coordinate(9, 9, 9), (int)$mission->user_id);
+            }
+        };
+
+        $avant = $this->stockOf($cible);
+
+        try {
+            (new CombatCancellationService(planner: $planificateur))->cancel(
+                $combat->id,
+                CombatCancellationCause::AdministrativeDecision,
+                function (): void {
+                    $this->fail('A return was created though the destination had moved.');
+                },
+                (int)$combat->ends_at
+            );
+            $this->fail('The cancellation wrote a destination it had never locked.');
+        } catch (ReturnDestinationMoved $refus) {
+            $this->assertSame($mission->id, $refus->fleetMissionId);
+        }
+
+        $combat->refresh();
+        $this->assertSame(CombatState::Active, $combat->status, 'The combat was made final on a destination that had moved.');
+        $this->assertNotNull(CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->first(), 'The body was released.');
+        $this->assertSame(0, FleetMission::query()->where('parent_id', $mission->id)->count());
+        $this->assertSame(0, (int)$mission->refresh()->processed);
+        $this->assertSame($avant, $this->stockOf($cible));
+    }
+
+    /**
+     * L'annulation declare ses verrous, et les corps de destination viennent apres les missions.
+     *
+     * ## Pourquoi une garde de source, et non une observation
+     *
+     * SQLite ignore `lockForUpdate()` : la requete sort identique a une lecture ordinaire, et aucun
+     * essai ne peut distinguer ici un verrou pris d'un verrou oublie. Retirer le verrou ne fait donc
+     * tomber aucune assertion d'execution — c'est cette garde qui le voit.
+     *
+     * Elle ne prouve pas que le verrou tient : cela demande deux connexions MariaDB, et cette epreuve
+     * reste a faire. Elle prouve qu'un futur passage ne l'enlevera pas en silence, et que l'ordre
+     * annonce est celui du code.
+     */
+    public function testTheCancellationDeclaresItsLocksInTheFixedOrder(): void
+    {
+        $fichier = (new ReflectionClass(CombatCancellationService::class))->getFileName();
+        $this->assertNotFalse($fichier);
+
+        $source = preg_replace('/\s+/', ' ', (string)file_get_contents($fichier));
+        $this->assertNotNull($source);
+
+        $verrous = [
+            'barriere' => "CelestialBodyCombatBarrier::query() ->where('combat_instance_id', \$combatInstanceId) ->lockForUpdate()",
+            'instance' => 'CombatInstance::query()->whereKey($combatInstanceId)->lockForUpdate()',
+            'union' => 'FleetUnion::query()->whereKey($combat->union_id)->lockForUpdate()',
+            'missions' => "->orderBy('id') ->lockForUpdate()",
+            // Les corps ou les flottes vont se poser : sans eux, une destination peut changer entre
+            // le choix et l'ecriture.
+            'destinations' => (new ReflectionClass(Planet::class))->getShortName() . "::query()->whereIn('id', \$corpsDeRetour)->orderBy('id')->lockForUpdate()",
+        ];
+
+        foreach ($verrous as $quoi => $declaration) {
+            $this->assertStringContainsString($declaration, $source, "The cancellation no longer declares the lock on the {$quoi}.");
+        }
+
+        // **Les destinations apres les missions.** L'ordre global est le meme partout : barriere,
+        // instance, union, missions, corps. L'inverser rouvrirait l'interblocage que cet ordre ferme.
+        $this->assertLessThan(
+            strpos($source, $verrous['destinations']),
+            strpos($source, $verrous['missions']),
+            'The cancellation locks the destinations before the missions: the global order is broken.'
+        );
+
+        // **La seconde passe decide, la premiere ne fait que designer les lignes a tenir.**
+        $this->assertLessThan(
+            strpos($source, 'foreach ($aRendre as $identifiant => [$mission, $trajet, $pressenti])'),
+            strpos($source, $verrous['destinations']),
+            'The cancellation decides before holding the destinations: the plan is not taken under lock.'
+        );
     }
 
     /**

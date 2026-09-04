@@ -9,14 +9,19 @@ use OGame\Combat\Enums\CombatCancellationCause;
 use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Exceptions\FleetHasNowhereToReturn;
+use OGame\Combat\Exceptions\ReturnDestinationMoved;
 use OGame\Combat\Exceptions\UnreturnableFleet;
 use OGame\Combat\Support\CombatParticipantKey;
+use OGame\GameMissions\Models\ResolvedReturnDestination;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatOutboxMessage;
 use OGame\Models\CombatParticipant;
+use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\FleetUnion;
+use OGame\Models\Planet;
+use OGame\Models\Planet\Coordinate;
 use OGame\Services\FleetMissionService;
 use RuntimeException;
 
@@ -113,7 +118,12 @@ final class CombatCancellationService
             // dont le trajet aller ne se lit pas, arrete l'annulation : le corps reste tenu et rien
             // n'est ecrit. Liberer le corps en pretendant que toutes les flottes sont rendues serait
             // exactement la perte silencieuse que ce chemin existe pour eviter.
-            $plans = [];
+            //
+            // **Deux passes, et un verrou entre les deux.** La premiere dit quelles lignes il faut
+            // tenir ; la seconde decide, ces lignes tenues. Un plan qui change entre les deux est un
+            // corps qui a bouge sous nos pieds : on s'arrete plutot que d'ecrire une destination qui
+            // n'est deja plus celle qu'on a choisie.
+            $aRendre = [];
 
             foreach ($missions as $mission) {
                 if ((int)$mission->processed === 1) {
@@ -126,13 +136,39 @@ final class CombatCancellationService
                     throw new UnreturnableFleet($combat->id, $mission->id, $trajet);
                 }
 
+                $aRendre[$mission->id] = [$mission, $trajet, $this->planner->planFor($mission)];
+            }
+
+            // 5. **Les corps de destination**, par identifiant croissant, apres les missions.
+            $destinations = [];
+
+            foreach ($aRendre as [, , $pressenti]) {
+                if ($pressenti->planetId !== null) {
+                    $destinations[$pressenti->planetId] = true;
+                }
+            }
+
+            $corpsDeRetour = array_keys($destinations);
+            sort($corpsDeRetour);
+
+            if ($corpsDeRetour !== []) {
+                Planet::query()->whereIn('id', $corpsDeRetour)->orderBy('id')->lockForUpdate()->get();
+            }
+
+            $plans = [];
+
+            foreach ($aRendre as $identifiant => [$mission, $trajet, $pressenti]) {
                 $plan = $this->planner->planFor($mission);
 
                 if (!$plan->isPossible() || $plan->planetId === null) {
-                    throw new FleetHasNowhereToReturn($combat->id, $mission->id, $plan->reason?->value);
+                    throw new FleetHasNowhereToReturn($combat->id, $identifiant, $plan->reason?->value);
                 }
 
-                $plans[$mission->id] = [$plan, $trajet];
+                if ($plan->planetId !== $pressenti->planetId || $plan->kind !== $pressenti->kind) {
+                    throw new ReturnDestinationMoved($combat->id, $identifiant, $pressenti->planetId, $plan->planetId);
+                }
+
+                $plans[$identifiant] = [$plan, $trajet];
             }
 
             $combat->status = CombatState::Cancelled;
@@ -190,7 +226,12 @@ final class CombatCancellationService
                     $this->fleetMissions()->getFleetUnits($mission),
                     $trajet,
                     $now,
-                    (int)$plan->planetId
+                    new ResolvedReturnDestination(
+                        (int)$plan->planetId,
+                        $plan->bodyType ?? PlanetType::Planet,
+                        $plan->coordinate ?? new Coordinate(0, 0, 0),
+                        (int)$plan->ownerId
+                    )
                 );
 
                 $rendues++;

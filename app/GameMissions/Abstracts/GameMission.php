@@ -15,6 +15,7 @@ use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
 use OGame\GameMissions\ExpeditionMission;
 use OGame\GameMissions\Models\MissionPossibleStatus;
+use OGame\GameMissions\Models\ResolvedReturnDestination;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
@@ -512,7 +513,7 @@ abstract class GameMission
      * @param int|null $overrideReturnDuration If set, use this duration (in seconds) for the return trip instead of calculating from parent mission times.
      * @return void
      */
-    protected function startReturn(FleetMission $parentMission, Resources $resources, UnitCollection $units, int $additionalReturnTripTime = 0, array|null $wreckFieldData = null, int|null $overrideReturnDuration = null, int|null $departureAt = null, int|null $destinationBodyId = null): void
+    protected function startReturn(FleetMission $parentMission, Resources $resources, UnitCollection $units, int $additionalReturnTripTime = 0, array|null $wreckFieldData = null, int|null $overrideReturnDuration = null, int|null $departureAt = null, ResolvedReturnDestination|null $destination = null): void
     {
         if ($units->getAmount() === 0) {
             // No units to return, no need to create a return mission.
@@ -596,24 +597,17 @@ abstract class GameMission
         $mission->system_to = $parentMission->system_from;
         $mission->position_to = $parentMission->position_from;
 
-        // **Une destination donnee explicitement l'emporte sur le corps de depart.** Le corps
-        // d'origine peut avoir disparu depuis le lancement — une lune detruite, une planete
-        // abandonnee. L'appelant qui a resolu le repli sous verrou dit ou la flotte se pose, et
-        // c'est cette decision-la qui est ecrite : la recalculer ici l'exposerait a changer en vol.
-        if ($destinationBodyId !== null) {
-            $destination = $this->planetServiceFactory->make($destinationBodyId, true);
-
-            if ($destination === null) {
-                throw new Exception('The resolved return destination ' . $destinationBodyId . ' does not exist.');
-            }
-
-            $coordonnees = $destination->getPlanetCoordinates();
-
-            $mission->planet_id_to = $destinationBodyId;
-            $mission->type_to = $destination->getPlanetType()->value;
-            $mission->galaxy_to = $coordonnees->galaxy;
-            $mission->system_to = $coordonnees->system;
-            $mission->position_to = $coordonnees->position;
+        // **Une destination resolue l'emporte sur le corps de depart, et elle s'ecrit telle quelle.**
+        // Le corps d'origine peut avoir disparu depuis le lancement — une lune rasee, une planete
+        // abandonnee. L'appelant a decide sous verrou ou la flotte se pose ; **relire ce corps ici**
+        // l'exposerait a atterrir ailleurs si quelque chose a bouge entre la decision et l'ecriture,
+        // et personne ne le verrait.
+        if ($destination !== null) {
+            $mission->planet_id_to = $destination->bodyId;
+            $mission->type_to = $destination->type->value;
+            $mission->galaxy_to = $destination->coordinate->galaxy;
+            $mission->system_to = $destination->coordinate->system;
+            $mission->position_to = $destination->coordinate->position;
         }
 
         // Fill in the units

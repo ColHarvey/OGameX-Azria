@@ -31,8 +31,14 @@ use OGame\Models\Planet\Coordinate;
  * Un corps peut avoir change de mains : une planete abandonnee puis recolonisee occupe les memes
  * coordonnees sans etre le meme foyer. Une flotte de repli ne se pose jamais chez quelqu'un
  * d'autre, meme si ce corps est exactement la ou elle allait.
+ *
+ * ## Pourquoi cette classe n'est pas finale
+ *
+ * La course « la destination bouge entre le choix et le verrou » ne se joue pas sous SQLite : deux
+ * transactions concurrentes y sont impossibles. Un double qui rend un plan different au second
+ * appel la reproduit exactement, et c'est le seul moyen d'eprouver le refus depuis ce poste.
  */
-final class ReturnPlanner
+class ReturnPlanner
 {
     /**
      * Le plan de retour de cette mission, lu maintenant.

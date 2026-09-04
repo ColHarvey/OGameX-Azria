@@ -25,6 +25,7 @@ use OGame\Enums\FleetSpeedType;
 use OGame\GameMissions\Abstracts\GameMission;
 use OGame\GameMissions\BattleEngine\BattleEngineFactory;
 use OGame\GameMissions\Models\MissionPossibleStatus;
+use OGame\GameMissions\Models\ResolvedReturnDestination;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatOutboxMessage;
@@ -134,8 +135,8 @@ class AttackMission extends GameMission
         return resolve(CombatCancellationService::class)->cancel(
             $combatInstanceId,
             $cause,
-            function (FleetMission $retourDe, Resources $ressources, UnitCollection $unites, int $duree, int $departA, int $corps): void {
-                $this->startReturn($retourDe, $ressources, $unites, 0, null, $duree, $departA, $corps);
+            function (FleetMission $retourDe, Resources $ressources, UnitCollection $unites, int $duree, int $departA, ResolvedReturnDestination $ou): void {
+                $this->startReturn($retourDe, $ressources, $unites, 0, null, $duree, $departA, $ou);
             },
             $now,
         );
