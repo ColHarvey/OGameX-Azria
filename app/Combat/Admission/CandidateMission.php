@@ -52,6 +52,9 @@ final readonly class CandidateMission
         public bool $inFlightAtOpening,
         public bool $recalled,
         public int|null $unionId = null,
+        // La fin du stationnement, pour une Defense ACS a l'aller : c'est elle qui dit si une
+        // flotte arrivee avant l'ouverture est encore la — presente — ou deja partie.
+        public int|null $holdsUntil = null,
     ) {
         if ($missionId < 1 || $userId < 1) {
             throw new InvalidArgumentException(
@@ -66,5 +69,16 @@ final readonly class CandidateMission
                 . 'lune les partagent.'
             );
         }
+    }
+
+    /**
+     * La flotte stationne-t-elle encore a cet instant ?
+     *
+     * Une fin de stationnement egale a l'instant compte pour « partie » : l'egalite avec une
+     * barriere vaut « apres », ici comme partout ailleurs.
+     */
+    public function isStillHoldingAt(int $instant): bool
+    {
+        return $this->holdsUntil !== null && $this->holdsUntil > $instant;
     }
 }

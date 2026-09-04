@@ -167,7 +167,9 @@ class AttackMission extends GameMission
      */
     private function sendItHomeAfterTheRallyClosed(FleetMission $mission, CombatInstance $combat): void
     {
-        CombatOutboxMessage::query()->updateOrCreate(
+        // **La raison de la fermeture, si elle l'a jugee, n'est pas reecrite** : une vague refusee
+        // pour sa limite de flottes doit lire « limite atteinte », pas « ralliement ferme ».
+        CombatOutboxMessage::query()->firstOrCreate(
             [
                 'combat_instance_id' => $combat->id,
                 'participant_key' => CombatParticipantKey::forFleet($mission->id),

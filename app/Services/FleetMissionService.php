@@ -13,6 +13,7 @@ use OGame\GameConstants\UniverseConstants;
 use OGame\GameMessages\AcsDefendArrivalHost;
 use OGame\GameMessages\AcsDefendArrivalSender;
 use OGame\GameMissions\Abstracts\GameMission;
+use OGame\GameMissions\AcsDefendMission;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
@@ -612,6 +613,21 @@ class FleetMissionService
 
                 // Send arrival messages to sender and host
                 $this->sendAcsDefendArrivalMessages($mission);
+            }
+        }
+
+        // Une Defense ACS arrivee sur un corps dont le combat n'a pas de place pour elle repart :
+        // refusee a la fermeture, ou arrivee apres. Elle ne stationne jamais hors photographie.
+        if ($isAcsDefendOutbound && !$mission->processed && $mission->time_holding !== null
+            && ($mission->time_arrival - $mission->time_holding) <= Date::now()->timestamp) {
+            $defense = $this->gameMissionFactory->getMissionById(5, [
+                'fleetMissionService' => $this,
+                'messageService' => $this->messageService,
+            ]);
+
+            if ($defense instanceof AcsDefendMission
+                && $defense->turnBackIfTheCombatHasNoPlaceForIt($mission, (int)Date::now()->timestamp)) {
+                return;
             }
         }
 

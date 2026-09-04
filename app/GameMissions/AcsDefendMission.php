@@ -2,11 +2,20 @@
 
 namespace OGame\GameMissions;
 
+use OGame\Combat\Enums\CombatOutboxKind;
+use OGame\Combat\Enums\CombatReasonCode;
+use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Services\EngagedFleetCheck;
+use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Enums\FleetMissionStatus;
 use OGame\Enums\FleetSpeedType;
 use OGame\GameMissions\Abstracts\GameMission;
 use OGame\GameMissions\Models\MissionPossibleStatus;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Models\CelestialBodyCombatBarrier;
+use OGame\Models\CombatInstance;
+use OGame\Models\CombatOutboxMessage;
+use OGame\Models\CombatParticipant;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet\Coordinate;
@@ -94,6 +103,13 @@ class AcsDefendMission extends GameMission
      */
     protected function processArrival(FleetMission $mission): void
     {
+        // **Le stationnement d'une flotte engagee ne s'acheve pas avant le combat.** La bataille est
+        // calculee avec elle a la fermeture et appliquee a l'echeance ; la renvoyer entre les deux la
+        // ferait combattre et rentrer. Le travailleur repassera : le combat termine, elle rentre.
+        if (resolve(EngagedFleetCheck::class)->isEngaged($mission)) {
+            return;
+        }
+
         // Note: Arrival messages are sent earlier when the fleet physically arrives (start of hold time)
         // via FleetMissionService::sendAcsDefendArrivalMessages()
         // This method is called after the hold time expires to create the return mission
@@ -106,6 +122,80 @@ class AcsDefendMission extends GameMission
         // Mark the arrival mission as processed
         $mission->processed = 1;
         $mission->save();
+    }
+
+    /**
+     * Renvoie la flotte si le combat sur sa cible n'a pas de place pour elle.
+     *
+     * Une Defense ACS ne stationne jamais hors photographie : refusee a la fermeture, ou arrivee
+     * apres elle, elle repart avec sa raison — celle de la fermeture si elle existe, `RallyClosed`
+     * sinon. Pendant le ralliement elle attend son jugement ; sans combat, elle stationne comme
+     * toujours. Le retour part maintenant et dure le trajet aller, comme un rappel.
+     *
+     * @return bool Vrai si la flotte a ete renvoyee.
+     */
+    public function turnBackIfTheCombatHasNoPlaceForIt(FleetMission $mission, int $now): bool
+    {
+        if ($mission->planet_id_to === null || (int)$mission->processed === 1) {
+            return false;
+        }
+
+        $barriere = CelestialBodyCombatBarrier::query()->where('target_body_id', $mission->planet_id_to)->first();
+
+        if ($barriere === null) {
+            return false;
+        }
+
+        $combat = CombatInstance::query()->find($barriere->combat_instance_id);
+
+        if ($combat === null || $combat->status === CombatState::Rallying || $combat->status->isFinal()) {
+            return false;
+        }
+
+        $inscrite = CombatParticipant::query()
+            ->where('combat_instance_id', $combat->id)
+            ->where('fleet_mission_id', $mission->id)
+            ->exists();
+
+        if ($inscrite) {
+            return false;
+        }
+
+        // La raison de la fermeture, si elle l'a jugee ; sinon elle est arrivee apres.
+        CombatOutboxMessage::query()->firstOrCreate(
+            [
+                'combat_instance_id' => $combat->id,
+                'participant_key' => CombatParticipantKey::forFleet($mission->id),
+                'kind' => CombatOutboxKind::RallyRefused->value,
+            ],
+            [
+                'payload' => [
+                    'reason' => CombatReasonCode::RallyClosed->value,
+                    'target_body_id' => $combat->target_planet_id,
+                    'galaxy' => $combat->galaxy,
+                    'system' => $combat->system,
+                    'position' => $combat->position,
+                    'group_fleets' => 1,
+                ],
+                'available_at' => $now,
+            ]
+        );
+
+        $arriveePhysique = $mission->time_arrival - ($mission->time_holding ?? 0);
+
+        $mission->time_arrival = $now;
+        $mission->time_holding = 0;
+        $mission->processed = 1;
+        $mission->save();
+
+        $this->startReturn(
+            $mission,
+            $this->fleetMissionService->getResources($mission),
+            $this->fleetMissionService->getFleetUnits($mission),
+            $arriveePhysique - $now
+        );
+
+        return true;
     }
 
     /**

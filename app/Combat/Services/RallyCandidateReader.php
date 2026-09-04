@@ -2,6 +2,7 @@
 
 namespace OGame\Combat\Services;
 
+use Illuminate\Database\Eloquent\Builder;
 use OGame\Combat\Admission\CandidateMission;
 use OGame\Combat\Admission\FrozenAllianceMembership;
 use OGame\Combat\Enums\ActorKind;
@@ -95,12 +96,13 @@ final class RallyCandidateReader
                 // retour. L'aller n'en a pas.
                 $mission->parent_id === null ? FlightLeg::Outbound : FlightLeg::Return,
                 $targetBodyId,
-                $mission->time_arrival,
+                self::scheduledArrivalOf($mission),
                 // **Strictement avant l'ouverture.** L'engagement est le lancement, et une egalite
                 // avec une barriere compte pour « apres », ici comme partout ailleurs.
                 $mission->time_departure < $openedAt,
                 $mission->canceled === 1,
                 $mission->union_id,
+                self::isAnAcsDefenceOutbound($mission) ? $mission->time_arrival : null,
             );
         }
 
@@ -162,8 +164,34 @@ final class RallyCandidateReader
         $missions = FleetMission::query()
             ->where('planet_id_to', $targetBodyId)
             ->where('id', '!=', $excludedMissionId)
-            ->where('time_arrival', '>=', $openedAt)
-            ->where('time_arrival', '<', $plafond)
+            // **Une flotte deja partie n'est plus une candidate** — stationnement acheve, renvoyee.
+            // Une flotte rappelee, elle, reste lue : son refus se raconte au joueur.
+            ->where(static function (Builder $query): void {
+                $query->where('processed', 0)->orWhere('canceled', 1);
+            })
+            ->where(static function (Builder $query) use ($openedAt, $plafond): void {
+                // Toute mission ordinaire : son arrivee planifiee tombe dans la fenetre.
+                $query->where(static function (Builder $ordinaire) use ($openedAt, $plafond): void {
+                    $ordinaire
+                        ->where(static function (Builder $forme): void {
+                            $forme->where('mission_type', '!=', 5)->orWhereNotNull('parent_id');
+                        })
+                        ->where('time_arrival', '>=', $openedAt)
+                        ->where('time_arrival', '<', $plafond);
+                })
+                // **Une Defense ACS a l'aller porte la fin de son stationnement dans `time_arrival`.**
+                // Son arrivee physique est `time_arrival - time_holding` ; elle est candidate si elle
+                // arrive avant le plafond et stationne encore apres l'ouverture — presente a
+                // l'ouverture, ou en vol vers la fenetre. Une flotte dont le stationnement s'acheve a
+                // l'ouverture meme est partie : l'egalite vaut « apres ».
+                ->orWhere(static function (Builder $defense) use ($openedAt, $plafond): void {
+                    $defense
+                        ->where('mission_type', 5)
+                        ->whereNull('parent_id')
+                        ->whereRaw('(time_arrival - COALESCE(time_holding, 0)) < ?', [$plafond])
+                        ->where('time_arrival', '>', $openedAt);
+                });
+            })
             ->orderBy('id')
             ->lockForUpdate()
             ->get()
@@ -172,7 +200,7 @@ final class RallyCandidateReader
         usort(
             $missions,
             static fn (FleetMission $a, FleetMission $b): int
-                => [$a->time_arrival, $a->id] <=> [$b->time_arrival, $b->id]
+                => [self::scheduledArrivalOf($a), $a->id] <=> [self::scheduledArrivalOf($b), $b->id]
         );
 
         return $missions;
@@ -196,5 +224,26 @@ final class RallyCandidateReader
         }
 
         return $genres;
+    }
+
+    /**
+     * L'arrivee planifiee : celle du corps, pas celle de la fin du stationnement.
+     *
+     * Le chemin instantane lit les Defenses ACS presentes exactement ainsi
+     * (`collectDefendingFleets()`) ; lire `time_arrival` tel quel les ferait toutes disparaitre du
+     * ralliement, puisque leur stationnement s'acheve bien apres la fenetre.
+     */
+    private static function scheduledArrivalOf(FleetMission $mission): int
+    {
+        if (!self::isAnAcsDefenceOutbound($mission)) {
+            return $mission->time_arrival;
+        }
+
+        return $mission->time_arrival - ($mission->time_holding ?? 0);
+    }
+
+    private static function isAnAcsDefenceOutbound(FleetMission $mission): bool
+    {
+        return $mission->mission_type === 5 && $mission->parent_id === null;
     }
 }

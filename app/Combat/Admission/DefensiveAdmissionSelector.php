@@ -157,7 +157,14 @@ final class DefensiveAdmissionSelector
 
         // Une egalite avec le plafond compte pour apres. Au-dela, la candidate repart : elle ne
         // stationne jamais hors photographie.
-        if ($candidate->scheduledArrivalAt >= $ceiling || $candidate->scheduledArrivalAt < $openedAt) {
+        if ($candidate->scheduledArrivalAt >= $ceiling) {
+            return CombatReasonCode::RallyWindowLimit;
+        }
+
+        // **Arrivee avant l'ouverture : presente, ou partie.** Une Defense ACS qui stationne encore a
+        // l'ouverture est une force presente — elle compose la photographie comme la garnison. Une
+        // arrivee anterieure sans stationnement en cours n'a rien a faire ici.
+        if ($candidate->scheduledArrivalAt < $openedAt && !$candidate->isStillHoldingAt($openedAt)) {
             return CombatReasonCode::RallyWindowLimit;
         }
 

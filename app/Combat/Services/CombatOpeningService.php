@@ -6,6 +6,8 @@ use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Admission\AdmissionBudget;
 use OGame\Combat\Admission\AttackAdmissionSelector;
+use OGame\Combat\Admission\DefensiveAdmissionSelector;
+use OGame\Combat\Admission\DefensiveRallyCandidate;
 use OGame\Combat\Admission\FoundingGroup;
 use OGame\Combat\Admission\FrozenAllianceMembership;
 use OGame\Combat\Admission\RallyGrouping;
@@ -91,6 +93,7 @@ final class CombatOpeningService
         private MoonDestructionRuleRegistry|null $moonRules = null,
         private SnapshotProjectionRegistry|null $projections = null,
         private RallyClosureService|null $closure = null,
+        private DefensiveAdmissionSelector $defenceSelector = new DefensiveAdmissionSelector(),
     ) {
     }
 
@@ -300,6 +303,7 @@ final class CombatOpeningService
         AdmissionBudget $budget,
     ): int {
         $candidates = $this->reader->read($targetBodyId, $openedAt, $membership, 0);
+        $arrivees = [];
 
         // **Seules les formes que la matrice delegue au selecteur.** Un retour ou un transport
         // arrive ici serait une entree contradictoire, et le selecteur leve — a juste titre. Ce
@@ -309,24 +313,32 @@ final class CombatOpeningService
 
         [$fondatrices, $autres] = $this->grouping->splitFounding($combattantes, $opener->id, $union?->id);
 
-        if ($fondatrices === []) {
-            // L'ouvreur n'est pas parmi les candidates lues : sa forme ne rallie rien. Il n'y a donc
-            // personne a attendre.
-            return $openedAt;
+        if ($fondatrices !== []) {
+            $verdict = $this->selector->select(
+                new FoundingGroup($creatorUserId, $membership->allianceId, $fondatrices, $budget),
+                $targetBodyId,
+                $this->actorHolding($targetBodyId),
+                $openedAt,
+                $this->grouping->intoGroups($autres)
+            );
+
+            foreach ($verdict->admitted() as $groupe) {
+                $arrivees[] = $groupe->scheduledArrivalAt();
+            }
         }
 
-        $verdict = $this->selector->select(
-            new FoundingGroup($creatorUserId, $membership->allianceId, $fondatrices, $budget),
-            $targetBodyId,
-            $this->actorHolding($targetBodyId),
-            $openedAt,
-            $this->grouping->intoGroups($autres)
-        );
+        // **Les deux camps.** La regle arretee est « derniere arrivee admise des deux camps + 1 » :
+        // un renfort defensif en vol prolonge la fenetre exactement comme une vague attaquante. Une
+        // flotte deja presente n'a rien a prolonger — `closesAt()` ne retient que les arrivees a venir.
+        $renforts = DefensiveRallyCandidate::ofAll($candidates);
+        $proprietaire = $this->ownerOf($targetBodyId);
 
-        $arrivees = [];
+        if ($renforts !== [] && $proprietaire >= 1) {
+            $defense = $this->defenceSelector->select($proprietaire, $targetBodyId, $openedAt, $renforts);
 
-        foreach ($verdict->admitted() as $groupe) {
-            $arrivees[] = $groupe->scheduledArrivalAt();
+            foreach ($defense->admitted() as $groupe) {
+                $arrivees[] = $groupe->scheduledArrivalAt();
+            }
         }
 
         return CombatRallyWindow::closesAt($openedAt, $arrivees);
@@ -337,6 +349,13 @@ final class CombatOpeningService
      *
      * Un combat contre une faction pilotee par le serveur ne se rassemble pas : l'ouvreur y va seul.
      */
+    private function ownerOf(int $targetBodyId): int
+    {
+        $planete = Planet::find($targetBodyId);
+
+        return $planete === null ? 0 : (int)$planete->user_id;
+    }
+
     private function actorHolding(int $targetBodyId): ActorKind
     {
         $planete = Planet::find($targetBodyId);
