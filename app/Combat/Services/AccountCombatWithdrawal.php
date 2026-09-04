@@ -10,6 +10,7 @@ use OGame\GameMissions\AttackMission;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatParticipant;
 use OGame\Models\FleetMission;
+use OGame\Services\SettingsService;
 
 /**
  * Ce qu'un compte qui disparait fait de ses combats en cours.
@@ -83,7 +84,59 @@ final class AccountCombatWithdrawal
             $aAnnuler[$identifiant] = $cause;
         }
 
-        return new AccountWithdrawalPlan($aAnnuler, $empechements);
+        return new AccountWithdrawalPlan($aAnnuler, $empechements, $this->fleetsThatCouldStillEngage($userId));
+    }
+
+    /**
+     * Les flottes du compte encore en vol qui peuvent ouvrir ou rejoindre un combat.
+     *
+     * ## Ce que le drapeau ne ferme pas
+     *
+     * Le drapeau de suppression empeche les **nouveaux** lancements ; il ne dit rien d'une flotte
+     * deja partie. Celle-la peut atteindre le travailleur apres l'inventaire, ouvrir un combat, et
+     * voir ensuite ses missions effacees : le combat garderait une initiatrice qui n'existe plus, et
+     * sa barriere tiendrait un corps pour toujours — la colonne du lien n'a pas de cle etrangere qui
+     * l'aurait arrete.
+     *
+     * La suppression attend donc qu'elles soient finales. L'ensemble ne peut que retrecir : le
+     * compte ne lance plus rien, et chaque flotte finit par arriver puis rentrer.
+     *
+     * **Seulement quand le combat durable est arme** : sans lui aucune barriere n'existe, aucune de
+     * ces arrivees ne peut ouvrir de combat, et faire attendre une suppression pour une course
+     * impossible immobiliserait des comptes sans rien protéger.
+     *
+     * @param int $userId
+     * @return array<int, int>
+     */
+    private function fleetsThatCouldStillEngage(int $userId): array
+    {
+        if (!resolve(SettingsService::class)->persistentCombatEnabled()) {
+            return [];
+        }
+
+        $genres = [];
+
+        foreach (CombatMissionKind::byMissionType() as $type => $genre) {
+            if ($genre->opensCombat() || $genre->reinforcesTheDefence()) {
+                $genres[] = $type;
+            }
+        }
+
+        // **Celles qui ne portent pas encore le lien, et elles seules.** Une flotte deja rattachee a
+        // un combat figure dans l'inventaire : son combat a recu sa cause, et elle ne peut plus en
+        // ouvrir un second. C'est le cas de l'initiatrice de chaque combat du compte, qui reste non
+        // traitee tant que sa bataille dure — la compter retiendrait toute suppression d'attaquant,
+        // pour toujours.
+        return FleetMission::query()
+            ->where('user_id', $userId)
+            ->whereNull('parent_id')
+            ->whereNull('combat_instance_id')
+            ->where('processed', 0)
+            ->whereIn('mission_type', $genres)
+            ->orderBy('id')
+            ->pluck('id')
+            ->map(static fn (mixed $id): int => (int)$id)
+            ->all();
     }
 
     /**

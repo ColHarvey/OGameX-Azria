@@ -43,6 +43,7 @@ use OGame\Models\Planet;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
 use OGame\Models\User;
+use OGame\Services\AccountDeletionBarrier;
 use OGame\Services\FleetMissionService;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
@@ -50,6 +51,7 @@ use OGame\Services\SettingsService;
 use ReflectionClass;
 use RuntimeException;
 use Tests\FleetDispatchTestCase;
+use Throwable;
 
 /**
  * La sortie d'exploitation d'un combat qui ne se reglera jamais : annuler, rendre, liberer.
@@ -684,9 +686,19 @@ class CombatCancellationTest extends FleetDispatchTestCase
                 }
             });
 
-        $this->assertTrue($this->cancel($combat, CombatCancellationCause::AdministrativeDecision)->cancelled);
+        // **L'annulation est imbriquee, comme elle l'est sous une suppression de compte.** Sortir de
+        // sa fermeture interne n'est alors qu'un relachement de point de sauvegarde : une ligne
+        // posee la affirmerait une annulation que le commit exterieur peut encore refuser. C'est le
+        // seul scenario ou « apres la fermeture » et « apres le commit » se distinguent — a plat,
+        // les deux tombent au meme endroit et l'essai ne prouverait rien.
+        DB::transaction(function () use ($combat, &$niveaux): void {
+            $this->assertTrue($this->cancel($combat, CombatCancellationCause::AdministrativeDecision)->cancelled);
 
-        $this->assertSame([0], $niveaux, 'The cancellation line was written inside the transaction that could still roll back.');
+            $this->assertSame([], $niveaux, 'The cancellation line was written before the owning transaction committed.');
+            $this->assertGreaterThan(0, DB::transactionLevel(), 'The cancellation was not nested: nothing would be proved.');
+        });
+
+        $this->assertSame([0], $niveaux, 'The cancellation line was not written once the owning transaction committed.');
         unset($mission);
     }
 
@@ -748,14 +760,45 @@ class CombatCancellationTest extends FleetDispatchTestCase
     }
 
     /**
-     * Supprimer le compte de l'attaquant annule son combat, et l'inscription survit sans son lien.
+     * Tout le retrait vit dans une seule transaction, qui tient le compte.
      *
-     * ## Le cycle de vie d'une inscription
+     * ## Ce que « le plan avant les effets » ne protegeait pas
      *
-     * Une mission inscrite dans un combat actif ne s'efface pas : la suppression annule d'abord le
-     * combat, avec la cause faite pour cela. Ensuite seulement la mission disparait — et
-     * l'inscription reste, cle de participant, proprietaire et instantane intacts, son lien vers la
-     * mission devenu nul. Un identifiant de mission reutilise ne peut plus devenir ce participant.
+     * Un plan protege les decisions deja lues, pas les lignes qui peuvent apparaitre pendant la
+     * lecture. Sans transaction proprietaire, chaque annulation etait validee pour elle-meme : une
+     * defaillance a la purge laissait des combats annules et un compte toujours la, et rien ne
+     * ramenait ces annulations en arriere.
+     */
+    public function testTheWholeWithdrawalIsOneTransactionThatOwnsTheAccount(): void
+    {
+        [$combat, $mission] = $this->anActiveCombat();
+        $compte = (int)$mission->user_id;
+
+        // **Le journal de l'annulation part apres le commit** : ce qu'il voit du compte dit donc
+        // quelle transaction l'a valide. Sous une transaction proprietaire, il part quand tout le
+        // retrait est fini — le compte n'existe plus. Sans elle, chaque annulation est sa propre
+        // transaction : la ligne partirait avant la purge, et le compte serait encore la.
+        $comptesVus = [];
+        Log::partialMock()
+            ->shouldReceive('warning')
+            ->andReturnUsing(function (mixed $message, mixed $contexte) use (&$comptesVus, $compte): void {
+                if ($message === 'Combat durable annule.') {
+                    $comptesVus[] = DB::table('users')->where('id', $compte)->exists() ? 'le compte est encore la' : 'le compte a disparu';
+                }
+            });
+
+        resolve(PlayerServiceFactory::class)->make($compte, true)->delete();
+
+        $this->assertSame(
+            ['le compte a disparu'],
+            $comptesVus,
+            'The cancellation was committed on its own: the withdrawal is not one transaction.'
+        );
+        $this->assertSame(CombatState::Cancelled, $combat->refresh()->status);
+    }
+
+    /**
+     * Supprimer le compte de l'attaquant annule son combat et garde l'inscription sans son lien.
      */
     public function testDeletingTheAttackerAccountCancelsItsCombatAndKeepsTheEnrolmentWithoutItsLink(): void
     {
@@ -1132,6 +1175,132 @@ class CombatCancellationTest extends FleetDispatchTestCase
         $this->assertNull($combat->cancellation_cause);
         $this->assertNotNull(CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->first(), 'The body was released.');
         $this->assertSame(0, (int)$mission->refresh()->processed, 'The fleet was sent home by a plan that had to stop.');
+    }
+
+    /**
+     * Une flotte du compte encore en vol retient la suppression jusqu'a ce qu'elle soit finale.
+     *
+     * ## Ce que le drapeau ne fermait pas
+     *
+     * Le drapeau empeche les **nouveaux** lancements ; il ne dit rien d'une flotte deja partie.
+     * Celle-la peut atteindre le travailleur apres l'inventaire, ouvrir un combat, et voir ensuite
+     * ses missions effacees : le combat garderait une initiatrice qui n'existe plus, et sa barriere
+     * tiendrait un corps pour toujours — la colonne du lien n'a pas de cle etrangere qui l'aurait
+     * arrete.
+     *
+     * La suppression attend donc. L'ensemble ne peut que retrecir : le compte ne lance plus rien.
+     */
+    public function testAFleetStillInFlightHoldsTheDeletionUntilItIsFinal(): void
+    {
+        $reglages = resolve(SettingsService::class);
+        $reglages->set('persistent_combat_enabled', '1');
+
+        try {
+            [$combat, $mission] = $this->anActiveCombat();
+            $compte = (int)$mission->user_id;
+
+            // **L'initiatrice porte le lien que son arrivee pose en jeu.** Le fixture ouvre le
+            // combat sans passer par le travailleur ; sans ce lien, elle passerait pour une flotte
+            // encore capable d'engager, et l'essai ne prouverait rien de la seconde.
+            DB::table('fleet_missions')->where('id', $mission->id)->update(['combat_instance_id' => $combat->id]);
+
+            // Une seconde attaque du meme compte, encore en vol : elle peut ouvrir un combat.
+            $enVol = $this->anAttackingFleetOf($compte, (int)$mission->planet_id_to);
+            $this->assertSame(0, (int)$enVol->processed, 'The second fleet already landed: nothing would be proved.');
+
+            resolve(PlayerServiceFactory::class)->make($compte, true)->delete();
+
+            $attendant = resolve(PlayerServiceFactory::class)->make($compte, true);
+            $this->assertTrue($attendant->isPendingDeletion(), 'The account is not marked as awaiting deletion.');
+            $this->assertStringContainsString('encore en vol', $attendant->deletionDeferredReason(), 'The wait does not say what holds it.');
+            $this->assertStringContainsString((string)$enVol->id, $attendant->deletionDeferredReason(), 'The wait does not name the fleet in flight.');
+            $this->assertNotNull(FleetMission::query()->find($mission->id), 'The deferred deletion still erased a mission.');
+
+            // La flotte devient finale ; plus rien ne retient.
+            DB::table('fleet_missions')->where('id', $enVol->id)->update(['processed' => 1]);
+
+            $this->assertSame(Command::SUCCESS, Artisan::call('ogamex:comptes:reprendre-suppressions', ['--compte' => $compte]));
+            $this->assertNull(DB::table('users')->where('id', $compte)->first(), 'The deletion did not resume once no fleet could engage.');
+        } finally {
+            $reglages->set('persistent_combat_enabled', '0');
+        }
+    }
+
+    /**
+     * Un joueur charge **avant** la pose du drapeau ne peut pas lancer de flotte apres.
+     *
+     * ## Pourquoi la lecture doit etre fraiche
+     *
+     * `PlayerServiceFactory` garde ses instances et `PlanetService` garde son `PlayerService`. Un
+     * traitement qui avait charge le joueur avant la pose du drapeau continuait a lire « non »
+     * longtemps apres son ecriture en base : le refus s'appuyait sur un modele perime, et une flotte
+     * pouvait partir d'un compte deja en cours de suppression. La barriere lit donc la ligne, pas le
+     * modele.
+     */
+    public function testAPlayerLoadedBeforeTheFlagStillCannotLaunch(): void
+    {
+        [, $mission] = $this->anActiveCombat();
+        $compte = (int)$mission->user_id;
+
+        // **Le corps est charge maintenant, avant toute suppression.** C'est ce `PlanetService`-la
+        // qui servira au lancement, avec le `PlayerService` qu'il garde : l'instance perimee. Le
+        // charger apres la pose du drapeau donnerait un joueur frais, et l'essai passerait meme si
+        // le refus lisait le modele.
+        $origine = resolve(PlanetServiceFactory::class)->make((int)$mission->planet_id_from, true);
+        $this->assertNotNull($origine, 'The mission has no origin body.');
+
+        $perime = $origine->getPlayer();
+        $this->assertNotNull($perime, 'The origin body has no owner.');
+        $this->assertFalse($perime->isPendingDeletion(), 'The account is already pending: nothing would be proved.');
+
+        AccountDeletionBarrier::markPending($compte, (int)Date::now()->timestamp);
+
+        // Le modele que le corps garde n'a pas bouge : c'est exactement la lecture qui mentait.
+        $this->assertFalse($perime->isPendingDeletion(), 'The cached player already sees the flag: nothing would be proved.');
+
+        $unites = new UnitCollection();
+        $unites->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 1);
+
+        $this->expectExceptionMessage('en cours de suppression');
+        resolve(FleetMissionService::class)->createNewFromPlanet(
+            $origine,
+            new Coordinate(1, 1, 1),
+            PlanetType::Planet,
+            3,
+            $unites,
+            new Resources(0, 0, 0, 0),
+            10
+        );
+    }
+
+    /**
+     * Une defaillance pendant le retrait laisse un compte en attente, jamais un compte ordinaire.
+     *
+     * Le drapeau est valide **avant** l'inventaire, dans sa propre transaction. S'il vivait dans
+     * celle de la purge, il disparaitrait avec elle : le compte redeviendrait ordinaire au milieu
+     * d'un retrait commence, et plus rien ne le reprendrait.
+     */
+    public function testAFailureDuringTheWithdrawalLeavesTheAccountPending(): void
+    {
+        [$combat, $mission] = $this->anActiveCombat();
+        $compte = (int)$mission->user_id;
+
+        // La destination du retour disparait sous le retrait : l'annulation s'arrete, la
+        // transaction proprietaire ramene tout en arriere.
+        DB::table('planets')->where('user_id', $compte)->update(['destroyed' => (int)$combat->started_at]);
+
+        try {
+            resolve(PlayerServiceFactory::class)->make($compte, true)->delete();
+        } catch (Throwable $panne) {
+            // La panne est le scenario ; ce qui compte est l'etat qu'elle laisse.
+            unset($panne);
+        }
+
+        $reste = DB::table('users')->where('id', $compte)->first();
+        $this->assertNotNull($reste, 'The account was erased although the withdrawal failed.');
+        $this->assertNotNull($reste->deletion_pending_since, 'The failed withdrawal left an ordinary account: nothing would resume it.');
+        $this->assertSame(CombatState::Active, $combat->refresh()->status, 'The combat was cancelled although the withdrawal failed.');
+        $this->assertNotNull(FleetMission::query()->find($mission->id), 'The failed withdrawal still erased a mission.');
     }
 
     /**

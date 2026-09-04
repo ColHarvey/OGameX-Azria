@@ -5,6 +5,7 @@ namespace OGame\Services;
 use Exception;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Facades\DB;
 use OGame\Combat\Services\EngagedFleetCheck;
 use OGame\Combat\Services\FleetDispositionRegistry;
 use OGame\Combat\Services\FleetMovementGate;
@@ -577,22 +578,39 @@ class FleetMissionService
      */
     public function createNewFromPlanet(PlanetService $planet, Coordinate $targetCoordinate, PlanetType $targetType, int $missionType, UnitCollection $units, Resources $resources, float $speedPercent, int $holdingHours = 0, int $parent_id = 0, bool $retreatAfterDefenderRetreat = false): FleetMission
     {
-        // **Un compte en suppression en attente ne lance plus rien.** C'est ici que la course se
-        // ferme : sans ce refus, une flotte partie apres l'inventaire des combats du compte pourrait
-        // ouvrir une bataille que personne n'annulerait, et sa barriere tiendrait un corps pour
-        // toujours. Le refus vaut pour tous les genres de mission, pas seulement l'attaque : une
-        // Defense ACS ou un deploiement laisserait la meme flotte derriere un compte disparu.
+        // **Un compte en suppression en attente ne lance plus rien**, et le controle tient le compte
+        // jusqu'a l'insertion de la mission.
+        //
+        // Le refus lisait le drapeau sur le `PlayerService` que la requete tenait deja : la fabrique
+        // garde ses instances, donc un traitement qui avait charge le joueur avant la pose du
+        // drapeau continuait a lire « non » apres son ecriture. Et sans verrou, un lancement pouvait
+        // lire « non », la suppression poser le drapeau et inventorier, puis la mission s'inserer
+        // apres l'inventaire — un combat que personne n'annulerait, une barriere tenant un corps
+        // pour toujours.
+        //
+        // La transaction est ouverte **ici**, et pas laissee a l'appelant : le chemin ordinaire de
+        // la flotte en a une, celui de la Galaxie n'en a pas, et le verrou serait relache avant
+        // l'ecriture. Imbriquee dans une transaction appelante, elle garde le verrou plus longtemps
+        // encore, ce qui ne fait que renforcer la serialisation.
+        //
+        // Le refus vaut pour tous les genres, pas seulement l'attaque : une Defense ACS ou un
+        // deploiement laisserait la meme flotte derriere un compte disparu.
         $proprietaire = $planet->getPlayer();
 
-        if ($proprietaire !== null && $proprietaire->isPendingDeletion()) {
-            throw new Exception('Ce compte est en cours de suppression : il ne peut plus lancer de flotte.');
+        if ($proprietaire === null) {
+            throw new Exception('Planet has no owner.');
         }
 
         $missionObject = $this->gameMissionFactory->getMissionById($missionType, [
             'fleetMissionService' => $this,
             'messageService' => $this->messageService,
         ]);
-        return $missionObject->start($planet, $targetCoordinate, $targetType, $units, $resources, $speedPercent, $holdingHours, $parent_id, $retreatAfterDefenderRetreat);
+
+        return DB::transaction(function () use ($proprietaire, $missionObject, $planet, $targetCoordinate, $targetType, $units, $resources, $speedPercent, $holdingHours, $parent_id, $retreatAfterDefenderRetreat): FleetMission {
+            AccountDeletionBarrier::refuseIfTheAccountIsBeingDeleted($proprietaire->getId());
+
+            return $missionObject->start($planet, $targetCoordinate, $targetType, $units, $resources, $speedPercent, $holdingHours, $parent_id, $retreatAfterDefenderRetreat);
+        });
     }
 
     /**

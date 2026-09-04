@@ -1052,12 +1052,10 @@ class PlayerService
      */
     private function markDeletionPending(): void
     {
-        if ($this->user->deletion_pending_since === null) {
-            $this->user->deletion_pending_since = (int)Date::now()->timestamp;
-        }
+        AccountDeletionBarrier::markPending($this->getId(), (int)Date::now()->timestamp);
 
-        $this->user->deletion_deferred_reason = null;
-        $this->user->save();
+        // Le modele en memoire suit la ligne : la barriere a ecrit, pas lui.
+        $this->user->refresh();
     }
 
     /**
@@ -1077,8 +1075,7 @@ class PlayerService
     public function delete(): void
     {
         // Include destroyed planets still awaiting purge so related rows are cleaned up.
-        $planetIds = Planet::where('user_id', $this->getId())->pluck('id');
-        $corps = $planetIds->map(static fn (mixed $id): int => (int)$id)->all();
+        $corps = Planet::where('user_id', $this->getId())->pluck('id')->map(static fn (mixed $id): int => (int)$id)->all();
 
         // **Le drapeau avant l'inventaire.** Sans lui, un combat pouvait s'ouvrir entre le moment
         // ou l'on releve les combats du compte et celui ou l'on efface ses lignes : ce combat-la
@@ -1086,6 +1083,31 @@ class PlayerService
         // lancement de flotte lit ce drapeau et refuse.
         $this->markDeletionPending();
 
+        // **Tout le retrait vit dans une transaction qui tient le compte.**
+        //
+        // « Le plan avant les effets » protegeait les decisions deja lues, pas les lignes qui
+        // peuvent apparaitre pendant la lecture. Le verrou de la ligne du compte vient **en tete de
+        // l'ordre global** — compte, puis barriere, instance, union, missions, corps de retour — et
+        // c'est le meme que prend le lancement d'une flotte : les deux operations se serialisent au
+        // lieu de se croiser.
+        //
+        // Le drapeau, lui, est deja valide : une defaillance ici ramene l'inventaire et la purge en
+        // arriere, et laisse un compte **en attente** que la commande de reprise peut reprendre —
+        // jamais un compte ordinaire au milieu d'un retrait commence.
+        DB::transaction(function () use ($corps): void {
+            AccountDeletionBarrier::heldPendingDeletion($this->getId());
+
+            $this->carryOutTheDeletion($corps);
+        });
+    }
+
+    /**
+     * Le retrait lui-meme, sous le verrou du compte et dans sa transaction.
+     *
+     * @param array<int, int> $corps Les corps du compte, ceux en attente de purge compris.
+     */
+    private function carryOutTheDeletion(array $corps): void
+    {
         // **Ses combats d'abord, et le plan entier avant le premier effet.** Une mission inscrite
         // dans un combat actif ne s'efface pas : la bataille a ete calculee avec elle. Le retrait
         // annulait combat par combat et ne decouvrait qu'en arrivant a sa ligne qu'un combat
@@ -1105,7 +1127,7 @@ class PlayerService
 
         $retrait->apply($this->getId(), $plan, (int)Date::now()->timestamp);
 
-        foreach ($planetIds as $planetId) {
+        foreach ($corps as $planetId) {
             // Delete all queue items.
             ResearchQueue::where('planet_id', $planetId)->delete();
             BuildingQueue::where('planet_id', $planetId)->delete();

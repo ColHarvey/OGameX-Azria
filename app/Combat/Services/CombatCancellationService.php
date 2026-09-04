@@ -93,11 +93,16 @@ final class CombatCancellationService
             throw new RuntimeException('Une annulation exige une note d exploitation : rien n est annule sans dire ce qui a ete constate.');
         }
 
-        // **Le journal se remplit dedans et s'ecrit dehors.** Une ligne posee dans la transaction
-        // survivrait a son annulation : un echec tardif au commit laisserait une trace affirmant une
-        // annulation que la base n'a jamais enregistree, et l'exploitation chercherait un combat
+        // **Le journal se remplit dedans et s'ecrit apres le commit.** Une ligne posee dans la
+        // transaction survivrait a son annulation : un echec tardif laisserait une trace affirmant
+        // une annulation que la base n'a jamais enregistree, et l'exploitation chercherait un combat
         // toujours en cours. Les avis, eux, restent dans l'outbox transactionnelle — ils doivent
         // disparaitre avec elle.
+        //
+        // L'ecriture est remise a `DB::afterCommit`, et non placee apres l'appel : ce service est
+        // parfois **imbrique** — la suppression d'un compte annule plusieurs combats dans une seule
+        // transaction proprietaire —, et la sortie de la transaction interne n'est alors qu'un
+        // relachement de point de sauvegarde. Sortir de la fermeture ne prouverait plus rien.
         $journal = [];
 
         $resultat = DB::transaction(function () use ($combatInstanceId, $cause, $note, $creerRetour, $now, &$journal): CombatCancellationOutcome {
@@ -310,9 +315,10 @@ final class CombatCancellationService
             return CombatCancellationOutcome::cancelled($rendues, $dejaParties, $renfortsRendus);
         });
 
-        // Le commit a eu lieu : ce que la ligne affirme est vrai.
         if ($journal !== []) {
-            Log::warning('Combat durable annule.', $journal);
+            DB::afterCommit(static function () use ($journal): void {
+                Log::warning('Combat durable annule.', $journal);
+            });
         }
 
         return $resultat;
