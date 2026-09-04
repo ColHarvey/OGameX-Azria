@@ -99,8 +99,14 @@ jobs:
       # **Une seule execution, sequentielle, avec son rapport.** Relancer trois fois la meme
       # selection ne prouve rien de plus, et lire du texte a la recherche du mot « ignore » se trompe
       # des qu'il apparait dans un nom d'essai.
+      # La sortie console est conservee dans l'artefact : un run rouge sans JUnit ne laissait
+      # aucun moyen de nommer l'essai fautif sans se connecter a GitHub. Le code de sortie reste
+      # celui du lanceur, jamais celui de tee.
       - name: Executer le groupe du moteur
-        run: php scripts/suite.php --sequentiel --filter Rust --log-junit=storage/logs/junit-rust.xml
+        shell: bash
+        run: |
+          set -o pipefail
+          php scripts/suite.php --sequentiel --filter Rust --log-junit=storage/logs/junit-rust.xml 2>&1 | tee storage/logs/console-rust.txt
 
       # C'est ici que le workflow gagne son sens : ces essais sont **ignores** partout ailleurs faute
       # de bibliotheque. Un code de sortie vert ne suffit pas — une suite entierement sautee sort
@@ -109,7 +115,10 @@ jobs:
         run: php scripts/verifier-junit.php storage/logs/junit-rust.xml --minimum=30 --sans-ignores
 
       - name: Executer la suite complete
-        run: php scripts/suite.php --sequentiel --log-junit=storage/logs/junit-suite.xml
+        shell: bash
+        run: |
+          set -o pipefail
+          php scripts/suite.php --sequentiel --log-junit=storage/logs/junit-suite.xml 2>&1 | tee storage/logs/console-suite.txt
 
       - name: Exiger une suite sans ignore
         run: php scripts/verifier-junit.php storage/logs/junit-suite.xml --sans-ignores
@@ -141,5 +150,8 @@ jobs:
           path: |
             storage/logs/junit-rust.xml
             storage/logs/junit-suite.xml
+            storage/logs/console-rust.txt
+            storage/logs/console-suite.txt
+            storage/logs/laravel.log
             /tmp/so.txt
             /tmp/so-sha256.txt
