@@ -207,7 +207,7 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
         $this->assertSame(0, FleetMission::query()->where('parent_id', $renfort->id)->count());
 
         // Le combat fini, son stationnement expire est traite.
-        $issue = resolve(AttackMission::class)->cancelPersistentCombat($combat->id, CombatCancellationCause::AdministrativeDecision, $ouverture + 41);
+        $issue = resolve(AttackMission::class)->cancelPersistentCombat($combat->id, CombatCancellationCause::AdministrativeDecision, 'essai', $ouverture + 41);
         $this->assertTrue($issue->cancelled);
 
         resolve(FleetMissionService::class)->updateMission($renfort->refresh());

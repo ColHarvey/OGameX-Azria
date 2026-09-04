@@ -26,6 +26,7 @@ use OGame\Combat\Support\ReturnOrder;
 use OGame\Combat\Support\SealedResourceDiagnostics;
 use OGame\Enums\FleetMissionStatus;
 use OGame\Enums\FleetSpeedType;
+use OGame\Factories\GameMissionFactory;
 use OGame\GameMissions\Abstracts\GameMission;
 use OGame\GameMissions\BattleEngine\BattleEngineFactory;
 use OGame\GameMissions\Models\MissionPossibleStatus;
@@ -133,13 +134,20 @@ class AttackMission extends GameMission
      * sa fermeture a l'annulation comme elle la prete au reglement, et rien d'autre ne cree de
      * retour en son nom.
      */
-    public function cancelPersistentCombat(int $combatInstanceId, CombatCancellationCause $cause, int $now): CombatCancellationOutcome
+    public function cancelPersistentCombat(int $combatInstanceId, CombatCancellationCause $cause, string $note, int $now): CombatCancellationOutcome
     {
         return resolve(CombatCancellationService::class)->cancel(
             $combatInstanceId,
             $cause,
-            function (FleetMission $retourDe, Resources $ressources, UnitCollection $unites, int $duree, int $departA, ResolvedReturnDestination $ou): void {
-                $this->startReturn($retourDe, $ressources, $unites, 0, null, $duree, $departA, $ou);
+            $note,
+            // **Chaque genre de mission cree son propre retour.** Une Defense ACS inscrite rentre par
+            // le meme chemin qu'une attaquante, mais c'est son genre qui sait le faire — pas
+            // l'attaque, meme si le calcul se ressemble.
+            function (FleetMission $retourDe, int $duree, int $departA, ResolvedReturnDestination $ou): void {
+                GameMissionFactory::getMissionById((int)$retourDe->mission_type, [
+                    'fleetMissionService' => $this->fleetMissionService,
+                    'messageService' => $this->messageService,
+                ])->returnFromACancelledCombat($retourDe, $duree, $departA, $ou);
             },
             $now,
         );

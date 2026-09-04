@@ -32,6 +32,8 @@ use OGame\Combat\Enums\CombatState;
  * @property int $id
  * @property CombatState $status
  * @property CombatCancellationCause|null $cancellation_cause
+ * @property string|null $cancellation_note Ce que l'administrateur a ecrit en annulant.
+ * @property int|null $cancelled_at L'instant de l'annulation, en secondes.
  * @property int $mission_id
  * @property int|null $union_id
  * @property int|null $target_planet_id
@@ -93,6 +95,8 @@ use OGame\Combat\Enums\CombatState;
 #[Fillable([
     'status',
     'cancellation_cause',
+    'cancellation_note',
+    'cancelled_at',
     'mission_id',
     'union_id',
     'target_planet_id',

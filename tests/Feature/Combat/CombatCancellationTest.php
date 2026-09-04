@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Combat;
 
+use Closure;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Date;
@@ -33,6 +34,7 @@ use OGame\Models\FleetMission;
 use OGame\Models\Planet;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
+use OGame\Models\User;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
 use OGame\Services\SettingsService;
@@ -226,7 +228,7 @@ class CombatCancellationTest extends FleetDispatchTestCase
         $this->assertArrayHasKey($combat->id, $this->advanceAt($avanceur, (int)$combat->ends_at)->failures, 'A resumed combat was not attempted again.');
 
         // L'annulation le sort de la quarantaine pour de bon.
-        $this->assertSame(Command::SUCCESS, Artisan::call('ogamex:combat:annuler', ['combat' => $combat->id, '--cause' => 'inconsistent_snapshot']));
+        $this->assertSame(Command::SUCCESS, Artisan::call('ogamex:combat:annuler', ['combat' => $combat->id, '--cause' => 'inconsistent_snapshot', '--note' => 'quarantaine sans issue apres cinq echecs']));
         $combat->refresh();
         $this->assertSame(CombatState::Cancelled, $combat->status);
         $this->assertSame(0, $this->advanceAt($avanceur, (int)$combat->ends_at)->quarantined, 'A cancelled combat is still counted as waiting for an operator.');
@@ -239,12 +241,158 @@ class CombatCancellationTest extends FleetDispatchTestCase
     {
         [$combat] = $this->anActiveCombat();
 
-        $this->assertSame(Command::FAILURE, Artisan::call('ogamex:combat:annuler', ['combat' => $combat->id, '--cause' => 'parce_que']));
+        $this->assertSame(Command::FAILURE, Artisan::call('ogamex:combat:annuler', ['combat' => $combat->id, '--cause' => 'parce_que', '--note' => 'n importe']));
         $combat->refresh();
         $this->assertSame(CombatState::Active, $combat->status, 'An unknown cause cancelled the combat anyway.');
 
-        $this->assertSame(Command::FAILURE, Artisan::call('ogamex:combat:annuler', ['combat' => 999_999]));
+        // **Ni cause ni note par defaut.** Une cause implicite ferait annuler sans dire pourquoi ;
+        // une note absente, sans dire ce qui a ete vu.
+        $this->assertSame(Command::FAILURE, Artisan::call('ogamex:combat:annuler', ['combat' => $combat->id, '--note' => 'sans cause']));
+        $this->assertSame(CombatState::Active, $combat->refresh()->status, 'A cancellation without a cause went through.');
+
+        $this->assertSame(Command::FAILURE, Artisan::call('ogamex:combat:annuler', ['combat' => $combat->id, '--cause' => 'administrative_decision']));
+        $this->assertSame(CombatState::Active, $combat->refresh()->status, 'A cancellation without a note went through.');
+
+        $this->assertSame(Command::FAILURE, Artisan::call('ogamex:combat:annuler', ['combat' => $combat->id, '--cause' => 'administrative_decision', '--note' => '   ']));
+        $this->assertSame(CombatState::Active, $combat->refresh()->status, 'A blank note counted as a note.');
+
+        $this->assertSame(Command::FAILURE, Artisan::call('ogamex:combat:annuler', ['combat' => 999_999, '--cause' => 'administrative_decision', '--note' => 'inconnu']));
         $this->assertSame(Command::FAILURE, Artisan::call('ogamex:combat:reprendre', ['combat' => 999_999]));
+    }
+
+    /**
+     * L'annulation laisse une trace complete : cause, note, instant, empreinte abandonnee, avis a la cible.
+     *
+     * Une annulation qu'on ne retrouve pas apres coup n'est pas une sortie d'exploitation, c'est une
+     * disparition. La note est ce que l'administrateur a vu ; l'empreinte relie l'annulation aux
+     * faits geles qu'elle ecarte ; la cible apprend que le corps est libre, et pourquoi.
+     */
+    public function testACancellationLeavesItsFullAuditTrail(): void
+    {
+        [$combat, $mission, $cible] = $this->anActiveCombat();
+        $empreinte = $combat->frozen_facts_fingerprint;
+        $this->assertNotNull($empreinte, 'The combat has no frozen facts fingerprint: nothing would be linked.');
+
+        $instant = (int)$combat->ends_at;
+        $issue = resolve(AttackMission::class)->cancelPersistentCombat($combat->id, CombatCancellationCause::InconsistentSnapshot, '  photographie sans effectif, vue au journal  ', $instant);
+        $this->assertTrue($issue->cancelled);
+
+        $combat->refresh();
+        $this->assertSame(CombatCancellationCause::InconsistentSnapshot, $combat->cancellation_cause);
+        $this->assertSame('photographie sans effectif, vue au journal', $combat->cancellation_note, 'The note was not persisted trimmed.');
+        $this->assertSame($instant, (int)$combat->cancelled_at);
+
+        foreach ([
+            'la flotte' => CombatParticipantKey::forFleet($mission->id),
+            'la cible' => CombatParticipantKey::forPlanet($cible->getPlanetId()),
+        ] as $qui => $cle) {
+            $avis = CombatOutboxMessage::query()
+                ->where('combat_instance_id', $combat->id)
+                ->where('participant_key', $cle)
+                ->where('kind', CombatOutboxKind::CombatCancelled->value)
+                ->first();
+
+            $this->assertNotNull($avis, "No cancellation notice for {$qui}.");
+            $charge = $avis->payload ?? [];
+            $this->assertSame(CombatCancellationCause::InconsistentSnapshot->value, $charge['cause'] ?? null, "The notice for {$qui} does not carry the cause.");
+            $this->assertSame('photographie sans effectif, vue au journal', $charge['note'] ?? null, "The notice for {$qui} does not carry the note.");
+            $this->assertSame($instant, $charge['cancelled_at'] ?? null, "The notice for {$qui} does not carry the instant.");
+            $this->assertSame($empreinte, $charge['abandoned_fingerprint'] ?? null, "The notice for {$qui} does not link the abandoned fingerprint.");
+        }
+    }
+
+    /**
+     * Une annulation sans note ne se fait pas.
+     */
+    public function testACancellationWithoutANoteIsRefused(): void
+    {
+        [$combat] = $this->anActiveCombat();
+
+        try {
+            resolve(AttackMission::class)->cancelPersistentCombat($combat->id, CombatCancellationCause::AdministrativeDecision, '   ', (int)$combat->ends_at);
+            $this->fail('A cancellation without a note went through.');
+        } catch (RuntimeException $refus) {
+            $this->assertStringContainsString('note', $refus->getMessage());
+        }
+
+        $this->assertSame(CombatState::Active, $combat->refresh()->status);
+    }
+
+    /**
+     * Les renforts defensifs inscrits rentrent aussi, chacun par son genre de mission, et sont avises.
+     *
+     * La bataille etait calculee avec eux : les laisser stationner sur un corps qui ne tient plus
+     * de combat serait les oublier a moitie. Le retour d'une Defense ACS est celui de son genre —
+     * un retour de type 5 —, et son avis porte la meme cause que ceux des attaquantes.
+     */
+    public function testEnrolledDefensiveReinforcementsAreSentHomeAndTold(): void
+    {
+        $renfort = null;
+        [$combat, $mission] = $this->anActiveCombat(function (PlanetService $cible, int $ouverture) use (&$renfort): void {
+            // Pose sur le corps avant l'ouverture, pour longtemps : retenu a l'ouverture, admis a la
+            // fermeture, inscrit dans la photographie.
+            $renfort = $this->aDefensiveReinforcement($cible, $ouverture - 10, 100_000, $ouverture - 600);
+        });
+
+        if ($renfort === null) {
+            $this->fail('The reinforcement was never launched.');
+        }
+
+        $this->assertTrue(
+            $combat->participants()->where('fleet_mission_id', $renfort->id)->where('side', 'defender')->exists(),
+            'The reinforcement was not enrolled as a defender: nothing would be proved.'
+        );
+
+        $instant = (int)$combat->ends_at;
+        $issue = $this->cancel($combat, CombatCancellationCause::AdministrativeDecision);
+
+        $this->assertTrue($issue->cancelled);
+        $this->assertSame(1, $issue->fleetsSentHome, 'The attacking fleet count is wrong.');
+        $this->assertSame(1, $issue->defendersSentHome, 'The enrolled reinforcement was not counted as sent home.');
+
+        $renfort->refresh();
+        $this->assertSame(1, (int)$renfort->processed, 'The enrolled reinforcement stayed on a body that no longer holds a combat.');
+        $retour = FleetMission::query()->where('parent_id', $renfort->id)->first();
+        $this->assertNotNull($retour, 'The enrolled reinforcement was not sent home.');
+        $this->assertSame(5, (int)$retour->mission_type, 'The reinforcement return is not of its own kind.');
+        $this->assertSame($instant, (int)$retour->time_departure);
+        $this->assertSame((int)$renfort->planet_id_from, (int)$retour->planet_id_to);
+
+        $avis = CombatOutboxMessage::query()
+            ->where('combat_instance_id', $combat->id)
+            ->where('participant_key', CombatParticipantKey::forFleet($renfort->id))
+            ->where('kind', CombatOutboxKind::CombatCancelled->value)
+            ->first();
+        $this->assertNotNull($avis, 'The enrolled reinforcement was not told.');
+
+        unset($mission);
+    }
+
+    /**
+     * Une initiatrice qui n'est pas inscrite parmi les attaquants arrete l'annulation avant tout.
+     *
+     * L'effectif se verifie avant de changer d'etat : liberer un corps en pretendant avoir rendu un
+     * effectif qu'on ne sait pas decrire serait la perte silencieuse que ce chemin existe pour eviter.
+     */
+    public function testAnInitiatorMissingFromTheRosterStopsTheCancellationBeforeAnythingIsWritten(): void
+    {
+        [$combat, $mission] = $this->anActiveCombat();
+
+        $this->assertSame(1, $combat->participants()->where('fleet_mission_id', $mission->id)->delete(), 'The initiator was not enrolled: nothing would be proved.');
+
+        try {
+            $this->cancel($combat, CombatCancellationCause::AdministrativeDecision);
+            $this->fail('The cancellation went through on a roster that does not describe the combat.');
+        } catch (RuntimeException $refus) {
+            $this->assertStringContainsString('initiatrice', $refus->getMessage());
+        }
+
+        $combat->refresh();
+        $this->assertSame(CombatState::Active, $combat->status, 'The combat was made final on an unverifiable roster.');
+        $this->assertNull($combat->cancellation_cause);
+        $this->assertNotNull(CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->first(), 'The body was released.');
+        $this->assertSame(0, FleetMission::query()->where('parent_id', $mission->id)->count());
+        $this->assertSame(0, (int)$mission->refresh()->processed);
     }
 
     /**
@@ -272,7 +420,7 @@ class CombatCancellationTest extends FleetDispatchTestCase
         // production, et un depart passe pourrait s'y glisser sans que rien ne le dise.
         $annulation = $arriveeInitiale + 7_200;
         $this->travelTo(Date::createFromTimestamp($annulation));
-        $issue = resolve(AttackMission::class)->cancelPersistentCombat($combat->id, CombatCancellationCause::AdministrativeDecision, $annulation);
+        $issue = resolve(AttackMission::class)->cancelPersistentCombat($combat->id, CombatCancellationCause::AdministrativeDecision, 'essai', $annulation);
         $this->assertTrue($issue->cancelled, 'The cancellation did nothing: ' . $issue->reason);
 
         $retour = FleetMission::query()->where('parent_id', $mission->id)->first();
@@ -352,7 +500,8 @@ class CombatCancellationTest extends FleetDispatchTestCase
             (new CombatCancellationService())->cancel(
                 $combat->id,
                 CombatCancellationCause::AdministrativeDecision,
-                function (FleetMission $retourDe, Resources $ressources, UnitCollection $unites, int $duree, int $departA, ResolvedReturnDestination $ou) use (&$appels, &$premierRetour): void {
+                'essai',
+                function (FleetMission $retourDe, int $duree, int $departA, ResolvedReturnDestination $ou) use (&$appels, &$premierRetour): void {
                     $appels++;
 
                     if ($appels === 2) {
@@ -382,10 +531,10 @@ class CombatCancellationTest extends FleetDispatchTestCase
                         'mission_type' => $retourDe->mission_type,
                         'time_departure' => $departA,
                         'time_arrival' => $departA + $duree,
-                        'light_fighter' => $unites->getAmountByMachineName('light_fighter'),
-                        'metal' => (int)$ressources->metal->get(),
-                        'crystal' => (int)$ressources->crystal->get(),
-                        'deuterium' => (int)$ressources->deuterium->get(),
+                        'light_fighter' => (int)$retourDe->light_fighter,
+                        'metal' => (int)$retourDe->metal,
+                        'crystal' => (int)$retourDe->crystal,
+                        'deuterium' => (int)$retourDe->deuterium,
                     ]);
 
                     $premierRetour = $retour->id;
@@ -525,6 +674,7 @@ class CombatCancellationTest extends FleetDispatchTestCase
             (new CombatCancellationService(destinations: new ReturnDestinationResolver($planificateur)))->cancel(
                 $combat->id,
                 CombatCancellationCause::AdministrativeDecision,
+                'essai',
                 function (): void {
                     $this->fail('A return was created though the destination had moved.');
                 },
@@ -650,6 +800,7 @@ class CombatCancellationTest extends FleetDispatchTestCase
             (new CombatCancellationService(destinations: new ReturnDestinationResolver($planificateur)))->cancel(
                 $combat->id,
                 CombatCancellationCause::AdministrativeDecision,
+                'essai',
                 function (): void {
                     $this->fail('A return was created though the facts behind the fallback had changed.');
                 },
@@ -767,7 +918,7 @@ class CombatCancellationTest extends FleetDispatchTestCase
      *
      * @return array{0: CombatInstance, 1: FleetMission, 2: PlanetService}
      */
-    private function anActiveCombat(): array
+    private function anActiveCombat(Closure|null $avantOuverture = null): array
     {
         for ($i = 0; $i < 6; $i++) {
             $this->createAndLoginUser();
@@ -800,11 +951,65 @@ class CombatCancellationTest extends FleetDispatchTestCase
         ]);
         $cible->reloadPlanet();
 
+        if ($avantOuverture !== null) {
+            $avantOuverture($cible, (int)$mission->time_arrival);
+        }
+
         $combat = (new CombatOpeningService())->openOrJoin($mission, $cible->getPlanetId(), (int)$mission->time_arrival);
         $combat->refresh();
         $this->assertSame(CombatState::Active, $combat->status, 'A lone attacker did not close its own rally.');
 
         return [$combat, $mission, $cible];
+    }
+
+    /**
+     * Une Defense ACS d'un autre joueur, posee ou en route vers la cible.
+     */
+    private function aDefensiveReinforcement(PlanetService $cible, int $physicalArrival, int $holding, int $departsAt): FleetMission
+    {
+        $proprietaire = (int)DB::table('planets')->where('id', $cible->getPlanetId())->value('user_id');
+        $allie = User::query()
+            ->where('is_npc', false)
+            ->where('vacation_mode', false)
+            ->where('username', '!=', User::SYSTEM_ACCOUNT_USERNAME)
+            ->whereNotIn('id', [$this->currentUserId, $proprietaire])
+            ->orderByDesc('id')
+            ->first();
+
+        if ($allie === null) {
+            $this->fail('No third player exists to send a reinforcement.');
+        }
+
+        $origine = Planet::query()->where('user_id', $allie->id)->orderBy('id')->first();
+
+        if ($origine === null) {
+            $this->fail('The ally owns no planet.');
+        }
+
+        $coordonnees = $cible->getPlanetCoordinates();
+
+        return FleetMission::forceCreate([
+            'user_id' => $allie->id,
+            'planet_id_from' => $origine->id,
+            'type_from' => 1,
+            'galaxy_from' => $origine->galaxy,
+            'system_from' => $origine->system,
+            'position_from' => $origine->planet,
+            'planet_id_to' => $cible->getPlanetId(),
+            'type_to' => 1,
+            'galaxy_to' => $coordonnees->galaxy,
+            'system_to' => $coordonnees->system,
+            'position_to' => $coordonnees->position,
+            'mission_type' => 5,
+            'time_departure' => $departsAt,
+            'time_arrival' => $physicalArrival + $holding,
+            'time_holding' => $holding,
+            'processed_hold' => 1,
+            'light_fighter' => 5,
+            'metal' => 0,
+            'crystal' => 0,
+            'deuterium' => 0,
+        ]);
     }
 
     private function aSecondAttackAgainst(PlanetService $cible): FleetMission
@@ -830,7 +1035,7 @@ class CombatCancellationTest extends FleetDispatchTestCase
 
     private function cancel(CombatInstance $combat, CombatCancellationCause $cause): CombatCancellationOutcome
     {
-        return resolve(AttackMission::class)->cancelPersistentCombat($combat->id, $cause, (int)$combat->ends_at);
+        return resolve(AttackMission::class)->cancelPersistentCombat($combat->id, $cause, 'resultat fige illisible, constate a la main', (int)$combat->ends_at);
     }
 
     /**

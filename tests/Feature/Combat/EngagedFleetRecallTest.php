@@ -141,22 +141,38 @@ class EngagedFleetRecallTest extends FleetDispatchTestCase
     }
 
     /**
-     * Le combat termine, le renfort en stationnement se rappelle de nouveau : la regle ne lui survit pas.
+     * Le combat annule, le renfort inscrit est deja rentre par l'annulation ; un rappel n'y ajoute rien.
+     *
+     * ## Ce que la regle devient quand le combat finit
+     *
+     * Une premiere version de cet essai rappelait le renfort apres l'annulation et attendait qu'il
+     * parte. L'annulation rend maintenant l'effectif des deux camps : le renfort inscrit rentre par
+     * elle, avec sa cause, comme les attaquantes. La regle « une engagee ne se rappelle pas » ne
+     * survit pas au combat — mais il n'y a plus rien a rappeler, et un rappel apres coup ne doit
+     * surtout pas creer un second retour.
      */
-    public function testOnceTheCombatIsOverTheReinforcementCanBeRecalledAgain(): void
+    public function testOnceTheCombatIsCancelledTheReinforcementIsAlreadyHomeBoundAndARecallAddsNothing(): void
     {
         [$combat, $renfort, $ouverture] = $this->aClosedCombatWithADefendingReinforcement();
 
-        $issue = resolve(AttackMission::class)->cancelPersistentCombat($combat->id, CombatCancellationCause::AdministrativeDecision, $ouverture + 30);
+        $issue = resolve(AttackMission::class)->cancelPersistentCombat($combat->id, CombatCancellationCause::AdministrativeDecision, 'essai', $ouverture + 30);
         $this->assertTrue($issue->cancelled, 'The combat could not be cancelled: ' . $issue->reason);
         $this->assertSame(CombatState::Cancelled, $combat->refresh()->status);
-
-        $this->travelTo(Date::createFromTimestamp($ouverture + 10));
-        resolve(FleetMissionService::class)->cancelMission($renfort);
+        $this->assertSame(1, $issue->defendersSentHome, 'The cancellation did not send the enrolled reinforcement home.');
 
         $renfort->refresh();
-        $this->assertSame(1, (int)$renfort->canceled, 'A reinforcement of a combat that is over is still held: the rule outlived the combat.');
-        $this->assertSame(1, FleetMission::query()->where('parent_id', $renfort->id)->count(), 'The recalled reinforcement is not coming home.');
+        $this->assertSame(1, (int)$renfort->processed, 'The enrolled reinforcement stayed on the body after the cancellation.');
+        $this->assertSame(0, (int)$renfort->canceled, 'The cancellation was recorded as a player recall.');
+        $this->assertSame(1, FleetMission::query()->where('parent_id', $renfort->id)->count(), 'The reinforcement is not coming home.');
+        $this->assertSame($ouverture + 30, (int)FleetMission::query()->where('parent_id', $renfort->id)->value('time_departure'), 'The return does not leave at the cancellation instant.');
+
+        // Un rappel apres coup : rien de plus, surtout pas un second retour.
+        $this->travelTo(Date::createFromTimestamp($ouverture + 40));
+        resolve(FleetMissionService::class)->cancelMission($renfort->refresh());
+
+        $renfort->refresh();
+        $this->assertSame(0, (int)$renfort->canceled, 'A recall after the cancellation was accepted on a fleet already home-bound.');
+        $this->assertSame(1, FleetMission::query()->where('parent_id', $renfort->id)->count(), 'A recall after the cancellation doubled the return.');
     }
 
     /**

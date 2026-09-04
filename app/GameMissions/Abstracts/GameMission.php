@@ -524,6 +524,27 @@ abstract class GameMission
     }
 
     /**
+     * Le retour d'une flotte dont le combat a ete annule : ce qu'elle portait, de l'instant de
+     * l'annulation, pour la duree de son aller, la ou le plan de recours la fait atterrir.
+     *
+     * Appele par l'annulation, sous ses verrous, pour chaque genre de mission inscrit — attaque
+     * simple, attaque groupee, Defense ACS. Rien n'est applique : la flotte rentre entiere.
+     */
+    public function returnFromACancelledCombat(FleetMission $tenue, int $duree, int $departAt, ResolvedReturnDestination $ou): void
+    {
+        $this->startReturn(
+            $tenue,
+            $this->fleetMissionService->getResources($tenue),
+            $this->fleetMissionService->getFleetUnits($tenue),
+            0,
+            null,
+            $duree,
+            $departAt,
+            $ou
+        );
+    }
+
+    /**
      * Ce que ce genre de mission sait faire, et rien de plus : creer le retour qu'un ordre decrit.
      *
      * La destination et l'instant de depart sont imposes par l'ordre ; le protocole verifie ensuite

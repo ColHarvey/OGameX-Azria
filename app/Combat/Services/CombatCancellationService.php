@@ -10,13 +10,13 @@ use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Exceptions\UnreturnableFleet;
 use OGame\Combat\Support\CombatParticipantKey;
+use OGame\GameMissions\Models\ResolvedReturnDestination;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatOutboxMessage;
 use OGame\Models\CombatParticipant;
 use OGame\Models\FleetMission;
 use OGame\Models\FleetUnion;
-use OGame\Services\FleetMissionService;
 use RuntimeException;
 
 /**
@@ -42,9 +42,20 @@ use RuntimeException;
  *
  * ## Audite
  *
- * La cause est persistee sur l'instance, chaque flotte renvoyee recoit un message avec cette
- * cause, et une ligne de journal nomme le combat, la cause et les flottes rendues. Une annulation
- * qu'on ne retrouve pas apres coup n'est pas une sortie d'exploitation, c'est une disparition.
+ * La cause, la note de l'administrateur et l'instant sont persistes sur l'instance, a cote de
+ * l'empreinte des faits geles que l'annulation abandonne. Chaque flotte renvoyee — attaquante ou
+ * renfort defensif — recoit un avis avec la cause et la note ; la cible aussi. Une ligne de journal
+ * nomme le combat, la cause, la note, l'empreinte abandonnee et les flottes rendues de chaque camp.
+ * Une annulation qu'on ne retrouve pas apres coup n'est pas une sortie d'exploitation, c'est une
+ * disparition.
+ *
+ * ## L'effectif se verifie avant de changer d'etat
+ *
+ * Les flottes a rendre sont celles que la photographie a inscrites, des deux camps, plus rien. Une
+ * initiatrice qui n'y figure pas, ou une inscrite dont la mission n'existe plus, est une
+ * contradiction : l'annulation s'arrete avant d'ecrire, le corps reste tenu, et l'exploitation lit
+ * pourquoi. Liberer un corps en pretendant avoir rendu un effectif qu'on ne sait pas decrire serait
+ * la perte silencieuse que ce chemin existe pour eviter.
  *
  * ## L'ordre des verrous
  *
@@ -58,20 +69,25 @@ final class CombatCancellationService
     public function __construct(
         private CombatRosterReader $roster = new CombatRosterReader(),
         private ReturnDestinationResolver $destinations = new ReturnDestinationResolver(),
-        private FleetMissionService|null $fleetMissions = null,
     ) {
     }
 
     /**
      * Annule le combat, ou explique pourquoi il n'y avait rien a annuler.
      *
-     * @param Closure $creerRetour Cree une mission retour ; delegue a GameMission::startReturn(),
-     *                              en lui donnant la duree du trajet aller, l'instant du depart et le
-     *                              corps ou le plan de repli fait atterrir la flotte.
+     * @param string $note Ce que l'administrateur a constate. **Jamais vide** : une annulation sans
+     *                     note est une annulation dont personne ne saura la raison concrete.
+     * @param Closure(FleetMission, int, int, ResolvedReturnDestination): void $creerRetour Cree la
+     *        mission retour d'une flotte tenue : la duree du trajet aller, l'instant du depart et le
+     *        corps ou le plan de repli la fait atterrir lui sont imposes.
      */
-    public function cancel(int $combatInstanceId, CombatCancellationCause $cause, Closure $creerRetour, int $now): CombatCancellationOutcome
+    public function cancel(int $combatInstanceId, CombatCancellationCause $cause, string $note, Closure $creerRetour, int $now): CombatCancellationOutcome
     {
-        return DB::transaction(function () use ($combatInstanceId, $cause, $creerRetour, $now): CombatCancellationOutcome {
+        if (trim($note) === '') {
+            throw new RuntimeException('Une annulation exige une note d exploitation : rien n est annule sans dire ce qui a ete constate.');
+        }
+
+        return DB::transaction(function () use ($combatInstanceId, $cause, $note, $creerRetour, $now): CombatCancellationOutcome {
             $barriere = CelestialBodyCombatBarrier::query()
                 ->where('combat_instance_id', $combatInstanceId)
                 ->lockForUpdate()
@@ -100,10 +116,26 @@ final class CombatCancellationService
                 FleetUnion::query()->whereKey($combat->union_id)->lockForUpdate()->first();
             }
 
+            // **L'effectif des deux camps, tel que la photographie l'a inscrit.** Les renforts
+            // defensifs inscrits sont engages autant que les attaquantes : la bataille etait calculee
+            // avec eux, et une sortie d'exploitation qui ne les rendrait pas les laisserait
+            // stationner sur un corps qui ne tient plus de combat.
             $attaquantes = $this->roster->missionIdsOf($combat, CombatParticipant::SIDE_ATTACKER);
-            $identifiants = array_values(array_unique(array_merge($attaquantes, [(int)$combat->mission_id])));
+            $defensives = $this->roster->missionIdsOf($combat, CombatParticipant::SIDE_DEFENDER);
+
+            if (!in_array((int)$combat->mission_id, $attaquantes, true)) {
+                throw new RuntimeException(
+                    'La mission initiatrice ' . $combat->mission_id . ' n est pas inscrite parmi les attaquants du combat '
+                    . $combat->id . ' : l effectif ne se verifie pas, rien n est annule.'
+                );
+            }
+
+            $identifiants = array_values(array_unique(array_merge($attaquantes, $defensives)));
             sort($identifiants);
 
+            // Chaque inscrite existe : la cle etrangere de l'inscription l'impose, une mission
+            // inscrite ne se supprime pas. Il n'y a donc rien a verifier ici que la base ne
+            // garantisse deja.
             $missions = FleetMission::query()
                 ->whereIn('id', $identifiants)
                 ->orderBy('id')
@@ -172,13 +204,21 @@ final class CombatCancellationService
 
             $combat->status = CombatState::Cancelled;
             $combat->cancellation_cause = $cause;
+            $combat->cancellation_note = trim($note);
+            $combat->cancelled_at = $now;
             $combat->save();
+
+            // **L'empreinte que cette annulation abandonne.** Les faits geles a l'ouverture, et la
+            // bataille calculee sur eux, ne seront jamais appliques : l'avis et le journal portent
+            // leur empreinte pour que l'audit relie l'annulation a ce qu'elle a ecarte.
+            $empreinteAbandonnee = $combat->frozen_facts_fingerprint;
 
             // **Le corps se libere.** C'est tout l'objet : sans cela, l'annulation laisserait la
             // barriere qu'elle existe pour lever.
             $barriere?->delete();
 
             $rendues = 0;
+            $renfortsRendus = 0;
             $dejaParties = 0;
 
             foreach ($missions as $mission) {
@@ -199,13 +239,7 @@ final class CombatCancellationService
                         'kind' => CombatOutboxKind::CombatCancelled->value,
                     ],
                     [
-                        'payload' => [
-                            'cause' => $cause->value,
-                            'target_body_id' => $combat->target_planet_id,
-                            'galaxy' => $combat->galaxy,
-                            'system' => $combat->system,
-                            'position' => $combat->position,
-                        ],
+                        'payload' => $this->noticePayload($combat, $cause, $note, $now, $empreinteAbandonnee),
                         'available_at' => $now,
                     ]
                 );
@@ -219,33 +253,62 @@ final class CombatCancellationService
                 $mission->processed = 1;
                 $mission->save();
 
-                ($creerRetour)(
-                    $mission,
-                    $this->fleetMissions()->getResources($mission),
-                    $this->fleetMissions()->getFleetUnits($mission),
-                    $trajet,
-                    $now,
-                    $destination
-                );
+                ($creerRetour)($mission, $trajet, $now, $destination);
 
-                $rendues++;
+                if (in_array((int)$mission->id, $defensives, true)) {
+                    $renfortsRendus++;
+                } else {
+                    $rendues++;
+                }
             }
+
+            // **La cible l'apprend aussi.** Un combat qui disparait sans un mot laisse le defenseur
+            // devant un corps redevenu libre sans savoir pourquoi ; l'avis porte la meme cause, la
+            // meme note et la meme empreinte que ceux des flottes.
+            CombatOutboxMessage::query()->updateOrCreate(
+                [
+                    'combat_instance_id' => $combat->id,
+                    'participant_key' => CombatParticipantKey::forPlanet((int)$combat->target_planet_id),
+                    'kind' => CombatOutboxKind::CombatCancelled->value,
+                ],
+                [
+                    'payload' => $this->noticePayload($combat, $cause, $note, $now, $empreinteAbandonnee),
+                    'available_at' => $now,
+                ]
+            );
 
             Log::warning('Combat durable annule.', [
                 'combat_instance_id' => $combat->id,
                 'cause' => $cause->value,
+                'note' => trim($note),
+                'abandoned_fingerprint' => $empreinteAbandonnee,
                 'target_body_id' => $combat->target_planet_id,
                 'fleets_sent_home' => $rendues,
+                'defenders_sent_home' => $renfortsRendus,
                 'fleets_already_gone' => $dejaParties,
                 'at' => $now,
             ]);
 
-            return CombatCancellationOutcome::cancelled($rendues, $dejaParties);
+            return CombatCancellationOutcome::cancelled($rendues, $dejaParties, $renfortsRendus);
         });
     }
 
-    private function fleetMissions(): FleetMissionService
+    /**
+     * Ce que tout avis d'annulation porte : la cause, la note, l'instant, l'empreinte abandonnee.
+     *
+     * @return array<string, mixed>
+     */
+    private function noticePayload(CombatInstance $combat, CombatCancellationCause $cause, string $note, int $now, string|null $empreinteAbandonnee): array
     {
-        return $this->fleetMissions ??= resolve(FleetMissionService::class);
+        return [
+            'cause' => $cause->value,
+            'note' => trim($note),
+            'cancelled_at' => $now,
+            'abandoned_fingerprint' => $empreinteAbandonnee,
+            'target_body_id' => $combat->target_planet_id,
+            'galaxy' => $combat->galaxy,
+            'system' => $combat->system,
+            'position' => $combat->position,
+        ];
     }
 }
