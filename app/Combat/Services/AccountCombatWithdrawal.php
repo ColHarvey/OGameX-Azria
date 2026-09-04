@@ -3,10 +3,12 @@
 namespace OGame\Combat\Services;
 
 use OGame\Combat\Enums\CombatCancellationCause;
+use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Enums\CombatState;
 use OGame\GameMissions\AttackMission;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatParticipant;
+use OGame\Models\FleetMission;
 use RuntimeException;
 
 /**
@@ -44,9 +46,16 @@ final class AccountCombatWithdrawal
         $ouverts = CombatInstance::query()
             ->whereIn('status', array_map(static fn (CombatState $etat): string => $etat->value, self::statesStillRunning()))
             ->where(function ($requete) use ($userId, $planetIds): void {
+                // **Les deux liens, pas seulement l'inscription.** Avant la fermeture personne
+                // n'est inscrit : un combat en ralliement ouvert par ce compte n'aurait ete
+                // trouve par aucune de ces deux premieres conditions. Ses missions auraient ete
+                // effacees, le combat serait reste avec une initiatrice qui n'existe plus, et sa
+                // barriere aurait tenu le corps pour toujours — la colonne du lien n'a pas de cle
+                // etrangere qui aurait arrete la suppression.
                 $requete
                     ->whereIn('target_planet_id', $planetIds)
-                    ->orWhereIn('id', CombatParticipant::query()->select('combat_instance_id')->where('player_id', $userId));
+                    ->orWhereIn('id', CombatParticipant::query()->select('combat_instance_id')->where('player_id', $userId))
+                    ->orWhereIn('id', FleetMission::query()->select('combat_instance_id')->whereNotNull('combat_instance_id')->where('user_id', $userId));
             })
             ->orderBy('id')
             ->get();
@@ -54,6 +63,16 @@ final class AccountCombatWithdrawal
         $annules = 0;
 
         foreach ($ouverts as $combat) {
+            // **Un combat en cours d'application ne s'annule pas** — la machine d'etats le refuse,
+            // et elle a raison : des ecritures sont en train de partir. Le dire ici, plutot que de
+            // laisser l'annulation echouer sur un message qui parle d'etats.
+            if ($combat->status === CombatState::Resolving) {
+                throw new RuntimeException(
+                    'Le combat ' . $combat->id . ' est en cours d application : la suppression du compte ' . $userId
+                    . ' attend qu il soit final.'
+                );
+            }
+
             $cause = $this->causeFor($combat, $userId, $planetIds);
 
             $issue = resolve(AttackMission::class)->cancelPersistentCombat(
@@ -87,6 +106,19 @@ final class AccountCombatWithdrawal
             ->exists();
 
         if ($attaquant) {
+            return CombatCancellationCause::AttackerRemoved;
+        }
+
+        // **Pendant le ralliement, le camp se lit du genre de la mission retenue.** La
+        // photographie n'est pas encore prise ; c'est la meme lecture que fait l'effectif de
+        // l'annulation, et la meme enumeration exhaustive qui la porte.
+        $retenues = FleetMission::query()
+            ->where('combat_instance_id', $combat->id)
+            ->where('user_id', $userId)
+            ->pluck('mission_type')
+            ->map(static fn (mixed $type): CombatMissionKind => CombatMissionKind::fromMissionType((int)$type));
+
+        if ($retenues->isNotEmpty() && $retenues->every(static fn (CombatMissionKind $genre): bool => !$genre->reinforcesTheDefence())) {
             return CombatCancellationCause::AttackerRemoved;
         }
 

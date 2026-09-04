@@ -7,10 +7,12 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use OGame\Combat\Enums\CombatCancellationCause;
 use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Exceptions\FleetHasNowhereToReturn;
+use OGame\Combat\Exceptions\IncoherentCombatEnrolment;
 use OGame\Combat\Exceptions\ReturnDestinationMoved;
 use OGame\Combat\Exceptions\UnreturnableFleet;
 use OGame\Combat\Services\CombatCancellationOutcome;
@@ -371,6 +373,210 @@ class CombatCancellationTest extends FleetDispatchTestCase
     }
 
     /**
+     * Une flotte disparue de l'effectif arrete l'annulation, quel que soit son camp.
+     *
+     * ## Ce que la cle etrangere ne disait pas
+     *
+     * L'inscription pointe vers une mission, et la base impose que ce pointeur soit valide. Elle
+     * n'impose pas qu'il en reste un : une mission effacee laisse son inscription avec un lien vide.
+     * La lecture ecartait ces lignes-la, donc un effectif ampute — une attaquante secondaire, un
+     * renfort defensif — passait pour complet. Le combat etait annule, le corps libere, et la flotte
+     * manquante n'etait rendue par personne, sans que rien ne le dise.
+     *
+     * L'initiatrice, elle, etait verifiee : c'est precisement ce qui rendait le trou invisible.
+     */
+    public function testAnEnrolmentThatLostItsFleetStopsTheCancellation(): void
+    {
+        foreach ([CombatParticipant::SIDE_ATTACKER, CombatParticipant::SIDE_DEFENDER] as $camp) {
+            [$combat, $mission, $cible] = $this->anActiveCombat();
+
+            $seconde = $this->aDefensiveReinforcement($cible, (int)$combat->started_at, 3_600, (int)$combat->started_at - 600);
+            CombatParticipant::forceCreate([
+                'combat_instance_id' => $combat->id,
+                'participant_key' => CombatParticipantKey::forFleet($seconde->id),
+                'player_id' => $seconde->user_id,
+                'fleet_mission_id' => $seconde->id,
+                'side' => $camp,
+                'participant_type' => CombatParticipant::TYPE_ACS_DEFEND,
+            ]);
+
+            // Ce que la suppression d'un compte laisse derriere elle : l'inscription sans sa flotte.
+            DB::table('combat_participants')
+                ->where('combat_instance_id', $combat->id)
+                ->where('fleet_mission_id', $seconde->id)
+                ->update(['fleet_mission_id' => null]);
+
+            try {
+                $this->cancel($combat, CombatCancellationCause::AdministrativeDecision);
+                $this->fail("A combat missing a {$camp} fleet from its roster was cancelled anyway.");
+            } catch (IncoherentCombatEnrolment $refus) {
+                $this->assertStringContainsString('n existe plus', $refus->getMessage());
+            }
+
+            $this->nothingWasWritten($combat, $mission);
+        }
+    }
+
+    /**
+     * Une flotte retenue par le combat sans y etre inscrite arrete l'annulation.
+     *
+     * Liberer le corps la laisserait posee dessus : plus de combat pour la reclamer, plus de
+     * barriere pour la retenir, et aucun retour pour la ramener. L'inscription ne la nomme pas, donc
+     * personne ne la rendrait.
+     */
+    public function testAFleetHeldWithoutBeingEnrolledStopsTheCancellation(): void
+    {
+        [$combat, $mission, $cible] = $this->anActiveCombat();
+
+        $clandestine = $this->aDefensiveReinforcement($cible, (int)$combat->started_at, 3_600, (int)$combat->started_at - 600);
+        DB::table('fleet_missions')->where('id', $clandestine->id)->update(['combat_instance_id' => $combat->id]);
+
+        try {
+            $this->cancel($combat, CombatCancellationCause::AdministrativeDecision);
+            $this->fail('A combat holding a fleet it never enrolled was cancelled anyway.');
+        } catch (IncoherentCombatEnrolment $refus) {
+            $this->assertStringContainsString((string)$clandestine->id, $refus->getMessage());
+            $this->assertStringContainsString('sans figurer dans son effectif', $refus->getMessage());
+        }
+
+        $this->nothingWasWritten($combat, $mission);
+        $this->assertSame(0, (int)$clandestine->refresh()->processed, 'The unenrolled fleet was sent home by a cancellation that stopped.');
+    }
+
+    /**
+     * Une flotte inscrite dans les deux camps arrete l'annulation : un camp ne se devine pas.
+     */
+    public function testAFleetEnrolledOnBothSidesStopsTheCancellation(): void
+    {
+        [$combat, $mission] = $this->anActiveCombat();
+
+        CombatParticipant::forceCreate([
+            'combat_instance_id' => $combat->id,
+            'participant_key' => CombatParticipantKey::forFleet($mission->id) . ':double',
+            'player_id' => $mission->user_id,
+            'fleet_mission_id' => $mission->id,
+            'side' => CombatParticipant::SIDE_DEFENDER,
+            'participant_type' => CombatParticipant::TYPE_ACS_DEFEND,
+        ]);
+
+        try {
+            $this->cancel($combat, CombatCancellationCause::AdministrativeDecision);
+            $this->fail('A fleet enrolled on both sides was cancelled anyway.');
+        } catch (IncoherentCombatEnrolment $refus) {
+            $this->assertStringContainsString('inscrite plus d une fois', $refus->getMessage());
+        }
+
+        $this->nothingWasWritten($combat, $mission);
+    }
+
+    /**
+     * Une inscrite dont la mission est retenue par un autre combat arrete l'annulation.
+     *
+     * Les deux liens se contredisent : celui-ci la dit sienne, l'autre la retient. La rendre ferait
+     * disparaitre une flotte de la photographie d'une bataille qui, elle, sera bien appliquee.
+     */
+    public function testAnEnrolledFleetHeldByAnotherCombatStopsTheCancellation(): void
+    {
+        [$combat, $mission, $cible] = $this->anActiveCombat();
+
+        $ailleurs = CombatInstance::create([
+            'status' => CombatState::Rallying,
+            'mission_id' => $mission->id,
+            'target_planet_id' => $cible->getPlanetId(),
+            'target_type' => 1,
+            'galaxy' => $cible->getPlanetCoordinates()->galaxy,
+            'system' => $cible->getPlanetCoordinates()->system,
+            'position' => $cible->getPlanetCoordinates()->position,
+            'started_at' => (int)$combat->started_at,
+        ]);
+
+        DB::table('fleet_missions')->where('id', $mission->id)->update(['combat_instance_id' => $ailleurs->id]);
+
+        try {
+            $this->cancel($combat, CombatCancellationCause::AdministrativeDecision);
+            $this->fail('A fleet held by another combat was sent home by this one.');
+        } catch (IncoherentCombatEnrolment $refus) {
+            $this->assertStringContainsString('se contredisent', $refus->getMessage());
+        }
+
+        $this->nothingWasWritten($combat, $mission);
+    }
+
+    /**
+     * Un combat encore en ralliement s'annule : son effectif est ce qu'il retient.
+     *
+     * ## Le trou que la seule lecture des inscriptions ouvrait
+     *
+     * Personne n'est inscrit avant la fermeture — c'est elle qui prend la photographie. Exiger que
+     * l'initiatrice y figure rendait donc **toute** annulation d'un combat en ralliement impossible :
+     * la suppression d'un compte butait dessus, le corps restait tenu pour toujours, et la commande
+     * d'exploitation rendait la meme erreur. Pendant le ralliement, le lien porte seul l'effectif, et
+     * le camp se lit du genre de la mission.
+     */
+    public function testARallyingCombatIsCancelledOnTheFleetsItHolds(): void
+    {
+        [$combat, $mission] = $this->anActiveCombat();
+
+        // Le retour en ralliement : la photographie n'a pas encore ete prise, et la flotte est
+        // retenue par le lien que son arrivee pose — c'est tout l'etat d'un combat qui rallie.
+        $combat->participants()->delete();
+        DB::table('combat_instances')->where('id', $combat->id)->update(['status' => CombatState::Rallying->value]);
+        DB::table('fleet_missions')->where('id', $mission->id)->update(['combat_instance_id' => $combat->id]);
+        $combat->refresh();
+
+        $this->assertSame(0, $combat->participants()->count(), 'The roster survived: the scenario proves nothing.');
+        $this->assertSame($combat->id, (int)$mission->refresh()->combat_instance_id, 'The initiator is not held by the combat.');
+
+        $issue = $this->cancel($combat, CombatCancellationCause::AdministrativeDecision);
+
+        $this->assertTrue($issue->cancelled, 'A rallying combat could not be cancelled: its body would be held forever.');
+        $this->assertSame(1, $issue->fleetsSentHome, 'The held fleet was not counted as sent home.');
+        $this->assertSame(CombatState::Cancelled, $combat->refresh()->status);
+        $this->assertNull(CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->first(), 'The body is still held.');
+        $this->assertSame(1, (int)$mission->refresh()->processed);
+        $this->assertSame(1, FleetMission::query()->where('parent_id', $mission->id)->count(), 'The held fleet did not come home.');
+    }
+
+    /**
+     * Le journal de l'annulation s'ecrit apres le commit, jamais dedans.
+     *
+     * Une ligne posee dans la transaction survivrait a son annulation : l'exploitation lirait une
+     * annulation reussie et chercherait un combat qui, lui, tourne toujours.
+     */
+    public function testTheCancellationLineIsWrittenOnlyAfterTheCommit(): void
+    {
+        [$combat, $mission] = $this->anActiveCombat();
+
+        $niveaux = [];
+        Log::partialMock()
+            ->shouldReceive('warning')
+            ->andReturnUsing(function (mixed $message, mixed $contexte) use (&$niveaux): void {
+                if ($message === 'Combat durable annule.') {
+                    $niveaux[] = DB::transactionLevel();
+                }
+            });
+
+        $this->assertTrue($this->cancel($combat, CombatCancellationCause::AdministrativeDecision)->cancelled);
+
+        $this->assertSame([0], $niveaux, 'The cancellation line was written inside the transaction that could still roll back.');
+        unset($mission);
+    }
+
+    /**
+     * Rien n'a ete ecrit : le combat tient toujours son corps, et sa flotte n'a pas bouge.
+     */
+    private function nothingWasWritten(CombatInstance $combat, FleetMission $mission): void
+    {
+        $combat->refresh();
+        $this->assertSame(CombatState::Active, $combat->status, 'The combat was made final on an unverifiable roster.');
+        $this->assertNull($combat->cancellation_cause);
+        $this->assertNull($combat->cancelled_at);
+        $this->assertNotNull(CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->first(), 'The body was released.');
+        $this->assertSame(0, FleetMission::query()->where('parent_id', $mission->id)->count());
+        $this->assertSame(0, (int)$mission->refresh()->processed);
+    }
+
+    /**
      * Une initiatrice qui n'est pas inscrite parmi les attaquants arrete l'annulation avant tout.
      *
      * L'effectif se verifie avant de changer d'etat : liberer un corps en pretendant avoir rendu un
@@ -378,9 +584,25 @@ class CombatCancellationTest extends FleetDispatchTestCase
      */
     public function testAnInitiatorMissingFromTheRosterStopsTheCancellationBeforeAnythingIsWritten(): void
     {
-        [$combat, $mission] = $this->anActiveCombat();
+        [$combat, $mission, $cible] = $this->anActiveCombat();
 
         $this->assertSame(1, $combat->participants()->where('fleet_mission_id', $mission->id)->delete(), 'The initiator was not enrolled: nothing would be proved.');
+
+        // **Elle quitte les deux liens**, sinon c'est la flotte retenue sans inscription qui
+        // parle la premiere — un autre ecart, et l'essai ne prouverait pas celui-ci.
+        DB::table('fleet_missions')->where('id', $mission->id)->update(['combat_instance_id' => null]);
+
+        // Un second inscrit reste : un effectif entierement vide est un autre ecart encore.
+        $second = $this->aDefensiveReinforcement($cible, (int)$combat->started_at, 3_600, (int)$combat->started_at - 600);
+        DB::table('fleet_missions')->where('id', $second->id)->update(['combat_instance_id' => $combat->id]);
+        CombatParticipant::forceCreate([
+            'combat_instance_id' => $combat->id,
+            'participant_key' => CombatParticipantKey::forFleet($second->id),
+            'player_id' => $second->user_id,
+            'fleet_mission_id' => $second->id,
+            'side' => CombatParticipant::SIDE_DEFENDER,
+            'participant_type' => CombatParticipant::TYPE_ACS_DEFEND,
+        ]);
 
         try {
             $this->cancel($combat, CombatCancellationCause::AdministrativeDecision);
@@ -443,6 +665,97 @@ class CombatCancellationTest extends FleetDispatchTestCase
             'light_fighter' => 1,
         ]);
         $this->assertSame(0, CombatParticipant::query()->where('fleet_mission_id', $neuve->id)->count(), 'A brand-new mission inherited a former enrolment.');
+    }
+
+    /**
+     * Supprimer un compte dont le combat rallie encore l'annule aussi.
+     *
+     * ## Le corps que personne n'aurait libere
+     *
+     * Avant la fermeture, personne n'est inscrit : le retrait cherchait les combats par les
+     * inscriptions et par la cible, donc un combat en ralliement ouvert par ce compte n'etait trouve
+     * par aucune des deux. Ses missions etaient effacees — la colonne du lien n'a pas de cle
+     * etrangere qui l'aurait empeche —, le combat gardait une initiatrice qui n'existait plus, et sa
+     * barriere tenait le corps pour toujours.
+     */
+    public function testDeletingAnAccountWhoseCombatIsStillRallyingCancelsItToo(): void
+    {
+        [$combat, $mission] = $this->anActiveCombat();
+
+        // Le retour en ralliement, tel qu'il est avant la fermeture : aucune inscription, et la
+        // flotte retenue par le lien que son arrivee a pose.
+        $combat->participants()->delete();
+        DB::table('combat_instances')->where('id', $combat->id)->update(['status' => CombatState::Rallying->value]);
+        DB::table('fleet_missions')->where('id', $mission->id)->update(['combat_instance_id' => $combat->id]);
+        $combat->refresh();
+
+        $this->assertSame(0, $combat->participants()->count(), 'The roster survived: the scenario proves nothing.');
+
+        resolve(PlayerServiceFactory::class)->make($this->currentUserId, true)->delete();
+
+        $combat->refresh();
+        $this->assertSame(CombatState::Cancelled, $combat->status, 'A rallying combat outlived the account that opened it.');
+        $this->assertSame(CombatCancellationCause::AttackerRemoved, $combat->cancellation_cause);
+        $this->assertNull(
+            CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->first(),
+            'The barrier still holds a body for a combat whose opener no longer exists.'
+        );
+    }
+
+    /**
+     * L'audit d'un combat annule se relit sans aucun modele vivant.
+     *
+     * L'inscription garde sa cle, son camp et sa photographie ; l'instance garde la cause, la note,
+     * l'instant et l'empreinte des faits abandonnes ; l'avis reste lisible. Rien de tout cela ne
+     * demande la mission, qui n'existe plus.
+     */
+    public function testTheAuditOfACancelledCombatSurvivesTheDeletedAccount(): void
+    {
+        [$combat, $mission] = $this->anActiveCombat();
+
+        $empreinte = (string)$combat->frozen_facts_fingerprint;
+        $this->assertNotSame('', $empreinte, 'The combat has no fingerprint: nothing would be proved.');
+
+        resolve(PlayerServiceFactory::class)->make($this->currentUserId, true)->delete();
+
+        $combat->refresh();
+        $this->assertSame($empreinte, (string)$combat->frozen_facts_fingerprint, 'The abandoned facts lost their fingerprint.');
+        $this->assertNotNull($combat->cancelled_at, 'The cancellation lost its instant.');
+
+        $avis = CombatOutboxMessage::query()
+            ->where('combat_instance_id', $combat->id)
+            ->where('participant_key', CombatParticipantKey::forFleet($mission->id))
+            ->where('kind', CombatOutboxKind::CombatCancelled->value)
+            ->first();
+
+        $this->assertNotNull($avis, 'The notice of a deleted fleet was erased with its account.');
+        $this->assertSame($empreinte, (string)($avis->payload['abandoned_fingerprint'] ?? ''), 'The notice lost the fingerprint it was meant to carry.');
+    }
+
+    /**
+     * Un combat en cours d'application arrete la suppression du compte, et dit pourquoi.
+     *
+     * `Resolving` n'est pas final, donc la recherche le trouve — mais la machine d'etats refuse de
+     * l'annuler, et elle a raison : des ecritures sont en train de partir. Sans ce contrôle, la
+     * suppression echouait sur un message qui parle d'etats de combat a un administrateur venu
+     * effacer un compte.
+     */
+    public function testDeletingAnAccountWaitsForACombatThatIsBeingApplied(): void
+    {
+        [$combat, $mission] = $this->anActiveCombat();
+
+        DB::table('combat_instances')->where('id', $combat->id)->update(['status' => CombatState::Resolving->value]);
+        $combat->refresh();
+
+        try {
+            resolve(PlayerServiceFactory::class)->make($this->currentUserId, true)->delete();
+            $this->fail('An account was deleted while one of its combats was being applied.');
+        } catch (RuntimeException $refus) {
+            $this->assertStringContainsString('en cours d application', $refus->getMessage());
+        }
+
+        $this->assertSame(CombatState::Resolving, $combat->refresh()->status, 'The combat being applied was changed.');
+        $this->assertNotNull(FleetMission::query()->find($mission->id), 'The mission of a combat being applied was erased.');
     }
 
     /**

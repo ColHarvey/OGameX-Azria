@@ -9,6 +9,7 @@ use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\FleetDispositionKind;
 use OGame\Combat\Exceptions\ContradictoryRefusalNotice;
+use OGame\Combat\Exceptions\CorruptedResourceAmount;
 use OGame\Combat\Exceptions\FleetHasNowhereToReturn;
 use OGame\Combat\Exceptions\ReturnDoesNotMatchTheOrder;
 use OGame\Combat\Services\FleetDispositionRegistry;
@@ -25,6 +26,7 @@ use OGame\Models\FleetMission;
 use OGame\Models\FleetUnion;
 use OGame\Models\Planet;
 use OGame\Models\User;
+use OGame\Services\FleetMissionService;
 use Tests\TestCase;
 
 /**
@@ -470,6 +472,119 @@ class RefusedFleetHomecomingTest extends TestCase
     /**
      * La destination que l'ordre donnerait a une flotte dont l'origine est intacte.
      */
+    /**
+     * Une colonne economique abimee sur l'aller arrete le renvoi avant tout effet.
+     *
+     * ## Ce que le transtypage entier laissait passer
+     *
+     * La projection convertissait la cargaison par `(int)`, et `startReturn()` faisait exactement la
+     * meme chose sur l'enfant. Une cargaison de `10.9` devenait donc `10` **des deux cotes** : la
+     * comparaison etait satisfaite, et neuf dixiemes d'unite disparaissaient sans que rien ne le
+     * dise. Une valeur juste et une valeur fausse coincidaient, et l'essai qui les comparait ne
+     * prouvait rien.
+     *
+     * La frontiere economique refuse maintenant la colonne. Rien n'est appele, rien n'est cree, et
+     * la disposition reste a consommer : la flotte attend plutot que de rentrer amputee.
+     */
+    public function testAnEconomicColumnCarryingAFractionStopsTheHomecomingBeforeAnything(): void
+    {
+        $abimees = [
+            'metal' => 10.9,
+            'crystal' => 0.5,
+            'deuterium' => 7.25,
+            // Le carburant consomme entre dans le calcul du retour : une fraction dessus se
+            // propagerait au demi rendu, et le plancher la ferait disparaitre pareillement.
+            'deuterium_consumption' => 3.5,
+            // Une dette d'une unite ou plus n'est pas un artefact d'arrondi.
+            'light_fighter_cargo_negative' => -2.0,
+        ];
+
+        foreach ($abimees as $nom => $valeur) {
+            $colonne = $nom === 'light_fighter_cargo_negative' ? 'metal' : $nom;
+
+            [$combat, $mission] = $this->aCombatAndAFleet();
+            DB::table('fleet_missions')->where('id', $mission->id)->update([$colonne => $valeur]);
+            $mission->refresh();
+
+            $registre = new FleetDispositionRegistry();
+            $registre->record($combat, $mission->id, CombatReasonCode::RallyClosed, 1_700_000_600, FleetDispositionKind::ReturnToOrigin);
+
+            $appele = false;
+
+            try {
+                (new RefusedFleetHomecoming())->sendHome($mission, 1_700_000_900, function (FleetMission $tenue, ReturnOrder $ordre) use (&$appele): void {
+                    $appele = true;
+                    $this->aFaithfulReturnOf($tenue, $ordre);
+                });
+                $this->fail("A fleet whose {$colonne} column held {$valeur} was sent home anyway.");
+            } catch (CorruptedResourceAmount $refus) {
+                $this->assertStringContainsString($colonne, $refus->getMessage(), "The refusal did not name the {$colonne} column.");
+            }
+
+            $this->assertFalse($appele, "The creator ran although the {$colonne} column was already unusable.");
+            $this->assertSame(0, FleetMission::query()->where('parent_id', $mission->id)->count(), 'A return was created from a broken column.');
+            $this->assertSame(0, (int)$mission->refresh()->processed, 'The outbound leg was marked although nothing came home.');
+            $this->assertNotNull($registre->pendingFor($mission), 'The decision was consumed although nothing came home.');
+        }
+    }
+
+    /**
+     * La moitie du carburant rendue reste un demi legitime, et le plancher ne refuse pas le retour.
+     *
+     * ## Pourquoi ce demi-la n'est pas une donnee abimee
+     *
+     * `FleetMissionService::getResources()` rend la cargaison **plus la moitie du carburant
+     * consomme** — une regle du jeu, appliquee a tous les genres de mission depuis l'amont. Une
+     * consommation impaire y produit donc `x,5` legitimement. Refuser cette fraction refuserait un
+     * retour sur deux et laisserait des flottes posees sur le corps qu'elles doivent quitter : le
+     * controle porte sur ce que la base **porte**, pas sur ce que le calcul produit.
+     */
+    public function testTheHalfFuelGivenBackIsFlooredAndDoesNotRefuseTheReturn(): void
+    {
+        [$combat, $mission] = $this->aCombatAndAFleet();
+        DB::table('fleet_missions')->where('id', $mission->id)->update(['deuterium' => 100, 'deuterium_consumption' => 639]);
+        $mission->refresh();
+
+        // La valeur que le jeu fabrique ici est bien fractionnaire : sans cela l'essai ne prouverait rien.
+        $this->assertSame(419.5, resolve(FleetMissionService::class)->getResources($mission)->deuterium->get());
+
+        (new FleetDispositionRegistry())->record($combat, $mission->id, CombatReasonCode::RallyClosed, 1_700_000_600, FleetDispositionKind::ReturnToOrigin);
+
+        $this->assertTrue((new RefusedFleetHomecoming())->sendHome($mission, 1_700_000_900, function (FleetMission $tenue, ReturnOrder $ordre): void {
+            $this->aFaithfulReturnOf($tenue, $ordre);
+        }));
+
+        $retour = FleetMission::query()->where('parent_id', $mission->id)->firstOrFail();
+        $this->assertSame(419, (int)$retour->deuterium, 'The half unit of fuel was not floored the way the game floors it.');
+        $this->assertSame(0, (int)$retour->deuterium_consumption, 'The return re-credited fuel of its own.');
+    }
+
+    /**
+     * Une fortune au-dela de deux puissance cinquante-trois rentre : sa precision est degradee, pas fausse.
+     *
+     * Le refus de fraction ne mord jamais la : dans cette zone, tout flottant est deja entier. Une
+     * planete assez riche ne gagne donc pas une immunite au renvoi.
+     */
+    public function testACargoInTheDegradedPrecisionZoneStillComesHome(): void
+    {
+        [$combat, $mission] = $this->aCombatAndAFleet();
+        DB::table('fleet_missions')->where('id', $mission->id)->update(['metal' => 9007199254740992.0]);
+        $mission->refresh();
+
+        $porte = (float)$mission->metal;
+        $this->assertGreaterThanOrEqual(9007199254740992.0, $porte, 'The column did not keep a value in the degraded zone.');
+        $this->assertSame(floor($porte), $porte, 'The scenario is not conclusive: the stored value is not a whole number.');
+
+        (new FleetDispositionRegistry())->record($combat, $mission->id, CombatReasonCode::RallyClosed, 1_700_000_600, FleetDispositionKind::ReturnToOrigin);
+
+        $this->assertTrue((new RefusedFleetHomecoming())->sendHome($mission, 1_700_000_900, function (FleetMission $tenue, ReturnOrder $ordre): void {
+            $this->aFaithfulReturnOf($tenue, $ordre);
+        }));
+
+        $retour = FleetMission::query()->where('parent_id', $mission->id)->firstOrFail();
+        $this->assertSame($porte, (float)$retour->metal, 'The fortune lost units on the way home.');
+    }
+
     private function theOriginAsDestinationOf(FleetMission $mission): ResolvedReturnDestination
     {
         return ResolvedReturnDestination::from((new ReturnPlanner())->planFor($mission), $mission);
@@ -502,6 +617,24 @@ class RefusedFleetHomecomingTest extends TestCase
             'metal' => 0,
             'crystal' => 0,
             'deuterium' => 0,
+        ]);
+    }
+
+    /**
+     * Le retour tel qu'un genre de mission correct le cree, ressources comprises.
+     *
+     * Il lit les ressources par le service, comme `startReturn()`, et les transtype comme lui : ce
+     * createur ne falsifie rien, et c'est justement ce qui rend le controle de la projection
+     * significatif — la troncature qu'il applique doit etre celle que la projection attend.
+     */
+    private function aFaithfulReturnOf(FleetMission $parent, ReturnOrder $ordre): void
+    {
+        $ressources = resolve(FleetMissionService::class)->getResources($parent);
+
+        $this->aReturnOf($parent, $ordre, [
+            'metal' => (int)$ressources->metal->get(),
+            'crystal' => (int)$ressources->crystal->get(),
+            'deuterium' => (int)$ressources->deuterium->get(),
         ]);
     }
 

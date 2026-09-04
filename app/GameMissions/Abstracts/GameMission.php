@@ -540,7 +540,8 @@ abstract class GameMission
             null,
             $duree,
             $departAt,
-            $ou
+            $ou,
+            true
         );
     }
 
@@ -562,7 +563,8 @@ abstract class GameMission
                 $this->fleetMissionService->getResources($tenue),
                 $this->fleetMissionService->getFleetUnits($tenue),
                 departureAt: $ordre->departureAt,
-                destination: $ordre->destination
+                destination: $ordre->destination,
+                leaveToTheWorker: true
             );
         };
     }
@@ -575,9 +577,10 @@ abstract class GameMission
      * @param UnitCollection $units The units that are to be returned.
      * @param int $additionalReturnTripTime Time in seconds to add to the return trip duration (optional, used by expeditions). Can be positive or negative.
      * @param int|null $overrideReturnDuration If set, use this duration (in seconds) for the return trip instead of calculating from parent mission times.
+     * @param bool $leaveToTheWorker Laisser la livraison au travailleur canonique, meme si l'arrivee est deja passee.
      * @return void
      */
-    protected function startReturn(FleetMission $parentMission, Resources $resources, UnitCollection $units, int $additionalReturnTripTime = 0, array|null $wreckFieldData = null, int|null $overrideReturnDuration = null, int|null $departureAt = null, ResolvedReturnDestination|null $destination = null): void
+    protected function startReturn(FleetMission $parentMission, Resources $resources, UnitCollection $units, int $additionalReturnTripTime = 0, array|null $wreckFieldData = null, int|null $overrideReturnDuration = null, int|null $departureAt = null, ResolvedReturnDestination|null $destination = null, bool $leaveToTheWorker = false): void
     {
         if ($units->getAmount() === 0) {
             // No units to return, no need to create a return mission.
@@ -693,6 +696,24 @@ abstract class GameMission
 
         // Save the new fleet return mission.
         $mission->save();
+
+        // **Un retour orchestre sort d'ici non traite, et le travailleur canonique le livre.**
+        //
+        // Un combat qui refuse une flotte, ou une annulation d'exploitation, cree souvent un retour
+        // dont l'arrivee est deja passee. Le livrer ici, dans la transaction qui decide, avait deux
+        // defauts. D'abord le drapeau dependait de deux lectures d'horloge — la projection lisait
+        // l'heure avant l'appel, cette ligne la relisait apres l'insertion — et un retour pose sur
+        // la frontiere pouvait etre attendu non traite puis livre. Ensuite le drapeau ne prouvait
+        // que lui-meme : un createur fautif posant `processed = 1` sans rien crediter satisfaisait
+        // la projection, et la cargaison disparaissait sous un retour declare arrive.
+        //
+        // Laisser la livraison au travailleur ote l'horloge de la projection — l'attendu vaut
+        // toujours zero —, garde l'annulation conforme a sa propre regle (aucun corps n'est ecrit
+        // pendant qu'elle tient ses verrous), et rend le credit observable par le chemin ordinaire,
+        // apres le commit.
+        if ($leaveToTheWorker) {
+            return;
+        }
 
         // Check if the created mission arrival time is in the past.
         // If the mission is in the past, process it immediately.

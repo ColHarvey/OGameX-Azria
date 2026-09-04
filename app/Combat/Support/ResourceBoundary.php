@@ -132,7 +132,35 @@ final class ResourceBoundary
     }
 
     /**
-     * La normalisation, commune aux trois entrees.
+     * Une cargaison transportee par une flotte, convertie en unites entieres.
+     *
+     * **Aucun arrondi ici : une fraction est refusee.** Les trois autres entrees servent des soldes
+     * qui avancent par fractions — la production d une planete, un partage de butin. Une cargaison
+     * n avance pas : elle est posee entiere au depart de la flotte et rien ne la fait bouger en vol.
+     * Une valeur fractionnaire dessus est donc une donnee abimee, jamais un artefact a corriger.
+     *
+     * Le silence que cette entree ferme est precis. La colonne d un retour est entiere : arrondir
+     * une cargaison de `10.9` donnerait `10` dans la projection **et** `10` dans le retour cree, la
+     * comparaison serait satisfaite, et neuf dixiemes d unite auraient disparu sans trace. Le refus
+     * arrete l operation entiere, et la flotte reste ou elle est plutot que de rentrer amputee.
+     *
+     * Les autres categories ne changent pas : non fini et negatif restent des corruptions, et
+     * au-dela de deux puissance cinquante-trois la valeur passe avec son diagnostic — la ne vivent
+     * que des entiers, donc le refus de fraction n y mord jamais.
+     *
+     * @param float $amount
+     * @param string $field
+     * @param string $phase
+     * @param string $subject
+     * @return NormalizedResourceAmount
+     */
+    public static function wholeUnitsOfCarriedCargo(float $amount, string $field, string $phase = ResourceBoundary::UNSPECIFIED_PHASE, string $subject = ''): NormalizedResourceAmount
+    {
+        return self::normalise($amount, $field, false, false, $phase, $subject, true);
+    }
+
+    /**
+     * La normalisation, commune aux quatre entrees.
      *
      * @param float $amount
      * @param string $field
@@ -140,6 +168,7 @@ final class ResourceBoundary
      * @param bool $roundUp Le sens de l'arrondi.
      * @param string $phase
      * @param string $subject
+     * @param bool $refuseFraction Si une valeur non entiere est refusee au lieu d'etre arrondie.
      * @return NormalizedResourceAmount
      */
     private static function normalise(
@@ -149,6 +178,7 @@ final class ResourceBoundary
         bool $roundUp,
         string $phase,
         string $subject,
+        bool $refuseFraction = false,
     ): NormalizedResourceAmount {
         if (!is_finite($amount)) {
             throw CorruptedResourceAmount::becauseItIsNotFinite($field, $amount);
@@ -176,6 +206,14 @@ final class ResourceBoundary
         }
 
         $arrondi = $roundUp ? ceil($amount) : floor($amount);
+
+        // **Le refus vient apres le non fini et le negatif, et avant la conversion.** Il porte sur
+        // l'ecart entre la valeur et son plancher : au-dela de deux puissance cinquante-trois cet
+        // ecart est toujours nul, donc une fortune degradee traverse par le chemin ordinaire.
+        if ($refuseFraction && $arrondi !== $amount) {
+            throw CorruptedResourceAmount::becauseItIsNotAWholeUnit($field, $amount);
+        }
+
         $entier = self::safeIntegerOf($arrondi, $field);
 
         if ($entier < 0) {

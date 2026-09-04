@@ -14,7 +14,6 @@ use OGame\GameMissions\Models\ResolvedReturnDestination;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatOutboxMessage;
-use OGame\Models\CombatParticipant;
 use OGame\Models\FleetMission;
 use OGame\Models\FleetUnion;
 use RuntimeException;
@@ -51,11 +50,18 @@ use RuntimeException;
  *
  * ## L'effectif se verifie avant de changer d'etat
  *
- * Les flottes a rendre sont celles que la photographie a inscrites, des deux camps, plus rien. Une
- * initiatrice qui n'y figure pas, ou une inscrite dont la mission n'existe plus, est une
- * contradiction : l'annulation s'arrete avant d'ecrire, le corps reste tenu, et l'exploitation lit
- * pourquoi. Liberer un corps en pretendant avoir rendu un effectif qu'on ne sait pas decrire serait
- * la perte silencieuse que ce chemin existe pour eviter.
+ * Les flottes a rendre sont celles que la photographie a inscrites, des deux camps, plus rien — et
+ * **les deux liens qui les nomment sont confrontes** : l'inscription, qui fixe le camp, et la
+ * colonne `combat_instance_id` de la mission, qui dit qui est retenu sur le corps. Une inscription
+ * dont la flotte a ete effacee, une flotte retenue sans etre inscrite, une inscrite que retient un
+ * autre combat, un camp double : chacun de ces ecarts arrete l'annulation avant tout changement
+ * d'etat. Le corps reste tenu, et l'exploitation lit pourquoi. Liberer un corps en pretendant avoir
+ * rendu un effectif qu'on ne sait pas decrire serait la perte silencieuse que ce chemin existe pour
+ * eviter.
+ *
+ * Avant la fermeture, personne n'est encore inscrit : le lien porte seul l'effectif, et le camp se
+ * lit du genre de la mission. Sans cela, **aucun combat en ralliement n'aurait pu etre annule** — ni
+ * par la commande d'exploitation, ni par la suppression d'un compte — et son corps serait reste tenu.
  *
  * ## L'ordre des verrous
  *
@@ -87,7 +93,14 @@ final class CombatCancellationService
             throw new RuntimeException('Une annulation exige une note d exploitation : rien n est annule sans dire ce qui a ete constate.');
         }
 
-        return DB::transaction(function () use ($combatInstanceId, $cause, $note, $creerRetour, $now): CombatCancellationOutcome {
+        // **Le journal se remplit dedans et s'ecrit dehors.** Une ligne posee dans la transaction
+        // survivrait a son annulation : un echec tardif au commit laisserait une trace affirmant une
+        // annulation que la base n'a jamais enregistree, et l'exploitation chercherait un combat
+        // toujours en cours. Les avis, eux, restent dans l'outbox transactionnelle — ils doivent
+        // disparaitre avec elle.
+        $journal = [];
+
+        $resultat = DB::transaction(function () use ($combatInstanceId, $cause, $note, $creerRetour, $now, &$journal): CombatCancellationOutcome {
             $barriere = CelestialBodyCombatBarrier::query()
                 ->where('combat_instance_id', $combatInstanceId)
                 ->lockForUpdate()
@@ -120,8 +133,14 @@ final class CombatCancellationService
             // defensifs inscrits sont engages autant que les attaquantes : la bataille etait calculee
             // avec eux, et une sortie d'exploitation qui ne les rendrait pas les laisserait
             // stationner sur un corps qui ne tient plus de combat.
-            $attaquantes = $this->roster->missionIdsOf($combat, CombatParticipant::SIDE_ATTACKER);
-            $defensives = $this->roster->missionIdsOf($combat, CombatParticipant::SIDE_DEFENDER);
+            //
+            // **Les deux liens sont confrontes**, et pas seulement l'inscription. Une inscription
+            // dont la flotte a ete effacee, une flotte retenue par le combat sans y etre inscrite,
+            // une flotte inscrite ici mais retenue ailleurs, un camp double : chacun de ces ecarts
+            // arrete l'annulation avant tout changement d'etat. La cle etrangere ne garantissait que
+            // la validite d'un pointeur, jamais son existence, et la seule presence de l'initiatrice
+            // ne disait rien d'une attaquante secondaire ou d'un renfort disparu.
+            [$attaquantes, $defensives] = $this->roster->enrolmentOf($combat);
 
             if (!in_array((int)$combat->mission_id, $attaquantes, true)) {
                 throw new RuntimeException(
@@ -133,9 +152,8 @@ final class CombatCancellationService
             $identifiants = array_values(array_unique(array_merge($attaquantes, $defensives)));
             sort($identifiants);
 
-            // Chaque inscrite existe : la cle etrangere de l'inscription l'impose, une mission
-            // inscrite ne se supprime pas. Il n'y a donc rien a verifier ici que la base ne
-            // garantisse deja.
+            // Chaque inscrite existe : `enrolmentOf()` vient de le verifier sur les deux liens, et
+            // s'est arrete si l'un des deux nommait une flotte que l'autre ignore.
             $missions = FleetMission::query()
                 ->whereIn('id', $identifiants)
                 ->orderBy('id')
@@ -277,7 +295,7 @@ final class CombatCancellationService
                 ]
             );
 
-            Log::warning('Combat durable annule.', [
+            $journal = [
                 'combat_instance_id' => $combat->id,
                 'cause' => $cause->value,
                 'note' => trim($note),
@@ -287,10 +305,17 @@ final class CombatCancellationService
                 'defenders_sent_home' => $renfortsRendus,
                 'fleets_already_gone' => $dejaParties,
                 'at' => $now,
-            ]);
+            ];
 
             return CombatCancellationOutcome::cancelled($rendues, $dejaParties, $renfortsRendus);
         });
+
+        // Le commit a eu lieu : ce que la ligne affirme est vrai.
+        if ($journal !== []) {
+            Log::warning('Combat durable annule.', $journal);
+        }
+
+        return $resultat;
     }
 
     /**

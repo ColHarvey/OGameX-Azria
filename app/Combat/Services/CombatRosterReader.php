@@ -3,6 +3,9 @@
 namespace OGame\Combat\Services;
 
 use Illuminate\Support\Collection;
+use OGame\Combat\Enums\CombatMissionKind;
+use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Exceptions\IncoherentCombatEnrolment;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
@@ -146,6 +149,151 @@ final class CombatRosterReader
             ->all();
 
         return $identifiants;
+    }
+
+    /**
+     * L'effectif engage d'un combat, confronte aux deux liens qui le decrivent.
+     *
+     * ## Pourquoi deux liens, et ce que chacun ne suffit pas a dire
+     *
+     * L'inscription (`combat_participants`) fixe le camp dans la photographie ; la colonne
+     * `combat_instance_id` de la mission dit qui est **retenu** sur le corps, et c'est elle que la
+     * porte des mouvements relit pour refuser un rappel. Une sortie d'exploitation doit rendre les
+     * deux ensembles a la fois : rendre ce que l'un nomme laisserait ce que l'autre nomme pose sur
+     * un corps qui vient d'etre libere.
+     *
+     * La cle etrangere de l'inscription garantit qu'un lien pointe vers une mission reelle. Elle ne
+     * garantit pas qu'il en reste un : une mission effacee laisse son inscription avec un lien vide,
+     * et la lecture qui ecarte les liens vides rendait alors un effectif plus court d'une flotte,
+     * sans que rien ne le dise. Verifier la seule presence de l'initiatrice ne voyait pas cela.
+     *
+     * ## Les deux inclusions exigees, et pourquoi ce n'est pas une egalite
+     *
+     * **Tout ce qui est retenu est inscrit.** Une mission liee au combat mais absente de l'effectif
+     * ne serait rendue par personne.
+     *
+     * **Toute inscrite existe, et n'appartient a aucun autre combat.** Sa mission peut en revanche
+     * ne pas encore porter le lien : la fermeture inscrit une vague dont l'arrivee precede la
+     * cloture meme si son travailleur n'est pas encore passe, et c'est ce passage qui pose la
+     * colonne. Exiger l'egalite refuserait cette annulation-la pour un retard normal.
+     *
+     * ## Le ralliement n'a pas encore de photographie
+     *
+     * Avant la fermeture, personne n'est inscrit : le lien porte seul l'effectif, et le camp se lit
+     * du genre de la mission. Un combat en ralliement qui porterait deja des inscriptions, ou un
+     * combat ferme qui n'en porterait aucune, est une contradiction et arrete tout.
+     *
+     * ## Ce que cette lecture ne couvre pas
+     *
+     * Une ligne apparue **apres** cette lecture — le fantome — n'y figure pas. Le refermer demande
+     * un verrou de portee et une epreuve MariaDB ; ici, l'appelant tient deja les verrous de l'ordre
+     * global, et cette lecture ne pretend pas les remplacer.
+     *
+     * @return array{0: array<int, int>, 1: array<int, int>} Les attaquantes, puis les defensives.
+     */
+    public function enrolmentOf(CombatInstance $combat): array
+    {
+        $inscriptions = $combat->participants()->get(['side', 'fleet_mission_id']);
+
+        $orphelines = $inscriptions->filter(static fn (CombatParticipant $ligne): bool => $ligne->fleet_mission_id === null)->count();
+
+        if ($orphelines > 0) {
+            throw IncoherentCombatEnrolment::becauseAnEnrolmentLostItsFleet((int)$combat->id, $orphelines);
+        }
+
+        $retenues = FleetMission::query()
+            ->where('combat_instance_id', $combat->id)
+            ->orderBy('id')
+            ->pluck('id')
+            ->map(static fn (mixed $id): int => (int)$id)
+            ->all();
+
+        if ($combat->status === CombatState::Rallying) {
+            if ($inscriptions->isNotEmpty()) {
+                throw IncoherentCombatEnrolment::becauseARallyingCombatAlreadyHasARoster((int)$combat->id, $inscriptions->count());
+            }
+
+            return $this->sidesOfTheHeldFleets($retenues);
+        }
+
+        if ($inscriptions->isEmpty()) {
+            throw IncoherentCombatEnrolment::becauseAClosedCombatHasNoRoster((int)$combat->id);
+        }
+
+        $camps = [CombatParticipant::SIDE_ATTACKER => [], CombatParticipant::SIDE_DEFENDER => []];
+        $vues = [];
+
+        foreach ($inscriptions as $ligne) {
+            $identifiant = (int)$ligne->fleet_mission_id;
+
+            if (isset($vues[$identifiant])) {
+                throw IncoherentCombatEnrolment::becauseAFleetIsEnrolledTwice((int)$combat->id, $identifiant);
+            }
+
+            $vues[$identifiant] = true;
+            $camps[$ligne->side][] = $identifiant;
+        }
+
+        // **Tout ce que le combat retient figure dans son effectif.** Une mission liee sans
+        // inscription resterait posee sur un corps que l'annulation vient de liberer.
+        $sansInscription = array_values(array_diff($retenues, array_keys($vues)));
+
+        if ($sansInscription !== []) {
+            throw IncoherentCombatEnrolment::becauseFleetsAreHeldWithoutBeingEnrolled((int)$combat->id, $sansInscription);
+        }
+
+        // **Aucune inscrite n'appartient a un autre combat.** Le lien vide reste permis : c'est le
+        // travailleur en retard, pas une contradiction.
+        $liens = FleetMission::query()
+            ->whereIn('id', array_keys($vues))
+            ->whereNotNull('combat_instance_id')
+            ->where('combat_instance_id', '!=', $combat->id)
+            ->get(['id', 'combat_instance_id']);
+
+        foreach ($liens as $etrangere) {
+            throw IncoherentCombatEnrolment::becauseAnEnrolledFleetBelongsToAnotherCombat(
+                (int)$combat->id,
+                (int)$etrangere->id,
+                (int)$etrangere->combat_instance_id
+            );
+        }
+
+        sort($camps[CombatParticipant::SIDE_ATTACKER]);
+        sort($camps[CombatParticipant::SIDE_DEFENDER]);
+
+        return [$camps[CombatParticipant::SIDE_ATTACKER], $camps[CombatParticipant::SIDE_DEFENDER]];
+    }
+
+    /**
+     * Les camps des flottes retenues pendant le ralliement, lus du genre de leur mission.
+     *
+     * Ce n'est pas un second moteur de decision : la fermeture range ses candidates par le meme
+     * genre, et l'enumeration l'impose de facon exhaustive.
+     *
+     * @param array<int, int> $retenues
+     * @return array{0: array<int, int>, 1: array<int, int>}
+     */
+    private function sidesOfTheHeldFleets(array $retenues): array
+    {
+        $attaquantes = [];
+        $defensives = [];
+
+        $missions = FleetMission::query()
+            ->whereIn('id', $retenues === [] ? [0] : $retenues)
+            ->orderBy('id')
+            ->get(['id', 'mission_type']);
+
+        foreach ($missions as $mission) {
+            if (CombatMissionKind::fromMissionType((int)$mission->mission_type)->reinforcesTheDefence()) {
+                $defensives[] = (int)$mission->id;
+
+                continue;
+            }
+
+            $attaquantes[] = (int)$mission->id;
+        }
+
+        return [$attaquantes, $defensives];
     }
 
     /**

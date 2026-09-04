@@ -259,6 +259,72 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
      * Pire, une vague touchee apres le reglement trouvait le corps libre — barriere levee — et
      * **ouvrait un second combat** : celui-la meme que son refus existait pour empecher.
      */
+    /**
+     * Un retour orchestre par un refus nait non traite, et le travailleur canonique le livre.
+     *
+     * ## Les deux defauts que l'ancien drapeau portait
+     *
+     * `startReturn()` livrait sur place tout retour dont l'arrivee etait deja passee — et c'est le
+     * cas courant : un refus decide a la fermeture cree son retour quand le travailleur passe, une
+     * heure plus tard. Le drapeau dependait alors de **deux lectures d'horloge**, celle de la
+     * projection avant l'appel et celle de la creation apres l'insertion ; un retour pose sur la
+     * frontiere pouvait etre attendu a zero puis livre, et le protocole refusait un retour juste.
+     *
+     * Pire, a un, le drapeau ne prouvait que lui-meme : un createur fautif ecrivant `processed = 1`
+     * sans rien crediter satisfaisait la projection, et la flotte disparaissait en etant declaree
+     * rentree.
+     *
+     * L'essai suit donc la livraison par le seul chemin ordinaire : apres le refus, l'enfant est la,
+     * non traite, et **rien n'est encore revenu sur le corps d'origine** ; c'est le passage suivant
+     * du travailleur qui repose les vaisseaux.
+     */
+    public function testAReturnOrchestratedByARefusalIsBornUntreatedUntilTheWorkerDeliversIt(): void
+    {
+        [$combat, $ouvreuse, , $ouverture, $cible] = $this->anOpenedCombat(false);
+
+        $vague = $this->aSecondAttackAgainst($cible, $ouvreuse);
+        DB::table('fleet_missions')->where('id', $vague->id)->update(['time_arrival' => $ouverture + 30]);
+        $vague->refresh();
+
+        $origine = (int)$vague->planet_id_from;
+        $partis = (int)Planet::query()->where('id', $origine)->value('light_fighter');
+
+        (new FleetDispositionRegistry())->record(
+            $combat,
+            $vague->id,
+            CombatReasonCode::FleetLimitReached,
+            $ouverture + 30,
+            FleetDispositionKind::ReturnToOrigin
+        );
+
+        $this->travelTo(Date::createFromTimestamp((int)$combat->refresh()->ends_at));
+        (new PersistentCombatAdvancer())->advance((int)$combat->ends_at);
+
+        // **Le travailleur passe une heure trop tard** : le retour cree arrive donc dans le passe.
+        $apres = (int)$combat->refresh()->ends_at + 3_600;
+        $this->travelTo(Date::createFromTimestamp($apres));
+        resolve(FleetMissionService::class)->updateMission($vague->refresh());
+
+        $retour = FleetMission::query()->where('parent_id', $vague->id)->firstOrFail();
+        $this->assertLessThan($apres, (int)$retour->time_arrival, 'The return does not arrive in the past: the scenario proves nothing.');
+        $this->assertSame(0, (int)$retour->processed, 'The refusal delivered the fleet itself instead of leaving it to the worker.');
+        $this->assertSame(
+            $partis,
+            (int)Planet::query()->where('id', $origine)->value('light_fighter'),
+            'The ships were put back on the body while the return was still declared untreated.'
+        );
+
+        // Le chemin ordinaire, et lui seul, credite le corps.
+        resolve(FleetMissionService::class)->updateMission($retour);
+
+        $this->assertSame(1, (int)$retour->refresh()->processed, 'The worker did not deliver the return it was left.');
+        $this->assertSame(
+            $partis + 100,
+            (int)Planet::query()->where('id', $origine)->value('light_fighter'),
+            'The hundred light fighters did not come back to the body they left.'
+        );
+    }
+
     public function testARefusedWaveStillGoesHomeAfterTheCombatIsOverAndOnlyOnce(): void
     {
         [$combat, $ouvreuse, , $ouverture, $cible] = $this->anOpenedCombat(false);

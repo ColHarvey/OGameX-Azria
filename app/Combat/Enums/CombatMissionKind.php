@@ -131,6 +131,27 @@ enum CombatMissionKind: string
     }
 
     /**
+     * Si une flotte de ce genre rejoint le camp defenseur du corps vise.
+     *
+     * La Defense groupee, et elle seule : c'est le renfort exterieur que la photographie range du
+     * cote du defenseur. Tous les autres genres qui touchent un corps tenu par un combat y sont
+     * ranges du cote attaquant, ou n'y sont pas ranges du tout.
+     *
+     * **La correspondance est exhaustive**, comme les autres de cette enumeration : une mission
+     * ajoutee au jeu devra choisir son camp ici plutot que de tomber dans un defaut plausible.
+     *
+     * @return bool
+     */
+    public function reinforcesTheDefence(): bool
+    {
+        return match ($this) {
+            self::AcsDefend => true,
+            self::Attack, self::AcsAttack, self::MoonDestruction, self::Transport, self::Deployment,
+            self::Espionage, self::Colonisation, self::Recycle, self::Missile, self::Expedition => false,
+        };
+    }
+
+    /**
      * Ce que l'aller de cette mission vise reellement.
      *
      * **Le retour n'est pas concerne** : une flotte qui rentre se pose toujours sur un corps

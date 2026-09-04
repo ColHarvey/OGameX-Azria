@@ -56,6 +56,28 @@ class CorruptedResourceAmount extends RuntimeException
     }
 
     /**
+     * Une cargaison qui ne porte pas un nombre entier d unites.
+     *
+     * Un stock de planete avance par fractions ; **une cargaison, non**. Elle est posee une fois au
+     * depart de la flotte, en unites entieres, et rien ne la fait produire en vol. Une fraction
+     * dessus est une donnee abimee, et l arrondir ferait disparaitre la difference sans que
+     * personne ne l apprenne : la colonne du retour est entiere, donc `10.9` deviendrait `10` des
+     * deux cotes de la comparaison, et neuf dixiemes d unite seraient perdus par une egalite.
+     *
+     * @param string $field
+     * @param float $amount
+     * @return self
+     */
+    public static function becauseItIsNotAWholeUnit(string $field, float $amount): self
+    {
+        return new self(
+            'La cargaison « ' . $field . ' » vaut ' . var_export($amount, true) . ', qui n est pas un nombre entier '
+            . 'd unites. Une cargaison se pose entiere au depart et ne produit rien en vol : arrondir ici perdrait '
+            . 'la fraction en silence au lieu de signaler la donnee abimee.'
+        );
+    }
+
+    /**
      * @param string $field
      * @param float $amount
      * @return self
