@@ -77,15 +77,15 @@ struct SystemDraws {
 
 impl Draws for SystemDraws {
     fn target_index(&mut self, count: usize) -> usize {
-        (self.rng.gen::<u32>() as usize) % count
+        (self.rng.random::<u32>() as usize) % count
     }
 
     fn explosion_percent(&mut self) -> u32 {
-        self.rng.gen::<u32>() % 101
+        self.rng.random::<u32>() % 101
     }
 
     fn rapidfire_centipercent(&mut self) -> u32 {
-        1 + self.rng.gen::<u32>() % 10000
+        1 + self.rng.random::<u32>() % 10000
     }
 
     fn journal(&self) -> Option<DrawJournal> {
@@ -473,7 +473,7 @@ fn process_battle_rounds(input: BattleInput) -> BattleOutput {
     // One source for the whole battle: seeded when the client asked for a replayable one.
     let mut draws: Box<dyn Draws> = match input.seed {
         Some(seed) => Box::new(SeededDraws::new(seed)),
-        None => Box::new(SystemDraws { rng: rand::thread_rng() }),
+        None => Box::new(SystemDraws { rng: rand::rng() }),
     };
 
     // Track peak memory usage for debugging purposes
@@ -889,8 +889,12 @@ mod tests {
         serde_json::from_str(&serde_json::to_string(input).unwrap()).unwrap()
     }
 
+    /// The battle as a value — rounds and draws, without the memory metric, which is a debug
+    /// measurement that changes from one run to the next and says nothing about the battle.
     fn as_value(input: &BattleInput) -> serde_json::Value {
-        serde_json::to_value(&process_battle_rounds(a_seeded(input))).unwrap()
+        let mut value = serde_json::to_value(&process_battle_rounds(a_seeded(input))).unwrap();
+        value.as_object_mut().unwrap().remove("memory_metrics");
+        value
     }
 
     #[test]

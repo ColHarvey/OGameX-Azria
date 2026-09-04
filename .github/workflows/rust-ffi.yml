@@ -86,11 +86,24 @@ jobs:
       - name: Installer les dependances
         run: composer install --no-interaction --prefer-dist --no-progress
 
+      # **Une base SQLite, nommee en clair.** `.env.example` vise MariaDB (`ogamex-db`) : avec lui,
+      # le `migrate:fresh` du lanceur n'avait aucune base a vider, et le groupe du moteur tombait
+      # avant le premier essai — c'est ce que l'artefact de `f82d5c20` a fini par dire.
       - name: Preparer l environnement
         run: |
+          set -euo pipefail
           cp .env.example .env
+          php -r '
+            $env = file_get_contents(".env");
+            foreach (["APP_ENV" => "testing", "DB_CONNECTION" => "sqlite", "DB_DATABASE" => getcwd() . "/database/database.sqlite", "QUEUE_CONNECTION" => "sync", "SESSION_DRIVER" => "file", "CACHE_DRIVER" => "file"] as $clef => $valeur) {
+              $env = preg_replace("/^" . $clef . "=.*$/m", $clef . "=" . $valeur, $env, 1, $n);
+              if ($n === 0) { $env .= "\n" . $clef . "=" . $valeur . "\n"; }
+            }
+            file_put_contents(".env", $env);
+          '
           php artisan key:generate --force
           touch database/database.sqlite
+          grep -E "^(APP_ENV|DB_CONNECTION|DB_DATABASE)=" .env
 
       # **Les essais natifs du moteur**, depuis le manifeste que le script de construction utilise.
       # `--locked` refuse une resolution de dependances differente de celle qui est versionnee.
@@ -157,5 +170,6 @@ jobs:
             storage/logs/console-suite.txt
             storage/logs/parite-*.json
             storage/logs/laravel.log
+            storage/framework/testing/migrate-*.log
             /tmp/so.txt
             /tmp/so-sha256.txt
