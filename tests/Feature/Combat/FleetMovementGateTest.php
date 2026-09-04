@@ -4,6 +4,7 @@ namespace Tests\Feature\Combat;
 
 use ArrayObject;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Exceptions\MovementLocksOutdated;
 use OGame\Combat\Services\FleetMovementGate;
@@ -294,7 +295,8 @@ class FleetMovementGateTest extends TestCase
             }
         });
 
-        $vu = (new FleetMovementGate())->decideUnderLock(
+        // **La porte possede la transaction** : l'essai enveloppe tout dans la sienne, et le dit.
+        $vu = $this->aRootGate()->decideUnderLock(
             $perime,
             fn (FleetMission $tenue): int|null => $tenue->union_id === null ? null : (int)$tenue->union_id
         );
@@ -327,7 +329,7 @@ class FleetMovementGateTest extends TestCase
             }
         });
 
-        $vu = (new FleetMovementGate())->decideUnderLock(
+        $vu = $this->aRootGate()->decideUnderLock(
             $perime,
             fn (FleetMission $tenue): int|null => $tenue->combat_instance_id === null ? null : (int)$tenue->combat_instance_id
         );
@@ -367,8 +369,12 @@ class FleetMovementGateTest extends TestCase
 
         $decide = false;
 
+        // **Renoncer ne se fait jamais en silence** : le travail sera repris au passage suivant, et
+        // l'exploitation doit savoir qu'un lien change plus vite que la porte ne le rattrape.
+        Log::partialMock()->shouldReceive('warning')->once();
+
         try {
-            (new FleetMovementGate())->decideUnderLock($mission, function (FleetMission $tenue) use (&$decide): int {
+            $this->aRootGate()->decideUnderLock($mission, function (FleetMission $tenue) use (&$decide): int {
                 $decide = true;
 
                 return $tenue->id;
@@ -383,6 +389,49 @@ class FleetMovementGateTest extends TestCase
 
         $this->assertFalse($decide, 'The gate decided on a link it never held.');
         $this->assertGreaterThan(1, $course['passages'], 'The gate refused on the first divergence instead of retrying from the barrier.');
+    }
+
+    /**
+     * Imbriquee dans une transaction qu'elle ne possede pas, la porte ne recommence jamais.
+     *
+     * ## Pourquoi « relacher tout » serait un mensonge ici
+     *
+     * Un retour au point de sauvegarde ne relache pas les verrous pris avant ce point : MariaDB les
+     * garde jusqu'a la fin de la transaction exterieure. Une porte imbriquee qui recommencerait
+     * tiendrait encore l'ancien lien pendant qu'elle prend le nouveau, dans un ordre qu'elle ne
+     * controle plus. Elle fait donc une seule prise, et une divergence remonte au proprietaire de
+     * la transaction — avec le signal d'exploitation.
+     */
+    public function testNestedInATransactionItDoesNotOwnTheGateNeverRetries(): void
+    {
+        [, $mission] = $this->aCombatAndAFleet();
+        $union = $this->aUnionFor($mission);
+
+        $perime = FleetMission::query()->findOrFail($mission->id);
+        DB::table('fleet_missions')->where('id', $mission->id)->update(['union_id' => $union->id]);
+
+        $prises = 0;
+        DB::listen(function ($requete) use (&$prises): void {
+            if (str_contains($requete->sql, '"fleet_unions"')) {
+                $prises++;
+            }
+        });
+
+        // Le signal d'exploitation part aussi quand c'est le proprietaire de la transaction qui
+        // apprend qu'il decide sur un lien qu'il ne tient pas.
+        Log::partialMock()->shouldReceive('warning')->once();
+
+        // La porte de production : racine au niveau zero. L'essai est deja dans sa transaction.
+        $this->assertGreaterThan(0, DB::transactionLevel(), 'The test is not inside a transaction: nothing would be proved about nesting.');
+
+        try {
+            (new FleetMovementGate())->decideUnderLock($perime, fn (FleetMission $tenue): int => $tenue->id);
+            $this->fail('A nested gate decided on a link it never held.');
+        } catch (MovementLocksOutdated $refus) {
+            $this->assertSame('l union', $refus->lien);
+        }
+
+        $this->assertSame(1, $prises, 'A nested gate retried from the barrier while the outer transaction still held the old locks.');
     }
 
     /**
@@ -464,6 +513,14 @@ class FleetMovementGateTest extends TestCase
         ]);
 
         return [$combat, $mission, $corps];
+    }
+
+    /**
+     * La porte telle que l'essai la possede : sa transaction est la racine.
+     */
+    private function aRootGate(): FleetMovementGate
+    {
+        return new FleetMovementGate(rootLevel: DB::transactionLevel());
     }
 
     private function aUnionFor(FleetMission $mission): FleetUnion

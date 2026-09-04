@@ -4,6 +4,7 @@ namespace OGame\Combat\Services;
 
 use Closure;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use OGame\Combat\Exceptions\MovementLocksOutdated;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
@@ -45,7 +46,20 @@ use RuntimeException;
  * tient l'ancien et s'appreterait a decider sur le nouveau. Elle le verifie apres la relecture, et
  * quand un lien courant n'est pas tenu, elle **relache tout et recommence depuis la barriere** avec
  * les liens a jour — jamais en acquerant le verrou manquant apres la mission, ce qui inverserait
- * l'ordre. Le nombre de reprises est borne ; au-dela, `MovementLocksOutdated` sort.
+ * l'ordre.
+ *
+ * ## Qui possede la transaction
+ *
+ * « Relacher tout » n'est vrai que pour une transaction racine. Imbriquee dans une transaction
+ * exterieure, une reprise ne ferait qu'un retour au point de sauvegarde, et MariaDB **garde** les
+ * verrous pris avant ce point : la porte recommencerait en tenant encore l'ancien lien, dans un
+ * ordre qu'elle ne controle plus. La porte ne recommence donc **que lorsqu'elle possede la
+ * transaction**. Imbriquee, elle fait une seule prise, et une divergence remonte au proprietaire de
+ * la transaction — qui, tenant deja la mission, ne devrait jamais la voir.
+ *
+ * Quand la porte renonce, elle le dit au journal d'exploitation avant de lever : le travail sera
+ * repris au passage suivant, avec l'attente que ce passage impose, et personne ne bouclera sans
+ * alerte.
  *
  * `lockForUpdate()` ne compile a rien sous SQLite : ce que les essais locaux montrent est la
  * **relecture**, la forme des requetes et la reprise. La preuve d'interblocage et de stabilite est
@@ -60,6 +74,20 @@ final class FleetMovementGate
     private const int ATTEMPTS = 3;
 
     /**
+     * L'attente avant une reprise, multipliee par le numero de la tentative.
+     */
+    private const int BACKOFF_MICROSECONDS = 20_000;
+
+    /**
+     * @param int $rootLevel Le niveau de transaction auquel la porte possede la transaction. Zero
+     *        en production ; un essai qui enveloppe tout dans sa propre transaction le dit ici,
+     *        pour que la porte le traite comme la racine qu'il est pour lui.
+     */
+    public function __construct(private readonly int $rootLevel = 0)
+    {
+    }
+
+    /**
      * Ouvre la section critique, puis laisse decider sur une mission relue sous verrou.
      *
      * @template TValeur
@@ -68,23 +96,56 @@ final class FleetMovementGate
      *        mission y soit encore liee — celle qu'une jointure s'apprete a rejoindre. Elles entrent
      *        dans l'ordre global a leur place, avec les autres.
      * @return TValeur
+     *
+     * @throws MovementLocksOutdated Si les liens de la mission changent plus vite que la porte ne
+     *         les rattrape, ou si, imbriquee, elle en trouve un que la transaction ne tient pas.
      */
     public function decideUnderLock(FleetMission $mission, Closure $decider, array $alsoHoldingUnionIds = []): mixed
     {
+        if (DB::transactionLevel() > $this->rootLevel) {
+            // **Imbriquee, une seule prise.** Un retour au point de sauvegarde ne relacherait pas
+            // les verrous de la transaction exterieure ; recommencer ici serait un mensonge.
+            try {
+                return DB::transaction(fn (): mixed => $this->attempt($mission, $decider, $alsoHoldingUnionIds));
+            } catch (MovementLocksOutdated $perime) {
+                $this->giveUp($perime, 1);
+
+                throw $perime;
+            }
+        }
+
         for ($tentative = 1; ; $tentative++) {
             try {
                 return DB::transaction(fn (): mixed => $this->attempt($mission, $decider, $alsoHoldingUnionIds));
             } catch (MovementLocksOutdated $perime) {
                 if ($tentative >= self::ATTEMPTS) {
+                    $this->giveUp($perime, $tentative);
+
                     throw $perime;
                 }
 
                 // **Reprise depuis la barriere, avec les liens a jour.** La transaction est deja
-                // relachee ; on recharge le modele hors verrou, puisque c'est de lui que la porte
-                // deduit ce qu'elle doit tenir.
+                // relachee ; on attend un peu, puis on recharge le modele hors verrou, puisque
+                // c'est de lui que la porte deduit ce qu'elle doit tenir.
+                usleep(self::BACKOFF_MICROSECONDS * $tentative);
                 $mission->refresh();
             }
         }
+    }
+
+    /**
+     * Le signal d'exploitation, avant de lever : une porte qui renonce ne le fait jamais en silence.
+     */
+    private function giveUp(MovementLocksOutdated $perime, int $tentatives): void
+    {
+        Log::warning('Porte des mouvements : un lien de la mission a change sous les verrous, abandon.', [
+            'fleet_mission_id' => $perime->fleetMissionId,
+            'lien' => $perime->lien,
+            'tenu' => $perime->tenu,
+            'courant' => $perime->courant,
+            'tentatives' => $tentatives,
+            'imbriquee' => DB::transactionLevel() > $this->rootLevel,
+        ]);
     }
 
     /**

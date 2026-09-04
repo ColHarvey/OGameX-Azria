@@ -3,7 +3,9 @@
 namespace OGame\Services;
 
 use Exception;
+use OGame\Combat\Services\FleetDispositionRegistry;
 use OGame\Combat\Services\FleetMovementGate;
+use OGame\Models\CombatParticipant;
 use OGame\Models\FleetMission;
 use OGame\Models\FleetUnion;
 
@@ -40,37 +42,47 @@ class FleetUnionService
      */
     public function createUnion(FleetMission $mission, string|null $name = null): FleetUnion
     {
-        // Validate mission type (must be attack - type 1)
-        if ($mission->mission_type !== 1) {
-            throw new Exception(__('t_acs.error_invalid_mission_type'));
-        }
-
-        // Validate mission is still in flight
-        if ($mission->processed || $mission->canceled) {
-            throw new Exception(__('t_acs.error_mission_not_active'));
-        }
-
-        // Validate mission is not already in a union
-        if ($mission->isInUnion()) {
-            throw new Exception(__('t_acs.error_already_in_union'));
-        }
-
         // Une union sans sa mission fondatrice n'est pas une union : elle apparaitrait dans la
         // liste des unions a rejoindre, vide, et sans moyen d'y entrer. Les deux ecritures ne
         // font donc qu'une.
+        //
         // **Dans l'ordre global, comme tout ce qui touche a ce a quoi une flotte est liee.** La
         // porte prend la barriere du corps vise avant d'ecrire le lien d'union : une porte
         // concurrente — rappel, arrivee — ne peut plus tenir l'ancien lien pendant que celui-ci
         // s'ecrit. L'objet de l'appelant est ensuite aligne sur la ligne ecrite.
+        //
+        // **Les validations vivent dans la fermeture tenue, sur la mission relue.** Faites sur le
+        // modele recu, avant la porte, elles ne prouvaient rien : un rappel ou une arrivee pouvait
+        // gagner entre elles et l'ecriture, et l'union se creait quand meme pour une flotte partie
+        // ou engagee. L'interface peut prevalider ; la preuve metier est ici, et nulle part avant.
         return resolve(FleetMovementGate::class)->decideUnderLock($mission, function (FleetMission $tenue) use ($mission, $name): FleetUnion {
+            // Validate mission type (must be attack - type 1)
+            if ($tenue->mission_type !== 1) {
+                throw new Exception(__('t_acs.error_invalid_mission_type'));
+            }
+
+            // Validate mission is still in flight
+            if ($tenue->processed || $tenue->canceled) {
+                throw new Exception(__('t_acs.error_mission_not_active'));
+            }
+
+            // Validate mission is not already in a union
+            if ($tenue->isInUnion()) {
+                throw new Exception(__('t_acs.error_already_in_union'));
+            }
+
+            $this->refuseIfTheCombatHoldsIt($tenue);
+
+            // **Depuis la ligne tenue, pas depuis le modele recu** : c'est elle qui dit ou la flotte
+            // va et quand elle arrive.
             $union = FleetUnion::create([
-                'user_id' => $mission->user_id,
+                'user_id' => $tenue->user_id,
                 'name' => $name,
-                'galaxy_to' => $mission->galaxy_to,
-                'system_to' => $mission->system_to,
-                'position_to' => $mission->position_to,
-                'planet_type_to' => $mission->type_to,
-                'time_arrival' => $mission->time_arrival,
+                'galaxy_to' => $tenue->galaxy_to,
+                'system_to' => $tenue->system_to,
+                'position_to' => $tenue->position_to,
+                'planet_type_to' => $tenue->type_to,
+                'time_arrival' => $tenue->time_arrival,
                 'max_fleets' => 16,
                 'max_players' => 5,
             ]);
@@ -85,6 +97,35 @@ class FleetUnionService
 
             return $union;
         });
+    }
+
+    /**
+     * Une flotte que le combat tient n'entre dans aucune union, et n'en fonde aucune.
+     *
+     * Trois liens le disent : le combat que l'arrivee lui a rattache, l'inscription que la
+     * fermeture a ecrite, la disposition qui lui impose un mouvement. Chacun est lu sur la mission
+     * **tenue** ; sur le modele recu, il decrirait un passe. La jointure ou la creation modifierait
+     * sinon une flotte dont le sort est deja decide ailleurs — et decalerait l'heure d'arrivee de
+     * toute une union pour une flotte qui ne viendra pas.
+     *
+     * Le message est celui d'une mission qui n'est plus disponible : pour le joueur, c'est
+     * exactement cela.
+     *
+     * @throws Exception
+     */
+    private function refuseIfTheCombatHoldsIt(FleetMission $tenue): void
+    {
+        if ($tenue->combat_instance_id !== null) {
+            throw new Exception(__('t_acs.error_mission_not_active'));
+        }
+
+        if (CombatParticipant::query()->where('fleet_mission_id', $tenue->id)->exists()) {
+            throw new Exception(__('t_acs.error_mission_not_active'));
+        }
+
+        if (resolve(FleetDispositionRegistry::class)->pendingFor($tenue) !== null) {
+            throw new Exception(__('t_acs.error_mission_not_active'));
+        }
     }
 
     /**
@@ -191,6 +232,9 @@ class FleetUnionService
             throw new Exception(__('t_acs.error_already_in_union'));
         }
 
+        // Tenue par un combat — rattachee, inscrite ou deja renvoyee — elle ne rejoint rien.
+        $this->refuseIfTheCombatHoldsIt($mission);
+
         // Validate union hasn't reached max fleets
         if ($union->hasReachedMaxFleets()) {
             throw new Exception(__('t_acs.error_max_fleets_reached'));
@@ -273,17 +317,22 @@ class FleetUnionService
      */
     public function handleFleetRecall(FleetMission $mission): void
     {
-        if (!$mission->isInUnion()) {
-            return;
-        }
-
         // Le retrait, le compactage des creneaux et le transfert de propriete ne font qu'une
         // ecriture : a moitie appliques, ils laisseraient des numeros non consecutifs que rien ne
         // rattrape ensuite, et une union dont le proprietaire n'est plus celui du creneau 1.
         //
         // Et dans l'ordre global : le rappel d'une flotte engagee passe deja par la porte des
         // mouvements ; celle-ci s'y imbrique, et tout autre appelant y entre par la meme voie.
+        // **« Est-elle dans une union ? » se lit sur la ligne tenue** : l'appelant vivant tient deja
+        // la mission relue, mais la methode est publique, et un appelant futur ne doit pas pouvoir
+        // en faire un contournement.
         resolve(FleetMovementGate::class)->decideUnderLock($mission, function (FleetMission $tenue) use ($mission): void {
+            if (!$tenue->isInUnion()) {
+                $this->alignOn($mission, $tenue);
+
+                return;
+            }
+
             $this->recallUnderLock($tenue);
             $this->alignOn($mission, $tenue);
         });

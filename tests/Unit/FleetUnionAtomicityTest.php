@@ -3,10 +3,19 @@
 namespace Tests\Unit;
 
 use ArrayObject;
+use Closure;
 use Exception;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Lang;
+use OGame\Combat\Enums\CombatReasonCode;
+use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Enums\FleetDispositionKind;
+use OGame\Combat\Services\FleetDispositionRegistry;
+use OGame\Combat\Services\FleetMovementGate;
+use OGame\Combat\Support\CombatParticipantKey;
+use OGame\Models\CombatInstance;
+use OGame\Models\CombatParticipant;
 use OGame\Models\FleetMission;
 use OGame\Models\FleetUnion;
 use OGame\Models\Planet;
@@ -82,6 +91,13 @@ class FleetUnionAtomicityTest extends TestCase
         });
 
         DB::beginTransaction();
+
+        // **La porte telle que la production la connait : elle possede sa transaction.** L'essai
+        // enveloppe tout dans la sienne ; sans le dire a la porte, celle-ci se croirait imbriquee et
+        // ne recommencerait jamais depuis la barriere — et un modele perime dont le lien a change
+        // sortirait par le refus de la porte au lieu de celui du service, qui est ce que le joueur
+        // lit.
+        $this->app->instance(FleetMovementGate::class, new FleetMovementGate(rootLevel: DB::transactionLevel()));
     }
 
     protected function tearDown(): void
@@ -215,6 +231,146 @@ class FleetUnionAtomicityTest extends TestCase
             $plusBas,
             'A union was created outside any transaction: a failure would leave an empty union nobody can join.'
         );
+    }
+
+    /**
+     * Un modele perime ne fonde pas d'union pour une flotte que le jeu a deja prise ailleurs.
+     *
+     * ## Les validations ne prouvent rien avant la porte
+     *
+     * Le service verifiait le genre, l'etat et l'absence d'union sur le modele recu, puis entrait
+     * dans la porte et creait l'union sans rien reverifier. Un rappel ou une arrivee pouvait gagner
+     * entre les deux : la porte relisait une mission partie ou engagee, et l'union se creait quand
+     * meme. Les trois facons dont une flotte cesse d'etre disponible sont jouees ici avec le modele
+     * d'avant.
+     */
+    public function testAStaleModelDoesNotFoundAUnionForAFleetTheGameAlreadyTook(): void
+    {
+        foreach ($this->waysAFleetBecomesUnavailable() as $comment => $rendreIndisponible) {
+            $mission = $this->anAttackMission($this->aPlayerWithAPlanet());
+            $perime = FleetMission::query()->findOrFail($mission->id);
+
+            $rendreIndisponible($mission);
+
+            try {
+                $this->service->createUnion($perime);
+                $this->fail("A union was founded for a fleet that {$comment}.");
+            } catch (Exception $refus) {
+                $attendu = __('t_acs.error_mission_not_active');
+                $this->assertIsString($attendu);
+                $this->assertSame($attendu, $refus->getMessage(), "The refusal for a fleet that {$comment} does not say the fleet is unavailable.");
+            }
+
+            $this->assertSame(0, FleetUnion::query()->where('user_id', $mission->user_id)->count(), "A union exists for a fleet that {$comment}.");
+            $this->assertNull(FleetMission::query()->findOrFail($mission->id)->union_id, "A fleet that {$comment} was linked to a union.");
+        }
+    }
+
+    /**
+     * Un modele perime ne fait pas rejoindre une union a une flotte que le jeu a deja prise, et ne
+     * decale l'horaire d'aucun membre.
+     */
+    public function testAStaleModelDoesNotJoinAUnionWithAFleetTheGameAlreadyTook(): void
+    {
+        foreach ($this->waysAFleetBecomesUnavailable() as $comment => $rendreIndisponible) {
+            [$union, $second] = $this->aUnionAndASecondAttack();
+            $perime = FleetMission::query()->findOrFail($second->id);
+
+            // La rejoignante arrive plus tard : une jointure acceptee decalerait toute l'union.
+            DB::table('fleet_missions')->where('id', $second->id)->update(['time_arrival' => $union->time_arrival + 100]);
+            $perime->refresh();
+
+            $horaireUnion = (int)$union->time_arrival;
+            $horairesMembres = $union->activeFleetMissions()->pluck('time_arrival', 'id')->all();
+
+            $rendreIndisponible($second);
+
+            try {
+                $this->service->joinUnion($union, $perime);
+                $this->fail("A fleet that {$comment} joined a union.");
+            } catch (Exception $refus) {
+                $attendu = __('t_acs.error_mission_not_active');
+                $this->assertIsString($attendu);
+                $this->assertSame($attendu, $refus->getMessage());
+            }
+
+            $this->assertNull(FleetMission::query()->findOrFail($second->id)->union_id, "A fleet that {$comment} was linked to the union.");
+            $this->assertSame($horaireUnion, (int)$union->refresh()->time_arrival, "The union was rescheduled for a fleet that {$comment}.");
+            $this->assertSame($horairesMembres, $union->activeFleetMissions()->pluck('time_arrival', 'id')->all(), "A member was rescheduled for a fleet that {$comment}.");
+        }
+    }
+
+    /**
+     * Un rappel lu sur un modele qui croit encore la flotte dans une union ne touche a rien.
+     *
+     * « Est-elle dans une union ? » se lit sur la ligne tenue. Sur le modele recu, la question
+     * ferait retirer d'une union une flotte qui n'y est plus — et compacter des creneaux qu'elle
+     * n'occupe pas.
+     */
+    public function testARecallReadOnAStaleModelStillInAUnionTouchesNothing(): void
+    {
+        [$union, $second] = $this->aUnionAndASecondAttack();
+        $this->service->joinUnion($union, $second);
+
+        // Le modele croit la flotte dans l'union ; la ligne, elle, en est deja sortie.
+        $perime = FleetMission::query()->findOrFail($second->id);
+        $this->assertSame($union->id, (int)$perime->union_id);
+        DB::table('fleet_missions')->where('id', $second->id)->update(['union_id' => null, 'union_slot' => null, 'mission_type' => 1]);
+
+        $creneaux = $union->activeFleetMissions()->pluck('union_slot', 'id')->all();
+        $proprietaire = (int)$union->user_id;
+
+        $this->service->handleFleetRecall($perime);
+
+        $this->assertNotNull(FleetUnion::query()->find($union->id), 'The union was deleted on a stale read.');
+        $this->assertSame($creneaux, $union->activeFleetMissions()->pluck('union_slot', 'id')->all(), 'Slots were compacted on a stale read.');
+        $this->assertSame($proprietaire, (int)$union->refresh()->user_id, 'Union ownership moved on a stale read.');
+        $this->assertNull($perime->union_id, 'The caller model was not aligned on the row.');
+    }
+
+    /**
+     * Les trois facons dont une flotte cesse d'etre disponible pour une union, ecrites sur la ligne.
+     *
+     * @return array<string, Closure(FleetMission): void>
+     */
+    private function waysAFleetBecomesUnavailable(): array
+    {
+        return [
+            'was recalled' => function (FleetMission $mission): void {
+                DB::table('fleet_missions')->where('id', $mission->id)->update(['processed' => 1, 'canceled' => 1]);
+            },
+            'was bound to a combat by its arrival' => function (FleetMission $mission): void {
+                DB::table('fleet_missions')->where('id', $mission->id)->update(['combat_instance_id' => $this->aCombatOver($mission)->id]);
+            },
+            'was enrolled by a closure' => function (FleetMission $mission): void {
+                CombatParticipant::forceCreate([
+                    'combat_instance_id' => $this->aCombatOver($mission)->id,
+                    'player_id' => $mission->user_id,
+                    'fleet_mission_id' => $mission->id,
+                    'participant_key' => CombatParticipantKey::forFleet($mission->id),
+                    'side' => CombatParticipant::SIDE_ATTACKER,
+                    'participant_type' => CombatParticipant::TYPE_ATTACK_FLEET,
+                    'units_snapshot' => ['light_fighter' => 10],
+                ]);
+            },
+            'carries a refusal decision' => function (FleetMission $mission): void {
+                (new FleetDispositionRegistry())->record($this->aCombatOver($mission), $mission->id, CombatReasonCode::RallyClosed, (int)$mission->time_arrival, FleetDispositionKind::ReturnToOrigin);
+            },
+        ];
+    }
+
+    private function aCombatOver(FleetMission $mission): CombatInstance
+    {
+        return CombatInstance::create([
+            'status' => CombatState::Rallying,
+            'mission_id' => $mission->id,
+            'target_planet_id' => $mission->planet_id_to,
+            'target_type' => 1,
+            'galaxy' => $mission->galaxy_to,
+            'system' => $mission->system_to,
+            'position' => $mission->position_to,
+            'started_at' => (int)$mission->time_arrival,
+        ]);
     }
 
     /**
