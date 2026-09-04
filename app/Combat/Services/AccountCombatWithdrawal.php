@@ -122,21 +122,29 @@ final class AccountCombatWithdrawal
             }
         }
 
-        // **Celles qui ne portent pas encore le lien, et elles seules.** Une flotte deja rattachee a
-        // un combat figure dans l'inventaire : son combat a recu sa cause, et elle ne peut plus en
-        // ouvrir un second. C'est le cas de l'initiatrice de chaque combat du compte, qui reste non
-        // traitee tant que sa bataille dure — la compter retiendrait toute suppression d'attaquant,
-        // pour toujours.
-        return FleetMission::query()
+        $candidates = FleetMission::query()
             ->where('user_id', $userId)
             ->whereNull('parent_id')
-            ->whereNull('combat_instance_id')
             ->where('processed', 0)
             ->whereIn('mission_type', $genres)
             ->orderBy('id')
             ->pluck('id')
             ->map(static fn (mixed $id): int => (int)$id)
             ->all();
+
+        // **Deja engagee ne veut pas dire « colonne posee ».** Une flotte rattachee a un combat
+        // figure dans l'inventaire : son combat a recu sa cause, et elle ne peut plus en ouvrir un
+        // second. Mais l'engagement a **deux preuves**, et la colonne n'est que la premiere : un
+        // renfort defensif n'est lie que par son inscription, et une attaque groupee non ouvreuse
+        // porte l'inscription avant que son travailleur ne pose la colonne.
+        //
+        // Ne regarder que la colonne produisait un plan contradictoire : le meme attaquant recevait
+        // sa cause d'annulation **et** figurait parmi les flottes qui retiennent tout. Rien n'etait
+        // annule, et la suppression attendait la fin naturelle d'un combat qu'elle aurait du
+        // arreter. La definition vient donc d'`EngagedFleetCheck`, la seule du depot.
+        $engagees = resolve(EngagedFleetCheck::class)->engagedAmong($candidates);
+
+        return array_values(array_diff($candidates, $engagees));
     }
 
     /**

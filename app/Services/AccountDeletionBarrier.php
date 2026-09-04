@@ -4,6 +4,7 @@ namespace OGame\Services;
 
 use Exception;
 use Illuminate\Support\Facades\DB;
+use OGame\Enums\AccountDeletionState;
 use OGame\Models\User;
 
 /**
@@ -22,9 +23,19 @@ use OGame\Models\User;
  * **Rien ne serialisait les deux operations.** Un lancement pouvait lire « non », la suppression
  * poser le drapeau et inventorier, puis la mission s'inserer apres l'inventaire — un combat ouvert
  * par une flotte que personne n'annulerait, et une barriere tenant un corps pour toujours. Les deux
- * chemins prennent maintenant le **verrou de la ligne du compte**, et il vient en tete de l'ordre
- * global : compte, puis barriere, instance, union, missions, corps de retour. Aucun chemin ne prend
- * la barriere avant le compte, donc l'ordre ne se croise pas.
+ * chemins prennent maintenant le **verrou de la ligne du compte**.
+ *
+ * ## L'ordre, formule exactement
+ *
+ * La regle n'est pas « le compte avant tout », et l'annoncer ainsi etait faux : la porte des
+ * mouvements et l'annulation commencent par la barriere sans jamais toucher la ligne d'un compte.
+ * La regle est plus etroite, et c'est ce qui la rend vraie :
+ *
+ * > **Parmi les chemins qui prennent les deux, le compte vient avant la barriere.**
+ *
+ * Deux chemins seulement prennent la ligne d'un compte : le lancement d'une flotte et la suppression
+ * d'un compte. Aucun autre ne la prend, donc aucun cycle ne peut se former — un chemin qui prendrait
+ * la barriere puis un compte le fermerait, et c'est cela qu'une garde de source surveille.
  *
  * **Le lancement rapide n'avait pas d'enveloppe.** Le chemin ordinaire de la flotte ouvre une
  * transaction ; celui de la Galaxie, non. Le verrou serait relache avant l'insertion de la mission,
@@ -56,23 +67,39 @@ final class AccountDeletionBarrier
      */
     public static function refuseIfTheAccountIsBeingDeleted(int $userId): void
     {
-        if (self::heldPendingDeletion($userId)) {
+        if (self::heldState($userId) === AccountDeletionState::Pending) {
             throw new Exception('Ce compte est en cours de suppression : il ne peut plus lancer de flotte.');
         }
     }
 
     /**
-     * Tient le compte et rend son etat de suppression, lu sur la ligne.
+     * Tient le compte et rend ce que sa ligne dit de sa suppression.
+     *
+     * ## Pourquoi un etat, et pas un booleen
+     *
+     * Le controle rendait « en attente ou non », et confondait **une ligne absente** avec une ligne
+     * presente sans drapeau. Apres la validation du drapeau, deux chemins peuvent entrer : la
+     * suppression qui vient de le poser, et la commande de reprise. L'un efface le compte ; l'autre
+     * prend le verrou ensuite, ne trouve plus rien, et poursuivrait avec son modele et sa liste de
+     * corps perimes — en effacant des lignes qui ne lui appartiennent plus.
      *
      * @param int $userId
-     * @return bool
+     * @return AccountDeletionState
      */
-    public static function heldPendingDeletion(int $userId): bool
+    public static function heldState(int $userId): AccountDeletionState
     {
-        return DB::table('users')
+        $ligne = DB::table('users')
             ->where('id', $userId)
             ->lockForUpdate()
-            ->value('deletion_pending_since') !== null;
+            ->first(['deletion_pending_since']);
+
+        if ($ligne === null) {
+            return AccountDeletionState::Absent;
+        }
+
+        return $ligne->deletion_pending_since === null
+            ? AccountDeletionState::NotPending
+            : AccountDeletionState::Pending;
     }
 
     /**
@@ -83,12 +110,26 @@ final class AccountDeletionBarrier
      * le drapeau vivait dans la meme transaction que la purge, il disparaitrait avec elle et le
      * compte redeviendrait un compte ordinaire au milieu d'un retrait commence.
      *
+     * **Et `DB::transaction()` ne suffit pas a le garantir** : appele sous une transaction
+     * existante, Laravel n'ouvre qu'un point de sauvegarde, et un retour arriere exterieur emporte
+     * le drapeau avec le reste. C'est pourquoi l'appel est refuse hors du niveau zero : la garantie
+     * ne peut pas dependre de l'habitude des appelants.
+     *
      * @param int $userId
      * @param int $now
      * @return void
+     *
+     * @throws Exception Si une transaction est deja ouverte.
      */
     public static function markPending(int $userId, int $now): void
     {
+        if (DB::transactionLevel() > 0) {
+            throw new Exception(
+                'Le drapeau de suppression se valide dans sa propre transaction : appele sous une transaction '
+                . 'existante, il ne serait qu un point de sauvegarde, et un retour arriere exterieur l effacerait.'
+            );
+        }
+
         DB::transaction(function () use ($userId, $now): void {
             $compte = User::query()->whereKey($userId)->lockForUpdate()->first();
 

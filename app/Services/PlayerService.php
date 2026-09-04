@@ -14,6 +14,7 @@ use OGame\Combat\Enums\FlightLeg;
 use OGame\Combat\Enums\TargetScope;
 use OGame\Combat\Exceptions\MovementLocksOutdated;
 use OGame\Combat\Services\AccountCombatWithdrawal;
+use OGame\Enums\AccountDeletionState;
 use OGame\GameObjects\Models\Calculations\CalculationType;
 use OGame\Models\BuildingQueue;
 use OGame\Models\FleetMission;
@@ -1052,10 +1053,18 @@ class PlayerService
      */
     private function markDeletionPending(): void
     {
+        // La barriere refuse d'etre appelee sous une transaction : un point de sauvegarde n'est
+        // pas un commit, et le drapeau doit survivre au retour arriere du retrait.
         AccountDeletionBarrier::markPending($this->getId(), (int)Date::now()->timestamp);
 
-        // Le modele en memoire suit la ligne : la barriere a ecrit, pas lui.
-        $this->user->refresh();
+        // **Le modele suit la ligne, si elle est encore la.** Une autre passe a pu finir le travail
+        // entre-temps : `refresh()` sur une ligne effacee leve, et ce n'est pas une erreur — c'est
+        // le cas idempotent, que la transaction du retrait reconnait ensuite comme « absent ».
+        $ligne = User::query()->whereKey($this->getId())->first();
+
+        if ($ligne instanceof User) {
+            $this->user = $ligne;
+        }
     }
 
     /**
@@ -1074,28 +1083,54 @@ class PlayerService
      */
     public function delete(): void
     {
-        // Include destroyed planets still awaiting purge so related rows are cleaned up.
-        $corps = Planet::where('user_id', $this->getId())->pluck('id')->map(static fn (mixed $id): int => (int)$id)->all();
-
-        // **Le drapeau avant l'inventaire.** Sans lui, un combat pouvait s'ouvrir entre le moment
-        // ou l'on releve les combats du compte et celui ou l'on efface ses lignes : ce combat-la
-        // n'aurait ete annule par personne, et sa barriere aurait tenu un corps pour toujours. Le
-        // lancement de flotte lit ce drapeau et refuse.
+        // **Le drapeau avant tout, et rien avant lui.** Sans lui, un combat pouvait s'ouvrir entre
+        // le moment ou l'on releve les combats du compte et celui ou l'on efface ses lignes : ce
+        // combat-la n'aurait ete annule par personne, et sa barriere aurait tenu un corps pour
+        // toujours. Le lancement de flotte lit ce drapeau et refuse.
+        //
+        // **L'inventaire des corps ne le precede plus.** Il vivait ici, avant le drapeau et avant
+        // le verrou : une colonisation ou une arrivee deja en vol pouvait creer ou changer un corps
+        // entre la photographie et le drapeau. La purge finale efface bien toutes les planetes,
+        // mais les files, les missions etrangeres et le plan de retrait etaient calcules depuis une
+        // liste perimee.
         $this->markDeletionPending();
 
         // **Tout le retrait vit dans une transaction qui tient le compte.**
         //
         // « Le plan avant les effets » protegeait les decisions deja lues, pas les lignes qui
-        // peuvent apparaitre pendant la lecture. Le verrou de la ligne du compte vient **en tete de
-        // l'ordre global** — compte, puis barriere, instance, union, missions, corps de retour — et
-        // c'est le meme que prend le lancement d'une flotte : les deux operations se serialisent au
-        // lieu de se croiser.
+        // peuvent apparaitre pendant la lecture. Parmi les chemins qui prennent **a la fois** la
+        // ligne d'un compte et une barriere de combat — le lancement d'une flotte et ce retrait —,
+        // le compte vient en premier. C'est ce qui les serialise au lieu de les croiser.
         //
         // Le drapeau, lui, est deja valide : une defaillance ici ramene l'inventaire et la purge en
         // arriere, et laisse un compte **en attente** que la commande de reprise peut reprendre —
         // jamais un compte ordinaire au milieu d'un retrait commence.
-        DB::transaction(function () use ($corps): void {
-            AccountDeletionBarrier::heldPendingDeletion($this->getId());
+        DB::transaction(function (): void {
+            // **Ce que la ligne dit, une fois tenue.** La suppression qui vient de poser le drapeau
+            // et la commande de reprise peuvent toutes deux entrer : si l'autre a fini le travail,
+            // la ligne n'est plus la, et poursuivre effacerait des lignes qui ne nous appartiennent
+            // plus — avec un modele et une liste de corps perimes.
+            $etat = AccountDeletionBarrier::heldState($this->getId());
+
+            if ($etat === AccountDeletionState::Absent) {
+                return;
+            }
+
+            if ($etat === AccountDeletionState::NotPending) {
+                throw new RuntimeException(
+                    'Le compte ' . $this->getId() . ' a perdu son drapeau de suppression entre sa pose et le '
+                    . 'verrou : personne n a le droit de l effacer en chemin.'
+                );
+            }
+
+            // **L'inventaire se prend ici, sous le verrou.** Pris avant, il pouvait vieillir entre
+            // la photographie et le drapeau, et tout ce qui en decoule aurait ete calcule de travers.
+            // Les corps detruits en attente de purge en font partie : leurs lignes liees se nettoient
+            // comme les autres.
+            $corps = Planet::where('user_id', $this->getId())
+                ->pluck('id')
+                ->map(static fn (mixed $id): int => (int)$id)
+                ->all();
 
             $this->carryOutTheDeletion($corps);
         });

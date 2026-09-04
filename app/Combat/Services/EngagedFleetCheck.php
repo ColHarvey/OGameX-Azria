@@ -39,17 +39,53 @@ final class EngagedFleetCheck
 {
     public function isEngaged(FleetMission $mission): bool
     {
-        $ouverts = $this->combatsStillRunning();
+        return $this->engagedAmong([(int)$mission->id]) !== [];
+    }
 
-        if ($mission->combat_instance_id !== null
-            && (clone $ouverts)->whereKey($mission->combat_instance_id)->exists()) {
-            return true;
+    /**
+     * Celles de ces missions qui sont engagees, par l'un ou l'autre lien.
+     *
+     * ## Pourquoi la meme definition, en gros
+     *
+     * « Engagee » a deux preuves, et une seule des deux suffit. Un appelant qui n'en regarderait
+     * qu'une se tromperait exactement la ou l'autre parle : la colonne est nulle pour un renfort
+     * defensif que seule la fermeture a inscrit, et pour une attaque groupee non ouvreuse dont le
+     * travailleur n'est pas encore passe.
+     *
+     * Le retrait d'un compte a besoin de la question pour un ensemble de missions, pas pour une
+     * seule. La poser flotte par flotte marcherait, mais la definition finirait par exister deux
+     * fois : celle-ci est la seule, et `isEngaged()` n'en est qu'un cas particulier.
+     *
+     * @param array<int, int> $missionIds
+     * @return array<int, int> Les identifiants engages, par ordre croissant.
+     */
+    public function engagedAmong(array $missionIds): array
+    {
+        if ($missionIds === []) {
+            return [];
         }
 
-        return CombatParticipant::query()
-            ->where('fleet_mission_id', $mission->id)
-            ->whereIn('combat_instance_id', $ouverts)
-            ->exists();
+        $ouverts = $this->combatsStillRunning();
+
+        $parLeLien = FleetMission::query()
+            ->whereIn('id', $missionIds)
+            ->whereNotNull('combat_instance_id')
+            ->whereIn('combat_instance_id', (clone $ouverts))
+            ->pluck('id')
+            ->map(static fn (mixed $id): int => (int)$id)
+            ->all();
+
+        $parLInscription = CombatParticipant::query()
+            ->whereIn('fleet_mission_id', $missionIds)
+            ->whereIn('combat_instance_id', (clone $ouverts))
+            ->pluck('fleet_mission_id')
+            ->map(static fn (mixed $id): int => (int)$id)
+            ->all();
+
+        $engagees = array_values(array_unique(array_merge($parLeLien, $parLInscription)));
+        sort($engagees);
+
+        return $engagees;
     }
 
     /**

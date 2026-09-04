@@ -3,6 +3,7 @@
 namespace Tests\Feature\Combat;
 
 use Closure;
+use Exception;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Date;
@@ -20,6 +21,8 @@ use OGame\Combat\Services\AccountWithdrawalPlan;
 use OGame\Combat\Services\CombatCancellationOutcome;
 use OGame\Combat\Services\CombatCancellationService;
 use OGame\Combat\Services\CombatOpeningService;
+use OGame\Combat\Services\CombatSettlementService;
+use OGame\Combat\Services\FleetMovementGate;
 use OGame\Combat\Services\PersistentCombatAdvance;
 use OGame\Combat\Services\PersistentCombatAdvancer;
 use OGame\Combat\Services\RallyClosureService;
@@ -27,6 +30,7 @@ use OGame\Combat\Services\ReturnDestinationResolver;
 use OGame\Combat\Services\ReturnPlanner;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\ReturnPlan;
+use OGame\Enums\AccountDeletionState;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameMissions\AttackMission;
@@ -1301,6 +1305,317 @@ class CombatCancellationTest extends FleetDispatchTestCase
         $this->assertNotNull($reste->deletion_pending_since, 'The failed withdrawal left an ordinary account: nothing would resume it.');
         $this->assertSame(CombatState::Active, $combat->refresh()->status, 'The combat was cancelled although the withdrawal failed.');
         $this->assertNotNull(FleetMission::query()->find($mission->id), 'The failed withdrawal still erased a mission.');
+    }
+
+    /**
+     * Une attaquante inscrite sans porter la colonne est engagee : sa suppression annule le combat.
+     *
+     * ## Ce que « pas encore rattachee » ne pouvait pas se deduire de la colonne
+     *
+     * L'engagement a **deux preuves**, et la colonne n'est que la premiere. Un renfort defensif n'est
+     * lie que par son inscription ; une attaque groupee non ouvreuse porte l'inscription avant que
+     * son travailleur ne pose la colonne. Ne regarder que la colonne rendait le plan contradictoire :
+     * le meme attaquant recevait sa cause d'annulation **et** figurait parmi les flottes qui
+     * retiennent tout. Rien n'etait annule, et la suppression attendait la fin naturelle d'un combat
+     * qu'elle aurait du arreter.
+     */
+    public function testAnEnrolledAttackerWithoutTheColumnStillLetsTheDeletionCancelItsCombat(): void
+    {
+        $reglages = resolve(SettingsService::class);
+        $reglages->set('persistent_combat_enabled', '1');
+
+        try {
+            [$combat, $mission] = $this->anActiveCombat();
+            $compte = (int)$mission->user_id;
+
+            // L'inscription est la, la colonne non : c'est l'etat d'une vague inscrite dont le
+            // travailleur n'est pas encore passe.
+            $this->assertTrue($combat->participants()->where('fleet_mission_id', $mission->id)->exists(), 'The attacker is not enrolled: nothing would be proved.');
+            $this->assertNull($mission->refresh()->combat_instance_id, 'The column is already set: nothing would be proved.');
+
+            resolve(PlayerServiceFactory::class)->make($compte, true)->delete();
+
+            $this->assertSame(CombatState::Cancelled, $combat->refresh()->status, 'The combat of a deleted attacker was not cancelled.');
+            $this->assertSame(CombatCancellationCause::AttackerRemoved, $combat->cancellation_cause);
+            $this->assertNull(DB::table('users')->where('id', $compte)->first(), 'The deletion waited for a fleet that was already engaged.');
+        } finally {
+            $reglages->set('persistent_combat_enabled', '0');
+        }
+    }
+
+    /**
+     * Un renfort inscrit sans colonne retient la suppression **pour la bonne raison**.
+     *
+     * Il est engage, donc il ne compte pas parmi les flottes qui peuvent encore entrer dans un
+     * combat. Ce qui retient la suppression est le combat d'un tiers qu'il renforce — et la raison
+     * lue sur le compte doit le dire, sinon deux empechements distincts se confondraient.
+     */
+    public function testAnEnrolledReinforcementHoldsTheDeletionAsAThirdPartyCombat(): void
+    {
+        $reglages = resolve(SettingsService::class);
+        $reglages->set('persistent_combat_enabled', '1');
+
+        try {
+            $renfort = null;
+            [$combat] = $this->anActiveCombat(function (PlanetService $cible, int $ouverture) use (&$renfort): void {
+                $renfort = $this->aDefensiveReinforcement($cible, $ouverture - 10, 100_000, $ouverture - 600);
+            });
+
+            if ($renfort === null) {
+                $this->fail('The reinforcement was never launched.');
+            }
+
+            $this->assertTrue($combat->participants()->where('fleet_mission_id', $renfort->id)->exists(), 'The reinforcement is not enrolled: nothing would be proved.');
+
+            // **La colonne est retiree exprès.** Arrive avant l'ouverture, ce renfort la porte ; ce
+            // que l'essai eprouve est l'autre preuve, celle de l'inscription seule — l'etat d'un
+            // renfort que seule la fermeture a lie.
+            DB::table('fleet_missions')->where('id', $renfort->id)->update(['combat_instance_id' => null]);
+            $this->assertNull($renfort->refresh()->combat_instance_id);
+
+            $compte = (int)$renfort->user_id;
+            resolve(PlayerServiceFactory::class)->make($compte, true)->delete();
+
+            $attendant = resolve(PlayerServiceFactory::class)->make($compte, true);
+            $this->assertTrue($attendant->isPendingDeletion());
+            $this->assertStringContainsString('renforce la defense', $attendant->deletionDeferredReason(), 'The wait blames the wrong thing.');
+            $this->assertStringNotContainsString('encore en vol', $attendant->deletionDeferredReason(), 'An enrolled reinforcement was counted as a fleet that could still enter a combat.');
+            $this->assertSame(CombatState::Active, $combat->refresh()->status);
+        } finally {
+            $reglages->set('persistent_combat_enabled', '0');
+        }
+    }
+
+    /**
+     * Une suppression appelee sous une transaction est refusee avant tout effet.
+     *
+     * ## Pourquoi la frontiere est structurelle
+     *
+     * `DB::transaction()` appele sous une transaction existante n'ouvre qu'un point de sauvegarde :
+     * le drapeau ne serait pas valide, et un retour arriere exterieur l'emporterait avec le reste —
+     * laissant un compte ordinaire au milieu d'un retrait commence, que rien ne reprendrait. La
+     * garantie ne peut pas dependre de l'habitude des appelants : l'appel est refuse.
+     */
+    public function testADeletionCalledInsideATransactionIsRefusedBeforeAnyEffect(): void
+    {
+        [$combat, $mission] = $this->anActiveCombat();
+        $compte = (int)$mission->user_id;
+
+        DB::beginTransaction();
+
+        try {
+            resolve(PlayerServiceFactory::class)->make($compte, true)->delete();
+            $this->fail('A deletion ran inside a caller transaction: its flag would be a savepoint.');
+        } catch (Exception $refus) {
+            $this->assertStringContainsString('propre transaction', $refus->getMessage());
+        } finally {
+            DB::rollBack();
+        }
+
+        $this->assertNotNull(DB::table('users')->where('id', $compte)->first(), 'The refused deletion still erased the account.');
+        $this->assertSame(CombatState::Active, $combat->refresh()->status, 'The refused deletion still cancelled the combat.');
+        $this->assertNull(DB::table('users')->where('id', $compte)->value('deletion_pending_since'), 'The refused deletion still flagged the account.');
+    }
+
+    /**
+     * Un compte deja efface par une autre passe ne fait rien du tout.
+     *
+     * Apres la validation du drapeau, deux chemins peuvent entrer : la suppression qui vient de le
+     * poser et la commande de reprise. L'un efface le compte ; l'autre prend le verrou ensuite. Le
+     * controle rendait « en attente ou non » et confondait une ligne absente avec une ligne sans
+     * drapeau : le second chemin poursuivait avec son modele et sa liste de corps perimes.
+     */
+    public function testADeletionFindingTheAccountAlreadyGoneDoesNothing(): void
+    {
+        [$combat, $mission] = $this->anActiveCombat();
+        $compte = (int)$mission->user_id;
+
+        // **Deux passes tiennent le meme compte** : la suppression initiale et la commande de
+        // reprise. Chacune garde son propre modele, charge avant que l'autre n'agisse.
+        $premiere = resolve(PlayerServiceFactory::class)->make($compte, true);
+        $seconde = resolve(PlayerServiceFactory::class)->make($compte, true);
+
+        $premiere->delete();
+        $this->assertNull(DB::table('users')->where('id', $compte)->first(), 'The first pass did not finish: the scenario proves nothing.');
+
+        $combats = CombatInstance::query()->count();
+        $missions = FleetMission::query()->count();
+
+        // **Ce que la seconde passe ecrit, et pas seulement ce qu'elle change.** Compter les lignes
+        // ne suffirait pas : une purge lancee sur un compte disparu n'affecte aucune ligne et
+        // laisserait les compteurs identiques. Ce qui distingue « ne rien faire » de « tout refaire
+        // dans le vide », c'est l'absence d'ecriture.
+        $ecritures = [];
+        DB::listen(function ($requete) use (&$ecritures): void {
+            $debut = strtolower(trim($requete->sql));
+
+            if (str_starts_with($debut, 'delete') || str_starts_with($debut, 'update')) {
+                $ecritures[] = $debut;
+            }
+        });
+
+        // La seconde passe entre apres coup, avec son modele perime.
+        $seconde->delete();
+
+        $this->assertSame([], $ecritures, 'A second pass rewrote a deletion whose account no longer exists.');
+        $this->assertSame(CombatState::Cancelled, $combat->refresh()->status, 'A second pass changed a combat the first had already settled.');
+        $this->assertSame($combats, CombatInstance::query()->count(), 'A second pass touched combats that were no longer its own.');
+        $this->assertSame($missions, FleetMission::query()->count(), 'A second pass erased missions that were no longer its own.');
+        unset($mission);
+    }
+
+    /**
+     * Un corps cree apres le chargement du joueur entre quand meme dans le retrait.
+     *
+     * ## Ce que l'inventaire pris trop tot laissait passer
+     *
+     * La liste des corps etait relevee avant le drapeau et avant le verrou — et, pire, elle pouvait
+     * venir de la liste que le service garde en memoire depuis son chargement. Une colonisation ou
+     * une arrivee deja en vol peut creer un corps entre les deux : la purge finale efface bien
+     * toutes les planetes, mais les files, les missions etrangeres et le plan de retrait etaient
+     * calcules depuis une liste perimee, et la mission d'un tiers vers ce corps-la restait accrochee
+     * a une planete qui n'existe plus.
+     */
+    public function testABodyCreatedAfterThePlayerWasLoadedIsStillCoveredByTheWithdrawal(): void
+    {
+        [, $mission] = $this->anActiveCombat();
+        $compte = (int)$mission->user_id;
+
+        // Le service est charge maintenant : sa liste de corps est celle de cet instant.
+        $joueur = resolve(PlayerServiceFactory::class)->make($compte, true);
+
+        // Puis un corps apparait — une colonisation qui aboutit pendant la suppression.
+        $libre = (int)DB::table('planets')->where('galaxy', 8)->max('system') + 1;
+        $neuf = Planet::factory()->create([
+            'user_id' => $compte,
+            'galaxy' => 8,
+            'system' => max(1, $libre),
+            'planet' => 5,
+        ]);
+
+        // Un tiers vole vers ce corps neuf : sa mission doit se detacher, pas disparaitre.
+        $tiers = (int)DB::table('users')->where('id', '!=', $compte)->orderBy('id')->value('id');
+        $venue = $this->anAttackingFleetOf($tiers, (int)$neuf->id);
+
+        $joueur->delete();
+
+        $this->assertNull(DB::table('users')->where('id', $compte)->first(), 'The deletion did not go through.');
+        $this->assertNull(Planet::query()->find($neuf->id), 'The body created after the load survived its owner.');
+
+        $venue->refresh();
+        $this->assertNull($venue->planet_id_to, 'A third party mission still points at a body that no longer exists: the inventory was stale.');
+    }
+
+    /**
+     * Les missions du compte qui ne touchent aucun combat disparaissent avec lui.
+     *
+     * La liste des flottes differees ne couvre que les genres capables d'ouvrir ou de renforcer un
+     * combat : c'est son objet, et rien d'autre ne doit en dependre. Un transport, un deploiement,
+     * une colonisation ou un retour du compte ne retiennent donc rien — ils s'effacent avec lui,
+     * comme toutes ses missions.
+     */
+    public function testTheOtherActiveMissionsOfTheAccountAreErasedWithoutHoldingIt(): void
+    {
+        $reglages = resolve(SettingsService::class);
+        $reglages->set('persistent_combat_enabled', '1');
+
+        try {
+            [, $mission] = $this->anActiveCombat();
+            $compte = (int)$mission->user_id;
+
+            $autres = [];
+
+            foreach ([3, 4, 7] as $genre) {
+                $autre = $this->anAttackingFleetOf($compte, (int)$mission->planet_id_to);
+                DB::table('fleet_missions')->where('id', $autre->id)->update(['mission_type' => $genre]);
+                $autres[] = (int)$autre->id;
+            }
+
+            // Et un retour, qui est une etape de vol et non un genre.
+            $retour = $this->anAttackingFleetOf($compte, (int)$mission->planet_id_to);
+            DB::table('fleet_missions')->where('id', $retour->id)->update(['parent_id' => $mission->id]);
+            $autres[] = (int)$retour->id;
+
+            resolve(PlayerServiceFactory::class)->make($compte, true)->delete();
+
+            $this->assertNull(DB::table('users')->where('id', $compte)->first(), 'A transport, a deployment, a colonisation or a return held the deletion back.');
+
+            foreach ($autres as $identifiant) {
+                $this->assertNull(FleetMission::query()->find($identifiant), 'The mission ' . $identifiant . ' outlived its owner.');
+            }
+        } finally {
+            $reglages->set('persistent_combat_enabled', '0');
+        }
+    }
+
+    /**
+     * La barriere distingue trois etats, et pas deux.
+     *
+     * Le controle rendait « en attente ou non », et confondait donc **une ligne absente** avec une
+     * ligne presente sans drapeau. Les deux se produisent et n'appellent pas la meme suite : la
+     * premiere est le cas idempotent — quelqu'un d'autre a fini —, la seconde un invariant rompu.
+     */
+    public function testTheBarrierTellsTheThreeStatesApart(): void
+    {
+        [, $mission] = $this->anActiveCombat();
+        $compte = (int)$mission->user_id;
+
+        $this->assertSame(AccountDeletionState::NotPending, AccountDeletionBarrier::heldState($compte));
+
+        AccountDeletionBarrier::markPending($compte, (int)Date::now()->timestamp);
+        $this->assertSame(AccountDeletionState::Pending, AccountDeletionBarrier::heldState($compte));
+
+        $this->assertSame(AccountDeletionState::Absent, AccountDeletionBarrier::heldState(0), 'An absent row is not told apart from a row without the flag.');
+    }
+
+    /**
+     * Aucun chemin qui prend une barriere ne prend ensuite la ligne d'un compte.
+     *
+     * ## La regle, formulee exactement
+     *
+     * J'avais annonce « le compte est le premier verrou de l'ordre global ». C'etait faux : la porte
+     * des mouvements et l'annulation commencent par la barriere, et ne touchent jamais la ligne d'un
+     * compte. La regle vraie est plus etroite :
+     *
+     * > **Parmi les chemins qui prennent les deux, le compte vient avant la barriere.**
+     *
+     * Deux chemins seulement prennent la ligne d'un compte : le lancement d'une flotte et la
+     * suppression. Aucun cycle ne peut donc se former — un chemin qui prendrait la barriere **puis**
+     * un compte le fermerait, et c'est ce que cette garde surveille.
+     *
+     * ## Pourquoi une garde de source
+     *
+     * `lockForUpdate()` ne compile a rien sous SQLite : aucun essai d'execution ne distingue ici un
+     * verrou pris d'un verrou oublie, ni l'ordre de deux prises. Elle ne prouve pas l'absence
+     * d'interblocage — cette epreuve appartient a MariaDB, dans les deux sens. Elle prouve qu'un
+     * futur passage ne fermera pas le cycle sans que personne ne le voie.
+     */
+    public function testNoPathThatTakesABarrierEverLocksAnAccountRow(): void
+    {
+        $chemins = [
+            FleetMovementGate::class,
+            CombatCancellationService::class,
+            CombatSettlementService::class,
+        ];
+
+        foreach ($chemins as $classe) {
+            $fichier = (new ReflectionClass($classe))->getFileName();
+            $this->assertNotFalse($fichier);
+
+            $source = preg_replace('/\s+/', ' ', (string)file_get_contents($fichier));
+            $this->assertNotNull($source);
+
+            // Ces chemins prennent bien une barriere : sans cela la garde ne surveillerait rien.
+            $this->assertStringContainsString('CelestialBodyCombatBarrier', $source, $classe . ' takes no barrier: this guard watches nothing.');
+
+            foreach (['AccountDeletionBarrier', "User::query()", "DB::table('users')"] as $prise) {
+                $this->assertStringNotContainsString(
+                    $prise,
+                    $source,
+                    $classe . ' locks an account row after taking a barrier: the lock cycle would close.'
+                );
+            }
+        }
     }
 
     /**
