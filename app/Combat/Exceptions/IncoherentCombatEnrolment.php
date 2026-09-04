@@ -88,6 +88,52 @@ class IncoherentCombatEnrolment extends RuntimeException
     }
 
     /**
+     * Un genre de mission qui n'a rien a faire dans un effectif de combat.
+     *
+     * `!reinforcesTheDefence()` ne veut pas dire « attaquant ». Un transport, un deploiement, un
+     * espionnage, une colonisation, un recyclage, un missile ou une expedition qui porterait le lien
+     * — par une donnee incoherente — etait range du cote attaquant et rendu comme une flotte de
+     * bataille. Les deux camps se nomment maintenant explicitement : ouvrir un combat d'un cote,
+     * renforcer la defense de l'autre, et rien d'autre n'est admissible.
+     *
+     * @param int $combatInstanceId
+     * @param int $fleetMissionId
+     * @param string $genre
+     * @return self
+     */
+    public static function becauseAFleetKindHasNoSideInACombat(int $combatInstanceId, int $fleetMissionId, string $genre): self
+    {
+        return new self(
+            'La flotte ' . $fleetMissionId . ' du combat ' . $combatInstanceId . ' est une mission « ' . $genre
+            . ' » : ce genre n ouvre pas de combat et ne renforce pas la defense, il n a donc pas de camp. '
+            . 'Le ranger d un cote ou de l autre reviendrait a l inventer.'
+        );
+    }
+
+    /**
+     * Une inscription qui ne decrit pas la flotte qu'elle nomme.
+     *
+     * La cle etrangere lie l'inscription a une mission ; elle ne verifie pas que ce qu'elle **dit**
+     * de cette mission est vrai. Une Defense ACS inscrite une seule fois du cote attaquant n'etait
+     * ni un doublon ni « deux camps » : elle passait, et l'annulation la rendait du mauvais cote.
+     *
+     * @param int $combatInstanceId
+     * @param int $fleetMissionId
+     * @param string $champ
+     * @param string $inscrit
+     * @param string $attendu
+     * @return self
+     */
+    public static function becauseAnEnrolmentContradictsItsFleet(int $combatInstanceId, int $fleetMissionId, string $champ, string $inscrit, string $attendu): self
+    {
+        return new self(
+            'L inscription de la flotte ' . $fleetMissionId . ' au combat ' . $combatInstanceId . ' porte « ' . $champ
+            . ' » = « ' . $inscrit . ' » alors que la mission dit « ' . $attendu . ' ». Les deux se contredisent : '
+            . 'rien n est annule.'
+        );
+    }
+
+    /**
      * @param int $combatInstanceId
      * @param int $inscriptions
      * @return self

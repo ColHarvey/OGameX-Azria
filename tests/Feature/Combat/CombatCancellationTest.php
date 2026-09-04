@@ -449,6 +449,129 @@ class CombatCancellationTest extends FleetDispatchTestCase
     }
 
     /**
+     * Une inscription qui ne decrit pas sa flotte arrete l'annulation, champ par champ.
+     *
+     * ## Ce qu'une cle etrangere ne verifie pas
+     *
+     * Elle lie l'inscription a une mission reelle. Elle ne verifie pas que ce que l'inscription
+     * **affirme** de cette mission est vrai. Une Defense ACS inscrite une seule fois du cote
+     * attaquant n'etait ni un doublon ni « deux camps » : elle passait, et l'annulation la rendait
+     * du mauvais cote. De meme pour un proprietaire qui n'est pas le sien, une cle d'identite qui
+     * nomme une autre flotte, ou un genre d'inscription que la fermeture n'aurait jamais ecrit.
+     */
+    public function testAnEnrolmentThatContradictsItsFleetStopsTheCancellation(): void
+    {
+        // **Le camp n'est pas dans cette boucle**, et c'est deliberé : sur l'initiatrice, c'est le
+        // controle « l'initiatrice figure parmi les attaquants » qui rougit d'abord, et la mutation
+        // serait tuee par un autre temoin que celui qu'on veut eprouver. Le camp a son propre essai,
+        // sur un renfort — la ou seule cette comparaison peut parler.
+        $permutations = [
+            'player_id' => fn (FleetMission $mission): array => ['player_id' => (int)$mission->user_id + 1],
+            'participant_key' => fn (FleetMission $mission): array => ['participant_key' => CombatParticipantKey::forFleet((int)$mission->id + 1)],
+            'participant_type' => fn (FleetMission $mission): array => ['participant_type' => CombatParticipant::TYPE_ACS_DEFEND],
+        ];
+
+        foreach ($permutations as $champ => $fausser) {
+            [$combat, $mission] = $this->anActiveCombat();
+
+            DB::table('combat_participants')
+                ->where('combat_instance_id', $combat->id)
+                ->where('fleet_mission_id', $mission->id)
+                ->update($fausser($mission));
+
+            try {
+                $this->cancel($combat, CombatCancellationCause::AdministrativeDecision);
+                $this->fail("An enrolment whose {$champ} contradicts its fleet was cancelled anyway.");
+            } catch (IncoherentCombatEnrolment $refus) {
+                $this->assertStringContainsString('« ' . $champ . ' »', $refus->getMessage(), "The refusal did not name {$champ}.");
+            }
+
+            $this->nothingWasWritten($combat, $mission);
+        }
+    }
+
+    /**
+     * Une Defense ACS inscrite du cote attaquant arrete l'annulation.
+     *
+     * ## L'exemple exact que rien ne voyait
+     *
+     * Elle n'est inscrite qu'une fois : ce n'est donc ni un doublon, ni « deux camps ». Et elle
+     * n'est pas l'initiatrice, donc le controle « l'initiatrice figure parmi les attaquants » ne
+     * dit rien d'elle. Seule la confrontation de son inscription a sa mission voit que le camp est
+     * faux — et sans elle, l'annulation aurait rendu un renfort defensif comme une attaquante.
+     */
+    public function testADefensiveReinforcementEnrolledOnTheAttackingSideStopsTheCancellation(): void
+    {
+        $renfort = null;
+        [$combat, $mission] = $this->anActiveCombat(function (PlanetService $cible, int $ouverture) use (&$renfort): void {
+            $renfort = $this->aDefensiveReinforcement($cible, $ouverture - 10, 100_000, $ouverture - 600);
+        });
+
+        if ($renfort === null) {
+            $this->fail('The reinforcement was never launched.');
+        }
+
+        $inscription = CombatParticipant::query()
+            ->where('combat_instance_id', $combat->id)
+            ->where('fleet_mission_id', $renfort->id)
+            ->first();
+
+        $this->assertNotNull($inscription, 'The reinforcement is not enrolled: nothing would be proved.');
+        $this->assertSame(CombatParticipant::SIDE_DEFENDER, $inscription->side, 'The reinforcement was not enrolled as a defender.');
+        $this->assertNotSame((int)$combat->mission_id, (int)$renfort->id, 'The reinforcement is the initiator: the initiator check would speak first.');
+
+        DB::table('combat_participants')
+            ->where('combat_instance_id', $combat->id)
+            ->where('fleet_mission_id', $renfort->id)
+            ->update(['side' => CombatParticipant::SIDE_ATTACKER]);
+
+        try {
+            $this->cancel($combat, CombatCancellationCause::AdministrativeDecision);
+            $this->fail('A defensive reinforcement enrolled on the attacking side was cancelled anyway.');
+        } catch (IncoherentCombatEnrolment $refus) {
+            $this->assertStringContainsString('« side »', $refus->getMessage(), 'The refusal did not name the side.');
+            $this->assertStringContainsString((string)$renfort->id, $refus->getMessage(), 'The refusal did not name the reinforcement.');
+        }
+
+        $this->nothingWasWritten($combat, $mission);
+        $this->assertSame(0, (int)$renfort->refresh()->processed, 'The reinforcement was sent home by a cancellation that stopped.');
+    }
+
+    /**
+     * Un genre de mission sans camp arrete l'annulation au lieu d'etre range chez les attaquants.
+     *
+     * ## Pourquoi « ne renforce pas la defense » ne veut pas dire « attaquant »
+     *
+     * Le camp se lisait d'une seule question, et tout ce qui repondait non y devenait attaquant :
+     * transport, deploiement, espionnage, colonisation, recyclage, missile, expedition. Une donnee
+     * incoherente qui aurait pose le lien sur l'une d'elles l'aurait fait rendre comme une flotte de
+     * bataille. Les deux camps se nomment maintenant explicitement.
+     */
+    public function testAFleetKindWithNoSideStopsTheCancellation(): void
+    {
+        [$combat, $mission] = $this->anActiveCombat();
+
+        // Le retour en ralliement : c'est la que le camp se lit du genre.
+        $combat->participants()->delete();
+        DB::table('combat_instances')->where('id', $combat->id)->update(['status' => CombatState::Rallying->value]);
+        DB::table('fleet_missions')->where('id', $mission->id)->update(['combat_instance_id' => $combat->id, 'mission_type' => 3]);
+        $combat->refresh();
+
+        try {
+            $this->cancel($combat, CombatCancellationCause::AdministrativeDecision);
+            $this->fail('A transport held by a combat was sent home as an attacking fleet.');
+        } catch (IncoherentCombatEnrolment $refus) {
+            $this->assertStringContainsString('transport', $refus->getMessage(), 'The refusal did not name the kind it could not place.');
+            $this->assertStringContainsString('n a donc pas de camp', $refus->getMessage());
+        }
+
+        $combat->refresh();
+        $this->assertSame(CombatState::Rallying, $combat->status, 'The combat was made final on a roster it cannot describe.');
+        $this->assertNotNull(CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->first(), 'The body was released.');
+        $this->assertSame(0, (int)$mission->refresh()->processed);
+    }
+
+    /**
      * Une flotte inscrite dans les deux camps arrete l'annulation : un camp ne se devine pas.
      */
     public function testAFleetEnrolledOnBothSidesStopsTheCancellation(): void

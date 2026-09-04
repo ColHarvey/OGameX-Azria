@@ -6,6 +6,7 @@ use Illuminate\Support\Collection;
 use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Exceptions\IncoherentCombatEnrolment;
+use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
@@ -193,7 +194,15 @@ final class CombatRosterReader
      */
     public function enrolmentOf(CombatInstance $combat): array
     {
-        $inscriptions = $combat->participants()->get(['side', 'fleet_mission_id']);
+        // **Les quatre champs que l'inscription affirme sur sa flotte** sont lus ici : sans eux, la
+        // confrontation comparerait des chaines vides a la mission et refuserait tout.
+        $inscriptions = $combat->participants()->get([
+            'side',
+            'fleet_mission_id',
+            'player_id',
+            'participant_key',
+            'participant_type',
+        ]);
 
         $orphelines = $inscriptions->filter(static fn (CombatParticipant $ligne): bool => $ligne->fleet_mission_id === null)->count();
 
@@ -213,7 +222,7 @@ final class CombatRosterReader
                 throw IncoherentCombatEnrolment::becauseARallyingCombatAlreadyHasARoster((int)$combat->id, $inscriptions->count());
             }
 
-            return $this->sidesOfTheHeldFleets($retenues);
+            return $this->sidesOfTheHeldFleets($combat, $retenues);
         }
 
         if ($inscriptions->isEmpty()) {
@@ -242,20 +251,34 @@ final class CombatRosterReader
             throw IncoherentCombatEnrolment::becauseFleetsAreHeldWithoutBeingEnrolled((int)$combat->id, $sansInscription);
         }
 
-        // **Aucune inscrite n'appartient a un autre combat.** Le lien vide reste permis : c'est le
-        // travailleur en retard, pas une contradiction.
-        $liens = FleetMission::query()
+        // **Chaque inscription doit decrire la flotte qu'elle nomme.** La cle etrangere lie les deux
+        // lignes ; elle ne verifie pas que ce que l'inscription dit de la mission est vrai. Une
+        // Defense ACS inscrite une seule fois du cote attaquant n'etait ni un doublon ni « deux
+        // camps » : elle passait, et l'annulation la rendait du mauvais cote.
+        $flottes = FleetMission::query()
             ->whereIn('id', array_keys($vues))
-            ->whereNotNull('combat_instance_id')
-            ->where('combat_instance_id', '!=', $combat->id)
-            ->get(['id', 'combat_instance_id']);
+            ->get(['id', 'user_id', 'mission_type', 'combat_instance_id'])
+            ->keyBy('id');
 
-        foreach ($liens as $etrangere) {
-            throw IncoherentCombatEnrolment::becauseAnEnrolledFleetBelongsToAnotherCombat(
-                (int)$combat->id,
-                (int)$etrangere->id,
-                (int)$etrangere->combat_instance_id
-            );
+        foreach ($inscriptions as $ligne) {
+            $identifiant = (int)$ligne->fleet_mission_id;
+            $flotte = $flottes->get($identifiant);
+
+            if (!$flotte instanceof FleetMission) {
+                throw IncoherentCombatEnrolment::becauseAnEnrolmentLostItsFleet((int)$combat->id, 1);
+            }
+
+            // **Aucune inscrite n'appartient a un autre combat.** Le lien vide reste permis : c'est
+            // le travailleur en retard, pas une contradiction.
+            if ($flotte->combat_instance_id !== null && (int)$flotte->combat_instance_id !== (int)$combat->id) {
+                throw IncoherentCombatEnrolment::becauseAnEnrolledFleetBelongsToAnotherCombat(
+                    (int)$combat->id,
+                    $identifiant,
+                    (int)$flotte->combat_instance_id
+                );
+            }
+
+            $this->refuseIfTheEnrolmentContradictsTheFleet($combat, $ligne, $flotte);
         }
 
         sort($camps[CombatParticipant::SIDE_ATTACKER]);
@@ -267,13 +290,13 @@ final class CombatRosterReader
     /**
      * Les camps des flottes retenues pendant le ralliement, lus du genre de leur mission.
      *
-     * Ce n'est pas un second moteur de decision : la fermeture range ses candidates par le meme
-     * genre, et l'enumeration l'impose de facon exhaustive.
+     * Ce n'est pas un second moteur de decision : la fermeture range ses candidates par les memes
+     * verdicts, et l'enumeration les impose de facon exhaustive.
      *
      * @param array<int, int> $retenues
      * @return array{0: array<int, int>, 1: array<int, int>}
      */
-    private function sidesOfTheHeldFleets(array $retenues): array
+    private function sidesOfTheHeldFleets(CombatInstance $combat, array $retenues): array
     {
         $attaquantes = [];
         $defensives = [];
@@ -284,7 +307,9 @@ final class CombatRosterReader
             ->get(['id', 'mission_type']);
 
         foreach ($missions as $mission) {
-            if (CombatMissionKind::fromMissionType((int)$mission->mission_type)->reinforcesTheDefence()) {
+            $camp = $this->sideOfTheKind($combat, (int)$mission->id, (int)$mission->mission_type);
+
+            if ($camp === CombatParticipant::SIDE_DEFENDER) {
                 $defensives[] = (int)$mission->id;
 
                 continue;
@@ -294,6 +319,81 @@ final class CombatRosterReader
         }
 
         return [$attaquantes, $defensives];
+    }
+
+    /**
+     * Le camp qu'un genre de mission occupe dans un combat, ou un refus.
+     *
+     * **`!reinforcesTheDefence()` ne veut pas dire « attaquant ».** Les deux camps se nomment
+     * explicitement, par les verdicts canoniques de l'enumeration : ouvrir un combat d'un cote,
+     * renforcer la defense de l'autre. Un transport, un deploiement, un espionnage, une
+     * colonisation, un recyclage, un missile ou une expedition qui porterait le lien — par une
+     * donnee incoherente — etait range du cote attaquant et rendu comme une flotte de bataille.
+     */
+    private function sideOfTheKind(CombatInstance $combat, int $fleetMissionId, int $missionType): string
+    {
+        $genre = CombatMissionKind::fromMissionType($missionType);
+
+        if ($genre->reinforcesTheDefence()) {
+            return CombatParticipant::SIDE_DEFENDER;
+        }
+
+        if ($genre->opensCombat()) {
+            return CombatParticipant::SIDE_ATTACKER;
+        }
+
+        throw IncoherentCombatEnrolment::becauseAFleetKindHasNoSideInACombat((int)$combat->id, $fleetMissionId, $genre->value);
+    }
+
+    /**
+     * Chaque champ de l'inscription est confronte a la mission qu'elle nomme.
+     *
+     * Le camp, le proprietaire, la cle d'identite et le genre d'inscription : quatre affirmations
+     * sur une flotte, qu'aucune contrainte de base ne verifiait.
+     */
+    private function refuseIfTheEnrolmentContradictsTheFleet(CombatInstance $combat, CombatParticipant $inscription, FleetMission $flotte): void
+    {
+        $identifiant = (int)$flotte->id;
+        $genre = CombatMissionKind::fromMissionType((int)$flotte->mission_type);
+
+        $attendus = [
+            'side' => $this->sideOfTheKind($combat, $identifiant, (int)$flotte->mission_type),
+            'player_id' => (string)$flotte->user_id,
+            'participant_key' => CombatParticipantKey::forFleet($identifiant),
+            'participant_type' => $this->participantTypeOfKind($genre),
+        ];
+
+        $portes = [
+            'side' => (string)$inscription->side,
+            'player_id' => (string)$inscription->player_id,
+            'participant_key' => (string)$inscription->participant_key,
+            'participant_type' => (string)$inscription->participant_type,
+        ];
+
+        foreach ($attendus as $champ => $attendu) {
+            if ($portes[$champ] !== $attendu) {
+                throw IncoherentCombatEnrolment::becauseAnEnrolmentContradictsItsFleet(
+                    (int)$combat->id,
+                    $identifiant,
+                    $champ,
+                    $portes[$champ],
+                    $attendu
+                );
+            }
+        }
+    }
+
+    /**
+     * Le genre d'inscription qu'une mission de ce genre produit — la meme correspondance que la
+     * fermeture applique quand elle inscrit.
+     */
+    private function participantTypeOfKind(CombatMissionKind $genre): string
+    {
+        return match ($genre) {
+            CombatMissionKind::AcsAttack => CombatParticipant::TYPE_ACS_ATTACK,
+            CombatMissionKind::AcsDefend => CombatParticipant::TYPE_ACS_DEFEND,
+            default => CombatParticipant::TYPE_ATTACK_FLEET,
+        };
     }
 
     /**
