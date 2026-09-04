@@ -917,8 +917,10 @@ mod tests {
         let mut input = a_battle_with_a_garrison_and_a_reinforcement();
         input.seed = Some(20260904);
 
-        let first = serde_json::to_string(&process_battle_rounds(a_seeded(&input))).unwrap();
-        let second = serde_json::to_string(&process_battle_rounds(a_seeded(&input))).unwrap();
+        // Values, not strings: two HashMaps of one process iterate in different orders, and two
+        // equal outputs could serialize to two different strings.
+        let first = serde_json::to_value(&process_battle_rounds(a_seeded(&input))).unwrap();
+        let second = serde_json::to_value(&process_battle_rounds(a_seeded(&input))).unwrap();
         assert_eq!(first, second, "two battles fed the same seed differ");
 
         input.seed = Some(0);
@@ -930,10 +932,10 @@ mod tests {
     fn a_permutation_of_the_fleets_fights_the_same_battle() {
         let mut input = a_battle_with_a_garrison_and_a_reinforcement();
         input.seed = Some(77);
-        let straight = serde_json::to_string(&process_battle_rounds(a_seeded(&input))).unwrap();
+        let straight = serde_json::to_value(&process_battle_rounds(a_seeded(&input))).unwrap();
 
         input.defender_fleets.reverse();
-        let reversed = serde_json::to_string(&process_battle_rounds(a_seeded(&input))).unwrap();
+        let reversed = serde_json::to_value(&process_battle_rounds(a_seeded(&input))).unwrap();
 
         assert_eq!(straight, reversed, "the order the fleets were listed in changed the battle");
     }
