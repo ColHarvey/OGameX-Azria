@@ -439,11 +439,23 @@ abstract class BattleEngine
 
             // Une attaquante sans mission — la sonde ephemere du contre-espionnage, ou un banc —
             // porte le nom reserve : lui inventer un identifiant nommerait une flotte qui n'existe pas.
+            // **Un participant qui n'a rien perdu ce round n'y figure pas.** Le moteur PHP initialise
+            // une carte vide pour chaque flotte a chaque round, le moteur Rust ne cree l'entree qu'a
+            // la premiere perte : le banc de parite a vu la difference (« present d'un seul cote »).
+            // La forme canonique est celle qui ne dit rien de qui n'a rien subi.
             foreach ($round->attackerLossesInRoundPerFleet as $mission => $pertes) {
+                if ($pertes->getAmount() === 0) {
+                    continue;
+                }
+
                 $parParticipant[$mission === 0 ? CombatParticipantKey::EPHEMERAL_ATTACKER : CombatParticipantKey::forFleet($mission)] = clone $pertes;
             }
 
             foreach ($round->defenderLossesInRoundPerFleet as $mission => $pertes) {
+                if ($pertes->getAmount() === 0) {
+                    continue;
+                }
+
                 $parParticipant[$mission === 0 ? $garnison : CombatParticipantKey::forFleet($mission)] = clone $pertes;
             }
 
