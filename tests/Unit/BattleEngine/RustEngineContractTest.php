@@ -78,6 +78,45 @@ class RustEngineContractTest extends UnitTestCase
         $this->assertArrayNotHasKey('rounds', $reponse);
     }
 
+    /**
+     * Un pointeur nul et une panique provoquee apres le decodage reviennent en documents d'erreur,
+     * et le processus continue : la bataille suivante se joue normalement.
+     */
+    public function testANullInputAndAPanicAfterDecodingComeBackAsErrorDocumentsAndTheProcessGoesOn(): void
+    {
+        $ffi = FFI::cdef(
+            "char* fight_battle_rounds(const char* input_json);\nvoid free_battle_output(char* output);",
+            base_path('storage/rust-libs/libbattle_engine_ffi.so')
+        );
+
+        // @phpstan-ignore-next-line
+        $sortie = $ffi->fight_battle_rounds(null);
+        $this->assertNotNull($sortie, 'A null input produced no document at all.');
+        $reponse = json_decode(FFI::string($sortie), true);
+        // @phpstan-ignore-next-line
+        $ffi->free_battle_output($sortie);
+
+        $this->assertIsArray($reponse);
+        $this->assertStringContainsString('null', (string)($reponse['error'] ?? ''), 'A null input was not refused as such.');
+
+        $entree = json_encode(['schema' => RustBattleEngine::ABI_VERSION, 'provoke_panic' => true, 'attacker_fleets' => [], 'defender_fleets' => []], JSON_THROW_ON_ERROR);
+        // @phpstan-ignore-next-line
+        $sortie = $ffi->fight_battle_rounds($entree);
+        $this->assertNotNull($sortie, 'A provoked panic produced no document at all.');
+        $reponse = json_decode(FFI::string($sortie), true);
+        // @phpstan-ignore-next-line
+        $ffi->free_battle_output($sortie);
+
+        $this->assertIsArray($reponse);
+        $this->assertSame(RustBattleEngine::ABI_VERSION, $reponse['schema'] ?? null);
+        $this->assertStringContainsString('panicked', (string)($reponse['error'] ?? ''), 'A panic after decoding did not come back as an error document.');
+        $this->assertArrayNotHasKey('rounds', $reponse);
+
+        // Le processus continue : une vraie bataille se joue ensuite.
+        $resultat = $this->anEngine()->simulateBattle();
+        $this->assertNotSame([], $resultat->rounds, 'The engine no longer fights after a caught panic.');
+    }
+
     private function anEngine(): RustBattleEngine
     {
         $attaquante = new AttackerFleet();

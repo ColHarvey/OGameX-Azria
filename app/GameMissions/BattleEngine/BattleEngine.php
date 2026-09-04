@@ -12,7 +12,6 @@ use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\LootContext;
 use OGame\Combat\Support\ResourceNormalizationDiagnostics;
 use OGame\GameMissions\BattleEngine\Draws\BattleDraws;
-use OGame\GameMissions\BattleEngine\Draws\Draw;
 use OGame\GameMissions\BattleEngine\Draws\SystemDraws;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleetResult;
@@ -100,6 +99,16 @@ abstract class BattleEngine
             throw new InvalidArgumentException('At least one attacker fleet is required');
         }
 
+        // **Deux flottes de meme identite s'ecraseraient dans chaque carte qui en depend.** Une
+        // seule garnison (zero) parmi les defenseurs ; au plus une attaquante sans mission (zero,
+        // la sonde ephemere du contre-espionnage) ; tout autre identifiant unique dans son camp.
+        self::refuseDuplicatedIdentities(array_map(static fn (AttackerFleet $f): int => $f->fleetMissionId, $this->attackers), 'attaquante');
+        self::refuseDuplicatedIdentities(array_map(static fn (DefenderFleet $f): int => $f->fleetMissionId, $this->defenders), 'defensive');
+
+        if ($this->defenders !== [] && !in_array(0, array_map(static fn (DefenderFleet $f): int => $f->fleetMissionId, $this->defenders), true)) {
+            throw new InvalidArgumentException('Aucune garnison (identifiant zero) parmi les flottes defensives.');
+        }
+
         // Le contexte doit avoir ete photographie pour **ces** flottes et **cette** cible. Sans ce
         // controle, rien n'empecherait d'appliquer le taux calcule sur le fret d'un combat aux
         // flottes d'un autre.
@@ -122,6 +131,18 @@ abstract class BattleEngine
      * parite compare.
      */
     protected BattleDraws $draws;
+
+    /**
+     * @param array<int, int> $identifiants
+     */
+    private static function refuseDuplicatedIdentities(array $identifiants, string $camp): void
+    {
+        foreach (array_count_values($identifiants) as $identifiant => $fois) {
+            if ($fois > 1) {
+                throw new InvalidArgumentException('La flotte ' . $camp . ' ' . $identifiant . ' apparait ' . $fois . ' fois : deux flottes de meme identite s ecraseraient.');
+            }
+        }
+    }
 
     /**
      * Remplace la source des tirages. Pour un banc ; en jeu, la source est celle du systeme.
@@ -1045,7 +1066,7 @@ abstract class BattleEngine
      */
     protected function rollMoonCreation($moonChance): bool
     {
-        $dice = Draw::index($this->draws, 100) + 1;
+        $dice = $this->draws->chanceOutOf(100);
 
         return $dice <= $moonChance;
     }

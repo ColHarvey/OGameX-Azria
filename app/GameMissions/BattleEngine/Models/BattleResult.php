@@ -55,6 +55,16 @@ class BattleResult
     public int $defenderReaperCargoCapacity = 0;
 
     /**
+     * @var array{count: int, digest: string}|null Ce que la source a graine a tire pendant les rounds.
+     *
+     * Transitoire, jamais persiste : il n'existe que sur un banc, ou la source a une graine, et il
+     * sert au banc de parite a verifier que les deux moteurs ont consomme la meme bande —
+     * meme nombre de tirages, meme empreinte. En jeu, la source est celle du systeme et ce champ
+     * reste nul.
+     */
+    public array|null $drawsConsumed = null;
+
+    /**
      * @var bool Whether a moon already existed at defender's planet location before battle commenced.
      */
     public bool $moonExisted;

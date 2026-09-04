@@ -3,7 +3,6 @@
 namespace OGame\GameMissions\BattleEngine;
 
 use OGame\GameMissions\BattleEngine\Draws\BattleDraws;
-use OGame\GameMissions\BattleEngine\Draws\Draw;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameMissions\BattleEngine\Models\BattleResultRound;
@@ -153,7 +152,7 @@ class PhpBattleEngine extends BattleEngine
                 // If the attacker has rapidfire against the defender and successfully rolled a dice,
                 // the attacker can attack a random unit again.
                 do {
-                    $targetUnit = $defenderUnits[Draw::index($this->roundDraws, count($defenderUnits))];
+                    $targetUnit = $defenderUnits[$this->roundDraws->targetIndex(count($defenderUnits))];
 
                     $rapidfire = $this->attackUnit(true, $round, $unit, $targetUnit);
                 } while ($rapidfire);
@@ -164,7 +163,7 @@ class PhpBattleEngine extends BattleEngine
                 // If the attacker has rapidfire against the defender and successfully rolled a dice,
                 // the attacker can attack a random unit again.
                 do {
-                    $targetUnit = $attackerUnits[Draw::index($this->roundDraws, count($attackerUnits))];
+                    $targetUnit = $attackerUnits[$this->roundDraws->targetIndex(count($attackerUnits))];
 
                     $rapidfire = $this->attackUnit(false, $round, $unit, $targetUnit);
                 } while ($rapidfire);
@@ -205,6 +204,10 @@ class PhpBattleEngine extends BattleEngine
             // Add the round to the list of rounds.
             $rounds[] = $round;
         }
+
+        // Ce que la source des rounds a tire, pour le banc de parite ; nul en jeu.
+        $journal = $this->roundDraws->journal();
+        $result->drawsConsumed = $journal === null ? null : ['count' => $journal->count(), 'digest' => $journal->digest()];
 
         // Populate per-fleet attacker results by scanning surviving units
         foreach ($result->attackerFleetResults as $fleetResult) {
@@ -445,7 +448,7 @@ class PhpBattleEngine extends BattleEngine
         $probability = $settings->hamillManoeuvreChance();
 
         // Une chance sur `$probability`, tiree de la source de la bataille.
-        if (Draw::index($this->draws, $probability) === 0) {
+        if ($this->draws->chanceOutOf($probability) === 1) {
             // Hamill Manoeuvre triggered! Destroy one Deathstar
             $result->hamillManoeuvreTriggered = true;
 

@@ -5,7 +5,6 @@ namespace OGame\GameMissions\BattleEngine;
 use FFI;
 use OGame\Combat\Exceptions\RustEngineContractMismatch;
 use OGame\Combat\Support\LootContext;
-use OGame\GameMissions\BattleEngine\Draws\Draw;
 use OGame\GameMissions\BattleEngine\Draws\SeededDraws;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
@@ -90,22 +89,37 @@ class RustBattleEngine extends BattleEngine
         // Convert PHP battle units to format expected by Rust
         $input = $this->prepareBattleInput($result);
 
-        // Convert to JSON
-        $inputJson = json_encode($input);
+        // Convert to JSON. Une entree qui ne s'encode pas s'arrete ici, pas dans la bibliotheque.
+        $inputJson = json_encode($input, JSON_THROW_ON_ERROR);
 
         // Call Rust function
         // @phpstan-ignore-next-line
         $outputPtr = $this->ffi->fight_battle_rounds($inputJson);
-        $output = FFI::string($outputPtr);
 
-        // **La chaine rendue est libree aussitot lue.** Elle fuyait a chaque bataille.
-        // @phpstan-ignore-next-line
-        $this->ffi->free_battle_output($outputPtr);
+        if ($outputPtr === null) {
+            throw RustEngineContractMismatch::becauseTheAnswerIs('la bibliotheque n a rien rendu (pointeur nul)');
+        }
+
+        // **La chaine rendue est liberee quoi qu'il arrive en la lisant.** Elle fuyait a chaque
+        // bataille, et une lecture qui echouait l'aurait encore laissee fuir.
+        try {
+            $output = FFI::string($outputPtr);
+        } finally {
+            // @phpstan-ignore-next-line
+            $this->ffi->free_battle_output($outputPtr);
+        }
 
         // **Une reponse qui n'est pas une bataille se refuse avec sa raison** — document illisible,
         // document d'erreur (le moteur Rust ne laisse plus passer de panique), autre version, aucun
         // round. Le jugement vit a part, pour etre eprouve sans bibliotheque.
         $battleOutput = RustEngineAnswer::battleOutputFrom($output, self::ABI_VERSION);
+
+        // Ce que la bibliotheque a tire, quand elle avait une graine : le banc de parite le compare
+        // au journal du moteur PHP.
+        $journal = $battleOutput['draws'] ?? null;
+        $result->drawsConsumed = is_array($journal) && isset($journal['count'], $journal['digest'])
+            ? ['count' => (int)$journal['count'], 'digest' => (string)$journal['digest']]
+            : null;
 
         // Convert Rust output back to PHP battle rounds
         $rounds = $this->convertBattleOutput($result, $battleOutput);
@@ -449,7 +463,7 @@ class RustBattleEngine extends BattleEngine
 
         // Une chance sur `$probability`, tiree de la source de la bataille — la meme que le
         // moteur PHP, au meme instant : avant les rounds.
-        if (Draw::index($this->draws, $probability) === 0) {
+        if ($this->draws->chanceOutOf($probability) === 1) {
             // Hamill Manoeuvre triggered! Destroy one Deathstar
             $result->hamillManoeuvreTriggered = true;
 

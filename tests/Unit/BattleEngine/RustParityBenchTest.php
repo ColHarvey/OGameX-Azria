@@ -76,12 +76,23 @@ class RustParityBenchTest extends UnitTestCase
     #[DataProvider('scenarios')]
     public function testBothEnginesFightTheSameBattle(string $nom, array $planete, array $attaquantes, array $renforts): void
     {
-        $php = CanonicalProjection::of($this->fight(PhpBattleEngine::class, $planete, $attaquantes, $renforts, self::GRAINE));
-        $rust = CanonicalProjection::of($this->fight(RustBattleEngine::class, $planete, $attaquantes, $renforts, self::GRAINE));
+        $resultatPhp = $this->fight(PhpBattleEngine::class, $planete, $attaquantes, $renforts, self::GRAINE);
+        $resultatRust = $this->fight(RustBattleEngine::class, $planete, $attaquantes, $renforts, self::GRAINE);
+
+        $php = CanonicalProjection::of($resultatPhp);
+        $rust = CanonicalProjection::of($resultatRust);
 
         $this->assertNotSame([], $php['rounds'], 'The PHP battle had no round: the projection would compare nothing.');
 
         $this->assertProjectionsAgree($nom, $php, $rust);
+
+        // **La bande a ete consommee entierement et a l'identique** : meme nombre de tirages, meme
+        // empreinte de genre, borne et valeur. Deux batailles egales tirees differemment seraient une
+        // coincidence, pas une parite.
+        $this->assertNotNull($resultatPhp->drawsConsumed, 'The PHP engine kept no journal of its draws.');
+        $this->assertNotNull($resultatRust->drawsConsumed, 'The Rust engine returned no journal of its draws.');
+        $this->assertGreaterThan(0, $resultatPhp->drawsConsumed['count']);
+        $this->assertSame($resultatPhp->drawsConsumed, $resultatRust->drawsConsumed, 'Scenario « ' . $nom . ' » : the two engines did not consume the same draws.');
     }
 
     /**

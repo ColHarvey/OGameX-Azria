@@ -42,11 +42,18 @@ class PhpEngineReplayTest extends UnitTestCase
 
     public function testTheSameSeedFightsTheSameBattle(): void
     {
-        $premiere = CanonicalProjection::of($this->fight(20260904));
-        $seconde = CanonicalProjection::of($this->fight(20260904));
+        $resultatPremier = $this->fight(20260904);
+        $resultatSecond = $this->fight(20260904);
+        $premiere = CanonicalProjection::of($resultatPremier);
+        $seconde = CanonicalProjection::of($resultatSecond);
 
         $this->assertNotSame([], $premiere['rounds'], 'The battle had no round: the projection would compare nothing.');
         $this->assertNull(CanonicalProjection::firstDivergence($premiere, $seconde));
+
+        // Le journal des rounds : meme bande, consommee a l'identique.
+        $this->assertNotNull($resultatPremier->drawsConsumed, 'A seeded battle kept no journal of its draws.');
+        $this->assertGreaterThan(0, $resultatPremier->drawsConsumed['count']);
+        $this->assertSame($resultatPremier->drawsConsumed, $resultatSecond->drawsConsumed, 'Two battles fed the same seed did not consume the same draws.');
 
         // La projection distingue bien deux batailles : une autre graine, une autre bataille.
         $autre = CanonicalProjection::of($this->fight(1));

@@ -3,21 +3,44 @@
 namespace Tests\Unit\BattleEngine;
 
 use InvalidArgumentException;
+use OGame\GameMissions\BattleEngine\Draws\BattleDraws;
 use OGame\GameMissions\BattleEngine\Draws\Draw;
+use OGame\GameMissions\BattleEngine\Draws\DrawJournal;
 use OGame\GameMissions\BattleEngine\Draws\SeededDraws;
 use OGame\GameMissions\BattleEngine\Draws\SystemDraws;
 use PHPUnit\Framework\TestCase;
 
 /**
- * La bande de tirages : rejouable a la graine, identique a celle du moteur Rust, et bornee.
+ * La bande de tirages : les frontieres PHP epinglees en valeurs ecrites en dur, la suite a graine
+ * identique a celle du moteur Rust, le journal qui nomme chaque tirage, et les bornes.
  */
 class DrawsTest extends TestCase
 {
     /**
-     * Les trois premiers tirages de la graine 1, calcules a la main depuis l'algorithme.
-     *
-     * Le moteur Rust affirme les memes trois valeurs (`the_xorshift_matches_the_php_sequence`) : c'est
-     * ce qui fait qu'une meme graine joue la meme bataille des deux cotes.
+     * Les frontieres du moteur PHP, telles qu'elles etaient : un pour-cent entier de 0 a 100
+     * compare strictement a la chance, un centieme de pour-cent de 0,01 a 100,00 compare
+     * largement. Avec une chance de 50,9, les tirages 0..50 explosent et 51..100 non — cent une
+     * valeurs, pas cent. Le moteur Rust reproduit ces frontieres, et le banc de parite le verifie.
+     */
+    public function testTheExplosionAndRapidfireBoundariesArePinned(): void
+    {
+        $this->assertTrue(Draw::explodes($this->drawing(explosion: 50), 50.9));
+        $this->assertFalse(Draw::explodes($this->drawing(explosion: 51), 50.9));
+        $this->assertTrue(Draw::explodes($this->drawing(explosion: 0), 0.5));
+        $this->assertFalse(Draw::explodes($this->drawing(explosion: 0), 0.0));
+        $this->assertTrue(Draw::explodes($this->drawing(explosion: 100), 100.5));
+        $this->assertFalse(Draw::explodes($this->drawing(explosion: 100), 100.0));
+
+        $this->assertTrue(Draw::rapidfire($this->drawing(rapidfire: 7500), 75.0));
+        $this->assertFalse(Draw::rapidfire($this->drawing(rapidfire: 7501), 75.0));
+        $this->assertTrue(Draw::rapidfire($this->drawing(rapidfire: 1), 0.01));
+        $this->assertFalse(Draw::rapidfire($this->drawing(rapidfire: 1), 0.0));
+        $this->assertTrue(Draw::rapidfire($this->drawing(rapidfire: 10000), 100.0));
+    }
+
+    /**
+     * Les trois premiers tirages bruts de la graine 1, calcules a la main depuis l'algorithme ;
+     * le moteur Rust affirme les memes (`the_xorshift_matches_the_php_sequence`).
      */
     public function testTheSeededSequenceIsTheOneTheRustEngineDraws(): void
     {
@@ -28,28 +51,86 @@ class DrawsTest extends TestCase
         $this->assertSame(2647435461, $tirages->next());
     }
 
-    public function testTheSameSeedDrawsTheSameSequence(): void
+    /**
+     * Le journal nomme chaque tirage — genre, borne, valeur — et son empreinte est celle que le
+     * moteur Rust calcule pour la meme bande (`the_journal_digest_distinguishes_kinds_and_order`).
+     */
+    public function testTheJournalIsPinnedAgainstTheRustEngine(): void
+    {
+        $tirages = new SeededDraws(1);
+
+        $this->assertSame(8, $tirages->targetIndex(13));
+        $this->assertSame(39, $tirages->explosionPercent());
+        $this->assertSame(5462, $tirages->rapidfireCentipercent());
+
+        $this->assertSame(3, $tirages->journal()->count());
+        $this->assertSame('3b66012af9879de4', $tirages->journal()->digest());
+        $this->assertSame($tirages->journal()->digest(), DrawJournal::fnv1a64('target:13:8;explosion:101:39;rapidfire:10000:5462;'));
+    }
+
+    /**
+     * L'empreinte distingue deux consommations differentes des memes nombres : un autre genre, un
+     * autre ordre. Une suite de nombres bruts ne le dirait pas.
+     */
+    public function testTheJournalDistinguishesKindsAndOrder(): void
+    {
+        $premiere = new SeededDraws(9);
+        $premiere->targetIndex(13);
+        $premiere->explosionPercent();
+
+        $seconde = new SeededDraws(9);
+        $seconde->explosionPercent();
+        $seconde->targetIndex(13);
+
+        $this->assertSame($premiere->journal()->count(), $seconde->journal()->count());
+        $this->assertNotSame($premiere->journal()->digest(), $seconde->journal()->digest());
+    }
+
+    /**
+     * L'arithmetique de l'empreinte, contre les vecteurs publics de FNV-1a sur soixante-quatre bits.
+     */
+    public function testTheDigestArithmeticMatchesThePublicFnvVectors(): void
+    {
+        $this->assertSame('cbf29ce484222325', DrawJournal::fnv1a64(''));
+        $this->assertSame('af63dc4c8601ec8c', DrawJournal::fnv1a64('a'));
+        $this->assertSame('85944171f73967e8', DrawJournal::fnv1a64('foobar'));
+    }
+
+    public function testTheSameSeedDrawsTheSameSequenceAndARoundSourceStartsAfresh(): void
     {
         $premiere = new SeededDraws(20260904);
         $seconde = new SeededDraws(20260904);
 
-        for ($i = 0; $i < 1000; $i++) {
-            $this->assertSame($premiere->next(), $seconde->next());
+        for ($i = 0; $i < 500; $i++) {
+            $this->assertSame($premiere->targetIndex(97), $seconde->targetIndex(97));
         }
+
+        $this->assertSame($premiere->journal()->digest(), $seconde->journal()->digest());
+
+        $rounds = $premiere->forRounds();
+        $this->assertNotSame($premiere, $rounds);
+        $this->assertSame((new SeededDraws(20260904))->targetIndex(97), $rounds->targetIndex(97), 'The round source does not start afresh from the seed.');
     }
 
-    public function testEveryDrawIsAThirtyTwoBitInteger(): void
+    public function testEveryDrawStaysWithinItsBound(): void
     {
         foreach ([new SeededDraws(0xFFFFFFFF), new SystemDraws()] as $source) {
-            for ($i = 0; $i < 1000; $i++) {
-                $tirage = $source->next();
-                $this->assertGreaterThanOrEqual(0, $tirage);
-                $this->assertLessThanOrEqual(0xFFFFFFFF, $tirage);
+            for ($i = 0; $i < 500; $i++) {
+                $this->assertLessThan(13, $source->targetIndex(13));
+                $this->assertGreaterThanOrEqual(0, $source->targetIndex(13));
+                $this->assertLessThanOrEqual(100, $source->explosionPercent());
+                $this->assertGreaterThanOrEqual(0, $source->explosionPercent());
+                $this->assertLessThanOrEqual(10000, $source->rapidfireCentipercent());
+                $this->assertGreaterThanOrEqual(1, $source->rapidfireCentipercent());
+                $this->assertLessThanOrEqual(7, $source->chanceOutOf(7));
+                $this->assertGreaterThanOrEqual(1, $source->chanceOutOf(7));
             }
         }
+
+        $this->assertNull((new SystemDraws())->journal());
     }
 
-    public function testTheSeedZeroAndOutOfRangeSeedsAreRefused(): void
+    public function testMeaninglessBoundsAndSeedsAreRefused(): void
     {
         foreach ([0, -1, 0x100000000] as $graine) {
             try {
@@ -59,39 +140,63 @@ class DrawsTest extends TestCase
                 $this->assertStringContainsString((string)$graine, $refus->getMessage());
             }
         }
-    }
 
-    public function testAnIndexIsDrawnAmongTheCandidatesAndNeverAmongNone(): void
-    {
-        $tirages = new SeededDraws(7);
+        foreach ([new SeededDraws(3), new SystemDraws()] as $source) {
+            try {
+                $source->targetIndex(0);
+                $this->fail('A target was drawn among no candidate.');
+            } catch (InvalidArgumentException) {
+                $this->addToAssertionCount(1);
+            }
 
-        for ($i = 0; $i < 500; $i++) {
-            $index = Draw::index($tirages, 13);
-            $this->assertGreaterThanOrEqual(0, $index);
-            $this->assertLessThan(13, $index);
-        }
-
-        $this->expectException(InvalidArgumentException::class);
-        Draw::index($tirages, 0);
-    }
-
-    public function testAnExplosionNeverHappensAtChanceZeroAndAlwaysAboveAHundred(): void
-    {
-        $tirages = new SeededDraws(11);
-
-        for ($i = 0; $i < 300; $i++) {
-            $this->assertFalse(Draw::explodes($tirages, 0.0));
-            $this->assertTrue(Draw::explodes($tirages, 100.5));
+            try {
+                $source->chanceOutOf(0);
+                $this->fail('A chance was drawn out of nothing.');
+            } catch (InvalidArgumentException) {
+                $this->addToAssertionCount(1);
+            }
         }
     }
 
-    public function testRapidfireNeverHappensAtChanceZeroAndAlwaysAtAHundred(): void
+    /**
+     * Une source qui rend les valeurs dictees, pour epingler une frontiere.
+     */
+    private function drawing(int $explosion = 0, int $rapidfire = 1): BattleDraws
     {
-        $tirages = new SeededDraws(13);
+        return new class ($explosion, $rapidfire) implements BattleDraws {
+            public function __construct(private int $explosion, private int $rapidfire)
+            {
+            }
 
-        for ($i = 0; $i < 300; $i++) {
-            $this->assertFalse(Draw::rapidfire($tirages, 0.0));
-            $this->assertTrue(Draw::rapidfire($tirages, 100.0));
-        }
+            public function targetIndex(int $count): int
+            {
+                return 0;
+            }
+
+            public function explosionPercent(): int
+            {
+                return $this->explosion;
+            }
+
+            public function rapidfireCentipercent(): int
+            {
+                return $this->rapidfire;
+            }
+
+            public function chanceOutOf(int $bound): int
+            {
+                return 1;
+            }
+
+            public function forRounds(): BattleDraws
+            {
+                return $this;
+            }
+
+            public function journal(): DrawJournal|null
+            {
+                return null;
+            }
+        };
     }
 }

@@ -3,7 +3,6 @@
 namespace OGame\GameMissions\BattleEngine\Services;
 
 use OGame\GameMissions\BattleEngine\Draws\BattleDraws;
-use OGame\GameMissions\BattleEngine\Draws\Draw;
 use OGame\GameObjects\Models\Enums\GameObjectType;
 use OGame\GameObjects\Models\Units\UnitCollection;
 
@@ -89,7 +88,7 @@ class DefenseRepairService
                     // et identique entre les deux moteurs. La graine historique reste pour les essais
                     // du service seul.
                     $roll = match (true) {
-                        $this->draws !== null => Draw::index($this->draws, 100) + 1,
+                        $this->draws !== null => $this->draws->chanceOutOf(100),
                         $this->seed !== null => mt_rand(1, 100),
                         default => random_int(1, 100),
                     };
