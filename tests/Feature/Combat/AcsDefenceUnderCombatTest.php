@@ -9,10 +9,15 @@ use OGame\Combat\Enums\CombatCancellationCause;
 use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Enums\FleetDispositionKind;
+use OGame\Combat\Services\PersistentCombatAdvancer;
 use OGame\Combat\Services\RallyClosureService;
 use OGame\Combat\Support\CombatParticipantKey;
+use OGame\GameMissions\AcsDefendMission;
 use OGame\GameMissions\AttackMission;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Models\CelestialBodyCombatBarrier;
+use OGame\Models\CombatFleetDisposition;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatOutboxMessage;
 use OGame\Models\CombatParticipant;
@@ -229,6 +234,107 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
         $this->assertSame(1, (int)$vague->processed, 'The refused wave is still waiting.');
         $this->assertSame(1, FleetMission::query()->where('parent_id', $vague->id)->count());
         $this->assertSame(CombatReasonCode::FleetLimitReached->value, $this->reasonToldTo($combat, $vague), 'The closure reason was overwritten by « rally closed ».');
+    }
+
+    /**
+     * Un renfort refuse rentre meme si personne ne le touche avant la fin du combat.
+     *
+     * ## Le trou que cet essai ferme
+     *
+     * Le demi-tour etait rededuit : on cherchait la barriere du corps, on retrouvait le combat, on
+     * constatait que la flotte n'y etait pas inscrite. La barriere est levee au reglement — apres
+     * quoi il ne reste plus rien a interroger.
+     *
+     * Un renfort refuse dont le stationnement s'acheve longtemps apres la bataille suivait donc son
+     * chemin ordinaire : il stationnait hors photographie, et l'avis de refus annoncait un mouvement
+     * qui n'arrivait jamais. La disposition ecrite a la fermeture survit a tout cela.
+     */
+    public function testARefusedReinforcementStillGoesHomeAfterTheCombatIsOver(): void
+    {
+        $renfort = null;
+        [$combat, , , $ouverture] = $this->anOpenedCombat(true, function (PlanetService $cible, int $ouverture) use (&$renfort): void {
+            // Lance a l'ouverture, donc pas encore en vol : la fermeture le refusera. Son
+            // stationnement, lui, dure bien plus longtemps que la bataille.
+            $renfort = $this->aDefensiveReinforcement($cible, $ouverture + 5, 100_000, $ouverture);
+        });
+
+        if ($renfort === null) {
+            $this->fail('The reinforcement was never launched.');
+        }
+
+        $this->assertTrue((new RallyClosureService())->close($combat->id, $ouverture + 19)->closed, 'The rally did not close.');
+        $this->assertFalse($this->isADefendingParticipant($combat, $renfort), 'The reinforcement was admitted: nothing would be refused.');
+
+        // La decision est ecrite, avec la raison que l'admission a prononcee.
+        $decidee = CombatFleetDisposition::query()->where('fleet_mission_id', $renfort->id)->first();
+        $this->assertNotNull($decidee, 'The closure refused the reinforcement without writing what it must do.');
+        $this->assertSame(FleetDispositionKind::ReturnToOrigin, $decidee->movement);
+        $this->assertSame(CombatReasonCode::NotAlreadyInFlight, $decidee->reason);
+        $this->assertTrue($decidee->isPending());
+
+        // **Personne ne le touche entre la fermeture et le reglement.**
+        $combat->refresh();
+        $this->travelTo(Date::createFromTimestamp((int)$combat->ends_at));
+        $this->assertSame(1, (new PersistentCombatAdvancer())->advance((int)$combat->ends_at)->settled, 'The combat did not settle.');
+
+        $combat->refresh();
+        $this->assertSame(CombatState::Resolved, $combat->status);
+        $this->assertNull(
+            CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->first(),
+            'The barrier is still there: the test would not prove that the disposition survives it.'
+        );
+
+        // Le travailleur passe enfin, bien apres la fin du combat.
+        $apres = (int)$combat->ends_at + 3_600;
+        $this->travelTo(Date::createFromTimestamp($apres));
+        resolve(FleetMissionService::class)->updateMission($renfort->refresh());
+
+        $renfort->refresh();
+        $this->assertSame(1, (int)$renfort->processed, 'A refused reinforcement stayed on the body after the combat was over.');
+        $retours = FleetMission::query()->where('parent_id', $renfort->id)->get();
+        $this->assertCount(1, $retours, 'The refused reinforcement did not come home exactly once.');
+        $retour = $retours->first();
+
+        if ($retour === null) {
+            $this->fail('The refused reinforcement has no return.');
+        }
+
+        $this->assertSame($apres, (int)$retour->time_departure, 'The return does not leave at the instant the disposition was consumed.');
+
+        // La raison est celle de l'admission, pas un « ralliement ferme » invente apres coup.
+        $this->assertSame(CombatReasonCode::NotAlreadyInFlight->value, $this->reasonToldTo($combat, $renfort));
+
+        $decidee->refresh();
+        $this->assertFalse($decidee->isPending(), 'The disposition was not marked as done.');
+        $this->assertSame($apres, (int)$decidee->consumed_at);
+    }
+
+    /**
+     * Une disposition ne se consomme qu'une fois, quel que soit le nombre de passages.
+     */
+    public function testADispositionIsConsumedOnlyOnce(): void
+    {
+        $renfort = null;
+        [$combat, , , $ouverture] = $this->anOpenedCombat(true, function (PlanetService $cible, int $ouverture) use (&$renfort): void {
+            $renfort = $this->aDefensiveReinforcement($cible, $ouverture + 5, 100_000, $ouverture);
+        });
+
+        if ($renfort === null) {
+            $this->fail('The reinforcement was never launched.');
+        }
+
+        $this->assertTrue((new RallyClosureService())->close($combat->id, $ouverture + 19)->closed);
+
+        $decidee = CombatFleetDisposition::query()->where('fleet_mission_id', $renfort->id)->first();
+        $this->assertNotNull($decidee);
+
+        $this->travelTo(Date::createFromTimestamp($ouverture + 30));
+        $mission = resolve(AcsDefendMission::class);
+
+        $this->assertTrue($mission->turnBackIfTheCombatHasNoPlaceForIt($renfort->refresh(), $ouverture + 30), 'The first pass did nothing.');
+        $this->assertFalse($mission->turnBackIfTheCombatHasNoPlaceForIt($renfort->refresh(), $ouverture + 60), 'A second pass consumed the same disposition again.');
+
+        $this->assertSame(1, FleetMission::query()->where('parent_id', $renfort->id)->count(), 'A second return was created.');
     }
 
     /**

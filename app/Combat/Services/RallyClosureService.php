@@ -19,6 +19,7 @@ use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Enums\FleetDispositionKind;
 use OGame\Combat\Enums\SnapshotContribution;
 use OGame\Combat\Exceptions\ContradictorySnapshotInclusion;
 use OGame\Combat\Projection\SnapshotProjectionRegistry;
@@ -85,6 +86,7 @@ final class RallyClosureService
         private RallyCandidateReader $reader = new RallyCandidateReader(),
         private AttackAdmissionSelector $attackSelector = new AttackAdmissionSelector(),
         private DefensiveAdmissionSelector $defenceSelector = new DefensiveAdmissionSelector(),
+        private FleetDispositionRegistry $dispositions = new FleetDispositionRegistry(),
         private RallyGrouping $grouping = new RallyGrouping(),
         SnapshotProjectionRegistry|null $projections = null,
         private CombatEngagementService $engagement = new CombatEngagementService(),
@@ -511,6 +513,18 @@ final class RallyClosureService
             }
 
             foreach ($admission->group->missions as $mission) {
+                // **Le mouvement d'abord, l'avis ensuite.** La disposition est ce que la flotte doit
+                // faire ; elle survit a la fin du combat et a la levee de la barriere, quand plus
+                // rien ne permettrait de rededuire le demi-tour. L'avis, lui, ne fait que le
+                // raconter.
+                $this->dispositions->record(
+                    $combat,
+                    $mission->missionId,
+                    $raison,
+                    $closedAt,
+                    FleetDispositionKind::ReturnToOrigin
+                );
+
                 CombatOutboxMessage::query()->updateOrCreate(
                     [
                         'combat_instance_id' => $combat->id,

@@ -5,7 +5,9 @@ namespace OGame\GameMissions;
 use OGame\Combat\Enums\CombatOutboxKind;
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Enums\FleetDispositionKind;
 use OGame\Combat\Services\EngagedFleetCheck;
+use OGame\Combat\Services\FleetDispositionRegistry;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Enums\FleetMissionStatus;
 use OGame\Enums\FleetSpeedType;
@@ -13,6 +15,7 @@ use OGame\GameMissions\Abstracts\GameMission;
 use OGame\GameMissions\Models\MissionPossibleStatus;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\CelestialBodyCombatBarrier;
+use OGame\Models\CombatFleetDisposition;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatOutboxMessage;
 use OGame\Models\CombatParticipant;
@@ -175,16 +178,60 @@ class AcsDefendMission extends GameMission
             return false;
         }
 
+        $registre = resolve(FleetDispositionRegistry::class);
+        $disposition = $registre->pendingFor($mission);
+
+        if ($disposition === null) {
+            // **Jamais jugee** : elle s'est posee apres la fermeture, personne ne l'a vue. Le combat
+            // decide maintenant, et la decision s'ecrit avant d'etre executee — comme celle d'une
+            // refusee, pour que les deux chemins se relisent de la meme facon.
+            $combat = $this->theCombatThatHasNoPlaceForIt($mission);
+
+            if ($combat === null) {
+                return false;
+            }
+
+            $registre->record(
+                $combat,
+                $mission->id,
+                CombatReasonCode::RallyClosed,
+                $now,
+                FleetDispositionKind::ReturnToOrigin
+            );
+            $disposition = $registre->pendingFor($mission);
+
+            if ($disposition === null) {
+                return false;
+            }
+        }
+
+        // **La disposition suffit, meme si le combat est termine et la barriere levee.** C'est tout
+        // l'objet de l'avoir ecrite : une flotte dont le stationnement s'acheve longtemps apres la
+        // bataille retrouve sa decision, et ne stationne pas hors photographie faute de barriere a
+        // interroger.
+        return $registre->consume($disposition, $now, function (CombatFleetDisposition $decidee) use ($mission, $now): void {
+            $this->announceAndSendHome($mission, $decidee, $now);
+        });
+    }
+
+    /**
+     * Le combat qui tient ce corps et n'a pas de place pour cette flotte, s'il y en a un.
+     *
+     * Il faut une barriere vivante : c'est le seul cas ou une flotte peut n'avoir jamais ete jugee.
+     * Une fois le combat termine, toute flotte qui devait repartir porte deja sa disposition.
+     */
+    private function theCombatThatHasNoPlaceForIt(FleetMission $mission): CombatInstance|null
+    {
         $barriere = CelestialBodyCombatBarrier::query()->where('target_body_id', $mission->planet_id_to)->first();
 
         if ($barriere === null) {
-            return false;
+            return null;
         }
 
         $combat = CombatInstance::query()->find($barriere->combat_instance_id);
 
         if ($combat === null || $combat->status === CombatState::Rallying || $combat->status->isFinal()) {
-            return false;
+            return null;
         }
 
         $inscrite = CombatParticipant::query()
@@ -192,20 +239,29 @@ class AcsDefendMission extends GameMission
             ->where('fleet_mission_id', $mission->id)
             ->exists();
 
-        if ($inscrite) {
-            return false;
-        }
+        return $inscrite ? null : $combat;
+    }
 
-        // La raison de la fermeture, si elle l'a jugee ; sinon elle est arrivee apres.
+    /**
+     * Ecrit l'avis depuis la decision, puis fait rentrer la flotte.
+     *
+     * **L'avis decoule du mouvement, jamais l'inverse.** Un message est une chose que l'on affiche ;
+     * une disposition est une chose que l'on doit faire. Les ecrire dans cet ordre garantit qu'aucun
+     * refus annonce ne reste sans le mouvement qui va avec.
+     */
+    private function announceAndSendHome(FleetMission $mission, CombatFleetDisposition $decidee, int $now): void
+    {
+        $combat = $decidee->combatInstance;
+
         CombatOutboxMessage::query()->firstOrCreate(
             [
-                'combat_instance_id' => $combat->id,
+                'combat_instance_id' => $decidee->combat_instance_id,
                 'participant_key' => CombatParticipantKey::forFleet($mission->id),
                 'kind' => CombatOutboxKind::RallyRefused->value,
             ],
             [
                 'payload' => [
-                    'reason' => CombatReasonCode::RallyClosed->value,
+                    'reason' => $decidee->reason->value,
                     'target_body_id' => $combat->target_planet_id,
                     'galaxy' => $combat->galaxy,
                     'system' => $combat->system,
@@ -229,8 +285,6 @@ class AcsDefendMission extends GameMission
             $this->fleetMissionService->getFleetUnits($mission),
             $arriveePhysique - $now
         );
-
-        return true;
     }
 
     /**

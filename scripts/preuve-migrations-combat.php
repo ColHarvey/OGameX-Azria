@@ -172,6 +172,7 @@ $migrations = [
     '2026_09_03_150000_add_loot_settlement_to_combat_instances',
     '2026_09_03_180000_add_advance_attempts_to_combat_instances',
     '2026_09_03_230000_change_fleet_mission_resources_to_double',
+    '2026_09_04_000000_create_combat_fleet_dispositions_table',
 ];
 
 $nouvellesTables = [
@@ -180,6 +181,7 @@ $nouvellesTables = [
     'combat_snapshot_inclusions',
     'combat_loot_reservations',
     'combat_outbox',
+    'combat_fleet_dispositions',
 ];
 
 $nouvellesColonnes = [
