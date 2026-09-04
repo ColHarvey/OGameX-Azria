@@ -190,10 +190,19 @@ class CombatResolutionService
                         // 1. Show a second fleet slot in the widget immediately after battle.
                         // 2. Leave a dangling return mission if the player later recalls the fleet,
                         //    causing both missions to process and double the ships returned.
-                        $fleetOwner = $this->playerServiceFactory->make($fleetResult->ownerId);
                         $originalUnits = $this->fleetMissionService->getFleetUnits($defendMission);
-                        $originalCargoCapacity = $originalUnits->getTotalCargoCapacity($fleetOwner);
-                        $remainingCargoCapacity = $fleetResult->unitsResult->getTotalCargoCapacity($fleetOwner);
+
+                        // **La proportion vient des capacites gelees a la cloture, pas du joueur vivant.**
+                        //
+                        // Les deux capacites etaient recalculees ici sur le proprietaire **vivant**,
+                        // c'est-a-dire sur sa classe et son hyperespace du moment. Sur le chemin durable, des
+                        // heures separent la cloture de l'echeance : un joueur qui monte sa recherche
+                        // pendant la bataille changeait la proportion appliquee a une cargaison
+                        // pourtant gelee. Les deux capacites bougent ensemble, mais pas du meme
+                        // facteur — la survivante ne compte que les vaisseaux restants — donc le
+                        // rapport change, et deux rejeux du meme combat rendaient deux cargaisons.
+                        $originalCargoCapacity = $fleetResult->startingCargoCapacity;
+                        $remainingCargoCapacity = $fleetResult->survivingCargoCapacity;
 
                         $survivalRate = $originalCargoCapacity > 0
                             ? $remainingCargoCapacity / $originalCargoCapacity
@@ -267,7 +276,8 @@ class CombatResolutionService
                     );
 
                     // Ensure total doesn't exceed surviving cargo capacity
-                    $remainingCargoCapacity = $fleetResult->unitsResult->getTotalCargoCapacity($fleetOwner);
+                    // La capacite survivante de cette flotte, gelee a la cloture.
+                    $remainingCargoCapacity = $fleetResult->survivingCargoCapacity;
                     if ($totalResources->sum() > $remainingCargoCapacity) {
                         $totalResources = $this->capAndCollect($totalResources, $remainingCargoCapacity, $allocation, $diagnostics, CombatResolutionOutcome::PHASE_RETURN_CAP, CombatParticipantKey::forFleet($fleetResult->fleetMissionId));
                     }
@@ -326,10 +336,9 @@ class CombatResolutionService
                 0
             );
 
-            // Calculate Reaper cargo capacity
-            $reaperObject = ObjectService::getShipObjectByMachineName('reaper');
-            $reaperCount = $battleResult->attackerUnitsResult->getAmountByMachineName('reaper');
-            $reaperCargoCapacity = $reaperObject->properties->capacity->calculate($attackerPlayer)->totalValue * $reaperCount;
+            // La capacite des Faucheurs attaquants survivants, gelee a la cloture : elle decide
+            // combien de debris changent de proprietaire.
+            $reaperCargoCapacity = $battleResult->attackerReaperCargoCapacity;
 
             // Limit collected debris to Reaper cargo capacity
             // (Can collect maximum 30% of debris OR Reaper capacity, whichever is lower)
@@ -346,7 +355,7 @@ class CombatResolutionService
         // space so excess debris stays in the debris field instead of disappearing.
         if (count($battleResult->attackerFleetResults) === 1 && $attackerCollectedDebris->sum() > 0) {
             $singleFleetResult = $battleResult->attackerFleetResults[0];
-            $remainingCargoCapacity = $battleResult->attackerUnitsResult->getTotalCargoCapacity($attackerPlayer);
+            $remainingCargoCapacity = $battleResult->attackerSurvivingCargoCapacity;
             $availableForCollectedDebris = max(
                 0,
                 (int)($remainingCargoCapacity - $singleFleetResult->survivingCargo->sum() - $singleFleetResult->lootShare->sum())
@@ -376,10 +385,8 @@ class CombatResolutionService
                 0
             );
 
-            // Calculate defender Reaper cargo capacity
-            $reaperObject = ObjectService::getShipObjectByMachineName('reaper');
-            $defenderReaperCount = $battleResult->defenderUnitsResult->getAmountByMachineName('reaper');
-            $defenderReaperCargoCapacity = $reaperObject->properties->capacity->calculate($defenderPlayer)->totalValue * $defenderReaperCount;
+            // La capacite des Faucheurs defenseurs survivants, gelee a la cloture.
+            $defenderReaperCargoCapacity = $battleResult->defenderReaperCargoCapacity;
 
             // Limit collected debris to Reaper cargo capacity
             if ($collectionAmount->sum() <= $defenderReaperCargoCapacity) {
@@ -505,7 +512,10 @@ class CombatResolutionService
         if ($attackerCollectedDebris->sum() > 0) {
             $reaperObject = ObjectService::getShipObjectByMachineName('reaper');
             $reaperCount = $battleResult->attackerUnitsResult->getAmountByMachineName('reaper');
-            $reaperCargoCapacity = $reaperObject->properties->capacity->calculate($attackerPlayer)->totalValue * $reaperCount;
+
+            // L'avis annonce le plafond qui a servi, pas un plafond recalcule maintenant : sinon il
+            // decrirait une recolte que le joueur ne peut pas retrouver dans ses ressources.
+            $reaperCargoCapacity = $battleResult->attackerReaperCargoCapacity;
 
             $this->messageService->sendSystemMessageToPlayer($attackerPlayer, DebrisFieldHarvest::class, [
                 'from' => '[planet]' . $mission->planet_id_from . '[/planet]',
@@ -527,7 +537,7 @@ class CombatResolutionService
         if ($defenderCollectedDebris->sum() > 0) {
             $reaperObject = ObjectService::getShipObjectByMachineName('reaper');
             $defenderReaperCount = $battleResult->defenderUnitsResult->getAmountByMachineName('reaper');
-            $defenderReaperCargoCapacity = $reaperObject->properties->capacity->calculate($defenderPlayer)->totalValue * $defenderReaperCount;
+            $defenderReaperCargoCapacity = $battleResult->defenderReaperCargoCapacity;
 
             $this->messageService->sendSystemMessageToPlayer($defenderPlayer, DebrisFieldHarvest::class, [
                 'from' => '[planet]' . $defenderPlanet->getPlanetId() . '[/planet]',
@@ -558,7 +568,8 @@ class CombatResolutionService
             $mission->save();
 
             // Create and start the return mission (if single attacker has remaining units).
-            $remainingCargoCapacity = $battleResult->attackerUnitsResult->getTotalCargoCapacity($attackerPlayer);
+            // La capacite survivante gelee : c'est elle qui plafonne ce qui rentre.
+            $remainingCargoCapacity = $battleResult->attackerSurvivingCargoCapacity;
             $singleFleetResult = $battleResult->attackerFleetResults[0];
 
             // Total resources = remaining mission resources + remaining loot + collected debris (from attacker Reapers)

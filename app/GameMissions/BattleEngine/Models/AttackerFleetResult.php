@@ -51,6 +51,11 @@ class AttackerFleetResult
     public int $survivingCargoCapacity = 0;
 
     /**
+     * @var int La capacite de fret que cette flotte portait **au depart**, gelee a la cloture.
+     */
+    public int $startingCargoCapacity = 0;
+
+    /**
      * @var bool Whether this fleet was completely destroyed.
      */
     public bool $completelyDestroyed;

@@ -119,12 +119,20 @@ class BattleResultCodecTest extends UnitTestCase
         $this->assertRefused($document, 'engine');
     }
 
+    /**
+     * Le schema suivant celui que ce codec sait lire se refuse.
+     *
+     * Le numero se derive de la constante : ecrit en dur, il devenait connu le jour ou le schema
+     * montait, et l'essai passait alors en n'exigeant plus rien.
+     */
     public function testAnUnknownSchemaIsRefused(): void
     {
-        $document = $this->aDocument();
-        $document['schema'] = 3;
+        $inconnu = BattleResultCodec::SCHEMA + 1;
 
-        $this->assertRefused($document, 'schema 3');
+        $document = $this->aDocument();
+        $document['schema'] = $inconnu;
+
+        $this->assertRefused($document, 'schema ' . $inconnu);
     }
 
     public function testAnUnknownUnitIsRefused(): void

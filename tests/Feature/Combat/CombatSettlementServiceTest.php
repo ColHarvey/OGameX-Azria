@@ -22,14 +22,19 @@ use OGame\Combat\Services\CombatSettlementOutcome;
 use OGame\Combat\Services\CombatSettlementService;
 use OGame\Combat\Services\RallyClosureService;
 use OGame\Combat\Support\ResourceNormalizationDiagnostics;
+use OGame\Enums\CharacterClass;
 use OGame\Factories\PlanetServiceFactory;
+use OGame\Factories\PlayerServiceFactory;
 use OGame\GameMissions\AttackMission;
+use OGame\GameMissions\BattleEngine\Models\AttackerFleetResult;
+use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\BattleReport;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatParticipant;
 use OGame\Models\DebrisField;
+use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet;
 use OGame\Models\Resources;
@@ -87,6 +92,8 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
         $settingsService->set('fleet_speed_holding', 1);
         $settingsService->set('fleet_speed_peaceful', 1);
         $settingsService->set('attack_block_until', 0);
+        // Les debris que les Faucheurs ramassent : un voisin de processus a pu changer la part.
+        $settingsService->set('debris_field_from_ships', 30);
 
         $this->planetAddResources(new Resources(0, 0, 1_000_000, 0));
     }
@@ -952,12 +959,375 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
     }
 
     /**
+     * Une classe abandonnee apres la cloture ne retrecit pas le retour.
+     *
+     * ## Le geste du joueur, et ce qu'il changeait
+     *
+     * L'attaquant combat en Collecteur : ses transporteurs portent un quart de plus, et c'est sur
+     * cette capacite-la que la bataille a plafonne son butin. Entre la cloture et l'echeance — des
+     * heures, sur le chemin durable — il change de classe.
+     *
+     * Le reglement recalculait alors la capacite survivante **sur le joueur d'apres**, la trouvait
+     * plus petite que ce que la flotte emportait, et coupait la difference : un butin gagne pendant
+     * la bataille disparaissait a cause d'un geste posterieur, sans qu'aucun message ne le dise.
+     *
+     * ## Ce que l'essai etablit avant de conclure
+     *
+     * Que la relecture vivante aurait bien rendu un autre nombre. Sans cette precondition, le juste
+     * et le faux coincideraient et l'essai ne prouverait rien : il passerait aussi bien avec la
+     * capacite gelee qu'avec la capacite relue.
+     */
+    public function testAClassGivenUpAfterTheClosureDoesNotShrinkTheReturn(): void
+    {
+        [$combat, $missions, ] = $this->anEngagedCombat(avantEnvoi: function (): void {
+            DB::table('users')->where('id', $this->currentUserId)->update(['character_class' => CharacterClass::COLLECTOR->value]);
+        });
+
+        $resultat = BattleResultCodec::fromStorage($combat->battle_result);
+        $flotte = $resultat->attackerFleetResults[0];
+
+        // La capacite telle qu'elle etait a la cloture : mesuree sur le joueur **avant** son
+        // changement de classe, donc sans rien emprunter au champ que l'on eprouve.
+        $collecteur = resolve(PlayerServiceFactory::class)->make($this->currentUserId, true);
+        $capaciteALaCloture = $resultat->attackerUnitsResult->getTotalCargoCapacity($collecteur);
+
+        $this->assertSame(
+            $capaciteALaCloture,
+            $resultat->attackerSurvivingCargoCapacity,
+            'The closure did not freeze the capacity it fought with.'
+        );
+
+        $potentiel = $this->potentialOf($combat);
+        $cargaison = $this->cargoOf($combat, 0);
+        $aRapporter = array_sum($potentiel) + array_sum($cargaison);
+
+        $this->assertLessThanOrEqual($capaciteALaCloture, $aRapporter, 'The frozen capacity does not even hold what the fleet earned.');
+
+        // **Le geste du joueur**, apres la bataille et avant l'echeance.
+        DB::table('users')->where('id', $this->currentUserId)->update(['character_class' => null]);
+
+        $ordinaire = resolve(PlayerServiceFactory::class)->make($this->currentUserId, true);
+        $capaciteRelue = $resultat->attackerUnitsResult->getTotalCargoCapacity($ordinaire);
+
+        $this->assertLessThan(
+            $aRapporter,
+            $capaciteRelue,
+            'A live re-read would have produced the same number as the frozen one: the test would prove nothing.'
+        );
+
+        $issue = $this->settleIt($combat, (int)$combat->ends_at);
+        $this->assertTrue($issue->settled, 'The settlement did nothing: ' . $issue->reason);
+
+        // Le retour porte tout ce que la bataille lui a donne : rien n'a ete coupe au nom d'une
+        // capacite mesuree apres coup.
+        $retour = $this->returnOf($missions[0]);
+        $this->assertSame($cargaison['metal'] + $potentiel['metal'], (int)$retour->metal, 'The settlement capped the return on a capacity it re-read live.');
+        $this->assertSame($cargaison['crystal'] + $potentiel['crystal'], (int)$retour->crystal, 'The settlement capped the return on a capacity it re-read live.');
+        $this->assertSame($cargaison['deuterium'] + $potentiel['deuterium'], (int)$retour->deuterium, 'The settlement capped the return on a capacity it re-read live.');
+    }
+
+    /**
+     * Une classe abandonnee apres la cloture ne retrecit aucun retour d'une union.
+     *
+     * Le chemin a plusieurs flottes plafonne chaque retour sur la capacite survivante de sa flotte.
+     * Elle etait relue sur le proprietaire vivant, comme pour une flotte seule ; la preuve est la
+     * meme, flotte par flotte, et la precondition exige qu'au moins un retour depasse ce qu'une
+     * relecture vivante lui aurait laisse.
+     */
+    public function testAClassGivenUpAfterTheClosureDoesNotShrinkTheReturnsOfAUnion(): void
+    {
+        // Une cible assez riche pour que le butin remplisse les soutes des deux flottes : avec le
+        // stock ordinaire, chaque part tiendrait meme dans les soutes d'un joueur sans classe.
+        [$combat, $missions, ] = $this->anEngagedCombat(
+            2,
+            avantEnvoi: function (): void {
+                DB::table('users')->where('id', $this->currentUserId)->update(['character_class' => CharacterClass::COLLECTOR->value]);
+            },
+            stock: ['metal' => 1_500_000, 'crystal' => 900_000, 'deuterium' => 300_000],
+        );
+
+        $resultat = BattleResultCodec::fromStorage($combat->battle_result);
+        $this->assertCount(2, $resultat->attackerFleetResults, 'The battle did not involve two fleets.');
+
+        $collecteur = resolve(PlayerServiceFactory::class)->make($this->currentUserId, true);
+
+        foreach ($resultat->attackerFleetResults as $flotte) {
+            $this->assertSame(
+                $flotte->unitsResult->getTotalCargoCapacity($collecteur),
+                $flotte->survivingCargoCapacity,
+                'The closure did not freeze the capacity fleet ' . $flotte->fleetMissionId . ' fought with.'
+            );
+        }
+
+        // **Le geste du joueur**, apres la bataille et avant l'echeance.
+        DB::table('users')->where('id', $this->currentUserId)->update(['character_class' => null]);
+        $ordinaire = resolve(PlayerServiceFactory::class)->make($this->currentUserId, true);
+
+        // Le solde de la cible n'a pas bouge : chaque part appliquee est la part gelee, et c'est
+        // sur elle que la precondition se mesure, avant tout reglement.
+        $limitants = 0;
+
+        foreach ($resultat->attackerFleetResults as $flotte) {
+            $aRapporter = (int)$flotte->survivingCargo->sum() + (int)$flotte->lootShare->sum();
+
+            if ($aRapporter > $flotte->unitsResult->getTotalCargoCapacity($ordinaire)) {
+                $limitants++;
+            }
+        }
+
+        $this->assertGreaterThan(0, $limitants, 'No return exceeds the capacity re-read live: the test would prove nothing.');
+
+        $issue = $this->settleIt($combat, (int)$combat->ends_at);
+        $this->assertTrue($issue->settled, 'The settlement did nothing: ' . $issue->reason);
+        $this->assertNotNull($issue->shares);
+
+        foreach ($missions as $mission) {
+            $flotte = $this->fleetResultOf($resultat, (int)$mission->id);
+            $part = $issue->shares->forFleet((int)$mission->id);
+            $retour = $this->returnOf($mission);
+
+            $this->assertSame((int)$flotte->survivingCargo->metal->get() + $part->metal, (int)$retour->metal, 'The settlement capped a return on a capacity it re-read live.');
+            $this->assertSame((int)$flotte->survivingCargo->crystal->get() + $part->crystal, (int)$retour->crystal, 'The settlement capped a return on a capacity it re-read live.');
+            $this->assertSame((int)$flotte->survivingCargo->deuterium->get() + $part->deuterium, (int)$retour->deuterium, 'The settlement capped a return on a capacity it re-read live.');
+        }
+    }
+
+    /**
+     * Une recherche achevee apres la cloture n'agrandit pas ce que les Faucheurs ramassent.
+     *
+     * ## Ce que le reglement relisait vivant
+     *
+     * Un Faucheur survivant ramasse une part des debris, dans la limite de sa capacite de fret.
+     * Cette capacite etait recalculee a l'echeance sur le joueur du moment : l'hyperespace monte
+     * d'un niveau pendant la bataille — une recherche qui s'acheve, rien de rare en plusieurs
+     * heures — faisait ramasser plus de debris que la bataille n'en avait accorde. Le champ de
+     * debris en perdait la difference.
+     *
+     * ## Le montage
+     *
+     * Une cible sans ressources : sans butin, la place a bord ne limite rien, et le plafond des
+     * Faucheurs est seul a decider. Une garnison de transporteurs : des vaisseaux perdus font des
+     * debris, la ou des defenses n'en font pas.
+     */
+    public function testAResearchCompletedAfterTheClosureDoesNotEnlargeWhatTheReapersCollect(): void
+    {
+        $unites = new UnitCollection();
+        $unites->addUnit(ObjectService::getUnitObjectByMachineName('reaper'), 1);
+        $unites->addUnit(ObjectService::getUnitObjectByMachineName('small_cargo'), 50);
+        $unites->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 350);
+
+        [$combat, $missions, $cible] = $this->anEngagedCombat(
+            avantEnvoi: function (): void {
+                $this->planetAddUnit('reaper', 1);
+            },
+            unites: $unites,
+            stock: ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'small_cargo' => 100],
+        );
+
+        $resultat = BattleResultCodec::fromStorage($combat->battle_result);
+        $this->assertSame(1, $resultat->attackerUnitsResult->getAmountByMachineName('reaper'), 'The reaper did not survive: nothing would be collected.');
+        $this->assertSame(0, (int)$resultat->loot->sum(), 'The attacker took loot from an empty target: the room aboard could limit the collection.');
+
+        $faucheur = ObjectService::getShipObjectByMachineName('reaper');
+        $avantRecherche = resolve(PlayerServiceFactory::class)->make($this->currentUserId, true);
+        $plafondALaCloture = (int)$faucheur->properties->capacity->calculate($avantRecherche)->totalValue;
+        $this->assertSame($plafondALaCloture, $resultat->attackerReaperCargoCapacity, 'The closure did not freeze the reaper capacity it fought with.');
+
+        $recolte = $this->collectableShareOf($resultat->debris);
+        $this->assertGreaterThan($plafondALaCloture, $recolte, sprintf('The collectable debris (%d, of %d) fit under the reaper cap (%d): the cap decides nothing.', $recolte, (int)$resultat->debris->sum(), $plafondALaCloture));
+
+        // **Le geste du jeu**, apres la bataille et avant l'echeance : la recherche s'acheve.
+        $this->playerSetResearchLevel('hyperspace_technology', 8);
+        $apresRecherche = resolve(PlayerServiceFactory::class)->make($this->currentUserId, true);
+        $plafondRelu = (int)$faucheur->properties->capacity->calculate($apresRecherche)->totalValue;
+
+        $this->assertNotSame($plafondALaCloture, $plafondRelu, 'The research did not change the reaper capacity: the test would prove nothing.');
+        $this->assertGreaterThan($plafondALaCloture, min($recolte, $plafondRelu), 'A live re-read would have collected the same amount as the frozen cap: the test would prove nothing.');
+
+        // La place a bord ne limite ni l'un ni l'autre : la precondition le verifie, sinon un
+        // second plafond masquerait le premier.
+        $cargaison = $this->cargoOf($combat, 0);
+        $place = $resultat->attackerSurvivingCargoCapacity - array_sum($cargaison);
+        $this->assertGreaterThan($plafondRelu, $place, 'The room aboard is what limits the collection, not the reaper cap.');
+
+        $champAvant = $this->debrisFieldAt($cible);
+
+        $issue = $this->settleIt($combat, (int)$combat->ends_at);
+        $this->assertTrue($issue->settled, 'The settlement did nothing: ' . $issue->reason);
+
+        // Le retour rapporte sa cargaison plus exactement le plafond gele, et le champ de debris
+        // garde tout le reste : ce que le Faucheur ramasse est ce que la bataille lui a accorde.
+        $retour = $this->returnOf($missions[0]);
+        $this->assertSame(
+            array_sum($cargaison) + $plafondALaCloture,
+            (int)$retour->metal + (int)$retour->crystal + (int)$retour->deuterium,
+            'The reapers collected debris under a capacity re-read live.'
+        );
+        $this->assertSame(
+            (int)$resultat->debris->sum() - $plafondALaCloture,
+            $this->debrisFieldAt($cible) - $champAvant,
+            'The debris field lost more than the frozen reaper cap.'
+        );
+    }
+
+    /**
+     * Une recherche achevee apres la cloture n'ouvre pas de place a bord pour plus de debris.
+     *
+     * ## Ce que le reglement relisait vivant
+     *
+     * Pour une flotte seule, les debris ramasses n'entrent qu'a la place que le butin et la
+     * cargaison laissent libre. Cette place se calculait sur la capacite survivante relue a
+     * l'echeance : l'hyperespace monte pendant la bataille en ouvrait, et le Faucheur ramassait
+     * des debris que la bataille avait laisses au champ. Le plafond du retour, lui, restait
+     * gele — les debris en trop disparaissaient alors purement et simplement.
+     *
+     * ## Le montage
+     *
+     * Une cible riche, pour que le butin remplisse les soutes et ne laisse presque aucune place ;
+     * une garnison de transporteurs pour les debris ; un Faucheur dont le plafond ne limite pas.
+     */
+    public function testAResearchCompletedAfterTheClosureDoesNotOpenRoomForMoreDebris(): void
+    {
+        $unites = new UnitCollection();
+        $unites->addUnit(ObjectService::getUnitObjectByMachineName('reaper'), 1);
+        $unites->addUnit(ObjectService::getUnitObjectByMachineName('small_cargo'), 50);
+        $unites->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 350);
+
+        [$combat, $missions, $cible] = $this->anEngagedCombat(
+            avantEnvoi: function (): void {
+                $this->planetAddUnit('reaper', 1);
+            },
+            unites: $unites,
+            stock: ['small_cargo' => 100],
+        );
+
+        $resultat = BattleResultCodec::fromStorage($combat->battle_result);
+        $this->assertSame(1, $resultat->attackerUnitsResult->getAmountByMachineName('reaper'), 'The reaper did not survive: nothing would be collected.');
+
+        $potentiel = $this->potentialOf($combat);
+        $cargaison = $this->cargoOf($combat, 0);
+        $recolte = $this->collectableShareOf($resultat->debris);
+        $plafondFaucheurs = $resultat->attackerReaperCargoCapacity;
+
+        // La place telle qu'elle etait a la cloture : ce que les soutes gardent apres le butin.
+        $placeALaCloture = max(0, $resultat->attackerSurvivingCargoCapacity - array_sum($cargaison) - array_sum($potentiel));
+        $this->assertLessThan(
+            min($recolte, $plafondFaucheurs),
+            $placeALaCloture,
+            sprintf(
+                'The room aboard (%d) is not what limits the collection (collectable %d, reaper cap %d, debris %d): the test would prove nothing about it.',
+                $placeALaCloture,
+                $recolte,
+                $plafondFaucheurs,
+                (int)$resultat->debris->sum()
+            )
+        );
+
+        // **Le geste du jeu**, apres la bataille et avant l'echeance : la recherche s'acheve.
+        $this->playerSetResearchLevel('hyperspace_technology', 8);
+        $apresRecherche = resolve(PlayerServiceFactory::class)->make($this->currentUserId, true);
+        $placeRelue = max(0, $resultat->attackerUnitsResult->getTotalCargoCapacity($apresRecherche) - array_sum($cargaison) - array_sum($potentiel));
+
+        $this->assertGreaterThan(
+            $placeALaCloture,
+            min($recolte, $plafondFaucheurs, $placeRelue),
+            'A live re-read of the room would have collected the same amount: the test would prove nothing.'
+        );
+
+        $champAvant = $this->debrisFieldAt($cible);
+
+        $issue = $this->settleIt($combat, (int)$combat->ends_at);
+        $this->assertTrue($issue->settled, 'The settlement did nothing: ' . $issue->reason);
+
+        // Ce qui a ete ramasse est borne par la place gelee ; tout le reste est encore au champ.
+        $ramasse = min($recolte, $plafondFaucheurs, $placeALaCloture);
+
+        $this->assertSame(
+            (int)$resultat->debris->sum() - $ramasse,
+            $this->debrisFieldAt($cible) - $champAvant,
+            'The debris field lost debris collected into room the settlement re-read live.'
+        );
+
+        $retour = $this->returnOf($missions[0]);
+        $this->assertSame(
+            array_sum($cargaison) + array_sum($potentiel) + $ramasse,
+            (int)$retour->metal + (int)$retour->crystal + (int)$retour->deuterium,
+            'The return does not carry exactly its cargo, its loot and the debris the frozen room allowed.'
+        );
+    }
+
+    /**
+     * Une recherche achevee par le defenseur apres la cloture n'agrandit pas ce que ses Faucheurs ramassent.
+     *
+     * Le Faucheur defenseur credite la cible d'une part des debris, dans la limite de sa capacite.
+     * Elle etait relue sur le defenseur vivant a l'echeance ; le credit est une ecriture economique,
+     * et il doit valoir ce que la bataille a fixe.
+     */
+    public function testAResearchCompletedByTheDefenderAfterTheClosureDoesNotEnlargeWhatItsReapersCollect(): void
+    {
+        // Trois Faucheurs : leurs boucliers repartissent le feu des chasseurs, la ou un seul
+        // tombait au premier tour. Ils ne sont pas si nombreux que leur plafond depasse la recolte.
+        // Et un attaquant plus leger que d'ordinaire : trois cent cinquante chasseurs venaient a bout
+        // de trois Faucheurs en quatre tours, une fois la garnison de transporteurs tombee.
+        $unites = new UnitCollection();
+        $unites->addUnit(ObjectService::getUnitObjectByMachineName('small_cargo'), 50);
+        $unites->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 200);
+
+        [$combat, , $cible] = $this->anEngagedCombat(unites: $unites, stock: ['reaper' => 3, 'small_cargo' => 100]);
+
+        $resultat = BattleResultCodec::fromStorage($combat->battle_result);
+        $faucheursRestants = $resultat->defenderUnitsResult->getAmountByMachineName('reaper');
+        $this->assertGreaterThan(0, $faucheursRestants, 'No defending reaper survived: nothing would be collected.');
+        $this->assertSame(0, $resultat->attackerUnitsResult->getAmountByMachineName('reaper'), 'The attacker has reapers too: the defender would collect from a remainder.');
+
+        $proprietaire = (int)DB::table('planets')->where('id', $cible->getPlanetId())->value('user_id');
+        $faucheur = ObjectService::getShipObjectByMachineName('reaper');
+        $avantRecherche = resolve(PlayerServiceFactory::class)->make($proprietaire, true);
+        $plafondALaCloture = (int)$faucheur->properties->capacity->calculate($avantRecherche)->totalValue * $faucheursRestants;
+        $this->assertSame($plafondALaCloture, $resultat->defenderReaperCargoCapacity, 'The closure did not freeze the defending reaper capacity it fought with.');
+
+        $recolte = $this->collectableShareOf($resultat->debris);
+        $this->assertGreaterThan($plafondALaCloture, $recolte, sprintf('The collectable debris (%d, of %d) fit under the reaper cap (%d): the cap decides nothing.', $recolte, (int)$resultat->debris->sum(), $plafondALaCloture));
+
+        // **Le geste du jeu**, apres la bataille et avant l'echeance : la recherche du defenseur s'acheve.
+        DB::table('users_tech')->where('user_id', $proprietaire)->update(['hyperspace_technology' => 8]);
+        $apresRecherche = resolve(PlayerServiceFactory::class)->make($proprietaire, true);
+        $plafondRelu = (int)$faucheur->properties->capacity->calculate($apresRecherche)->totalValue * $faucheursRestants;
+
+        $this->assertNotSame($plafondALaCloture, $plafondRelu, 'The research did not change the reaper capacity: the test would prove nothing.');
+        $this->assertGreaterThan($plafondALaCloture, min($recolte, $plafondRelu), 'A live re-read would have collected the same amount as the frozen cap: the test would prove nothing.');
+
+        $avant = $this->stockOf($cible);
+        $champAvant = $this->debrisFieldAt($cible);
+
+        $issue = $this->settleIt($combat, (int)$combat->ends_at);
+        $this->assertTrue($issue->settled, 'The settlement did nothing: ' . $issue->reason);
+        $this->assertNotNull($issue->loot);
+
+        // La cible perd l'applique et gagne exactement le plafond gele ; le champ garde le reste.
+        $applique = $issue->loot->applied;
+        $this->assertSame(
+            array_sum($avant) - ($applique->metal + $applique->crystal + $applique->deuterium) + $plafondALaCloture,
+            array_sum($this->stockOf($cible)),
+            'The target was credited with debris its reapers collected under a capacity re-read live.'
+        );
+        $this->assertSame(
+            (int)$resultat->debris->sum() - $plafondALaCloture,
+            $this->debrisFieldAt($cible) - $champAvant,
+            'The debris field lost more than the frozen reaper cap.'
+        );
+    }
+
+    /**
      * Une vraie bataille, ouverte, close et engagee, prete a etre reglee.
      *
      * @param int $fleets Le nombre de flottes attaquantes, toutes du meme joueur, vers la meme cible.
+     * @param Closure|null $avantEnvoi Appele une fois le joueur pret, avant que la moindre flotte parte.
+     * @param UnitCollection|null $unites Les unites de chaque flotte ; par defaut, transporteurs et chasseurs.
+     * @param array<string, int> $stock Ce qui s'ajoute au stock et a la garnison de la cible, ou les remplace.
      * @return array{0: CombatInstance, 1: array<int, FleetMission>, 2: PlanetService}
      */
-    private function anEngagedCombat(int $fleets = 1, int $defences = 20): array
+    private function anEngagedCombat(int $fleets = 1, int $defences = 20, Closure|null $avantEnvoi = null, UnitCollection|null $unites = null, array $stock = []): array
     {
         for ($i = 0; $i < 6; $i++) {
             $this->createAndLoginUser();
@@ -965,24 +1335,35 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
 
         $this->basicSetup();
 
-        $cible = null;
-        for ($i = 0; $i < $fleets; $i++) {
-            $units = new UnitCollection();
-            $units->addUnit(ObjectService::getUnitObjectByMachineName('small_cargo'), 50);
-            // Ecrasante, et c'est indispensable : le butin n'existe que si l'attaquant l'emporte.
-            $units->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 350);
-
-            $envoyeeVers = $this->sendMissionToOtherPlayerPlanet($units, new Resources(0, 0, 0, 0));
-
-            if ($cible !== null && $envoyeeVers->getPlanetId() !== $cible->getPlanetId()) {
-                $this->fail('The second fleet was sent to another planet: the battle would not involve two fleets.');
-            }
-
-            $cible = $envoyeeVers;
+        if ($avantEnvoi !== null) {
+            $avantEnvoi();
         }
 
-        if ($cible === null) {
-            $this->fail('No fleet was dispatched.');
+        // **Une cible propre, creee pour cette bataille.** La planete etrangere « voisine » est
+        // partagee entre les essais d'un meme processus, et ce qu'un autre y laisse — vingt mille
+        // tourelles, une garnison — change l'issue sans que rien ne le dise. Une seule planete pour
+        // toutes les flottes : la bataille doit les reunir.
+        $cible = $this->getNearbyForeignCleanPlanet();
+
+        // **Une garnison qui ne fuit jamais.** Devant une superiorite de cinq contre un, les vaisseaux
+        // d'un defenseur qui a du deuterium se retirent avant le combat : ils ne meurent pas, ne font
+        // aucun debris, et un essai qui compte sur des debris ne verrait rien. Ce banc eprouve le
+        // reglement, pas la retraite tactique ; elle a ses propres essais.
+        $proprietaire = $cible->getPlayer();
+        $this->assertNotNull($proprietaire, 'The clean target has no owner.');
+        DB::table('users')->where('id', $proprietaire->getId())->update(['tactical_retreat_ratio' => 0]);
+
+        for ($i = 0; $i < $fleets; $i++) {
+            $units = $unites;
+
+            if ($units === null) {
+                $units = new UnitCollection();
+                $units->addUnit(ObjectService::getUnitObjectByMachineName('small_cargo'), 50);
+                // Ecrasante, et c'est indispensable : le butin n'existe que si l'attaquant l'emporte.
+                $units->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 350);
+            }
+
+            $this->dispatchFleet($cible->getPlanetCoordinates(), $units, new Resources(0, 0, 0, 0), PlanetType::Planet);
         }
 
         $missions = FleetMission::query()
@@ -997,7 +1378,7 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
         // Un stock connu **avant la cloture** : c'est elle qui calcule la bataille, donc le butin.
         // Et une garnison : sans defense, la cible ne perd rien et le camp defenseur ne prouverait
         // rien. Vingt lanceurs tombent devant trois cent cinquante chasseurs sans changer l'issue.
-        $this->setStockOf($cible, ['metal' => 500_000, 'crystal' => 300_000, 'deuterium' => 100_000, 'rocket_launcher' => $defences]);
+        $this->setStockOf($cible, $stock + ['metal' => 500_000, 'crystal' => 300_000, 'deuterium' => 100_000, 'rocket_launcher' => $defences]);
 
         $combat = (new CombatOpeningService())->openOrJoin($missions[0], $cible->getPlanetId(), (int)$missions[0]->time_arrival);
 
@@ -1118,6 +1499,51 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
             $stock + ['time_last_update' => (int)now()->timestamp + 86_400]
         );
         $cible->reloadPlanet();
+    }
+
+    /**
+     * La part des debris qu'un Faucheur peut ramasser, composante par composante, comme la
+     * resolution la calcule : trente pour cent, tronques a l'entier.
+     */
+    private function collectableShareOf(Resources $debris): int
+    {
+        return (int)($debris->metal->get() * 0.3) + (int)($debris->crystal->get() * 0.3) + (int)($debris->deuterium->get() * 0.3);
+    }
+
+    /**
+     * Ce que le champ de debris de la cible contient, toutes ressources confondues — zero s'il n'existe pas.
+     *
+     * La cible est partagee entre les essais d'un meme processus, et son champ s'accumule : ce
+     * que l'on compare est toujours une difference.
+     */
+    private function debrisFieldAt(PlanetService $cible): int
+    {
+        $coordonnees = $cible->getPlanetCoordinates();
+        $champ = DebrisField::query()
+            ->where('galaxy', $coordonnees->galaxy)
+            ->where('system', $coordonnees->system)
+            ->where('planet', $coordonnees->position)
+            ->first();
+
+        if ($champ === null) {
+            return 0;
+        }
+
+        return (int)$champ->metal + (int)$champ->crystal + (int)$champ->deuterium;
+    }
+
+    /**
+     * Le resultat gele d'une flotte attaquante, par l'identifiant de sa mission.
+     */
+    private function fleetResultOf(BattleResult $resultat, int $missionId): AttackerFleetResult
+    {
+        foreach ($resultat->attackerFleetResults as $flotte) {
+            if ($flotte->fleetMissionId === $missionId) {
+                return $flotte;
+            }
+        }
+
+        $this->fail('The frozen result does not describe mission ' . $missionId . '.');
     }
 
     /**

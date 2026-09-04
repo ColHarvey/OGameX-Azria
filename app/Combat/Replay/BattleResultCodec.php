@@ -46,8 +46,15 @@ final class BattleResultCodec
      * Le schema 2 ajoute l'enveloppe d'identite : le combat, la cible, l'initiatrice, les
      * participants, la photographie et les cinq versions. Un document du schema 1 se refuse — il ne
      * se complete pas, parce que rien ne dirait de quel combat il parle.
+     *
+     * Le schema 3 ajoute les capacites de fret gelees : celle du camp attaquant, celles des
+     * Faucheurs des deux camps, et celles de chaque flotte, au depart comme survivantes. Le
+     * reglement les recalculait a l'echeance sur les joueurs vivants ; elles decident pourtant
+     * de transferts de ressources, et un changement de classe ou d'hyperespace survenu pendant
+     * la bataille en changeait le resultat. Un document du schema 2 se refuse : ces capacites ne
+     * se devinent pas apres coup.
      */
-    public const int SCHEMA = 2;
+    public const int SCHEMA = 3;
 
     private const array KEYS = [
         'schema',
@@ -75,6 +82,9 @@ final class BattleResultCodec
         'defender_resource_loss',
         'defender_fleet_results',
         'attacker_fleet_results',
+        'attacker_surviving_cargo_capacity',
+        'attacker_reaper_cargo_capacity',
+        'defender_reaper_cargo_capacity',
         'attacker_weapon_level',
         'attacker_shield_level',
         'attacker_armor_level',
@@ -103,6 +113,7 @@ final class BattleResultCodec
         'resource_loss',
         'loot_share',
         'surviving_cargo',
+        'starting_cargo_capacity',
         'surviving_cargo_capacity',
         'completely_destroyed',
     ];
@@ -113,6 +124,8 @@ final class BattleResultCodec
         'units_start',
         'units_result',
         'units_lost',
+        'starting_cargo_capacity',
+        'surviving_cargo_capacity',
         'completely_destroyed',
     ];
 
@@ -158,6 +171,7 @@ final class BattleResultCodec
                 'resource_loss' => self::resourcesToStorage($flotte->resourceLoss),
                 'loot_share' => self::resourcesToStorage($flotte->lootShare),
                 'surviving_cargo' => self::resourcesToStorage($flotte->survivingCargo),
+                'starting_cargo_capacity' => $flotte->startingCargoCapacity,
                 'surviving_cargo_capacity' => $flotte->survivingCargoCapacity,
                 'completely_destroyed' => $flotte->completelyDestroyed,
             ];
@@ -171,6 +185,8 @@ final class BattleResultCodec
                 'units_start' => $flotte->unitsStart->toArray(),
                 'units_result' => $flotte->unitsResult->toArray(),
                 'units_lost' => $flotte->unitsLost->toArray(),
+                'starting_cargo_capacity' => $flotte->startingCargoCapacity,
+                'surviving_cargo_capacity' => $flotte->survivingCargoCapacity,
                 'completely_destroyed' => $flotte->completelyDestroyed,
             ];
         }
@@ -235,6 +251,10 @@ final class BattleResultCodec
             'defender_resource_loss' => self::resourcesToStorage($result->defenderResourceLoss),
             'defender_fleet_results' => $flottesDefensives,
             'attacker_fleet_results' => $flottesAttaquantes,
+            // **Les capacites qui decident d'un transfert, telles qu'elles etaient a la cloture.**
+            'attacker_surviving_cargo_capacity' => $result->attackerSurvivingCargoCapacity,
+            'attacker_reaper_cargo_capacity' => $result->attackerReaperCargoCapacity,
+            'defender_reaper_cargo_capacity' => $result->defenderReaperCargoCapacity,
             'attacker_weapon_level' => $result->attackerWeaponLevel,
             'attacker_shield_level' => $result->attackerShieldLevel,
             'attacker_armor_level' => $result->attackerArmorLevel,
@@ -325,6 +345,10 @@ final class BattleResultCodec
             $result->attackerFleetResults[] = self::attackerFleet(self::structure($document, 'resultat.attacker_fleet_results[' . $rang . ']'), 'resultat.attacker_fleet_results[' . $rang . ']');
         }
 
+        $result->attackerSurvivingCargoCapacity = self::capacity($stored, 'attacker_surviving_cargo_capacity', 'resultat');
+        $result->attackerReaperCargoCapacity = self::capacity($stored, 'attacker_reaper_cargo_capacity', 'resultat');
+        $result->defenderReaperCargoCapacity = self::capacity($stored, 'defender_reaper_cargo_capacity', 'resultat');
+
         $result->attackerWeaponLevel = self::int($stored, 'attacker_weapon_level', 'resultat');
         $result->attackerShieldLevel = self::int($stored, 'attacker_shield_level', 'resultat');
         $result->attackerArmorLevel = self::int($stored, 'attacker_armor_level', 'resultat');
@@ -370,7 +394,8 @@ final class BattleResultCodec
         $flotte->resourceLoss = self::resources($document, 'resource_loss', $path);
         $flotte->lootShare = self::resources($document, 'loot_share', $path);
         $flotte->survivingCargo = self::resources($document, 'surviving_cargo', $path);
-        $flotte->survivingCargoCapacity = self::int($document, 'surviving_cargo_capacity', $path);
+        $flotte->startingCargoCapacity = self::capacity($document, 'starting_cargo_capacity', $path);
+        $flotte->survivingCargoCapacity = self::capacity($document, 'surviving_cargo_capacity', $path);
         $flotte->completelyDestroyed = self::bool($document, 'completely_destroyed', $path);
 
         return $flotte;
@@ -390,6 +415,8 @@ final class BattleResultCodec
         );
         $flotte->unitsResult = self::units($document, 'units_result', $path);
         $flotte->unitsLost = self::units($document, 'units_lost', $path);
+        $flotte->startingCargoCapacity = self::capacity($document, 'starting_cargo_capacity', $path);
+        $flotte->survivingCargoCapacity = self::capacity($document, 'surviving_cargo_capacity', $path);
         $flotte->completelyDestroyed = self::bool($document, 'completely_destroyed', $path);
 
         return $flotte;
@@ -490,6 +517,26 @@ final class BattleResultCodec
 
         if (!is_int($valeur)) {
             throw new CorruptedBattleResult('le champ « ' . $path . '.' . $field . ' » est un ' . get_debug_type($valeur) . ' et non un entier', $document);
+        }
+
+        return $valeur;
+    }
+
+    /**
+     * Une capacite de fret gelee : un entier, jamais negatif.
+     *
+     * Une capacite negative n'est pas une capacite plus petite : c'est un denominateur qui
+     * retournerait une proportion, ou un plafond qui laisserait passer n'importe quoi. Elle se
+     * refuse ici, avant qu'un reglement ne s'en serve pour decider d'un transfert.
+     *
+     * @param array<mixed, mixed> $document
+     */
+    private static function capacity(array $document, string $field, string $path): int
+    {
+        $valeur = self::int($document, $field, $path);
+
+        if ($valeur < 0) {
+            throw new CorruptedBattleResult('le champ « ' . $path . '.' . $field . ' » vaut ' . $valeur . ' : une capacite de fret ne se compte pas a l envers', $document);
         }
 
         return $valeur;

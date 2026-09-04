@@ -529,6 +529,109 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
     }
 
     /**
+     * Une classe prise apres la cloture ne change pas la cargaison qu'un renfort garde.
+     *
+     * ## Ce que le reglement relisait vivant
+     *
+     * La cargaison d'un renfort survivant est reduite en proportion de sa capacite survivante sur
+     * sa capacite de depart. Ces deux capacites etaient recalculees a l'echeance, **sur le
+     * proprietaire du moment** — sa classe, son hyperespace. Le bonus de Collecteur ne porte que
+     * sur les transporteurs : quand la bataille en a detruit une part et laisse les vaisseaux de
+     * guerre intacts, la proportion depend de la classe, et un joueur devenu Collecteur pendant
+     * la bataille rentrait avec une autre cargaison que celle que la bataille lui avait laissee.
+     *
+     * ## Pourquoi la flotte est melangee, et pourquoi l'essai le verifie
+     *
+     * Avec un seul type de vaisseau, la proportion ne depend d'aucun bonus : le juste et le faux
+     * coincident et rien n'est prouve. Le renfort porte donc des transporteurs, que les chasseurs
+     * abattent, et des vaisseaux de guerre, qu'ils n'entament pas. L'essai **etablit** que la
+     * composition a change et que la relecture vivante aurait ecrit un autre nombre, avant de
+     * comparer quoi que ce soit.
+     */
+    public function testAClassTakenAfterTheClosureDoesNotChangeTheCargoAReinforcementKeeps(): void
+    {
+        $renfort = null;
+        [$combat, , , $ouverture] = $this->anOpenedCombat(true, function (PlanetService $cible, int $ouverture) use (&$renfort): void {
+            $renfort = $this->aDefensiveReinforcement($cible, $ouverture + 5, 100_000, $ouverture - 600);
+        });
+
+        if ($renfort === null) {
+            $this->fail('The reinforcement was never launched.');
+        }
+
+        // Le proprietaire combat sans classe : la proportion gelee ne doit rien a un bonus.
+        DB::table('users')->where('id', $renfort->user_id)->update(['character_class' => null]);
+
+        // **Des transporteurs fragiles et des cuirasses intacts** : les chasseurs percent les
+        // premiers et rebondissent sur les seconds, et c'est ce qui rend la classe decisive.
+        DB::table('fleet_missions')->where('id', $renfort->id)->update([
+            'light_fighter' => 0,
+            'small_cargo' => 100,
+            'battle_ship' => 200,
+            'metal' => 4_200,
+            'crystal' => 1_300,
+            'deuterium' => 700,
+        ]);
+        $renfort->refresh();
+
+        $this->assertTrue((new RallyClosureService())->close($combat->id, $ouverture + 19)->closed, 'The rally did not close.');
+        $this->assertTrue($this->isADefendingParticipant($combat, $renfort), 'The reinforcement was not admitted: nothing would be proved.');
+
+        $combat->refresh();
+        $resultat = BattleResultCodec::fromStorage($combat->battle_result);
+
+        $issue = null;
+
+        foreach ($resultat->defenderFleetResults as $candidat) {
+            if ((int)$candidat->fleetMissionId === (int)$renfort->id) {
+                $issue = $candidat;
+                break;
+            }
+        }
+
+        $this->assertNotNull($issue, 'The frozen result does not describe this reinforcement at all.');
+
+        $transporteursRestants = $issue->unitsResult->getAmountByMachineName('small_cargo');
+        $cuirassesRestants = $issue->unitsResult->getAmountByMachineName('battle_ship');
+        $this->assertGreaterThan(0, $transporteursRestants, 'Every transporter died: the reinforcement would carry nothing and the rule would not be reached.');
+        $this->assertLessThan(100, $transporteursRestants, 'No transporter died: the composition is unchanged and the class would not matter.');
+        $this->assertSame(200, $cuirassesRestants, 'The battleships took losses: the composition change is not the one the test relies on.');
+
+        // La proportion telle qu'elle etait a la cloture, mesuree sur le proprietaire **avant** son
+        // changement de classe et sur les unites du resultat gele : elle n'emprunte rien au champ
+        // que l'on eprouve.
+        $sansClasse = resolve(PlayerServiceFactory::class)->make((int)$renfort->user_id, true);
+        $capaciteDepartALaCloture = $issue->unitsStart->getTotalCargoCapacity($sansClasse);
+        $capaciteRestanteALaCloture = $issue->unitsResult->getTotalCargoCapacity($sansClasse);
+        $partALaCloture = $capaciteRestanteALaCloture / $capaciteDepartALaCloture;
+
+        $this->assertSame($capaciteDepartALaCloture, $issue->startingCargoCapacity, 'The closure did not freeze the starting capacity it fought with.');
+        $this->assertSame($capaciteRestanteALaCloture, $issue->survivingCargoCapacity, 'The closure did not freeze the surviving capacity it fought with.');
+
+        // **Le geste du joueur**, apres la bataille et avant l'echeance.
+        DB::table('users')->where('id', $renfort->user_id)->update(['character_class' => CharacterClass::COLLECTOR->value]);
+
+        $collecteur = resolve(PlayerServiceFactory::class)->make((int)$renfort->user_id, true);
+        $partRelue = $issue->unitsResult->getTotalCargoCapacity($collecteur) / $issue->unitsStart->getTotalCargoCapacity($collecteur);
+
+        $this->assertNotSame(
+            (int)(4_200 * $partALaCloture),
+            (int)(4_200 * $partRelue),
+            'A live re-read would have written the same metal as the frozen proportion: the test would prove nothing.'
+        );
+
+        $this->travelTo(Date::createFromTimestamp((int)$combat->ends_at));
+        $this->assertSame(1, (new PersistentCombatAdvancer())->advance((int)$combat->ends_at)->settled, 'The combat did not settle.');
+
+        $renfort->refresh();
+        $this->assertSame(0, (int)$renfort->processed, 'The reinforcement left before its hold was over: the scenario changed.');
+
+        $this->assertSame((int)(4_200 * $partALaCloture), (int)$renfort->metal, 'The settlement applied a proportion it re-read on the player after the closure.');
+        $this->assertSame((int)(1_300 * $partALaCloture), (int)$renfort->crystal, 'The settlement applied a proportion it re-read on the player after the closure.');
+        $this->assertSame((int)(700 * $partALaCloture), (int)$renfort->deuterium, 'The settlement applied a proportion it re-read on the player after the closure.');
+    }
+
+    /**
      * La cloture gele la cargaison d'un renfort admis, et le reglement exige de la retrouver.
      *
      * ## Ce que l'application relisait vivant

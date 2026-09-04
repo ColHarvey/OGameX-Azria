@@ -320,6 +320,16 @@ abstract class BattleEngine
         // Distribute loot and surviving cargo proportionally among each attacker fleet.
         $this->distributeResources($result);
 
+        // **Toutes les capacites de fret sont gelees ici, pas relues au reglement.**
+        //
+        // Elles decident ce qui est transfere : ce qu'une flotte rapporte, ce qu'un renfort garde de
+        // sa cargaison, combien de debris un Faucheur ramasse. Chacune depend de la classe et de
+        // l'hyperespace de son proprietaire, et le reglement les recalculait a l'echeance — des
+        // heures apres la bataille sur le chemin durable. Un changement survenu **pendant** la
+        // bataille changeait donc une ressource transferee, et deux rejeux du meme combat ne
+        // rendaient pas le meme nombre.
+        $this->freezeCargoCapacities($result);
+
         // Calculate debris.
         // Only permanently lost defenses contribute to debris (destroyed - repaired).
         $permanentlyLostDefenderUnits = clone $result->defenderUnitsLost;
@@ -343,6 +353,73 @@ abstract class BattleEngine
         }
 
         return $result;
+    }
+
+    /**
+     * Gele toutes les capacites de fret dont l'application aura besoin.
+     *
+     * ## Pourquoi ici, et une fois
+     *
+     * Une capacite de fret depend de la classe du joueur et de sa recherche d'hyperespace. Sur le
+     * chemin instantane, la relire a l'application est sans danger : quelques millisecondes separent
+     * les deux. Sur le chemin durable, **des heures** les separent, et le joueur peut avoir change
+     * de classe ou monte sa recherche entre-temps.
+     *
+     * Chacune de ces capacites decide d'un transfert reel : la cargaison qu'un renfort garde, ce
+     * qu'une flotte peut rapporter, combien de debris un Faucheur ramasse. Les relire a l'echeance
+     * faisait donc dependre une ressource transferee d'un bonus acquis **apres** le calcul de la
+     * bataille — et deux rejeux du meme resultat gele ne rendaient pas le meme nombre.
+     *
+     * Elles sont donc toutes prises ici, a l'instant ou la bataille est calculee, et le reglement ne
+     * fait plus que les lire.
+     */
+    protected function freezeCargoCapacities(BattleResult $result): void
+    {
+        $initiatrice = $this->attackers[0] ?? null;
+        $garnison = null;
+
+        foreach ($this->defenders as $defenseur) {
+            if ($defenseur->fleetMissionId === 0) {
+                $garnison = $defenseur;
+                break;
+            }
+        }
+
+        // **Le camp attaquant, vu comme le reglement le voyait** : la totalite des unites
+        // survivantes, mesuree avec le joueur de l'initiatrice. La mesure ne change pas ; seul
+        // l'instant ou elle est prise change.
+        if ($initiatrice !== null) {
+            $result->attackerSurvivingCargoCapacity = $result->attackerUnitsResult->getTotalCargoCapacity($initiatrice->player);
+
+            $faucheur = ObjectService::getShipObjectByMachineName('reaper');
+            $faucheursAttaquants = $result->attackerUnitsResult->getAmountByMachineName('reaper');
+            $result->attackerReaperCargoCapacity = (int)($faucheur->properties->capacity->calculate($initiatrice->player)->totalValue * $faucheursAttaquants);
+        }
+
+        if ($garnison !== null) {
+            $faucheur = ObjectService::getShipObjectByMachineName('reaper');
+            $faucheursDefenseurs = $result->defenderUnitsResult->getAmountByMachineName('reaper');
+            $result->defenderReaperCargoCapacity = (int)($faucheur->properties->capacity->calculate($garnison->player)->totalValue * $faucheursDefenseurs);
+        }
+
+        // **Chaque renfort defensif porte les deux capacites qui fixent sa proportion.** La garnison
+        // n'a pas de cargaison a rendre : ses deux valeurs restent nulles, et rien ne les lit.
+        foreach ($result->defenderFleetResults as $flotte) {
+            if ($flotte->fleetMissionId === 0) {
+                continue;
+            }
+
+            foreach ($this->defenders as $defenseur) {
+                if ($defenseur->fleetMissionId !== $flotte->fleetMissionId) {
+                    continue;
+                }
+
+                $flotte->startingCargoCapacity = $defenseur->units->getTotalCargoCapacity($defenseur->player);
+                $flotte->survivingCargoCapacity = $flotte->unitsResult->getTotalCargoCapacity($defenseur->player);
+
+                break;
+            }
+        }
     }
 
     /**
@@ -531,6 +608,7 @@ abstract class BattleEngine
             $survivingCapacity = $attacker->getSurvivingCargoCapacity($fleetResult->unitsResult);
 
             $survivingCapacityByFleet[$fleetResult->fleetMissionId] = $survivingCapacity;
+            $fleetResult->startingCargoCapacity = $originalCapacity;
             $fleetResult->survivingCargoCapacity = $survivingCapacity;
             $totalSurvivingCapacity += $survivingCapacity;
 

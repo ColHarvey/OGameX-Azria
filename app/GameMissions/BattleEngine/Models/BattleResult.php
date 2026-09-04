@@ -31,6 +31,30 @@ class BattleResult
     public array $wreckField = [];
 
     /**
+     * @var int La capacite de fret survivante de tout le camp attaquant, gelee a la cloture.
+     *
+     * ## Pourquoi gelee
+     *
+     * Elle plafonne ce qu'une flotte rapporte, et elle depend de la classe et de l'hyperespace du
+     * joueur. La relire a l'echeance laissait un changement survenu **pendant** la bataille decider
+     * combien de ressources rentrent : la meme bataille rejouee ne rendait pas le meme nombre.
+     */
+    public int $attackerSurvivingCargoCapacity = 0;
+
+    /**
+     * @var int La capacite de fret des Faucheurs attaquants survivants, gelee a la cloture.
+     *
+     * Elle decide combien de debris changent de proprietaire : c'est une ecriture economique, et
+     * elle ne doit pas dependre d'un bonus acquis apres le calcul de la bataille.
+     */
+    public int $attackerReaperCargoCapacity = 0;
+
+    /**
+     * @var int La capacite de fret des Faucheurs defenseurs survivants, gelee a la cloture.
+     */
+    public int $defenderReaperCargoCapacity = 0;
+
+    /**
      * @var bool Whether a moon already existed at defender's planet location before battle commenced.
      */
     public bool $moonExisted;
