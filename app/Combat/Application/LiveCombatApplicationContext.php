@@ -2,6 +2,7 @@
 
 namespace OGame\Combat\Application;
 
+use Illuminate\Support\Facades\Date;
 use OGame\Enums\CharacterClass;
 use OGame\Services\CharacterClassService;
 use OGame\Services\Npc\NpcThreatService;
@@ -70,5 +71,21 @@ final class LiveCombatApplicationContext implements CombatApplicationContext
     public function npcNarrativeVariation(int $variations): int
     {
         return random_int(1, $variations);
+    }
+
+    public function debrisFieldFromShips(): int
+    {
+        return $this->settings->debrisFieldFromShips();
+    }
+
+    public function wreckFieldLifetimeHours(): int
+    {
+        return $this->settings->wreckFieldLifetimeHours();
+    }
+
+    public function applicationInstant(): int
+    {
+        // Le chemin instantane applique maintenant : rien ne separe le calcul de l'ecriture.
+        return (int)Date::now()->timestamp;
     }
 }

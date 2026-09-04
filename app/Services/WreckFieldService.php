@@ -4,6 +4,7 @@ namespace OGame\Services;
 
 use Exception;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use OGame\GameObjects\Models\Enums\GameObjectType;
 use OGame\GameObjects\Models\Units\UnitCollection;
@@ -56,8 +57,38 @@ class WreckFieldService
      * @param PlayerService $playerService
      * @param SettingsService $settingsService
      */
-    public function __construct(private PlayerService $playerService, private SettingsService $settingsService)
+    public function __construct(
+        private PlayerService $playerService,
+        private SettingsService $settingsService,
+        private int|null $debrisFieldFromShips = null,
+        private int|null $lifetimeHours = null,
+        private int|null $instant = null,
+    ) {
+    }
+
+    /**
+     * La part des vaisseaux detruits qui devient debris : figee par le combat durable, vivante sinon.
+     */
+    private function debrisFieldFromShips(): int
     {
+        return $this->debrisFieldFromShips ?? $this->settingsService->debrisFieldFromShips();
+    }
+
+    /**
+     * La duree de vie d'un champ qui nait ou s'etend ici : figee par le combat durable, vivante sinon.
+     */
+    private function lifetimeHours(): int
+    {
+        return $this->lifetimeHours ?? $this->settingsService->wreckFieldLifetimeHours();
+    }
+
+    /**
+     * L'instant auquel un champ nait ou s'etend ici. Le combat durable le fixe a son echeance ; les
+     * reparations, elles, sont des actions du joueur et gardent l'horloge courante.
+     */
+    private function instant(): Carbon
+    {
+        return $this->instant === null ? now() : Date::createFromTimestamp($this->instant);
     }
 
     /**
@@ -78,8 +109,8 @@ class WreckFieldService
             $wreckField->system = $coordinates->system;
             $wreckField->planet = $coordinates->position;
             $wreckField->owner_player_id = $this->playerService->getId();
-            $wreckField->created_at = now();
-            $wreckField->expires_at = now()->addHours($this->settingsService->wreckFieldLifetimeHours());
+            $wreckField->created_at = $this->instant();
+            $wreckField->expires_at = $this->instant()->copy()->addHours($this->lifetimeHours());
             $wreckField->status = 'active';
             $wreckField->ship_data = [];
         }
@@ -270,8 +301,8 @@ class WreckFieldService
             $wreckField->system = $coordinate->system;
             $wreckField->planet = $coordinate->position;
             $wreckField->owner_player_id = $ownerPlayerId;
-            $wreckField->created_at = now();
-            $wreckField->expires_at = now()->addHours($this->settingsService->wreckFieldLifetimeHours());
+            $wreckField->created_at = $this->instant();
+            $wreckField->expires_at = $this->instant()->copy()->addHours($this->lifetimeHours());
             $wreckField->status = 'active';
             $wreckField->ship_data = $shipData;
             $wreckField->save();
@@ -309,7 +340,7 @@ class WreckFieldService
         $wreckField->ship_data = $currentShipData;
 
         // Extend expiration time up to the maximum
-        $newExpiresAt = now()->addHours($this->settingsService->wreckFieldLifetimeHours());
+        $newExpiresAt = $this->instant()->copy()->addHours($this->lifetimeHours());
         if ($newExpiresAt->greaterThan($wreckField->expires_at)) {
             $wreckField->expires_at = $newExpiresAt;
         }
@@ -347,8 +378,8 @@ class WreckFieldService
         $wreckField->ship_data = $currentShipData;
 
         // Reset expiration timer to full duration
-        $wreckField->expires_at = now()->addHours($this->settingsService->wreckFieldLifetimeHours());
-        $wreckField->created_at = now();
+        $wreckField->expires_at = $this->instant()->copy()->addHours($this->lifetimeHours());
+        $wreckField->created_at = $this->instant();
 
         $wreckField->save();
     }
@@ -413,8 +444,8 @@ class WreckFieldService
         $wreckField->system = $coordinate->system;
         $wreckField->planet = $coordinate->position;
         $wreckField->owner_player_id = $ownerPlayerId;
-        $wreckField->created_at = now();
-        $wreckField->expires_at = now()->addHours($this->settingsService->wreckFieldLifetimeHours());
+        $wreckField->created_at = $this->instant();
+        $wreckField->expires_at = $this->instant()->copy()->addHours($this->lifetimeHours());
         $wreckField->status = 'blocked';
         $wreckField->ship_data = $shipData;
         $wreckField->save();
@@ -930,7 +961,7 @@ class WreckFieldService
      */
     public function getRecoverableWreckFieldPercentage(int $spaceDockLevel): float
     {
-        $nonDebrisShare = max(0.0, 100.0 - $this->settingsService->debrisFieldFromShips());
+        $nonDebrisShare = max(0.0, 100.0 - $this->debrisFieldFromShips());
         $normalizedLevel = max(1, min(15, $spaceDockLevel));
         $multiplier = self::SPACE_DOCK_WRECKAGE_MULTIPLIERS[$normalizedLevel] ?? self::SPACE_DOCK_WRECKAGE_MULTIPLIERS[1];
 

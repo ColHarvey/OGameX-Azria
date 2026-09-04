@@ -14,6 +14,7 @@ use OGame\Combat\Allocation\SettledBattleResult;
 use OGame\Combat\Allocation\SurvivingFleetCapacity;
 use OGame\Combat\Application\FrozenCombatApplicationContext;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Exceptions\CorruptedFrozenApplicationContext;
 use OGame\Combat\Exceptions\MismatchedCombatIdentity;
 use OGame\Combat\Exceptions\UnsettleableAtThisScale;
 use OGame\Combat\Replay\BattleResultCodec;
@@ -225,6 +226,20 @@ final class CombatSettlementService
             // pas combattu, ou en oublierait une qui l'a fait.
             $this->assertTheResultDescribesThisCombat($combat, $result, $effectif);
 
+            // **Les faits d'application viennent de la cloture**, pas du monde courant — et ils
+            // doivent decrire exactement cet effectif et cette echeance. Une photographie d'un autre
+            // combat, ou reparee a la main, se refuse avant tout debit.
+            $contexte = FrozenCombatApplicationContext::fromStorage($combat->frozen_settings);
+            $contexte->assertCovers($effectif);
+
+            if ($contexte->applicationInstant() !== (int)$combat->ends_at) {
+                throw new CorruptedFrozenApplicationContext(
+                    'l instant d application fige (' . $contexte->applicationInstant() . ') n est pas l echeance du combat '
+                    . $combat->id . ' (' . $combat->ends_at . ') : un champ d epaves serait date d un autre moment',
+                    $combat->frozen_settings
+                );
+            }
+
             // **Tout vient du combat**, jamais des courantes : un reglement sous une autre version
             // que celle de l'ouverture serait une autre bataille.
             $versions = FrozenCombatVersionSet::fromInstance($combat);
@@ -285,10 +300,7 @@ final class CombatSettlementService
                 $missionDeJeu,
                 $creerRetour,
                 $allocation,
-                // **Les faits d'application viennent de la cloture**, pas du monde courant : un
-                // joueur qui a change de classe ou monte son chantier spatial pendant la bataille
-                // ne doit pas en changer l'issue.
-                FrozenCombatApplicationContext::fromStorage($combat->frozen_settings),
+                $contexte,
             );
 
             $this->moveTo($combat, CombatState::Resolved);

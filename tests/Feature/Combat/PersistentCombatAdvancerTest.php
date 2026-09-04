@@ -163,10 +163,7 @@ class PersistentCombatAdvancerTest extends FleetDispatchTestCase
 
         foreach ($echeances as $echeanceDeRalliement) {
             $avanceur->advance($echeanceDeRalliement);
-
-            DB::table('combat_instances')
-                ->where('status', CombatState::Active->value)
-                ->update(['ends_at' => $horizon]);
+            $this->pushDeadlinesTo($horizon);
         }
 
         $premier->refresh();
@@ -192,6 +189,29 @@ class PersistentCombatAdvancerTest extends FleetDispatchTestCase
         $this->assertSame(CombatState::Active, $premier->status, 'The failing combat was left half settled.');
         $this->assertSame(1, $premier->advance_attempts, 'The failure was not counted on the combat.');
         $this->assertNotNull($premier->advance_last_error);
+    }
+
+    /**
+     * Repousse l'echeance des combats actifs — **et l'instant que leur photographie porte**.
+     *
+     * Le reglement refuse une photographie dont l'instant d'application n'est pas l'echeance de son
+     * combat : sans cela, un champ d'epaves serait date d'un autre moment que celui ou la bataille
+     * s'acheve. Une fixture qui repousse l'un sans l'autre fabrique un etat que la production ne
+     * produit jamais — et l'essai tombait sur ce refus, pas sur ce qu'il voulait prouver.
+     */
+    private function pushDeadlinesTo(int $horizon): void
+    {
+        foreach (CombatInstance::query()->where('status', CombatState::Active->value)->get() as $combat) {
+            $photographie = $combat->frozen_settings;
+
+            if (is_array($photographie)) {
+                $photographie['applied_at'] = $horizon;
+                $combat->frozen_settings = $photographie;
+            }
+
+            $combat->ends_at = $horizon;
+            $combat->save();
+        }
     }
 
     /**

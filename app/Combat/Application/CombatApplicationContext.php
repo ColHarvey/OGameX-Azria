@@ -13,16 +13,17 @@ use OGame\Services\PlayerService;
  *
  * Appliquer un resultat de bataille n'est pas seulement l'ecrire : quelques faits **changent ce qui
  * est ecrit**. Un attaquant de classe General laisse un champ d'epaves ; le niveau de son chantier
- * spatial en fixe la taille ; deux reglages decident si ce champ existe ; un Faucheur ramasse une
- * part des debris ; la classe des deux camps figure au rapport.
+ * spatial et la part des vaisseaux detruits qui devient debris en fixent la taille ; deux seuils
+ * decident si ce champ existe ; sa duree de vie et l'instant ou il nait decident quand il disparait ;
+ * un Faucheur ramasse une part des debris ; la classe des deux camps figure au rapport.
  *
  * Sur le chemin instantane, les lire dans le monde courant est juste : rien n'a bouge entre le
  * calcul et l'application, ils sont separes par quelques millisecondes.
  *
  * Sur le chemin durable, **des heures separent les deux**. Un joueur qui change de classe pendant la
- * bataille, un chantier spatial monte d'un niveau, un reglage ajuste par un administrateur —
- * chacun changerait l'issue d'une bataille deja calculee, et personne ne saurait pourquoi deux
- * rejeux du meme combat ne donnent pas le meme rapport.
+ * bataille, un chantier spatial monte d'un niveau, un reglage ajuste par un administrateur, un
+ * travailleur qui applique en retard — chacun changerait l'issue d'une bataille deja calculee, et
+ * personne ne saurait pourquoi deux rejeux du meme combat ne donnent pas le meme rapport.
  *
  * ## Une interface, deux sources, un seul applicateur
  *
@@ -66,6 +67,25 @@ interface CombatApplicationContext
      * La part minimale de flotte detruite, en pour-cent, au-dessous de laquelle il n'y en a pas non plus.
      */
     public function wreckFieldMinFleetPercentage(): int;
+
+    /**
+     * La part des vaisseaux detruits qui devient debris, en pour-cent ; le reste peut devenir epaves.
+     */
+    public function debrisFieldFromShips(): int;
+
+    /**
+     * La duree de vie d'un champ d'epaves, en heures, comptee depuis l'instant d'application.
+     */
+    public function wreckFieldLifetimeHours(): int;
+
+    /**
+     * L'instant auquel l'application est datee.
+     *
+     * Le chemin instantane applique maintenant. Le chemin durable applique **a l'echeance du
+     * combat**, meme si le travailleur passe plus tard : un champ d'epaves ne vit pas plus
+     * longtemps parce que le serveur a eu du retard.
+     */
+    public function applicationInstant(): int;
 
     /**
      * Le dernier motif qu'une faction hostile a inscrit contre ce joueur.

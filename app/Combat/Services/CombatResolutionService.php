@@ -412,7 +412,14 @@ class CombatResolutionService
         // IMPORTANT: If the battle is on a moon, the wreck field is created at the planet's coordinates
         // (not the moon's), and can only be interacted with from the planet.
         if (!empty($battleResult->wreckField) && $battleResult->wreckField['formed']) {
-            $wreckFieldService = new WreckFieldService($defenderPlayer, $this->settings);
+            // **Les faits d'epave viennent du contexte** : part de debris, duree de vie, instant.
+            $wreckFieldService = new WreckFieldService(
+                $defenderPlayer,
+                $this->settings,
+                $context->debrisFieldFromShips(),
+                $context->wreckFieldLifetimeHours(),
+                $context->applicationInstant()
+            );
 
             // Determine the coordinates for the wreck field
             // If battle is on a moon, use the planet's coordinates. If on a planet, use its own coordinates.
@@ -632,7 +639,13 @@ class CombatResolutionService
         if ($spaceDockPlayer === null) {
             throw new RuntimeException('Space dock planet has no owner.');
         }
-        $wreckFieldService = new WreckFieldService($spaceDockPlayer, $this->settings);
+        $wreckFieldService = new WreckFieldService(
+            $spaceDockPlayer,
+            $this->settings,
+            $context->debrisFieldFromShips(),
+            $context->wreckFieldLifetimeHours(),
+            $context->applicationInstant()
+        );
         $wreckFieldData = $wreckFieldService->calculateShipsForWreckField($attackerUnitsLost, $spaceDockLevel);
 
         // Check if wreck field conditions are met

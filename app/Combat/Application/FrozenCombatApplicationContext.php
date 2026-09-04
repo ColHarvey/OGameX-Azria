@@ -17,50 +17,73 @@ use OGame\Services\PlayerService;
  * | --- | --- |
  * | classe General d'un attaquant | un champ d'epaves apparait ou disparait |
  * | niveau de chantier spatial | la taille de ce champ |
+ * | part des vaisseaux detruits qui devient debris | la taille de ce champ, encore |
  * | part ramassee par un Faucheur | ce que la flotte rapporte des debris |
  * | classe des deux camps | ce que le rapport nomme |
- * | deux reglages de champ d'epaves | le seuil au-dessous duquel il n'existe pas |
+ * | deux seuils de champ d'epaves | le seuil au-dessous duquel il n'existe pas |
+ * | duree de vie d'un champ d'epaves | quand il disparait |
+ * | instant d'application | la date de naissance du champ, donc sa fin |
+ * | motif et variante d'un raid de faction | l'histoire que le rapport raconte |
  *
  * Un combat dure des heures. Chacun de ces faits peut changer entre le moment ou la bataille est
  * calculee et celui ou elle est appliquee : un joueur change de classe, un chantier monte d'un
- * niveau, un administrateur ajuste un seuil. **Aucun ne doit changer l'issue d'une bataille deja
- * engagee** — sans quoi deux rejeux du meme combat ne donneraient pas le meme rapport, et personne
- * ne saurait dire lequel est le bon.
+ * niveau, un administrateur ajuste un reglage, un travailleur en retard applique plus tard que
+ * l'echeance. **Aucun ne doit changer l'issue d'une bataille deja engagee** — sans quoi deux rejeux
+ * du meme combat ne donneraient pas le meme rapport, et personne ne saurait dire lequel est le bon.
+ *
+ * ## Ce qui reste vivant, et pourquoi
+ *
+ * Les reglages de reparation d'un champ d'epaves (`wreck_field_repair_max_hours`,
+ * `wreck_field_repair_min_minutes`) ne s'appliquent qu'a une action future du joueur, bien apres la
+ * bataille : ils n'appartiennent pas a ce combat. La part des defenses qui devient debris
+ * (`debris_field_from_defense`) entre dans le calcul de la bataille, donc dans le resultat fige —
+ * pas dans l'application.
  *
  * ## Ce qui n'est pas ici
  *
  * Les unites, les manches, les debris et le butin potentiel : ils vivent dans le resultat fige. Ce
  * contexte ne porte que ce dont **l'application** depend et que le resultat ne contient pas.
  *
- * ## Une porte de relecture
+ * ## Une porte de relecture, et une liaison a l'effectif
  *
- * `fromStorage()` refuse tout ce qui n'a pas la forme ecrite : clef inconnue, joueur ou corps dont
- * l'identifiant n'est pas entier, drapeau qui n'est pas booleen. Un fait gele relu autrement
- * qu'ecrit rendrait un rejeu different de l'original.
+ * `fromStorage()` refuse tout ce qui n'a pas la forme ecrite — clef inconnue, identifiant qui n'est
+ * pas un entier positif, classe que le jeu ne connait pas, part hors de sa plage, variante hors de
+ * la sienne. `assertCovers()` refuse ensuite une photographie qui ne porte pas **exactement** les
+ * joueurs et les corps de l'effectif : une de trop est celle d'un autre combat, ou une reparation a
+ * la main ; une de moins ferait relire le monde vivant.
  */
 final readonly class FrozenCombatApplicationContext implements CombatApplicationContext
 {
-    private const array KEYS = ['schema', 'players', 'space_docks', 'wreck_field', 'npc_narrative'];
+    private const array KEYS = ['schema', 'applied_at', 'players', 'space_docks', 'wreck_field', 'npc_narrative'];
 
-    private const array NARRATIVE_KEYS = ['motive', 'variation'];
+    private const array NARRATIVE_KEYS = ['motive', 'variation', 'variations'];
 
     private const array PLAYER_KEYS = ['is_general', 'reaper_debris_percentage', 'character_class'];
 
-    private const array WRECK_FIELD_KEYS = ['min_resources_loss', 'min_fleet_percentage'];
+    private const array WRECK_FIELD_KEYS = ['min_resources_loss', 'min_fleet_percentage', 'debris_field_from_ships', 'lifetime_hours'];
 
-    public const int SCHEMA = 1;
+    /**
+     * Le schema 2 ajoute l'instant d'application, la part de debris et la duree de vie des epaves,
+     * et ne tire une variante narrative que pour un raid de faction. Aucun document du schema 1 n'a
+     * jamais ete ecrit hors des essais : il se refuse, il ne se convertit pas.
+     */
+    public const int SCHEMA = 2;
 
     /**
      * @param array<int, array{is_general: bool, reaper_debris_percentage: float, character_class: int|null}> $players
      * @param array<int, int> $spaceDocks Niveau de chantier spatial, par identifiant de corps d'origine.
      */
     private function __construct(
+        private int $appliedAt,
         private array $players,
         private array $spaceDocks,
         private int $minResourcesLoss,
         private int $minFleetPercentage,
+        private int $debrisFieldFromShips,
+        private int $lifetimeHours,
         private string|null $npcMotive,
-        private int $npcVariation,
+        private int|null $npcVariation,
+        private int|null $npcVariations,
     ) {
     }
 
@@ -70,48 +93,45 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
      * Tous les joueurs de l'effectif y figurent — les deux camps —, et tous les corps d'origine des
      * flottes attaquantes. Un fait demande plus tard pour quelqu'un d'absent est un refus, pas un
      * repli sur le monde vivant : c'est ce qui rend la photographie complete par construction.
+     *
+     * @param int $appliedAt L'instant auquel l'application sera datee : l'echeance du combat, fixee
+     *                       ici meme. Un travailleur en retard ne date rien a sa propre heure.
      */
-    public static function photograph(CombatRoster $roster, CombatApplicationContext $live, int $narrativeVariations): self
+    public static function photograph(CombatRoster $roster, CombatApplicationContext $live, int $narrativeVariations, int $appliedAt): self
     {
         $joueurs = [];
-        $chantiers = [];
 
-        $inscrire = static function (PlayerService $joueur) use (&$joueurs, $live): void {
-            $joueurs[$joueur->getId()] = [
+        foreach (self::playersOf($roster) as $identifiant => $joueur) {
+            $joueurs[$identifiant] = [
                 'is_general' => $live->isGeneral($joueur),
                 'reaper_debris_percentage' => $live->reaperDebrisCollectionPercentage($joueur),
                 'character_class' => $live->characterClassOf($joueur)?->value,
             ];
-        };
-
-        foreach ($roster->attackers as $flotte) {
-            $inscrire($flotte->player);
         }
 
-        foreach ($roster->defenders as $flotte) {
-            $inscrire($flotte->player);
+        $chantiers = [];
+
+        foreach (self::bodiesOf($roster) as $identifiant => $corps) {
+            $chantiers[$identifiant] = $live->spaceDockLevelFor($corps);
         }
 
-        $inscrire($roster->targetOwner);
-        $inscrire($roster->initiatorOwner);
-
-        $chantiers[$roster->target->getPlanetId()] = $live->spaceDockLevelFor($roster->target);
-
-        foreach ($roster->originBodies as $corps) {
-            $chantiers[$corps->getPlanetId()] = $live->spaceDockLevelFor($corps);
-        }
+        // **Le recit ne se tire que pour un raid de faction.** Le motif lu a l'echeance
+        // expliquerait un raid par une provocation survenue pendant la bataille ; la variante tiree
+        // a l'echeance donnerait une histoire differente a chaque rejeu. Pour un combat entre
+        // joueurs, le rapport n'a rien a raconter : une absence explicite, pas un hasard inutilise.
+        $raid = $roster->initiatorOwner->getUser()->is_npc;
 
         return new self(
+            $appliedAt,
             $joueurs,
             $chantiers,
             $live->wreckFieldMinResourcesLoss(),
             $live->wreckFieldMinFleetPercentage(),
-            // **Le recit se fige ici aussi.** Le motif lu a l'echeance expliquerait un raid par une
-            // provocation survenue pendant la bataille ; la variante tiree a l'echeance donnerait
-            // une histoire differente a chaque rejeu. Ils sont photographies meme quand l'attaquant
-            // n'est pas une faction : le rapport ne les lira simplement pas.
-            $live->npcMotiveAgainst($roster->targetOwner),
-            $live->npcNarrativeVariation($narrativeVariations)
+            $live->debrisFieldFromShips(),
+            $live->wreckFieldLifetimeHours(),
+            $raid ? $live->npcMotiveAgainst($roster->targetOwner) : null,
+            $raid ? $live->npcNarrativeVariation($narrativeVariations) : null,
+            $raid ? $narrativeVariations : null
         );
     }
 
@@ -122,15 +142,19 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
     {
         return [
             'schema' => self::SCHEMA,
+            'applied_at' => $this->appliedAt,
             'players' => $this->players,
             'space_docks' => $this->spaceDocks,
             'wreck_field' => [
                 'min_resources_loss' => $this->minResourcesLoss,
                 'min_fleet_percentage' => $this->minFleetPercentage,
+                'debris_field_from_ships' => $this->debrisFieldFromShips,
+                'lifetime_hours' => $this->lifetimeHours,
             ],
             'npc_narrative' => [
                 'motive' => $this->npcMotive,
                 'variation' => $this->npcVariation,
+                'variations' => $this->npcVariations,
             ],
         ];
     }
@@ -149,10 +173,16 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
             throw new CorruptedFrozenApplicationContext('le schema ' . $schema . ' est inconnu, seul le schema ' . self::SCHEMA . ' se relit', $stored);
         }
 
+        $instant = self::int($stored, 'applied_at', 'contexte');
+
+        if ($instant < 1) {
+            throw new CorruptedFrozenApplicationContext('« contexte.applied_at » vaut ' . $instant . ' : aucune application ne se date avant l epoque', $stored);
+        }
+
         $joueurs = [];
         foreach (self::structure($stored, 'players', 'contexte') as $identifiant => $fait) {
-            if (!is_int($identifiant)) {
-                throw new CorruptedFrozenApplicationContext('« players » porte un joueur dont l identifiant est un ' . get_debug_type($identifiant), $stored);
+            if (!is_int($identifiant) || $identifiant < 1) {
+                throw new CorruptedFrozenApplicationContext('« players » porte un joueur dont l identifiant est ' . self::describe($identifiant) . ' et non un entier positif', $stored);
             }
 
             $chemin = 'contexte.players[' . $identifiant . ']';
@@ -169,21 +199,31 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
                 throw new CorruptedFrozenApplicationContext('« ' . $chemin . '.character_class » est un ' . get_debug_type($classe) . ' et non un entier ni null', $stored);
             }
 
+            if ($classe !== null && CharacterClass::tryFrom($classe) === null) {
+                throw new CorruptedFrozenApplicationContext('« ' . $chemin . '.character_class » vaut ' . $classe . ', une classe que le jeu ne connait pas', $stored);
+            }
+
+            $part = self::number($fait, 'reaper_debris_percentage', $chemin);
+
+            if (!is_finite($part) || $part < 0.0 || $part > 1.0) {
+                throw new CorruptedFrozenApplicationContext('« ' . $chemin . '.reaper_debris_percentage » vaut ' . self::describe($part) . ' : une part est un nombre fini entre 0 et 1', $stored);
+            }
+
             $joueurs[$identifiant] = [
                 'is_general' => self::bool($fait, 'is_general', $chemin),
-                'reaper_debris_percentage' => self::number($fait, 'reaper_debris_percentage', $chemin),
+                'reaper_debris_percentage' => $part,
                 'character_class' => $classe,
             ];
         }
 
         $chantiers = [];
         foreach (self::structure($stored, 'space_docks', 'contexte') as $corps => $niveau) {
-            if (!is_int($corps)) {
-                throw new CorruptedFrozenApplicationContext('« space_docks » porte un corps dont l identifiant est un ' . get_debug_type($corps), $stored);
+            if (!is_int($corps) || $corps < 1) {
+                throw new CorruptedFrozenApplicationContext('« space_docks » porte un corps dont l identifiant est ' . self::describe($corps) . ' et non un entier positif', $stored);
             }
 
-            if (!is_int($niveau)) {
-                throw new CorruptedFrozenApplicationContext('« space_docks[' . $corps . '] » est un ' . get_debug_type($niveau) . ' et non un entier', $stored);
+            if (!is_int($niveau) || $niveau < 1) {
+                throw new CorruptedFrozenApplicationContext('« space_docks[' . $corps . '] » est ' . self::describe($niveau) . ' et non un niveau entier d au moins 1', $stored);
             }
 
             $chantiers[$corps] = $niveau;
@@ -191,6 +231,27 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
 
         $epaves = self::structure($stored, 'wreck_field', 'contexte');
         self::refuseUnknownKeys($epaves, self::WRECK_FIELD_KEYS, 'contexte.wreck_field');
+
+        $perteMinimale = self::int($epaves, 'min_resources_loss', 'contexte.wreck_field');
+        $partMinimale = self::int($epaves, 'min_fleet_percentage', 'contexte.wreck_field');
+        $partDebris = self::int($epaves, 'debris_field_from_ships', 'contexte.wreck_field');
+        $dureeDeVie = self::int($epaves, 'lifetime_hours', 'contexte.wreck_field');
+
+        if ($perteMinimale < 0) {
+            throw new CorruptedFrozenApplicationContext('« contexte.wreck_field.min_resources_loss » vaut ' . $perteMinimale . ' : un seuil ne se compte pas en negatif', $stored);
+        }
+
+        if ($partMinimale < 0 || $partMinimale > 100) {
+            throw new CorruptedFrozenApplicationContext('« contexte.wreck_field.min_fleet_percentage » vaut ' . $partMinimale . ' : un pourcentage tient entre 0 et 100', $stored);
+        }
+
+        if ($partDebris < 0 || $partDebris > 100) {
+            throw new CorruptedFrozenApplicationContext('« contexte.wreck_field.debris_field_from_ships » vaut ' . $partDebris . ' : un pourcentage tient entre 0 et 100', $stored);
+        }
+
+        if ($dureeDeVie < 1) {
+            throw new CorruptedFrozenApplicationContext('« contexte.wreck_field.lifetime_hours » vaut ' . $dureeDeVie . ' : un champ d epaves vit au moins une heure', $stored);
+        }
 
         $recit = self::structure($stored, 'npc_narrative', 'contexte');
         self::refuseUnknownKeys($recit, self::NARRATIVE_KEYS, 'contexte.npc_narrative');
@@ -201,14 +262,85 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
             throw new CorruptedFrozenApplicationContext('« contexte.npc_narrative.motive » est un ' . get_debug_type($motif) . ' et non un texte ni null', $stored);
         }
 
+        $variante = self::present($recit, 'variation', 'contexte.npc_narrative');
+        $variantes = self::present($recit, 'variations', 'contexte.npc_narrative');
+
+        if ($variante !== null && !is_int($variante)) {
+            throw new CorruptedFrozenApplicationContext('« contexte.npc_narrative.variation » est un ' . get_debug_type($variante) . ' et non un entier ni null', $stored);
+        }
+
+        if ($variantes !== null && !is_int($variantes)) {
+            throw new CorruptedFrozenApplicationContext('« contexte.npc_narrative.variations » est un ' . get_debug_type($variantes) . ' et non un entier ni null', $stored);
+        }
+
+        // **Un raid a une variante et sa plage ; un combat entre joueurs n'a ni l'une ni l'autre.**
+        // L'une sans l'autre est une photographie a moitie ecrite.
+        if (($variante === null) !== ($variantes === null)) {
+            throw new CorruptedFrozenApplicationContext('« contexte.npc_narrative » porte une variation sans sa plage, ou une plage sans variation', $stored);
+        }
+
+        if ($variante === null && $motif !== null) {
+            throw new CorruptedFrozenApplicationContext('« contexte.npc_narrative » porte un motif sans variation : un recit ne se raconte qu a un raid de faction', $stored);
+        }
+
+        if ($variante !== null && $variantes !== null && ($variantes < 1 || $variante < 1 || $variante > $variantes)) {
+            throw new CorruptedFrozenApplicationContext('« contexte.npc_narrative.variation » vaut ' . $variante . ' pour une plage de ' . $variantes . ' : la variante tiree tient entre 1 et sa plage', $stored);
+        }
+
         return new self(
+            $instant,
             $joueurs,
             $chantiers,
-            self::int($epaves, 'min_resources_loss', 'contexte.wreck_field'),
-            self::int($epaves, 'min_fleet_percentage', 'contexte.wreck_field'),
+            $perteMinimale,
+            $partMinimale,
+            $partDebris,
+            $dureeDeVie,
             $motif,
-            self::int($recit, 'variation', 'contexte.npc_narrative')
+            $variante,
+            $variantes
         );
+    }
+
+    /**
+     * La photographie porte-t-elle exactement les joueurs et les corps de cet effectif ?
+     *
+     * « Chaque fait demande finit par exister » ne suffit pas : une photographie d'un autre combat,
+     * ou reparee a la main avec un joueur de trop, y satisferait. L'egalite des deux ensembles est
+     * ce qui lie ce contexte a cet effectif — et l'effectif est relu sous verrou, depuis les
+     * participants inscrits.
+     */
+    public function assertCovers(CombatRoster $roster): void
+    {
+        $joueursAttendus = array_keys(self::playersOf($roster));
+        $joueursFiges = array_keys($this->players);
+        sort($joueursAttendus);
+        sort($joueursFiges);
+
+        if ($joueursFiges !== $joueursAttendus) {
+            throw new CorruptedFrozenApplicationContext(
+                'la photographie porte les joueurs ' . implode(', ', $joueursFiges)
+                . ' alors que l effectif compte les joueurs ' . implode(', ', $joueursAttendus),
+                $this->players
+            );
+        }
+
+        $corpsAttendus = array_keys(self::bodiesOf($roster));
+        $corpsFiges = array_keys($this->spaceDocks);
+        sort($corpsAttendus);
+        sort($corpsFiges);
+
+        if ($corpsFiges !== $corpsAttendus) {
+            throw new CorruptedFrozenApplicationContext(
+                'la photographie porte les corps ' . implode(', ', $corpsFiges)
+                . ' alors que l effectif touche les corps ' . implode(', ', $corpsAttendus),
+                $this->spaceDocks
+            );
+        }
+    }
+
+    public function applicationInstant(): int
+    {
+        return $this->appliedAt;
     }
 
     public function isGeneral(PlayerService $player): bool
@@ -225,7 +357,7 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
     {
         $valeur = $this->factsOf($player->getId())['character_class'];
 
-        return $valeur === null ? null : CharacterClass::tryFrom($valeur);
+        return $valeur === null ? null : CharacterClass::from($valeur);
     }
 
     public function spaceDockLevelFor(PlanetService $originBody): int
@@ -254,6 +386,16 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
         return $this->minFleetPercentage;
     }
 
+    public function debrisFieldFromShips(): int
+    {
+        return $this->debrisFieldFromShips;
+    }
+
+    public function wreckFieldLifetimeHours(): int
+    {
+        return $this->lifetimeHours;
+    }
+
     public function npcMotiveAgainst(PlayerService $defender): string|null
     {
         return $this->npcMotive;
@@ -264,11 +406,59 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
      *
      * Le nombre de variantes est celui de l'applicateur ; si un deploiement en ajoute pendant qu'une
      * bataille dure, la variante figee reste dans l'ancienne plage — et c'est voulu : le rapport
-     * raconte l'histoire qui a ete tiree, pas une autre.
+     * raconte l'histoire qui a ete tiree, pas une autre. Un combat entre joueurs n'en a aucune, et
+     * la demander est un defaut d'integration, pas une occasion d'en tirer une.
      */
     public function npcNarrativeVariation(int $variations): int
     {
+        if ($this->npcVariation === null) {
+            throw new CorruptedFrozenApplicationContext(
+                'aucune variante narrative n a ete tiree : ce combat n etait pas un raid de faction, et le rapport n a rien a raconter',
+                ['motive' => $this->npcMotive, 'variations' => $this->npcVariations]
+            );
+        }
+
         return $this->npcVariation;
+    }
+
+    /**
+     * Les joueurs que l'application interroge : les deux camps, le proprietaire de la cible, celui de
+     * l'initiatrice. La photographie et la liaison a l'effectif passent par la meme liste.
+     *
+     * @return array<int, PlayerService>
+     */
+    private static function playersOf(CombatRoster $roster): array
+    {
+        $joueurs = [];
+
+        foreach ($roster->attackers as $flotte) {
+            $joueurs[$flotte->player->getId()] = $flotte->player;
+        }
+
+        foreach ($roster->defenders as $flotte) {
+            $joueurs[$flotte->player->getId()] = $flotte->player;
+        }
+
+        $joueurs[$roster->targetOwner->getId()] = $roster->targetOwner;
+        $joueurs[$roster->initiatorOwner->getId()] = $roster->initiatorOwner;
+
+        return $joueurs;
+    }
+
+    /**
+     * Les corps dont l'application lit le chantier spatial : la cible et les origines.
+     *
+     * @return array<int, PlanetService>
+     */
+    private static function bodiesOf(CombatRoster $roster): array
+    {
+        $corps = [$roster->target->getPlanetId() => $roster->target];
+
+        foreach ($roster->originBodies as $origine) {
+            $corps[$origine->getPlanetId()] = $origine;
+        }
+
+        return $corps;
     }
 
     /**
@@ -286,6 +476,11 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
         }
 
         return $this->players[$playerId];
+    }
+
+    private static function describe(mixed $valeur): string
+    {
+        return is_scalar($valeur) ? var_export($valeur, true) : 'un ' . get_debug_type($valeur);
     }
 
     /**

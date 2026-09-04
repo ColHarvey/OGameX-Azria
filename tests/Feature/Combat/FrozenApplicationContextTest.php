@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Combat;
 
+use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Application\FrozenCombatApplicationContext;
 use OGame\Combat\Enums\CombatState;
@@ -20,6 +21,7 @@ use OGame\Models\CombatInstance;
 use OGame\Models\FleetMission;
 use OGame\Models\Resources;
 use OGame\Models\User;
+use OGame\Models\WreckField;
 use OGame\Services\ObjectService;
 use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
@@ -75,6 +77,8 @@ class FrozenApplicationContextTest extends FleetDispatchTestCase
         $reglages = resolve(SettingsService::class);
         $reglages->set('wreck_field_min_resources_loss', 150000);
         $reglages->set('wreck_field_min_fleet_percentage', 5);
+        $reglages->set('debris_field_from_ships', 30);
+        $reglages->set('wreck_field_lifetime_hours', 72);
 
         parent::tearDown();
     }
@@ -198,6 +202,132 @@ class FrozenApplicationContextTest extends FleetDispatchTestCase
     }
 
     /**
+     * Le champ d'epaves a la taille que la part de debris avait a la cloture.
+     *
+     * Un administrateur change `debris_field_from_ships` pendant les heures que dure la bataille :
+     * sans photographie, la part recuperable serait celle d'aujourd'hui, appliquee a des pertes d'hier.
+     */
+    public function testTheWreckFieldIsSizedByTheDebrisShareFrozenAtTheClosure(): void
+    {
+        [$combat, $attaquant] = $this->anEngagedCombatWhoseAttackerIs(CharacterClass::GENERAL);
+
+        $document = $combat->frozen_settings;
+        $this->assertIsArray($document);
+        $this->assertSame(30, $document['wreck_field']['debris_field_from_ships'], 'The debris share was not photographed at thirty percent.');
+
+        // Entre la cloture et l'echeance, la part de debris passe de trente a quatre-vingt-dix.
+        resolve(SettingsService::class)->set('debris_field_from_ships', 90);
+
+        $this->settle($combat);
+        $combat->refresh();
+
+        $rapport = BattleReport::query()->find($combat->battle_report_id);
+        $this->assertNotNull($rapport);
+
+        $perdus = BattleResultCodec::fromStorage($combat->battle_result)->attackerUnitsLost;
+        $this->assertGreaterThan(0, $perdus->getAmount(), 'The attacker lost nothing: no wreck field would exist either way.');
+
+        $reglages = resolve(SettingsService::class);
+        $aLaPartGelee = $this->asReportShape((new WreckFieldService($this->playerOf($attaquant), $reglages, 30))->calculateShipsForWreckField($perdus, 1));
+        $aLaPartCourante = $this->asReportShape((new WreckFieldService($this->playerOf($attaquant), $reglages, 90))->calculateShipsForWreckField($perdus, 1));
+
+        $this->assertNotSame([], $aLaPartGelee, 'The frozen share recovers nothing from these losses: the test would compare two absences.');
+        $this->assertNotSame($aLaPartGelee, $aLaPartCourante, 'Both shares give the same wreck field: the test would prove nothing.');
+        $this->assertSame(
+            $aLaPartGelee,
+            $rapport->general['attacker_wreckage'] ?? null,
+            'The wreck field was sized by the debris share as it is now, not as it was when the battle was computed.'
+        );
+    }
+
+    /**
+     * Le champ d'epaves du defenseur nait a l'echeance du combat, et vit la duree figee a la cloture.
+     *
+     * Le travailleur applique dix heures apres l'echeance, et l'administrateur a ramene la duree de
+     * vie a une heure entre-temps : le champ doit naitre a l'echeance et vivre soixante-douze heures.
+     */
+    public function testADefenderWreckFieldIsDatedAtTheDeadlineWithTheFrozenLifetime(): void
+    {
+        [$combat] = $this->anEngagedCombatWhoseAttackerIs(CharacterClass::GENERAL, 300);
+
+        $result = BattleResultCodec::fromStorage($combat->battle_result);
+        $this->assertTrue((bool)($result->wreckField['formed'] ?? false), 'The defender left no wreck field: nothing would be dated.');
+        $this->assertNotSame([], $result->wreckField['ships'] ?? [], 'The defender wreck field holds no ship.');
+
+        $document = $combat->frozen_settings;
+        $this->assertIsArray($document);
+        $this->assertSame(72, $document['wreck_field']['lifetime_hours']);
+        $this->assertSame((int)$combat->ends_at, $document['applied_at'], 'The application instant is not the deadline.');
+
+        // Entre la cloture et l'echeance, la duree de vie tombe a une heure ; et le travailleur est en retard.
+        resolve(SettingsService::class)->set('wreck_field_lifetime_hours', 1);
+        $this->travelTo(Date::createFromTimestamp((int)$combat->ends_at + 36_000));
+
+        $this->settle($combat);
+
+        $cible = DB::table('planets')->where('id', $combat->target_planet_id)->first();
+        $this->assertNotNull($cible);
+        $champ = WreckField::query()
+            ->where('galaxy', $cible->galaxy)
+            ->where('system', $cible->system)
+            ->where('planet', $cible->planet)
+            ->where('owner_player_id', $cible->user_id)
+            ->orderByDesc('id')
+            ->first();
+        $this->assertNotNull($champ, 'No wreck field was created for the defender.');
+        $this->assertSame((int)$combat->ends_at, (int)$champ->created_at->timestamp, 'The wreck field was dated at the worker clock, not at the deadline.');
+        $this->assertSame((int)$combat->ends_at + 72 * 3_600, (int)$champ->expires_at->timestamp, 'The wreck field lives the lifetime of today, not the one frozen at the closure.');
+    }
+
+    /**
+     * Une photographie qui ne porte pas exactement l'effectif est refusee, meme complete.
+     */
+    public function testASnapshotThatDoesNotCoverTheRosterExactlyIsRefused(): void
+    {
+        [$combat] = $this->anEngagedCombatWhoseAttackerIs(CharacterClass::COLLECTOR);
+
+        $document = $combat->frozen_settings;
+        $this->assertIsArray($document);
+        $document['players'][999_999] = ['is_general' => false, 'reaper_debris_percentage' => 0.3, 'character_class' => null];
+        DB::table('combat_instances')->where('id', $combat->id)->update(['frozen_settings' => json_encode($document)]);
+
+        $this->expectException(CorruptedFrozenApplicationContext::class);
+        $this->settle($combat);
+    }
+
+    /**
+     * Un instant d'application qui n'est pas l'echeance est refuse.
+     */
+    public function testAnApplicationInstantThatIsNotTheDeadlineIsRefused(): void
+    {
+        [$combat] = $this->anEngagedCombatWhoseAttackerIs(CharacterClass::COLLECTOR);
+
+        $document = $combat->frozen_settings;
+        $this->assertIsArray($document);
+        $document['applied_at'] = (int)$combat->ends_at + 1;
+        DB::table('combat_instances')->where('id', $combat->id)->update(['frozen_settings' => json_encode($document)]);
+
+        $this->expectException(CorruptedFrozenApplicationContext::class);
+        $this->settle($combat);
+    }
+
+    /**
+     * Un combat entre joueurs n'a pas de recit : une absence explicite, pas un hasard inutilise.
+     */
+    public function testAPlayerAttackDrawsNoNarrative(): void
+    {
+        [$combat] = $this->anEngagedCombatWhoseAttackerIs(CharacterClass::COLLECTOR);
+
+        $document = $combat->frozen_settings;
+        $this->assertIsArray($document);
+        $this->assertSame(
+            ['motive' => null, 'variation' => null, 'variations' => null],
+            $document['npc_narrative'],
+            'A narrative was drawn for a combat between players.'
+        );
+    }
+
+    /**
      * Un combat ouvert, clos et engage, dont l'attaquant porte la classe demandee.
      *
      * La cible porte deux cents lanceurs : l'attaquant l'emporte mais **perd des vaisseaux**, sans
@@ -205,7 +335,7 @@ class FrozenApplicationContextTest extends FleetDispatchTestCase
      *
      * @return array{0: CombatInstance, 1: User, 2: FleetMission}
      */
-    private function anEngagedCombatWhoseAttackerIs(CharacterClass $classe): array
+    private function anEngagedCombatWhoseAttackerIs(CharacterClass $classe, int $defenderFighters = 0): array
     {
         for ($i = 0; $i < 6; $i++) {
             $this->createAndLoginUser();
@@ -237,6 +367,8 @@ class FrozenApplicationContextTest extends FleetDispatchTestCase
             'crystal' => 300_000,
             'deuterium' => 100_000,
             'rocket_launcher' => 200,
+            // Des vaisseaux au defenseur, quand l'essai veut qu'il laisse un champ d'epaves.
+            'light_fighter' => $defenderFighters,
             'time_last_update' => (int)now()->timestamp + 86_400,
         ]);
         $cible->reloadPlanet();

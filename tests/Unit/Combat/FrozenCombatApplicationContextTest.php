@@ -10,8 +10,10 @@ use Tests\UnitTestCase;
  * La photographie des faits d'application se relit telle qu'elle a ete ecrite, ou pas du tout.
  *
  * Ces faits decident de ce que l'application ecrit : un champ d'epaves apparait ou non, sa taille
- * change, le rapport nomme une classe. Les relire autrement qu'ecrits — un niveau devenu chaine,
- * un drapeau devenu entier — rendrait un rejeu different de l'original, et le ferait en silence.
+ * change, sa date de fin, le rapport nomme une classe et raconte un raid. Les relire autrement
+ * qu'ecrits — un niveau devenu chaine, un drapeau devenu entier, une classe que le jeu ne connait
+ * pas, une part hors de sa plage — rendrait un rejeu different de l'original, et le ferait en
+ * silence.
  */
 class FrozenCombatApplicationContextTest extends UnitTestCase
 {
@@ -25,6 +27,19 @@ class FrozenCombatApplicationContextTest extends UnitTestCase
         $this->assertSame($document, FrozenCombatApplicationContext::fromStorage($document)->toStorage());
     }
 
+    public function testTheApplicationInstantIsReadBack(): void
+    {
+        $this->assertSame(1_700_003_600, FrozenCombatApplicationContext::fromStorage($this->aSnapshot())->applicationInstant());
+    }
+
+    public function testTheWreckFieldFactsAreReadBack(): void
+    {
+        $contexte = FrozenCombatApplicationContext::fromStorage($this->aSnapshot());
+
+        $this->assertSame(30, $contexte->debrisFieldFromShips());
+        $this->assertSame(72, $contexte->wreckFieldLifetimeHours());
+    }
+
     /**
      * Un niveau de chantier spatial donne en chaine numerique est refuse.
      */
@@ -34,6 +49,30 @@ class FrozenCombatApplicationContextTest extends UnitTestCase
         $document['space_docks'][7] = '4';
 
         $this->assertRefused($document, 'space_docks[7]');
+    }
+
+    public function testASpaceDockLevelBelowOneIsRefused(): void
+    {
+        $document = $this->aSnapshot();
+        $document['space_docks'][7] = 0;
+
+        $this->assertRefused($document, 'space_docks[7]');
+    }
+
+    public function testABodyWithoutAPositiveIdentifierIsRefused(): void
+    {
+        $document = $this->aSnapshot();
+        $document['space_docks'][0] = 3;
+
+        $this->assertRefused($document, 'space_docks');
+    }
+
+    public function testAPlayerWithoutAPositiveIdentifierIsRefused(): void
+    {
+        $document = $this->aSnapshot();
+        $document['players'][-4] = $document['players'][4];
+
+        $this->assertRefused($document, 'players');
     }
 
     /**
@@ -48,12 +87,39 @@ class FrozenCombatApplicationContextTest extends UnitTestCase
     }
 
     /**
+     * Une classe que le jeu ne connait pas est refusee, au lieu de devenir « aucune » en silence.
+     */
+    public function testACharacterClassTheGameDoesNotKnowIsRefused(): void
+    {
+        $document = $this->aSnapshot();
+        $document['players'][3]['character_class'] = 99;
+
+        $this->assertRefused($document, 'character_class');
+    }
+
+    /**
      * Une part de Faucheur donnee en chaine est refusee.
      */
     public function testAReaperShareGivenAsAStringIsRefused(): void
     {
         $document = $this->aSnapshot();
         $document['players'][3]['reaper_debris_percentage'] = '0.30';
+
+        $this->assertRefused($document, 'reaper_debris_percentage');
+    }
+
+    public function testAReaperShareOutsideZeroToOneIsRefused(): void
+    {
+        $document = $this->aSnapshot();
+        $document['players'][3]['reaper_debris_percentage'] = 1.5;
+
+        $this->assertRefused($document, 'reaper_debris_percentage');
+    }
+
+    public function testAReaperShareThatIsNotFiniteIsRefused(): void
+    {
+        $document = $this->aSnapshot();
+        $document['players'][3]['reaper_debris_percentage'] = NAN;
 
         $this->assertRefused($document, 'reaper_debris_percentage');
     }
@@ -85,12 +151,55 @@ class FrozenCombatApplicationContextTest extends UnitTestCase
         $this->assertRefused($document, 'min_fleet_percentage');
     }
 
+    public function testANegativeThresholdIsRefused(): void
+    {
+        $document = $this->aSnapshot();
+        $document['wreck_field']['min_resources_loss'] = -1;
+
+        $this->assertRefused($document, 'min_resources_loss');
+    }
+
+    public function testADebrisShareAboveOneHundredPercentIsRefused(): void
+    {
+        $document = $this->aSnapshot();
+        $document['wreck_field']['debris_field_from_ships'] = 101;
+
+        $this->assertRefused($document, 'debris_field_from_ships');
+    }
+
+    public function testALifetimeBelowOneHourIsRefused(): void
+    {
+        $document = $this->aSnapshot();
+        $document['wreck_field']['lifetime_hours'] = 0;
+
+        $this->assertRefused($document, 'lifetime_hours');
+    }
+
+    public function testAnApplicationInstantBeforeTheEpochIsRefused(): void
+    {
+        $document = $this->aSnapshot();
+        $document['applied_at'] = 0;
+
+        $this->assertRefused($document, 'applied_at');
+    }
+
     public function testAnUnknownSchemaIsRefused(): void
     {
         $document = $this->aSnapshot();
         $document['schema'] = 9;
 
         $this->assertRefused($document, 'schema 9');
+    }
+
+    /**
+     * Le schema 1 ne se convertit pas : il se refuse. Aucun document n'en a ete ecrit hors des essais.
+     */
+    public function testTheFirstSchemaIsRefusedRatherThanConverted(): void
+    {
+        $document = $this->aSnapshot();
+        $document['schema'] = 1;
+
+        $this->assertRefused($document, 'schema 1');
     }
 
     /**
@@ -112,9 +221,57 @@ class FrozenCombatApplicationContextTest extends UnitTestCase
         $this->assertRefused($document, 'variation');
     }
 
+    public function testANarrativeVariationOutsideItsRangeIsRefused(): void
+    {
+        $document = $this->aSnapshot();
+        $document['npc_narrative']['variation'] = 6;
+
+        $this->assertRefused($document, 'variation');
+
+        $document['npc_narrative']['variation'] = 0;
+
+        $this->assertRefused($document, 'variation');
+    }
+
+    public function testAVariationWithoutItsRangeIsRefused(): void
+    {
+        $document = $this->aSnapshot();
+        $document['npc_narrative']['variations'] = null;
+
+        $this->assertRefused($document, 'plage');
+    }
+
+    public function testAMotiveWithoutAVariationIsRefused(): void
+    {
+        $document = $this->aSnapshot();
+        $document['npc_narrative']['variation'] = null;
+        $document['npc_narrative']['variations'] = null;
+
+        $this->assertRefused($document, 'motif');
+    }
+
+    /**
+     * Un combat entre joueurs n'a pas de recit : une absence explicite, et rien a raconter.
+     */
+    public function testAPlayerCombatHasNoNarrativeAndRefusesToInventOne(): void
+    {
+        $document = $this->aSnapshot();
+        $document['npc_narrative'] = ['motive' => null, 'variation' => null, 'variations' => null];
+
+        $contexte = FrozenCombatApplicationContext::fromStorage($document);
+        $this->assertSame($document, $contexte->toStorage());
+
+        try {
+            $contexte->npcNarrativeVariation(5);
+            $this->fail('A variation was invented for a combat that had none.');
+        } catch (CorruptedFrozenApplicationContext $refus) {
+            $this->assertStringContainsString('raid', $refus->defect);
+        }
+    }
+
     public function testADocumentThatIsNotAStructureIsRefused(): void
     {
-        $this->assertRefused('{"schema":1}', 'structure');
+        $this->assertRefused('{"schema":2}', 'structure');
     }
 
     private function assertRefused(mixed $document, string $attendu): void
@@ -134,13 +291,19 @@ class FrozenCombatApplicationContextTest extends UnitTestCase
     {
         return [
             'schema' => FrozenCombatApplicationContext::SCHEMA,
+            'applied_at' => 1_700_003_600,
             'players' => [
                 3 => ['is_general' => true, 'reaper_debris_percentage' => 0.3, 'character_class' => 2],
                 4 => ['is_general' => false, 'reaper_debris_percentage' => 0.3, 'character_class' => null],
             ],
             'space_docks' => [7 => 4, 9 => 1],
-            'wreck_field' => ['min_resources_loss' => 150_000, 'min_fleet_percentage' => 5],
-            'npc_narrative' => ['motive' => 'retaliation', 'variation' => 3],
+            'wreck_field' => [
+                'min_resources_loss' => 150_000,
+                'min_fleet_percentage' => 5,
+                'debris_field_from_ships' => 30,
+                'lifetime_hours' => 72,
+            ],
+            'npc_narrative' => ['motive' => 'retaliation', 'variation' => 3, 'variations' => 5],
         ];
     }
 }

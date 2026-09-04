@@ -112,7 +112,11 @@ final class CombatEngagementService
         $combat->frozen_settings = FrozenCombatApplicationContext::photograph(
             $effectif,
             new LiveCombatApplicationContext(resolve(CharacterClassService::class), $this->settings()),
-            CombatResolutionService::NPC_MOTIVE_VARIATIONS
+            CombatResolutionService::NPC_MOTIVE_VARIATIONS,
+            // **L'instant d'application est l'echeance**, fixee ici meme : un travailleur en retard
+            // n'y change rien, et un champ d'epaves ne vit pas plus longtemps parce que le serveur a
+            // eu du retard.
+            $startsAt + $estimation->seconds
         )->toStorage();
 
         $combat->battle_result = BattleResultCodec::toStorage($resultat);
