@@ -1,0 +1,150 @@
+name: Construction reelle du front
+
+# Pourquoi ce workflow existe
+#
+# Le conteneur de production part de `php:8.5-fpm` et n'a ni Node ni npm ; le poste de
+# developpement non plus. Les assets construits sont donc **commites** dans `public/build/`, et
+# c'est ce que le jeu sert. Ils y sont assembles a la main.
+#
+# Assembler a la main ne prouve pas que les sources sont reproductibles : rien ne garantit qu'un
+# `npm run build` refait exactement le meme fichier, ni meme qu'il aboutit. Ce workflow le fait
+# donc pour de vrai, avec le verrou de dependances versionne, et **compare** le resultat a ce qui
+# est commite. Une divergence n'est pas forcement une faute — Rollup nomme ses propres entrees —
+# mais elle doit etre vue et expliquee, jamais ignoree.
+#
+# Il ne remplace pas la verification navigateur : il repond a la question « ces sources
+# produisent-elles ces assets ? », pas a « la page est-elle juste ? ».
+
+on:
+  push:
+    branches:
+      - combats-persistants
+      - 'wip/**'
+    paths:
+      - 'resources/css/**'
+      - 'resources/js/**'
+      - 'public/build/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.js'
+      - '.github/workflows/front-build.yml'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  construire:
+    name: npm ci puis npm run build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Recuperer le depot
+        uses: actions/checkout@v4
+
+      - name: Nommer le candidat
+        run: |
+          {
+            echo "## Construction reelle du front"
+            echo ""
+            echo "| Champ | Valeur |"
+            echo "| --- | --- |"
+            echo "| SHA | \`${GITHUB_SHA}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Installer Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # **Le verrou versionne, et lui seul.** `npm ci` refuse une resolution differente de
+      # `package-lock.json` : c'est ce qui rend la construction reproductible.
+      - name: Installer les dependances
+        run: npm ci
+
+      # Ce que le depot porte aujourd'hui, mis de cote avant d'etre ecrase.
+      - name: Photographier les assets commites
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/commite
+          cp -r public/build /tmp/commite/build
+          sha256sum public/build/manifest.json | tee /tmp/commite/manifest.sha256
+          ls -1 public/build/assets | sort | tee /tmp/commite/assets.txt
+
+      - name: Construire
+        run: npm run build
+
+      - name: Photographier les assets construits
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/construit
+          cp -r public/build /tmp/construit/build
+          ls -1 public/build/assets | sort | tee /tmp/construit/assets.txt
+
+      # **La comparaison, lisible.** Le manifeste dit quels fichiers le jeu sert : c'est lui qui
+      # compte. Les differences sont affichees en clair, et le pas suivant decide si elles sont
+      # admissibles.
+      - name: Comparer au depot
+        id: comparer
+        run: |
+          set -uo pipefail
+          echo "### Manifeste" >> "$GITHUB_STEP_SUMMARY"
+          echo '```diff' >> "$GITHUB_STEP_SUMMARY"
+          diff -u /tmp/commite/build/manifest.json public/build/manifest.json | head -60 >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+          echo "### Fichiers d'assets" >> "$GITHUB_STEP_SUMMARY"
+          echo '```diff' >> "$GITHUB_STEP_SUMMARY"
+          diff -u /tmp/commite/assets.txt /tmp/construit/assets.txt | head -60 >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+          if diff -q /tmp/commite/build/manifest.json public/build/manifest.json > /dev/null; then
+            echo "identique=oui" >> "$GITHUB_OUTPUT"
+          else
+            echo "identique=non" >> "$GITHUB_OUTPUT"
+          fi
+
+      # **Le contenu du bundle du jeu compte plus que son nom.** Rollup nomme ses propres entrees
+      # avec sa propre empreinte ; le bundle concatene, lui, doit contenir exactement les memes
+      # sources. Ce controle-la ne pardonne rien : si `combat.js` manque, il tombe.
+      - name: Exiger que le bundle porte chaque source du depot
+        run: |
+          set -euo pipefail
+          php -r '
+            $manifeste = json_decode(file_get_contents("public/build/manifest.json"), true);
+            $bundle = file_get_contents("public/build/" . $manifeste["resources/js/ingame.js"]["file"]);
+            $vite = file_get_contents("vite.config.js");
+            preg_match("/const ingameScripts = \[(.*?)\n\]/s", $vite, $m);
+            preg_match_all("/\x27([^\x27]+)\x27/", $m[1], $f);
+            $manquants = [];
+            foreach ($f[1] as $chemin) {
+              if (!str_starts_with($chemin, "resources/")) { continue; }
+              if (!str_contains($bundle, rtrim(file_get_contents($chemin), "\r\n"))) { $manquants[] = $chemin; }
+            }
+            if ($manquants !== []) {
+              echo "Sources absentes du bundle construit :\n  " . implode("\n  ", $manquants) . "\n";
+              exit(1);
+            }
+            echo "Le bundle construit porte les " . count($f[1]) . " sources listees.\n";
+          '
+
+      - name: Publier les deux versions
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: front-build-${{ github.sha }}
+          if-no-files-found: warn
+          path: |
+            /tmp/commite/build/manifest.json
+            /tmp/commite/assets.txt
+            /tmp/construit/build/manifest.json
+            /tmp/construit/assets.txt
+
+      # Le verdict est dit, jamais devine : un manifeste different demande une decision humaine,
+      # et le workflow le signale sans faire echouer la validation du candidat.
+      - name: Dire le verdict
+        run: |
+          if [ "${{ steps.comparer.outputs.identique }}" = "oui" ]; then
+            echo "Le manifeste construit est identique a celui du depot."
+          else
+            echo "::warning::Le manifeste construit differe de celui du depot : comparer les artefacts et commiter le resultat du vrai build si la difference est reelle."
+          fi

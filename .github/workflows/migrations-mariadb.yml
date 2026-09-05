@@ -15,6 +15,7 @@ on:
   push:
     branches:
       - combats-persistants
+      - 'wip/**'
     paths:
       - 'database/migrations/**'
       - '.github/workflows/migrations-mariadb.yml'
@@ -102,7 +103,7 @@ jobs:
             SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE
               FROM information_schema.COLUMNS
              WHERE TABLE_SCHEMA = 'ogamex_essai'
-               AND (TABLE_NAME IN ('combat_instances', 'combat_participants')
+               AND (TABLE_NAME IN ('combat_instances', 'combat_participants', 'combat_presentation_events', 'combat_outbox', 'combat_fleet_dispositions', 'celestial_body_combat_barriers')
                     OR (TABLE_NAME = 'fleet_missions' AND COLUMN_NAME = 'combat_instance_id'))
              ORDER BY TABLE_NAME, ORDINAL_POSITION;
 
@@ -110,13 +111,13 @@ jobs:
             SELECT CONSTRAINT_NAME, DELETE_RULE, REFERENCED_TABLE_NAME
               FROM information_schema.REFERENTIAL_CONSTRAINTS
              WHERE CONSTRAINT_SCHEMA = 'ogamex_essai'
-               AND TABLE_NAME = 'combat_participants';
+               AND TABLE_NAME LIKE 'combat%';
 
             SELECT 'index et unicite' AS controle;
             SELECT TABLE_NAME, INDEX_NAME, NON_UNIQUE, GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) AS colonnes
               FROM information_schema.STATISTICS
              WHERE TABLE_SCHEMA = 'ogamex_essai'
-               AND TABLE_NAME IN ('combat_instances', 'combat_participants')
+               AND TABLE_NAME IN ('combat_instances', 'combat_participants', 'combat_presentation_events', 'combat_outbox', 'combat_fleet_dispositions', 'celestial_body_combat_barriers')
              GROUP BY TABLE_NAME, INDEX_NAME, NON_UNIQUE
              ORDER BY TABLE_NAME, INDEX_NAME;
           SQL
