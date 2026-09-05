@@ -3,7 +3,6 @@
 namespace Tests\MariaDb;
 
 use Illuminate\Support\Facades\DB;
-use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Services\CombatOpeningService;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
