@@ -125,6 +125,30 @@
 @endif
 <div id="siteHeader"></div>
 <div id="pageContent">
+@if ($pendingDeletionSince !== null)
+    {{-- La suppression du compte attend la fin d'un combat qu'il renforce : le joueur le voit
+         sur chaque page, avec la raison et l'instant de la demande. Le style est en ligne comme
+         celui du blocage d'attaque, juste en dessous : aucun asset a reconstruire. --}}
+    <style>
+        #deletionPendingNotice {
+            margin: 6px auto 0;
+            max-width: 980px;
+            padding: 6px 12px;
+            border: 1px solid #a45c00;
+            border-radius: 4px;
+            background: linear-gradient(180deg, #3a2a10 0%, #2a1c08 100%);
+            color: #f1c67a;
+            font-size: 11px;
+            line-height: 15px;
+            text-align: center;
+        }
+        #deletionPendingNotice strong { color: #ffd98a; }
+    </style>
+    <div id="deletionPendingNotice" role="status">
+        <strong>{{ __('t_ingame.layout.deletion_pending_title') }}</strong>
+        {{ __('t_ingame.layout.deletion_pending_body', ['since' => date('d.m.Y H:i', $pendingDeletionSince)]) }}
+    </div>
+@endif
     <div id="top">
         <div id="pageReloader" onclick="javascript: redirectOverview();"></div>
         <div id="headerbarcomponent" class="">

@@ -140,6 +140,10 @@ class IngameMainComposer
             'locale' => $locale,
             'isImpersonating' => $isImpersonating,
             'impersonateLeaveUrl' => $isImpersonating ? route('impersonate.leave') : null,
+            // **L'attente de suppression se voit** : un compte qui renforce le combat d'un autre joueur
+            // ne peut pas etre efface tant que ce combat n'est pas final, et il doit le savoir a
+            // chaque page — pas seulement sur celle ou il l'a demande. Lu sur la ligne du compte.
+            'pendingDeletionSince' => $this->player->isPendingDeletion() ? (int)$this->player->getUser()->deletion_pending_since : null,
             'attackBlockActive' => $attackBlockActive,
             'attackBlockUntil' => $attackBlockUntil,
             'attackBlockTooltip' => $attackBlockActive

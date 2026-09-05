@@ -947,6 +947,8 @@ return [
         'loading' => 'charger...',
         'no_fleet_movement' => 'Aucun mouvement de flotte',
         'under_attack' => 'Vous êtes attaqué !',
+        'deletion_pending_title' => 'Suppression du compte en attente.',
+        'deletion_pending_body' => 'Demandée le :since, elle reprendra d\'elle-même dès que les combats que vous renforcez chez d\'autres joueurs seront terminés. Aucune flotte ne peut partir d\'ici là.',
         'class_none' => 'Aucune classe sélectionnée',
         'class_selected' => 'Votre classe : :name',
         'class_click_select' => 'Cliquez pour sélectionner une classe de personnage',

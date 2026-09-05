@@ -1207,6 +1207,8 @@ return [
         'loading'                   => 'load...',
         'no_fleet_movement'         => 'No fleet movement',
         'under_attack'              => 'You are under attack!',
+        'deletion_pending_title'    => 'Account deletion pending.',
+        'deletion_pending_body'     => 'Requested on :since, it will resume on its own once the combats you are reinforcing for other players are over. No fleet can leave until then.',
 
         // Character class
         'class_none'                => 'No class selected',
