@@ -5,8 +5,8 @@ namespace Tests\Unit;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Garde de source : nginx porte le websocket du navigateur et l'API de publication du PHP
- * jusqu'au conteneur Reverb, derriere le meme hote public.
+ * Garde de source : nginx porte le websocket du navigateur — et lui seul — jusqu'au conteneur
+ * Reverb, derriere le meme hote public. L'API de publication (/apps/{id}/events) reste interne.
  *
  * Le fichier `nginx/conf.d/app.conf` est monte tel quel dans le conteneur de production. Sans cet
  * emplacement, un websocket vers `/app/{cle}` finit dans `location /`, donc dans Laravel, en 404 :
@@ -28,7 +28,7 @@ final class NginxReverbPathGuardTest extends TestCase
             'The Connection header is not derived from the Upgrade header: a websocket would not be upgraded.'
         );
 
-        $this->assertSame(1, preg_match('/^    location ~ \^\/apps\?\/ \{\n(.*?)\n    \}/ms', $conf, $bloc), 'No location carries /app and /apps to Reverb.');
+        $this->assertSame(1, preg_match('/^    location ~ \^\/app\/ \{\n(.*?)\n    \}/ms', $conf, $bloc), 'No location carries the /app websocket to Reverb.');
         $corps = $bloc[1] ?? '';
         $this->assertNotSame('', $corps, 'The Reverb location is empty.');
 
@@ -48,5 +48,9 @@ final class NginxReverbPathGuardTest extends TestCase
         // ecrit en dur empeche nginx de demarrer tant que le conteneur Reverb n'existe pas — ce qui
         // est exactement l'ordre de la mise en production.
         $this->assertStringNotContainsString('proxy_pass http://ogamex-reverb', $corps, 'The upstream is resolved at startup: nginx would refuse to start without Reverb.');
+
+        // **L'API de publication n'est pas exposee** : le navigateur n'en a pas besoin, et le PHP y parle
+        // par le reseau interne. Un emplacement qui couvrirait /apps/ ouvrirait une porte inutile.
+        $this->assertDoesNotMatchRegularExpression('/location[^{]*apps/', $conf, 'A location exposes the publishing API /apps/.');
     }
 }

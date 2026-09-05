@@ -22,7 +22,12 @@ use Throwable;
  * premier processus a sortir ferme pour l'autre. Chaque enfant ouvre la sienne, attend le signal
  * de depart pour que tous partent ensemble, fait sa tache, ecrit son issue dans un fichier, puis
  * **se tue** : derouler la fin de PHPUnit dans un enfant en ferait un second rapporteur. Le parent
- * se reconnecte, lit les fichiers, et c'est lui seul qui affirme quelque chose.
+ * se reconnecte, agit pendant que les enfants travaillent s'il a quelque chose a faire, lit les
+ * fichiers, et c'est lui seul qui affirme quelque chose.
+ *
+ * Seule la connexion par defaut est deconnectee : une connexion nommee que le parent tient — pour
+ * garder un verrou pendant qu'un enfant l'attend — survit a la bifurcation, et l'enfant, qui ne
+ * s'en sert jamais, ne la ferme pas en mourant.
  *
  * Ces epreuves ne s'executent que sur MariaDB : SQLite ne verrouille rien ligne par ligne, et
  * `lockForUpdate()` n'y compile a rien. Elles vivent hors des suites de `phpunit.xml`, dans
@@ -48,10 +53,14 @@ trait RunsInParallelProcesses
     /**
      * Lance la tache dans `$processus` processus a la fois, et rend l'issue de chacun, par rang.
      *
+     * `$pendant` est ce que le parent fait une fois les enfants partis, sur sa connexion par defaut
+     * reouverte — changer une ligne qu'un enfant attend, relacher un verrou tenu ailleurs.
+     *
      * @param Closure(int): string $tache
+     * @param Closure(): void|null $pendant
      * @return array<int, string>
      */
-    protected function inParallel(int $processus, Closure $tache): array
+    protected function inParallel(int $processus, Closure $tache, Closure|null $pendant = null): array
     {
         $dossier = sys_get_temp_dir() . '/ogamex-course-' . bin2hex(random_bytes(6));
         mkdir($dossier, 0700, true);
@@ -74,6 +83,11 @@ trait RunsInParallelProcesses
         // Tous attendent le meme signal : le depart est aussi simultane que le systeme le permet.
         touch($depart);
 
+        DB::reconnect();
+        if ($pendant !== null) {
+            $pendant();
+        }
+
         foreach ($enfants as $pid) {
             $statut = 0;
             pcntl_waitpid($pid, $statut);
@@ -93,6 +107,42 @@ trait RunsInParallelProcesses
         }
 
         return $issues;
+    }
+
+    /**
+     * Attend qu'une transaction de la base soit en attente d'un verrou — celle d'un enfant qui bute
+     * sur ce que le parent tient. Le fait est lu dans `information_schema.INNODB_TRX`, pas suppose.
+     */
+    protected function waitUntilAProcessWaitsOnALock(int $timeoutMs = 15_000): void
+    {
+        $limite = microtime(true) + $timeoutMs / 1000;
+        do {
+            $enAttente = DB::selectOne("SELECT COUNT(*) AS n FROM information_schema.INNODB_TRX WHERE trx_state = 'LOCK WAIT'");
+            if ($enAttente !== null && (int)$enAttente->n > 0) {
+                return;
+            }
+            usleep(20_000);
+        } while (microtime(true) < $limite);
+
+        $this->fail('No process came to wait on the lock: the scenario would prove nothing.');
+    }
+
+    /**
+     * Attend qu'une condition lue en base devienne vraie, ou echoue en le disant.
+     *
+     * @param Closure(): bool $condition
+     */
+    protected function waitUntil(Closure $condition, string $sinon, int $timeoutMs = 15_000): void
+    {
+        $limite = microtime(true) + $timeoutMs / 1000;
+        do {
+            if ($condition()) {
+                return;
+            }
+            usleep(20_000);
+        } while (microtime(true) < $limite);
+
+        $this->fail($sinon);
     }
 
     /**
