@@ -255,6 +255,15 @@ class NpcFactionTest extends AccountTestCase
      * Assert that a new base is born far from every human planet.
      *
      * Le jour de la mise en ligne, personne n'a demande a avoir des pirates comme voisins.
+     *
+     * ## L'essai demande la coordonnee au service, il ne la lui impose pas
+     *
+     * Il interrogeait `aSpawnedBase()`, qui pose une base a la premiere case libre a partir du
+     * systeme 470 **sans consulter la regle de distance** : c'est une commodite de banc, utile
+     * quand un essai a juste besoin d'une base quelque part. La regle vit dans
+     * `findSpawnCoordinate()`, et c'est elle qu'il faut interroger. L'ancien essai passait tant
+     * qu'aucun humain n'habitait pres du systeme 470 — un ordre d'execution suffisait a le faire
+     * mentir, dans un sens comme dans l'autre.
      */
     public function testANewBaseKeepsItsDistanceFromHumanPlanets(): void
     {
@@ -265,9 +274,9 @@ class NpcFactionTest extends AccountTestCase
         $this->settings->set('npc_seed_min_distance', '3');
         $this->settings->set('npc_seed_max_distance', '400');
 
-        $base = $this->aSpawnedBase();
+        $coordonnee = resolve(NpcBaseService::class)->findSpawnCoordinate(2000);
 
-        $baseCoordinate = $base->getPlanetCoordinates();
+        $this->assertNotNull($coordonnee, 'The universe offered no position at all: the rule could not be observed.');
 
         // Les corps detruits ne comptent pas : le placement les ignore a bon droit, et un ordre de
         // passage qui en laisse dans la galaxie ne doit pas faire mentir l'essai.
@@ -275,14 +284,18 @@ class NpcFactionTest extends AccountTestCase
             ->join('users', 'users.id', '=', 'planets.user_id')
             ->where('users.is_npc', false)
             ->where('planets.destroyed', 0)
-            ->where('planets.galaxy', $baseCoordinate->galaxy)
+            ->where('planets.galaxy', $coordonnee->galaxy)
             ->select('planets.system')
             ->get();
+
+        // **Une precondition, sinon l'essai passerait sur une galaxie vide.** La regle ne dit rien
+        // la ou il n'y a personne a tenir a distance.
+        $this->assertNotSame(0, $humans->count(), 'No human planet shares the chosen galaxy: the minimum distance would hold trivially.');
 
         foreach ($humans as $human) {
             $this->assertGreaterThanOrEqual(
                 3,
-                abs((int)$human->system - $baseCoordinate->system),
+                abs((int)$human->system - $coordonnee->system),
                 'A base was placed closer to a human planet than the configured minimum distance.'
             );
         }
