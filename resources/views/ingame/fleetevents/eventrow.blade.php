@@ -132,9 +132,15 @@
         data-arrival-time="{{ $fleet_event_row->mission_time_arrival }}"
     >
         <td class="countDown">
+        @if ($fleet_event_row->engaged_combat_id !== null)
+            {{-- Arrivee, et la bataille dure : ni compte a rebours, ni rappel. Le compteur ne porte pas
+                 l'identifiant que le script cherche, pour qu'il n'ecrase pas cet etat. --}}
+            <span class="overmark textBeefy combatEngaged" data-combat-id="{{ $fleet_event_row->engaged_combat_id }}">{{ __('t_ingame.fleet.engaged_in_combat') }}</span>
+        @else
         <span id="counter-eventlist-{{ $fleet_event_row->id }}" class="friendly textBeefy">
                     load...
         </span>
+        @endif
         </td>
         <td class="arrivalTime">{{ date('H:i:s', $fleet_event_row->mission_time_arrival) }} {{ __('t_ingame.layout.eventbox_clock') }}</td>
         <td class="missionFleet">

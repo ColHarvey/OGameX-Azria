@@ -5,6 +5,7 @@ namespace OGame\Http\Controllers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Date;
 use Illuminate\View\View;
+use OGame\Combat\Services\EngagedFleetCheck;
 use OGame\Enums\FleetMissionStatus;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\Models\Enums\PlanetType;
@@ -206,6 +207,12 @@ class FleetEventsController extends OGameController
         // Get all the fleet movements for the current user.
         $friendlyMissionRows = $fleetMissionService->getActiveFleetMissionsForCurrentPlayer();
 
+        // **Les flottes engagees dans un combat durable**, lues une fois sur les deux liens (colonne et
+        // inscription) : la liste les dit engagees et ne leur offre pas de rappel.
+        $engagees = array_flip((new EngagedFleetCheck())->engagedAmong(
+            $friendlyMissionRows->pluck('id')->map(static fn (mixed $id): int => (int)$id)->all()
+        ));
+
         $fleet_events = [];
         foreach ($friendlyMissionRows as $row) {
             // Planet from service
@@ -285,6 +292,11 @@ class FleetEventsController extends OGameController
                 if ($row->mission_type !== 10 && !$isRelocationTransfer) {
                     $eventRowViewModel->is_recallable = true;
                 }
+            }
+
+            if (isset($engagees[(int)$row->id])) {
+                $eventRowViewModel->engaged_combat_id = $row->combat_instance_id === null ? 0 : (int)$row->combat_instance_id;
+                $eventRowViewModel->is_recallable = false;
             }
 
             // Calculate holding time for display and logic
@@ -501,6 +513,12 @@ class FleetEventsController extends OGameController
             $summaryRow->time_departure = $initiator->time_departure;
             $summaryRow->is_return_trip = false;
             $summaryRow->is_recallable = false;
+            foreach ($allMemberViewModels as $membre) {
+                if ($membre->engaged_combat_id !== null) {
+                    $summaryRow->engaged_combat_id = $membre->engaged_combat_id;
+                    break;
+                }
+            }
             $summaryRow->friendly_status = $initiator->friendly_status ?? 'friendly';
 
             $summaryRow->destination_planet_name = $initiator->destination_planet_name;

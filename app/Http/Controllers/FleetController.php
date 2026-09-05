@@ -9,6 +9,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
+use OGame\Combat\Services\EngagedFleetCheck;
 use OGame\Factories\GameMissionFactory;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\GameConstants\UniverseConstants;
@@ -155,6 +156,11 @@ class FleetController extends OGameController
             return redirect()->route('fleet.index');
         }
 
+        // **Les flottes engagees dans un combat durable**, lues une fois sur les deux liens.
+        $engagees = array_flip((new EngagedFleetCheck())->engagedAmong(
+            $friendlyMissionRows->pluck('id')->map(static fn (mixed $id): int => (int)$id)->all()
+        ));
+
         $fleet_events = [];
         foreach ($friendlyMissionRows as $row) {
             $eventRowViewModel = new FleetEventRowViewModel();
@@ -238,6 +244,11 @@ class FleetController extends OGameController
             // Planet relocation ship transfers (deployment to self) cannot be recalled.
             $isRelocationTransfer = ($row->mission_type === 4 && $row->planet_id_from === $row->planet_id_to);
             $eventRowViewModel->is_recallable = ($row->mission_type !== 10 && !$isRelocationTransfer);
+
+            if (isset($engagees[(int)$row->id])) {
+                $eventRowViewModel->engaged_combat_id = $row->combat_instance_id === null ? 0 : (int)$row->combat_instance_id;
+                $eventRowViewModel->is_recallable = false;
+            }
 
             // Track union membership for ACS Attack grouping
             $eventRowViewModel->union_id = $row->union_id;

@@ -348,6 +348,7 @@ return [
         'ships'                    => 'Ships',
         'shipment'                 => 'Shipment',
         'recall'                   => 'Recall',
+        'engaged_in_combat'        => 'Combat in progress',
         'start_time'               => 'Start time',
         'time_of_arrival'          => 'Time of arrival',
         'deep_space'               => 'Deep space',

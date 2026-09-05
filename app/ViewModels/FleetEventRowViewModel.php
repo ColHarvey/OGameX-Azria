@@ -128,4 +128,13 @@ class FleetEventRowViewModel
      * @var string The username of the destination planet owner (for chat button).
      */
     public string $destination_player_name = '';
+
+    /**
+     * @var int|null Le combat durable dans lequel cette flotte est engagee, ou null.
+     *
+     * Une flotte engagee ne se rappelle plus jusqu'au combat final — le serveur le refuse — et
+     * son compte a rebours n'a plus de sens : elle est arrivee, et la bataille dure. La vue le dit
+     * a sa place, et n'offre pas un rappel qui echouerait.
+     */
+    public int|null $engaged_combat_id = null;
 }

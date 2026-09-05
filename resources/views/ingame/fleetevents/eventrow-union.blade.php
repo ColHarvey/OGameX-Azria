@@ -7,9 +7,13 @@
     data-arrival-time="{{ $fleet_event_row->mission_time_arrival }}"
 >
     <td class="countDown">
+        @if ($fleet_event_row->engaged_combat_id !== null)
+            <span class="overmark textBeefy combatEngaged" data-combat-id="{{ $fleet_event_row->engaged_combat_id }}">{{ __('t_ingame.fleet.engaged_in_combat') }}</span>
+        @else
         <span id="counter-eventlist-union{{ $fleet_event_row->union_id }}" class="{{ $fleet_event_row->friendly_status }} textBeefy">
             @lang('load...')
         </span>
+        @endif
     </td>
     <td class="arrivalTime">{{ date('H:i:s', $fleet_event_row->mission_time_arrival) }} {{ __('t_ingame.layout.eventbox_clock') }}</td>
     <td class="missionFleet">

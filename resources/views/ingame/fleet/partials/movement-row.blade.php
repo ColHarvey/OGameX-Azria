@@ -15,7 +15,12 @@ if ($fleet_event->is_return_trip) {
      data-return-flight="{{ $fleet_event->is_return_trip ? '1' : '' }}"
      data-arrival-time="{{ $fleet_event->mission_time_arrival }}">
 
+    @if ($fleet_event->engaged_combat_id !== null)
+        {{-- Arrivee, et la bataille dure : l'etat remplace le minuteur, et le rappel n'est pas offert. --}}
+        <span class="timer overmark textBeefy combatEngaged" data-combat-id="{{ $fleet_event->engaged_combat_id }}">{{ __('t_ingame.fleet.engaged_in_combat') }}</span>
+    @else
     <span class="timer tooltip" title="{{ date('d.m.Y H:i:s', $fleet_event->timer_time) }}" id="timer_{{ $fleet_event->id }}">{{ $fleet_event->remaining_time > 0 ? __('t_ingame.fleet.load_dots') : '-' }}</span>
+    @endif
     <span class="absTime">{{ date('H:i:s', $fleet_event->timer_time) }} {{ __('t_ingame.fleet.clock') }}</span>
     <span class="mission {{ $fleet_event->friendly_status }} textBeefy">{{ $fleet_event->mission_label }}{{ $fleet_event->is_return_trip ? ' (R)' : '' }}</span>
     <span class="allianceName">{{ $fleet_event->alliance_name }}</span>

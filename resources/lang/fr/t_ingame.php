@@ -254,6 +254,7 @@ return [
         'ships' => 'Vaisseaux',
         'shipment' => 'Expédition',
         'recall' => 'Rappel',
+        'engaged_in_combat' => 'Combat en cours',
         'start_time' => 'Heure de début',
         'time_of_arrival' => 'Heure d\'arrivée',
         'deep_space' => 'Espace profond',
