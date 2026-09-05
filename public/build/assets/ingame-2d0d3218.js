@@ -75176,7 +75176,7 @@ ogame.chat = {
             $(d).html(b.playerList)
         })
     }
-};
+};;
 /*
  * Les batailles en cours, dans les bandeaux du jeu.
  *

@@ -88,13 +88,19 @@ class OverviewScrollFixTest extends UnitTestCase
         $css = file_get_contents(public_path('build/' . $chemin));
         $this->assertIsString($css, "The manifest points at {$chemin}, which does not exist.");
 
-        foreach (['#contentWrapper::after', '#box::after'] as $selecteur) {
-            $this->assertStringContainsString(
-                $selecteur,
+        // **Les deux ecritures du pseudo-element sont equivalentes**, et un minifieur choisit la
+        // courte : chercher `::after` seul faisait tomber cet essai sur un asset pourtant juste.
+        // C'est la regle qui compte, pas la facon dont elle est ecrite.
+        foreach (['#contentWrapper', '#box'] as $selecteur) {
+            $this->assertMatchesRegularExpression(
+                '/' . preg_quote($selecteur, '/') . '::?after\b/',
                 $css,
                 "The served stylesheet does not clear the floats on {$selecteur}: the fix lives only in the source and has no effect in game."
             );
         }
+
+        // Et la regle fait bien ce qu'elle annonce : sans `clear`, le selecteur ne servirait a rien.
+        $this->assertStringContainsString('clear:both', str_replace(' ', '', $css), 'The clearfix reached the served stylesheet without clearing anything.');
 
         // Une feuille tronquee est aussi grave qu'une feuille non reportee, et le report se
         // fait a la main : on verifie que le fichier reste syntaxiquement clos.
