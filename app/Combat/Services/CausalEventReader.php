@@ -107,11 +107,16 @@ final class CausalEventReader
 
         // **Un lot d'unites produit unite par unite.** Le monde materialise une unite toutes les
         // `(fin − debut) / quantite` secondes : un lot qui finit apres le curseur a deja pose des unites
-        // avant lui. La lecture prend donc tout lot commence avant le curseur, et date son effet a sa
-        // **derniere unite terminee strictement avant le curseur** — un lot dont aucune unite n'est
-        // terminee n'a pas d'effet dans la partition, et n'est pas lu.
+        // avant lui, et un lot qui finit **pile** au curseur en a pose avant.
+        //
+        // L'effet est donc date a la **derniere unite terminee strictement avant le curseur**, jamais a
+        // la fin du lot : datee a la fin, une derniere unite tombant exactement a la fermeture faisait
+        // exclure le lot entier par la barriere stricte — alors que seule cette unite-la doit rester
+        // dehors. La barriere ne bouge pas ; c'est la date qui devient juste.
+        //
+        // Un lot dont aucune unite n'est terminee avant le curseur n'a pas d'effet dans la partition.
         foreach (self::unitBatchesStartedBy([$body], $cursorAt) as $file) {
-            $evenement = self::queueEvent(CombatEventIdentity::forUnitQueueCompletion($file->id), self::UNIT_QUEUE_KIND, $file, $body, $order, CombatEventType::QueueCompletion, [SnapshotContribution::TargetDefences], $file->completedAt <= $cursorAt ? $file->completedAt : $file->lastFinishInstantBy($cursorAt - 1));
+            $evenement = self::queueEvent(CombatEventIdentity::forUnitQueueCompletion($file->id), self::UNIT_QUEUE_KIND, $file, $body, $order, CombatEventType::QueueCompletion, [SnapshotContribution::TargetDefences], $file->lastFinishInstantBy($cursorAt - 1));
             $this->files[$evenement->identity] = $file;
             $evenements[] = $evenement;
         }
@@ -293,9 +298,11 @@ final class CausalEventReader
     }
 
     /**
-     * Les lots d'unites commences avant le curseur qui ont au moins une unite terminee strictement
-     * avant lui — ou qui sont finis avant lui, meme deja traites : la fermeture compte leur apport
+     * Les lots d'unites commences avant le curseur qui ont au moins une unite terminee **strictement**
+     * avant lui — ou qui se sont acheves avant lui, meme deja traites : la fermeture compte leur apport
      * depuis l'avancement materialise a l'ouverture, et un lot fini avant l'ouverture apporte zero.
+     *
+     * Un lot d'une seule unite achevee pile au curseur n'entre pas : rien de lui n'existe avant.
      *
      * @param array<int, int> $bodies
      * @return array<int, QueuedCompletion>
@@ -318,7 +325,7 @@ final class CausalEventReader
         $lots = [];
         foreach ($lignes as $ligne) {
             $lot = QueuedCompletion::fromRow((array)$ligne);
-            if ($lot->completedAt <= $cursorAt || $lot->unitsFinishedBy($cursorAt - 1) > 0) {
+            if ($lot->unitsFinishedBy($cursorAt - 1) > 0 || $lot->completedAt < $cursorAt) {
                 $lots[] = $lot;
             }
         }

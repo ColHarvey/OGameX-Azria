@@ -46,6 +46,13 @@ final class ProgressiveProductionInThePhotographTest extends FleetDispatchTestCa
 
     private const int GARRISON = 200;
 
+    /**
+     * Une salve detruit soixante lance-missiles. Soixante a l'ouverture, plus la premiere unite du lot :
+     * il en reste **un** apres l'impact, et la seconde unite s'ajoute ensuite. Un compte qui ne se
+     * confond avec aucun autre.
+     */
+    private const int MISSILE_GARRISON = 60;
+
     protected function basicSetup(): void
     {
         $this->basicSetupForARally();
@@ -146,6 +153,58 @@ final class ProgressiveProductionInThePhotographTest extends FleetDispatchTestCa
 
         $this->assertSame(self::GARRISON, $this->defenderStartOf($combat, 'rocket_launcher'), 'A unit finishing exactly at the closure entered the photograph: an equality with a barrier counts as after.');
         $this->assertGreaterThanOrEqual(self::GARRISON, $this->garrisonOf($cible, 'rocket_launcher'), 'The body lost a unit.');
+    }
+
+    /**
+     * La borne exacte, sur un lot qui a plusieurs unites dans la fenetre.
+     *
+     * Le temoin de borne precedent n'avait qu'une unite a la fermeture, donc zero de chaque cote : il
+     * ne montrait pas que **les precedentes entrent quand meme**. Ici, cinq unites s'achevent pendant
+     * le ralliement et la **derniere tombe pile a la fermeture** : les quatre premieres se battent,
+     * la cinquieme non — et le corps la porte quand meme, intacte.
+     */
+    public function testOnlyTheUnitFinishingExactlyAtTheClosureStaysOutOfABatchThatHasOthers(): void
+    {
+        [$combat, $cible, $ouverture] = $this->anOpenRally(self::GARRISON);
+        $fermeture = $ouverture + self::RALLY_WINDOW_SECONDS + 1;
+
+        // Cinq unites, une toutes les quatre secondes, de +Nu-1 : elles s'achevent a +3, +7, +11, +15
+        // et +19 — la derniere exactement a la fermeture.
+        $this->aUnitQueue($cible, 'rocket_launcher', 5, $ouverture - 1, $ouverture + 19);
+        (new OpeningStateRecorder())->capture($combat, $cible, $ouverture);
+        $this->assertSame($fermeture, $ouverture + 19, 'The scenario does not put the last unit exactly at the closure.');
+
+        $this->closeAt($combat, $ouverture);
+
+        $this->assertSame(self::GARRISON + 4, $this->defenderStartOf($combat, 'rocket_launcher'), 'The batch entered whole, or not at all: only the unit finishing at the closure must stay out.');
+        $this->assertSame(self::GARRISON + 5, $this->garrisonOf($cible, 'rocket_launcher'), 'The world does not carry the whole batch: the excluded unit was lost instead of merely kept out of the battle.');
+    }
+
+    /**
+     * L'ordre production / missile : ce qui existe a l'impact, et rien de plus.
+     *
+     * Un lot ajoute en bloc a la date de sa derniere unite ferait rencontrer au missile soit tout le
+     * lot, soit rien. Ici une unite s'acheve **avant** l'impact et une **apres** : la premiere est la
+     * pour lui, la seconde arrive apres.
+     */
+    public function testAUnitFinishedBeforeTheImpactExistsForItAndTheNextOneDoesNot(): void
+    {
+        [$combat, $cible, $ouverture] = $this->anOpenRally(self::MISSILE_GARRISON);
+
+        // **Engage avant l'ouverture** — sinon la barriere de decision l'exclut, et l'essai ne dirait
+        // rien de l'ordre. Deux unites, une toutes les douze secondes : +4 et +16, avant la fermeture (+19).
+        $this->aUnitQueue($cible, 'rocket_launcher', 2, $ouverture - 8, $ouverture + 16);
+        // **Deux missiles frappent a +12** : assez de puissance pour tout emporter. La premiere unite
+        // est la et meurt avec le reste ; la seconde arrive apres et survit. Un lot ajoute en bloc a la
+        // date de sa derniere unite laisserait les deux — 2 au lieu de 1.
+        $this->aPendingMissileTowards($cible, $ouverture - 50, $ouverture + 12, missiles: 2);
+        (new OpeningStateRecorder())->capture($combat, $cible, $ouverture);
+
+        $this->closeAt($combat, $ouverture);
+
+        // A l'impact, le corps photographie porte 61 lance-missiles, et la salve les emporte tous.
+        // Reste la seconde unite, achevee apres l'impact : **1**.
+        $this->assertSame(1, $this->defenderStartOf($combat, 'rocket_launcher'), 'The batch was added whole at the date of its last unit: the missile met either both units or none.');
     }
 
     private function closeAt(CombatInstance $combat, int $ouverture): void

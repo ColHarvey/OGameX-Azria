@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Replay\BattleResultCodec;
 use OGame\Combat\Services\MissileArrivalGate;
+use OGame\Combat\Services\MissileRefundClaims;
 use OGame\Combat\Services\RallyClosureService;
 use OGame\Factories\GameMissionFactory;
 use OGame\GameMissions\AttackMission;
@@ -173,23 +174,98 @@ final class MissileAgainstAHeldBodyTest extends FleetDispatchTestCase
     }
 
     /**
-     * Le silo d'origine n'existe plus : rien n'est rendu, rien n'est dit rendu, le missile est retenu.
+     * Le silo d'origine n'existe plus : les missiles suivent le protocole canonique de destination.
+     *
+     * Aucune destination inventee — c'est celui qui ramene une flotte refusee. Et l'annulation est
+     * **definitive** : le combat se termine, la barriere disparait, un nouveau passage a lieu, et le
+     * missile ne frappe toujours pas. Une version anterieure le laissait non traite, « en attente
+     * d'exploitation » : le verdict redevenait alors `APPLY`, et il frappait des heures plus tard.
      */
-    public function testAMissileWhoseSiloDisappearedIsHeldAndNothingIsClaimedReturned(): void
+    public function testAMissileWhoseSiloDisappearedIsStillCancelledAfterTheCombatEnds(): void
     {
         [$combat, $cible, $ouverture] = $this->anOpenRally(self::GARRISON);
+        $silo = $this->planetService->getObjectAmount('interplanetary_missile');
         $missile = $this->aPendingMissileTowards($cible, $ouverture + 1, $ouverture + 8, missiles: 2);
-        // Un corps supprime laisse aux missions des autres joueurs leurs coordonnees et leur retire le
-        // lien (`PlayerService::delete()`) : c est ainsi qu un silo disparait.
+
+        // Un corps supprime laisse aux missions leurs coordonnees et leur retire le lien
+        // (`PlayerService::delete()`) : c'est ainsi qu'un silo disparait.
         DB::table('fleet_missions')->where('id', $missile->id)->update(['planet_id_from' => null]);
         $this->travelTo(Date::createFromTimestamp($ouverture + 8));
 
-        $this->assertSame(MissileArrivalGate::HELD, resolve(MissileArrivalGate::class)->decide(FleetMission::query()->findOrFail($missile->id)));
+        $this->assertSame(MissileArrivalGate::CANCELLED, resolve(MissileArrivalGate::class)->decide(FleetMission::query()->findOrFail($missile->id)));
         resolve(FleetMissionService::class)->updateMission(FleetMission::query()->findOrFail($missile->id));
 
-        $this->assertSame(0, (int)DB::table('fleet_missions')->where('id', $missile->id)->value('processed'), 'A missile whose silo is gone was marked processed: its missiles are lost in silence.');
-        $this->assertSame(self::GARRISON, $this->garrisonOf($cible, 'rocket_launcher'), 'The held missile struck the body.');
+        $this->assertSame(1, (int)DB::table('fleet_missions')->where('id', $missile->id)->value('processed'), 'The cancellation was not made final: a later pass could still apply the missile.');
+        $this->assertSame(self::GARRISON, $this->garrisonOf($cible, 'rocket_launcher'), 'The cancelled missile struck the body.');
+
+        // **Le protocole canonique a rendu les missiles** : la planete du lanceur est sa destination.
+        $this->planetService->reloadPlanet();
+        $this->assertSame($silo + 2, $this->planetService->getObjectAmount('interplanetary_missile'), 'The canonical destination protocol returned nothing.');
+
+        // **Le combat se termine, la barriere disparait, le monde repasse.** Le verdict ne se retourne pas.
+        DB::table('celestial_body_combat_barriers')->where('target_body_id', $cible)->delete();
+        $this->travelTo(Date::createFromTimestamp($ouverture + 600));
+        resolve(FleetMissionService::class)->updateMission(FleetMission::query()->findOrFail($missile->id));
+
+        $this->assertSame(self::GARRISON, $this->garrisonOf($cible, 'rocket_launcher'), 'The missile struck once the barrier was gone: the cancellation was not durable.');
+        $this->planetService->reloadPlanet();
+        $this->assertSame($silo + 2, $this->planetService->getObjectAmount('interplanetary_missile'), 'The missiles were returned a second time.');
+        $this->assertSame(1, DB::table('messages')->where('user_id', $this->currentUserId)->where('key', 'combat_rally_refused')->count(), 'The launcher was told twice.');
+    }
+
+    /**
+     * Nulle part ou rendre a cet instant : les missiles deviennent une **creance**, jamais une perte.
+     *
+     * C'est le cas que la revue 99 a nomme : fermer le risque de frappe tardive en detruisant les
+     * actifs violerait la decision de Keven — un missile parti par une erreur du serveur est rendu.
+     * L'annulation reste definitive, ce qui est du est inscrit, et le reglement le rend **apres la fin
+     * du combat**, une seule fois.
+     */
+    public function testWithNoDestinationTheMissilesBecomeARecoverableClaimSettledOnlyOnce(): void
+    {
+        [$combat, $cible, $ouverture] = $this->anOpenRally(self::GARRISON);
+        $origine = $this->planetService->getPlanetId();
+        $silo = $this->planetService->getObjectAmount('interplanetary_missile');
+        $missile = $this->aPendingMissileTowards($cible, $ouverture + 1, $ouverture + 8, missiles: 2);
+
+        // Le lanceur n'a plus aucun corps : ni silo de depart, ni destination canonique. La colonne
+        // est NOT NULL, donc ses corps passent a un autre joueur — c'est ce que vit un compte dont les
+        // planetes ont change de main.
+        $autre = (int)DB::table('planets')->where('id', $cible)->value('user_id');
+        DB::table('fleet_missions')->where('id', $missile->id)->update(['planet_id_from' => null]);
+        DB::table('planets')->where('user_id', $this->currentUserId)->update(['user_id' => $autre]);
+        $this->travelTo(Date::createFromTimestamp($ouverture + 8));
+
+        resolve(FleetMissionService::class)->updateMission(FleetMission::query()->findOrFail($missile->id));
+
+        $this->assertSame(1, (int)DB::table('fleet_missions')->where('id', $missile->id)->value('processed'), 'The cancellation was not made final.');
+        $this->assertSame(self::GARRISON, $this->garrisonOf($cible, 'rocket_launcher'), 'The cancelled missile struck the body.');
         $this->assertSame(0, DB::table('messages')->where('user_id', $this->currentUserId)->where('key', 'combat_rally_refused')->count(), 'A refund was announced although nothing was returned.');
+
+        // **La creance existe, et elle dit ce qui est du.**
+        $creance = DB::table('combat_missile_refunds')->where('fleet_mission_id', $missile->id)->first();
+        $this->assertNotNull($creance, 'The missiles were destroyed instead of being owed: a log line is not a recoverable claim.');
+        $this->assertSame(2, (int)$creance->missiles);
+        $this->assertSame($this->currentUserId, (int)$creance->owner_id);
+        $this->assertNull($creance->credited_at, 'The claim was marked credited although nothing was credited.');
+
+        // Un second passage n'inscrit pas une seconde creance.
+        resolve(FleetMissionService::class)->updateMission(FleetMission::query()->findOrFail($missile->id));
+        $this->assertSame(1, DB::table('combat_missile_refunds')->where('fleet_mission_id', $missile->id)->count(), 'A replayed cancellation wrote a second claim.');
+
+        // **Le combat se termine, et le joueur retrouve un corps.** La creance se regle alors.
+        DB::table('celestial_body_combat_barriers')->where('target_body_id', $cible)->delete();
+        DB::table('planets')->where('id', $origine)->update(['user_id' => $this->currentUserId]);
+        $this->travelTo(Date::createFromTimestamp($ouverture + 600));
+
+        $issue = resolve(MissileRefundClaims::class)->settlePending((int)Date::now()->timestamp);
+        $this->assertSame(1, $issue['credited'], 'The claim was not settled although the owner has a body again.');
+        $this->assertSame($silo + 2, (int)DB::table('planets')->where('id', $origine)->value('interplanetary_missile'), 'The owed missiles were not returned.');
+
+        // **Une fois, et une seule.**
+        $secondIssue = resolve(MissileRefundClaims::class)->settlePending((int)Date::now()->timestamp);
+        $this->assertSame(0, $secondIssue['credited'], 'The claim was settled twice.');
+        $this->assertSame($silo + 2, (int)DB::table('planets')->where('id', $origine)->value('interplanetary_missile'), 'The missiles were credited a second time.');
     }
 
     private function missileMission(): MissileMission

@@ -69,6 +69,15 @@ trait EngagesAPersistentCombat
         $cible = $this->sendMissionToOtherPlayerCleanPlanet($unites, new Resources(0, 0, 0, 0));
 
         // Le proprietaire ne fuit pas, et sa garnison a de quoi perdre.
+        // **La planete propre est partagee entre les essais d un processus.** Poser deux types de
+        // defenses ne suffit pas : ce qu un voisin y a laisse — vaisseaux, autres defenses — decide
+        // alors de la bataille, et un essai qui exige des pertes des deux camps echoue au hasard. On
+        // vide avant de poser.
+        $cible->removeUnits($cible->getShipUnits(), false);
+        $cible->removeUnits($cible->getDefenseUnits(), false);
+        $cible->save();
+        $cible->reloadPlanet();
+
         $proprietaire = (int)DB::table('planets')->where('id', $cible->getPlanetId())->value('user_id');
         DB::table('users')->where('id', $proprietaire)->update(['tactical_retreat_ratio' => 0]);
         DB::table('planets')->where('id', $cible->getPlanetId())->update([

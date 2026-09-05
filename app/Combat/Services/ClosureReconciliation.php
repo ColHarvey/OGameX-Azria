@@ -274,7 +274,14 @@ final class ClosureReconciliation
      * donnent la meme photographie, parce que la fermeture ne lit jamais le delta d'une salve : elle
      * lit ses **faits** (`MissileStrikeFacts`) et rejoue.
      *
-     * ## Ce que l'on sait, et ce que l'on ne sait pas
+     * ## Les lots produisent au fil du temps
+ *
+ * Un lot admissible n'entre pas en bloc a la date de sa derniere unite : ses unites naissent une par
+ * une, et une salve qui frappe au milieu du ralliement ne rencontre que celles qui sont deja la. La
+ * photographie avance donc chaque lot **jusqu'a l'instant** de chaque effet non lineaire, puis jusqu'a
+ * la fermeture — par tranches, jamais une ligne par vaisseau.
+ *
+ * ## Ce que l'on sait, et ce que l'on ne sait pas
      *
      * Les antimissiles de la planete mere d'une lune ne sont pas photographies — la planete mere n'est
      * pas le corps tenu — : la projection prend ceux que le monde avait a l'impact, releves dans les
@@ -285,9 +292,46 @@ final class ClosureReconciliation
     private function photographedGarrisonOf(CombatInstance $combat, array $dansLaPhotographie, int $openedAt, int $closedAt): UnitCollection
     {
         $effectif = OpeningStateRecorder::openingUnitsOf($combat)->toArray();
-        $avancementOuverture = OpeningStateRecorder::openingQueueProgressOf($combat);
         $antimissiles = OpeningStateRecorder::openingInterceptorsOf($combat);
         $blindage = OpeningStateRecorder::openingDefenderOf($combat)->armorLevel;
+
+        // **Les lots admissibles, et ce qu'ils ont deja donne a la photographie.** Un lot ne s'ajoute
+        // pas en bloc : ses unites naissent une par une, et une salve qui frappe au milieu ne trouve
+        // que celles qui sont deja la. `crediterJusqua()` avance chaque lot a un instant donne, par
+        // tranches — jamais une ligne par vaisseau.
+        $lots = [];
+        $avancementOuverture = OpeningStateRecorder::openingQueueProgressOf($combat);
+        foreach ($dansLaPhotographie as $reconcilie) {
+            if ($reconcilie->admission !== CausalAdmission::AppliedBeforeSnapshot) {
+                continue;
+            }
+            $file = $this->reader->unitQueueOf($reconcilie->event->identity);
+            if ($file === null) {
+                continue;
+            }
+            $lots[] = [
+                'file' => $file,
+                'nom' => ObjectService::getUnitObjectById($file->objectId)->machine_name,
+                'ouverture' => $avancementOuverture[$file->id] ?? 0,
+                'credite' => 0,
+            ];
+        }
+
+        $crediterJusqua = function (int $instant) use (&$lots, &$effectif, &$antimissiles): void {
+            foreach ($lots as $rang => $lot) {
+                $cible = max(0, $lot['file']->unitsFinishedBy($instant) - $lot['ouverture']);
+                $apport = $cible - $lot['credite'];
+                if ($apport <= 0) {
+                    continue;
+                }
+                if ($lot['nom'] === 'anti_ballistic_missile') {
+                    $antimissiles += $apport;
+                } elseif (self::fightsInAGarrison($lot['nom'])) {
+                    $effectif[$lot['nom']] = ($effectif[$lot['nom']] ?? 0) + $apport;
+                }
+                $lots[$rang]['credite'] = $cible;
+            }
+        };
 
         foreach ($dansLaPhotographie as $reconcilie) {
             if ($reconcilie->admission !== CausalAdmission::AppliedBeforeSnapshot) {
@@ -304,24 +348,8 @@ final class ClosureReconciliation
                 continue;
             }
 
-            $file = $this->reader->unitQueueOf($identite);
-            if ($file !== null) {
-                // **Un lot produit unite par unite.** Son apport est ce qu'il a termine strictement
-                // avant la fermeture — l'egalite avec la barriere compte pour apres — moins ce que le
-                // monde avait deja materialise a l'ouverture : un lot fini et applique avant
-                // l'ouverture apporte zero, un lot qui finit apres la fermeture apporte ses unites deja
-                // terminees. Le monde, lui, materialise a son rythme, par la meme formule.
-                $apport = $file->unitsFinishedBy($closedAt - 1) - ($avancementOuverture[$file->id] ?? 0);
-                if ($apport <= 0) {
-                    continue;
-                }
-                $nom = ObjectService::getUnitObjectById($file->objectId)->machine_name;
-                if ($nom === 'anti_ballistic_missile') {
-                    $antimissiles += $apport;
-                } elseif (self::fightsInAGarrison($nom)) {
-                    $effectif[$nom] = ($effectif[$nom] ?? 0) + $apport;
-                }
-
+            // Les lots sont credites par les instants, pas par leur rang dans la tranche.
+            if ($this->reader->unitQueueOf($identite) !== null) {
                 continue;
             }
 
@@ -346,6 +374,11 @@ final class ClosureReconciliation
                     throw new RuntimeException('Le combat ' . $combat->id . ' ne peut pas projeter la salve ' . $identite . ' : le registre n en porte pas les faits.');
                 }
 
+                // **Ce qui existe a l'instant de l'impact, et rien de plus.** Le gestionnaire appelle
+                // `update()` avant de calculer sa destruction : une unite achevee **a** cette seconde
+                // est deja posee, d'ou un credit inclusif.
+                $crediterJusqua((int)$mission->time_arrival);
+
                 $interceptes = MissileStrikeProjection::intercepted($faits->missiles, $antimissiles + $faits->parentInterceptorsBefore);
                 foreach (MissileStrikeProjection::destroyedOn($effectif, $faits->missiles - $interceptes, $faits->weaponTech, $blindage, $faits->priority) as $nom => $nombre) {
                     $effectif[$nom] = max(0, ($effectif[$nom] ?? 0) - $nombre);
@@ -364,6 +397,10 @@ final class ClosureReconciliation
                 $effectif[$nom] = max(0, ($effectif[$nom] ?? 0) + $quantite);
             }
         }
+
+        // **Le reste des lots, jusqu'a la fermeture exclue.** L'egalite avec la barriere compte pour
+        // apres : une unite achevee exactement a la fermeture reste hors photographie, et intacte.
+        $crediterJusqua($closedAt - 1);
 
         $photographie = new UnitCollection();
         foreach ($effectif as $nom => $quantite) {
