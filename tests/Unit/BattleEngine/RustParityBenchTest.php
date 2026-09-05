@@ -69,7 +69,12 @@ class RustParityBenchTest extends UnitTestCase
 
         $this->assertSame(NoLootV1::VERSION, $bataille['contexte']->policyVersion);
         $this->assertSame(NoLootReason::NpcEncounter, $bataille['contexte']->noLootBecause);
-        $this->assertGreaterThan(0, $bataille['contexte']->totalCargo, 'The fleet carries no free cargo: the refusal would hold trivially.');
+        // Le fret se mesure sur la flotte : une politique sans pillage ne photographie aucun fret.
+        $this->assertGreaterThan(
+            0,
+            $bataille['attaquantes'][0]->units->getTotalCargoCapacity($bataille['attaquantes'][0]->player),
+            'The fleet carries no free cargo: the refusal would hold trivially.'
+        );
 
         [$php, $rust] = $this->assertBothEnginesAgree('interdit', $bataille);
 
