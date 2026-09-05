@@ -3,6 +3,7 @@
 namespace Tests\Unit\BattleEngine;
 
 use FFI;
+use FFI\CData;
 use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
@@ -119,23 +120,40 @@ class RustEngineContractTest extends UnitTestCase
     }
 
     /**
-     * Un `char*` reellement nul, rendu par une bibliotheque : la valeur PHP `null` ne le prouve pas.
+     * Un `char*` reellement nul, rendu par une bibliotheque, est reconnu — sous la forme que la
+     * plateforme lui donne.
      *
-     * Le moteur de combat ne rend jamais nul ; c'est la petite bibliotheque d'essai qui le fait.
-     * L'essai etablit que `=== null` le laisserait passer, et que le jugement du client le voit.
+     * ## Ce que la mesure a dit
+     *
+     * Codex avancait qu'un `char*` nul arrive en PHP comme un objet `FFI\CData` nul, et qu'un
+     * client testant `=== null` le laisserait passer. Sur cette plateforme, mesure faite par ce
+     * meme essai en integration continue, **PHP le rend comme la valeur `null`**. Les deux formes
+     * restent possibles selon la version et le type declare ; le jugement du client couvre les deux,
+     * et cet essai constate laquelle arrive plutot que de la supposer.
+     *
+     * Le moteur de combat ne rend jamais nul : c'est la petite bibliotheque d'essai qui le fait.
      */
-    public function testAGenuinelyNullPointerIsRecognisedByTheContractNotByThePhpNull(): void
+    public function testAGenuinelyNullPointerIsRecognisedWhateverFormPhpGivesIt(): void
     {
         $this->skipWhenTheRustLibraryIsUnavailable('libtest_ffi.so');
 
-        $ffi = FFI::cdef('char* rust_null_string(void);', base_path('storage/rust-libs/libtest_ffi.so'));
+        $ffi = FFI::cdef("char* rust_null_string(void);\nchar* rust_hello(void);", base_path('storage/rust-libs/libtest_ffi.so'));
 
         // @phpstan-ignore-next-line
-        $pointeur = $ffi->rust_null_string();
+        $nul = $ffi->rust_null_string();
 
-        $this->assertNotNull($pointeur, 'A null C pointer came back as the PHP null: the check under test would be trivially right.');
-        $this->assertTrue(FFI::isNull($pointeur));
-        $this->assertTrue(RustEngineAnswer::isNullPointer($pointeur), 'The client does not recognise a genuinely null pointer.');
+        $this->assertTrue(
+            $nul === null || (($nul instanceof CData) && FFI::isNull($nul)),
+            'A null C pointer came back as neither the PHP null nor a null CData: the client would not know what to check.'
+        );
+        $this->assertTrue(RustEngineAnswer::isNullPointer($nul), 'The client does not recognise a genuinely null pointer.');
+
+        // **Le temoin qui discrimine** : un pointeur reel n'est pas juge nul. Sans lui, un jugement
+        // qui repondrait toujours « nul » passerait l'assertion precedente.
+        // @phpstan-ignore-next-line
+        $reel = $ffi->rust_hello();
+        $this->assertFalse(RustEngineAnswer::isNullPointer($reel), 'A real pointer was judged null.');
+        $this->assertSame('Hello from Rust!', FFI::string($reel));
     }
 
     private function anEngine(): RustBattleEngine
