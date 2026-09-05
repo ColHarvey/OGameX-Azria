@@ -16,12 +16,10 @@ use OGame\Combat\Admission\DefensiveRallyCandidate;
 use OGame\Combat\Admission\FoundingGroup;
 use OGame\Combat\Admission\FrozenAllianceMembership;
 use OGame\Combat\Admission\RallyGrouping;
-use OGame\Combat\Decisions\CombatSituation;
 use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\FleetDispositionKind;
-use OGame\Combat\Enums\FlightLeg;
 use OGame\Combat\Enums\SnapshotContribution;
 use OGame\Combat\Exceptions\ContradictorySnapshotInclusion;
 use OGame\Combat\Projection\SnapshotProjectionRegistry;
@@ -37,7 +35,6 @@ use OGame\Models\CombatSnapshotInclusion;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet;
 use OGame\Models\User;
-use OGame\Services\FleetMissionService;
 use RuntimeException;
 
 /**
@@ -94,6 +91,7 @@ final class RallyClosureService
         private RallyGrouping $grouping = new RallyGrouping(),
         SnapshotProjectionRegistry|null $projections = null,
         private CombatEngagementService $engagement = new CombatEngagementService(),
+        private ClosureReconciliation $reconciliation = new ClosureReconciliation(),
     ) {
         $this->projections = $projections ?? SnapshotProjectionRegistry::default();
     }
@@ -205,11 +203,11 @@ final class RallyClosureService
         // echoue, la transaction efface les participants avec lui : un combat sans bataille ne
         // s'ecrit pas.
         //
-        // **Les effets admissibles encore en attente d'abord** : la bataille lit le stock et la
-        // garnison du corps ; ce qui appartient a la photographie doit y etre, quel que soit le
-        // retard du travailleur.
-        $this->applyPendingEligibleEffects($combat, $corps, $openedAt, $closedAt);
-        $this->engagement->engage($combat, $closedAt);
+        // **La photographie causale d'abord** : les effets admissibles encore en attente sont
+        // appliques, ceux qui y sont deja sont reconnus a leur provenance, et la reserve protegee
+        // qui en resulte est celle contre laquelle la bataille plafonne son butin.
+        $photographie = $this->reconcileTheSnapshot($combat, $corps, $openedAt, $closedAt);
+        $this->engagement->engage($combat, $closedAt, $photographie->protectedResources);
 
         $combat->status = CombatState::Active;
         $combat->fleets_admitted = $this->countFleets($cotesAttaquants)
@@ -440,84 +438,33 @@ final class RallyClosureService
      * jamais une seconde ligne.
      */
     /**
-     * Les effets admissibles encore en attente s'appliquent avant que la bataille se fige.
+     * La photographie causale de cette fermeture, et ce qu'elle impose.
      *
-     * ## La regle, et pourquoi elle ne peut pas dependre du travailleur
+     * ## Une seule decision autoritative
      *
-     * `CausalOrderReconciler` la fixe : un effet appartient a la photographie si sa decision precede
-     * strictement l'ouverture, si son effet precede strictement la fermeture, et s'il n'est pas deja
-     * dans l'etat protege. Un transport parti avant l'ouverture et arrive dans la fenetre y appartient
-     * donc — que le travailleur des pages l'ait deja livre ou non. Lire le stock vivant sans rien
-     * appliquer faisait dependre le butin gele de l'ordre des processus : le bac MariaDB l'a montre,
-     * la cargaison n'entrait dans le butin que si le travailleur passait avant la fermeture.
+     * Aucune regle temporelle ne vit ici. `ClosureReconciliation` relit les quatre sources sous verrou,
+     * verifie la tranche complete contre la barriere de partition, et confie a `CausalOrderReconciler`
+     * — pur et versionne — le soin de dire, de chaque evenement, s'il entre dans la photographie, s'il
+     * doit d'abord etre applique, ou s'il y est deja. Ce service execute ; il ne redecide pas.
      *
-     * ## Ce qui est applique, et par qui
+     * ## Ce que la fermeture en fait
      *
-     * Les arrivees aller encore non traitees vers ce corps dont le genre livre quelque chose au corps
-     * — cargaison ou flotte, d'apres `CombatSituation::possibleProjections()` : transport,
-     * deploiement —, parties strictement avant l'ouverture, arrivees strictement avant la fermeture.
-     * Chacune est verrouillee puis livree par son gestionnaire canonique, `updateMission()`, qui la
-     * relit et qui est idempotent par `processed` : le travailleur qui passe ensuite — par la porte,
-     * donc apres cette transaction — la trouve traitee. L'inclusion s'ecrit avec sa provenance, comme
-     * celle d'une flotte admise.
-     *
-     * ## Ce que cette methode ne fait pas encore, et qui est dit
-     *
-     * Un effet **inadmissible** deja livre par le travailleur — decide apres l'ouverture, arrive avant
-     * la fermeture — reste dans le stock que la bataille lit : l'en exclure demanderait la photographie
-     * de l'ouverture, qui n'existe pas encore. Les retours vers ce corps ne sont pas appliques ici.
+     * Les effets admissibles encore en attente sont livres par leurs gestionnaires canoniques —
+     * idempotents : ce que le travailleur a deja fait ne se refait pas. Chaque evenement qui entre dans
+     * la photographie et y apporte quelque chose recoit son inclusion, avec sa provenance. Et la reserve
+     * protegee — l'etat d'ouverture augmente des seules livraisons admissibles — est celle contre
+     * laquelle la bataille plafonne son butin, jamais le stock vivant.
      */
-    private function applyPendingEligibleEffects(CombatInstance $combat, int $corps, int $openedAt, int $closedAt): void
+    private function reconcileTheSnapshot(CombatInstance $combat, int $corps, int $openedAt, int $closedAt): ReconciledClosure
     {
-        $genres = [];
-        $apports = [];
-        foreach (CombatMissionKind::byMissionType() as $type => $genre) {
-            if ($genre->opensCombat() || $genre->reinforcesTheDefence()) {
-                continue;
-            }
-            $situation = new CombatSituation($genre, FlightLeg::Outbound, ActorKind::Player, CombatState::Rallying);
-            $livre = array_values(array_filter(
-                $situation->possibleProjections(),
-                static fn (SnapshotContribution $projection): bool => in_array($projection, [SnapshotContribution::DeliveredCargo, SnapshotContribution::DeliveredFleet], true)
-            ));
-            if ($livre === []) {
-                continue;
-            }
-            $genres[] = (int)$type;
-            $apports[(int)$type] = SnapshotContributionSet::of($livre);
-        }
-
-        if ($genres === []) {
-            return;
-        }
-
-        $enAttente = FleetMission::query()
-            ->where('planet_id_to', $corps)
-            ->whereNull('parent_id')
-            ->where('processed', 0)
-            ->whereIn('mission_type', $genres)
-            ->where('time_departure', '<', $openedAt)
-            ->where('time_arrival', '<', $closedAt)
-            ->orderBy('time_arrival')
-            ->orderBy('id')
-            ->lockForUpdate()
-            ->get();
-
-        if ($enAttente->isEmpty()) {
-            return;
-        }
-
-        $service = resolve(FleetMissionService::class);
+        $reconciliation = $this->reconciliation->reconcile($combat, $corps, $openedAt, $closedAt);
         $projection = $this->frozenProjectionOf($combat);
-        foreach ($enAttente as $mission) {
-            $service->updateMission($mission);
-            $this->includeOnce(
-                $combat,
-                CombatEventIdentity::forFleetArrival((int)$mission->id),
-                $apports[(int)$mission->mission_type],
-                $projection
-            );
+
+        foreach ($reconciliation->inclusions as $identite => $apports) {
+            $this->includeOnce($combat, $identite, $apports, $projection);
         }
+
+        return $reconciliation;
     }
 
     private function includeOnce(

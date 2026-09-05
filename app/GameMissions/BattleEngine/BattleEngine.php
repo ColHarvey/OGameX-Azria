@@ -651,7 +651,12 @@ abstract class BattleEngine
      */
     protected function calculateLootCapacityConstrained(): Resources
     {
-        $resources = $this->defenderPlanet->getResources();
+        // **La reserve que la photographie protege**, si ce combat en a une : un combat durable a gele
+        // l'etat du corps a son ouverture et n'y a ajoute que les livraisons admissibles. Lire le corps
+        // ici ferait entrer dans le butin la production et les livraisons decidees apres l'ouverture,
+        // et le resultat dependrait de l'instant ou le travailleur est passe. Un combat instantane n'a
+        // pas de fenetre : il lit le corps, comme avant.
+        $resources = $this->lootContext->protectedResources() ?? $this->defenderPlanet->getResources();
         $loot = new Resources(
             $this->lootableAmount($resources->metal->get()),
             $this->lootableAmount($resources->crystal->get()),

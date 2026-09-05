@@ -10,6 +10,7 @@ use OGame\Combat\Exceptions\FalsifiedLootContext;
 use OGame\Combat\Exceptions\UnknownFingerprintSchema;
 use OGame\Combat\Policies\LootPolicyRegistry;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
+use OGame\Models\Resources;
 
 /**
  * Les faits de pillage d'un combat, photographies une fois et jamais relus.
@@ -90,9 +91,10 @@ final readonly class LootContext
         int $observedAt,
         string $allocatorVersion,
         LootPolicyRegistry|null $registry = null,
+        Resources|null $protectedResources = null,
     ): self {
         $taux = $policy->maximumRateInBasisPoints($registry);
-        $snapshot = self::snapshotOf($policy, $fleets, $target, $observedAt, $allocatorVersion, $taux);
+        $snapshot = self::snapshotOf($policy, $fleets, $target, $observedAt, $allocatorVersion, $taux, $protectedResources);
 
         return new self(
             $policy,
@@ -260,6 +262,29 @@ final readonly class LootContext
     /**
      * Si ce combat ne donne droit a aucun pillage.
      */
+    /**
+     * La reserve que ce combat protege, ou `null` s'il lit le stock vivant.
+     *
+     * Un combat durable photographie l'etat du corps a son ouverture et n'y ajoute que les livraisons
+     * admissibles : c'est cette reserve que le butin plafonne, jamais ce que le monde a fait depuis.
+     * Un combat instantane n'a pas de fenetre — il n'y a rien entre sa decision et son effet — et rend
+     * `null` : le moteur lit alors le corps, comme il l'a toujours fait.
+     */
+    public function protectedResources(): Resources|null
+    {
+        $reserve = $this->snapshot['protected_resources'] ?? null;
+        if (!is_array($reserve)) {
+            return null;
+        }
+
+        return new Resources(
+            FrozenFact::int($reserve, 'metal'),
+            FrozenFact::int($reserve, 'crystal'),
+            FrozenFact::int($reserve, 'deuterium'),
+            0,
+        );
+    }
+
     public function grantsNoLoot(): bool
     {
         return $this->noLootBecause !== null;
@@ -283,6 +308,7 @@ final readonly class LootContext
         int $observedAt,
         string $allocatorVersion,
         int $rateInBasisPoints,
+        Resources|null $protectedResources = null,
     ): array {
         $classees = $fleets;
 
@@ -300,6 +326,15 @@ final readonly class LootContext
             'target_is_inactive' => $policy->targetIsInactive,
             'discoverer_cargo' => $policy->cargo->discovererCargo,
             'total_cargo' => $policy->cargo->totalCargo,
+            // **La reserve que le combat protege**, quand une photographie l'a determinee : l'etat du
+            // corps a l'ouverture, augmente des seules livraisons admissibles. Absente pour un combat
+            // instantane, qui n'a pas de fenetre et lit le stock vivant. Elle vit dans le snapshot,
+            // donc dans l'empreinte : un rejeu la retrouve, et une falsification se voit.
+            'protected_resources' => $protectedResources === null ? null : [
+                'metal' => (int)$protectedResources->metal->get(),
+                'crystal' => (int)$protectedResources->crystal->get(),
+                'deuterium' => (int)$protectedResources->deuterium->get(),
+            ],
             'fleets' => array_map(static fn (AttackerFleetSnapshot $f): array => $f->toArray(), $classees),
         ];
     }

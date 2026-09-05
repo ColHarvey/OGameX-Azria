@@ -68,6 +68,9 @@ use OGame\Combat\Enums\CombatState;
  * @property int $fleets_admitted
  * @property int $players_admitted
  * @property array<mixed>|null $frozen_settings
+ * @property array<mixed>|null $opening_state L etat protege du corps a l ouverture, avec sa provenance.
+ * @property string|null $opening_state_fingerprint L empreinte de cet etat : une relecture constate une divergence.
+ * @property int|null $opening_captured_at L instant de la capture, qui est celui de l ouverture.
  * @property array<mixed>|null $frozen_moon_identity
  * @property array<mixed>|null $moon_destruction_plan
  * @property string|null $frozen_facts_fingerprint
@@ -97,6 +100,9 @@ use OGame\Combat\Enums\CombatState;
 #[Fillable([
     'status',
     'broadcast_status',
+    'opening_state',
+    'opening_state_fingerprint',
+    'opening_captured_at',
     'cancellation_cause',
     'cancellation_note',
     'cancelled_at',
@@ -169,6 +175,7 @@ class CombatInstance extends Model
             'round_schedule' => 'array',
             'battle_snapshot' => 'array',
             'battle_result' => 'array',
+            'opening_state' => 'array',
             'frozen_settings' => 'array',
             'frozen_moon_identity' => 'array',
             'moon_destruction_plan' => 'array',

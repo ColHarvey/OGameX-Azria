@@ -89,6 +89,7 @@ final class CombatOpeningService
         private AttackAdmissionSelector $selector = new AttackAdmissionSelector(),
         private RallyGrouping $grouping = new RallyGrouping(),
         private CausalEventOrderRegistry|null $causalOrders = null,
+        private OpeningStateRecorder $openingState = new OpeningStateRecorder(),
         private LootAllocatorRegistry|null $allocators = null,
         private LootPolicyRegistry|null $policies = null,
         private MoonDestructionRuleRegistry|null $moonRules = null,
@@ -228,6 +229,13 @@ final class CombatOpeningService
             ),
             'revision' => 0,
         ]);
+
+        // **L'etat protege, capture ici et nulle part ailleurs.** La photographie d'un combat se
+        // construit depuis l'etat du corps a son ouverture et depuis ce que cet etat reflete deja ;
+        // relire le corps a la fermeture donnerait le monde vivant, ou la production et les livraisons
+        // decidees apres l'ouverture se seraient melees aux faits du combat. La transaction est celle
+        // qui cree l'instance : l'etat et le combat naissent ensemble, ou aucun des deux.
+        $this->openingState->capture($combat, $targetBodyId, $openedAt);
 
         // **Une fenetre nulle se ferme ici, pas a la minute suivante.**
         //

@@ -17,6 +17,7 @@ use OGame\Combat\Support\LootContextForMission;
 use OGame\GameMissions\BattleEngine\BattleEngineFactory;
 use OGame\Jobs\SettlePersistentCombat;
 use OGame\Models\CombatInstance;
+use OGame\Models\Resources;
 use OGame\Services\CharacterClassService;
 use OGame\Services\SettingsService;
 
@@ -70,7 +71,7 @@ final class CombatEngagementService
      * @param CombatInstance $combat Sous verrou, ses participants deja inscrits.
      * @param int $startsAt L'echeance du ralliement : le combat commence la, et sa fin se compte de la.
      */
-    public function engage(CombatInstance $combat, int $startsAt): CombatEngagement
+    public function engage(CombatInstance $combat, int $startsAt, Resources|null $protectedResources = null): CombatEngagement
     {
         // **Un combat deja engage garde son resultat.** Une cloture rejouee — un travail relivre,
         // un combat remis en ralliement pour reprendre son travail — retrouve la bataille calculee
@@ -104,7 +105,9 @@ final class CombatEngagementService
             $effectif->target,
             'attack',
             $combat->mission_id,
-            $allocation
+            $allocation,
+            null,
+            $protectedResources
         );
 
         $moteur = BattleEngineFactory::configured(

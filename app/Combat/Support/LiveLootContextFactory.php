@@ -8,6 +8,7 @@ use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\Enums\NoLootReason;
 use OGame\Combat\Policies\LootPolicySelector;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
+use OGame\Models\Resources;
 use OGame\Services\CharacterClassService;
 use OGame\Services\PlanetService;
 
@@ -48,9 +49,9 @@ final class LiveLootContextFactory
      * @param FrozenLootAllocation $allocation L'allocateur de cette operation, choisi a son debut.
      * @return LootContext
      */
-    public static function forBattle(array $attackers, PlanetService $target, FrozenLootAllocation $allocation): LootContext
+    public static function forBattle(array $attackers, PlanetService $target, FrozenLootAllocation $allocation, Resources|null $protectedResources = null): LootContext
     {
-        return self::snapshotOf(null, $attackers, $target, $allocation);
+        return self::snapshotOf(null, $attackers, $target, $allocation, $protectedResources);
     }
 
     /**
@@ -62,9 +63,9 @@ final class LiveLootContextFactory
      * @param FrozenLootAllocation $allocation
      * @return LootContext
      */
-    public static function withoutLoot(NoLootReason $reason, array $attackers, PlanetService $target, FrozenLootAllocation $allocation): LootContext
+    public static function withoutLoot(NoLootReason $reason, array $attackers, PlanetService $target, FrozenLootAllocation $allocation, Resources|null $protectedResources = null): LootContext
     {
-        return self::snapshotOf($reason, $attackers, $target, $allocation);
+        return self::snapshotOf($reason, $attackers, $target, $allocation, $protectedResources);
     }
 
     /**
@@ -84,7 +85,7 @@ final class LiveLootContextFactory
      * @param FrozenLootAllocation $allocation
      * @return LootContext
      */
-    private static function snapshotOf(NoLootReason|null $refusal, array $attackers, PlanetService $target, FrozenLootAllocation $allocation): LootContext
+    private static function snapshotOf(NoLootReason|null $refusal, array $attackers, PlanetService $target, FrozenLootAllocation $allocation, Resources|null $protectedResources = null): LootContext
     {
         $observe = self::now();
         $inactive = self::targetIsInactiveAt($target, $observe);
@@ -117,6 +118,8 @@ final class LiveLootContextFactory
             self::targetFactsOf($target),
             $observe,
             $allocation->version,
+            null,
+            $protectedResources,
         );
     }
 

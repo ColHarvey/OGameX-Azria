@@ -49,6 +49,40 @@ final class CombatEventIdentity
     /**
      * Une identite bien formee, ou rien.
      */
+    /**
+     * L'achevement d'une file de vaisseaux ou de defenses : il change l'effectif du corps.
+     */
+    public static function forUnitQueueCompletion(int $queueItemId): string
+    {
+        return self::build('unit_queue', $queueItemId);
+    }
+
+    /**
+     * L'achevement d'un batiment : il n'apporte rien a la bataille, mais il est lu et classe —
+     * une source qu'on n'interroge pas produit une photographie plausible et fausse.
+     */
+    public static function forBuildingQueueCompletion(int $queueItemId): string
+    {
+        return self::build('building_queue', $queueItemId);
+    }
+
+    /**
+     * L'achevement d'une recherche du proprietaire : armes, boucliers et blindage entrent dans
+     * la bataille.
+     */
+    public static function forResearchCompletion(int $queueItemId): string
+    {
+        return self::build('research', $queueItemId);
+    }
+
+    /**
+     * Le prefixe d'un genre, pour reconnaitre une identite sans la reconstruire.
+     */
+    public static function prefixOf(string $kind): string
+    {
+        return self::PREFIX . ':' . $kind . ':';
+    }
+
     private static function build(string $kind, int $identifier): string
     {
         if ($identifier < 1) {

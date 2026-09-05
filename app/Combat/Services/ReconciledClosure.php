@@ -1,0 +1,30 @@
+<?php
+
+namespace OGame\Combat\Services;
+
+use OGame\Combat\Causality\CausallyReconciledSnapshot;
+use OGame\Combat\Support\SnapshotContributionSet;
+use OGame\Models\Resources;
+
+/**
+ * Ce que la reconciliation d'une fermeture rend a `RallyClosureService`.
+ *
+ * La photographie reconciliee dit ce qui entre dans le combat ; les ressources protegees sont l'etat
+ * d'ouverture augmente des seules livraisons admissibles ; les identites appliquees sont celles que la
+ * fermeture a livrees elle-meme, par leurs gestionnaires canoniques ; les inclusions sont ce que la
+ * fermeture doit ecrire avec sa provenance, identite par identite.
+ */
+final readonly class ReconciledClosure
+{
+    /**
+     * @param array<int, string> $appliedIdentities
+     * @param array<string, SnapshotContributionSet> $inclusions
+     */
+    public function __construct(
+        public CausallyReconciledSnapshot $snapshot,
+        public Resources $protectedResources,
+        public array $appliedIdentities,
+        public array $inclusions,
+    ) {
+    }
+}

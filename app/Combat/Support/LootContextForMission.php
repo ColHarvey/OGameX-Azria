@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Log;
 use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Exceptions\UnsupportedActorSide;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
+use OGame\Models\Resources;
 use OGame\Services\PlanetService;
 
 /**
@@ -51,6 +52,8 @@ final class LootContextForMission
      * @param string $missionKind Le genre de mission, pour le journal.
      * @param int $missionId L'identifiant de la mission qui a declenche le combat.
      * @param FrozenLootAllocation $allocation L'allocateur de cette operation, choisi a son debut.
+     * @param Resources|null $protectedResources La reserve que la photographie protege, pour un combat
+     *        durable ; `null` pour un combat instantane, qui lit le stock vivant.
      * @param callable(array<AttackerFleet>, PlanetService): LootContext|null $snapshot La fabrique a
      *        employer. Celle du jeu par defaut ; un essai en fournit une qui refuse, pour verifier
      *        que le refus ne remonte pas a l'ordonnanceur.
@@ -63,9 +66,10 @@ final class LootContextForMission
         int $missionId,
         FrozenLootAllocation $allocation,
         callable|null $snapshot = null,
+        Resources|null $protectedResources = null,
     ): LootContext {
         $snapshot ??= static fn (array $flottes, PlanetService $cible): LootContext
-            => LiveLootContextFactory::forBattle($flottes, $cible, $allocation);
+            => LiveLootContextFactory::forBattle($flottes, $cible, $allocation, $protectedResources);
 
         try {
             return $snapshot($attackers, $target);
@@ -88,7 +92,7 @@ final class LootContextForMission
             // **Le meme allocateur que la tentative qui a echoue.** En rechoisir un ici ferait
             // qu un combat degrade se plafonnerait sous une regle differente de celle sous
             // laquelle il avait commence a se calculer.
-            return LiveLootContextFactory::withoutLoot($refus->reason->noLootReason(), $attackers, $target, $allocation);
+            return LiveLootContextFactory::withoutLoot($refus->reason->noLootReason(), $attackers, $target, $allocation, $protectedResources);
         }
     }
 }
