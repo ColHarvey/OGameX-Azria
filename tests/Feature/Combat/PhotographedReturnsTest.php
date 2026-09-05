@@ -8,6 +8,7 @@ use OGame\Combat\Replay\BattleResultCodec;
 use OGame\Combat\Services\RallyClosureService;
 use OGame\Models\CombatInstance;
 use OGame\Models\FleetMission;
+use OGame\Services\FleetMissionService;
 use OGame\Services\SettingsService;
 use Tests\FleetDispatchTestCase;
 
@@ -101,7 +102,7 @@ final class PhotographedReturnsTest extends FleetDispatchTestCase
 
         // **Rien n'est perdu** : il arrive ensuite, entier.
         $this->travelTo(Date::createFromTimestamp($fermeture + 31));
-        resolve(\OGame\Services\FleetMissionService::class)->updateMission(FleetMission::query()->findOrFail($retour->id));
+        resolve(FleetMissionService::class)->updateMission(FleetMission::query()->findOrFail($retour->id));
         $this->assertSame($vaisseauxAuDepart + self::VAISSEAUX, $this->garrisonOf($cible, 'light_fighter'), 'The late return never brought its ships home.');
         $this->assertSame(self::RALLY_STOCK_METAL + self::CARGAISON, $this->metalOf($cible), 'The late return never brought its cargo home.');
     }
