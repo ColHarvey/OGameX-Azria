@@ -30,10 +30,13 @@ use Throwable;
  *
  * ## A qui l'avis est livre
  *
- * D'abord a l'inscrit sous cette clef, si le combat en a un : c'est la photographie, et c'est elle
- * qui fait foi — un corps reattribue apres la cloture ne detourne pas l'avis. Sinon, avant la
- * cloture, a la mission que la clef nomme, ou au proprietaire vivant du corps vise : personne n'est
- * encore inscrit, et le corps est le seul a savoir qui il est.
+ * **Au destinataire que l'avis porte**, fige par son ecrivain a l'instant de la decision. C'est le
+ * seul repere sur : un corps ou une flotte peut changer de mains entre la decision et la livraison,
+ * et l'avis appartient a qui a subi la decision, pas a qui possede la chose aujourd'hui.
+ *
+ * Un avis ecrit avant que ce champ n'existe n'en porte pas : il retombe alors sur l'inscription —
+ * la photographie, qui fige elle aussi le joueur — puis sur la mission ou le corps. Ce repli existe
+ * pour ne pas perdre un avis en attente au moment du deploiement, pas comme chemin ordinaire.
  *
  * Un avis sans destinataire ou dont le message echoue est garde, compte, et retente au passage
  * suivant ; au-dela de cinq tentatives il est laisse a l'exploitation avec sa derniere erreur.
@@ -105,6 +108,12 @@ final class CombatOutboxDelivery
      */
     private function recipientOf(CombatOutboxMessage $avis): int|null
     {
+        $contenu = is_array($avis->payload) ? $avis->payload : [];
+
+        if (isset($contenu['recipient_id']) && is_numeric($contenu['recipient_id']) && (int)$contenu['recipient_id'] > 0) {
+            return (int)$contenu['recipient_id'];
+        }
+
         $clef = (string)$avis->participant_key;
 
         $inscrit = CombatParticipant::query()
@@ -147,7 +156,9 @@ final class CombatOutboxDelivery
             CombatOutboxKind::CombatCancelled->value => [CombatCancelled::class, [
                 'coordinates' => $coordonnees,
                 'cause_code' => (string)($contenu['cause'] ?? 'administrative_decision'),
-                'fingerprint' => (string)($contenu['abandoned_fingerprint'] ?? ''),
+                // La reference que le joueur peut citer : le numero du combat. L'empreinte des faits
+                // abandonnes reste dans l'audit — illisible pour lui, et sans rapport avec ce qu'il subit.
+                'reference' => (string)$avis->combat_instance_id,
             ]],
             default => throw new RuntimeException('Genre d avis inconnu : ' . $avis->kind),
         };

@@ -56,6 +56,11 @@ class CombatPanelTest extends FleetDispatchTestCase
         $reponse->assertSee(__('t_ingame.combat.role_attacker'));
         $reponse->assertSee('[' . $combat->galaxy . ':' . $combat->system . ':' . $combat->position . ']');
         $reponse->assertSee(__('t_ingame.combat.status_active'));
+
+        // **La page non plus ne porte l'echeance nulle part** — ni en texte, ni en attribut.
+        $contenu = (string)$reponse->getContent();
+        $this->assertStringNotContainsString((string)$combat->ends_at, $contenu, 'The battle deadline is written into the page.');
+        $this->assertStringNotContainsString('combatpanel_countdown', $contenu, 'A battle countdown survives in the page.');
     }
 
     /**
@@ -119,8 +124,33 @@ class CombatPanelTest extends FleetDispatchTestCase
 
         $this->assertSame($fin, $corps['server_now'], 'The server clock is not the one the response carries.');
         $this->assertSame('active', $corps['status']);
-        $this->assertSame($echeance - $fin, $corps['seconds_remaining'], 'The remaining seconds are not counted from the server clock.');
         $this->assertCount(count($maintenant), $corps['events']);
+
+        // **L'echeance de la bataille ne transite sous aucune forme.** Ni l'instant, ni des secondes
+        // restantes que `server_now` suffirait a retourner en instant : le document entier est fouille,
+        // clefs comprises, et l'echeance y est cherchee telle quelle et en ecart.
+        $this->assertArrayNotHasKey('seconds_remaining', $corps, 'The battle deadline came back as remaining seconds.');
+        $this->assertArrayNotHasKey('ends_at', $corps);
+
+        // La recherche porte sur les **valeurs** du document, pas sur son texte : un nombre de
+        // pertes de seize ou quarante-sept se retrouve par hasard dans une chaine, et une assertion
+        // par sous-chaine accuserait alors le code a tort.
+        $valeurs = [];
+        $aplatir = static function (mixed $noeud) use (&$aplatir, &$valeurs): void {
+            if (is_array($noeud)) {
+                foreach ($noeud as $fils) {
+                    $aplatir($fils);
+                }
+
+                return;
+            }
+
+            $valeurs[] = $noeud;
+        };
+        $aplatir($corps);
+
+        $this->assertNotContains($echeance, $valeurs, 'The battle deadline is a value of the feed.');
+        $this->assertNotContains($echeance - $fin, $valeurs, 'The seconds left before the battle ends are a value of the feed.');
 
         foreach ($corps['events'] as $evenement) {
             $this->assertLessThanOrEqual($fin, $evenement['at'], 'A loss from the future was sent to the browser.');

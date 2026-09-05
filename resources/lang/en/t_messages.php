@@ -124,8 +124,7 @@ Reason: :reason',
         'from' => 'Fleet Command',
         'subject' => 'Combat cancelled',
         'body' => 'The combat at :coordinates has been cancelled: :cause.
-Your fleets are returning to base. Fingerprint of the abandoned facts: :fingerprint',
-        'no_fingerprint' => 'none (the combat had not been frozen yet)',
+Your fleets are returning to base. Incident reference: :reference',
         'causes' => [
             'target_disappeared' => 'the targeted body no longer exists',
             'attacker_removed' => 'the attacker left the game',

@@ -143,7 +143,11 @@ class CombatOutboxDeliveryTest extends FleetDispatchTestCase
         $this->assertSame(0, Message::query()->where('user_id', $tiers)->where('key', 'combat_cancelled')->count(), 'The new owner of the body received a notice for a battle it never fought.');
 
         $message = Message::query()->where('user_id', $inscrit)->where('key', 'combat_cancelled')->firstOrFail();
-        $this->assertSame('abcdef0123456789', $message->params['fingerprint']);
+        // **L'empreinte technique ne parvient pas au joueur** : il recoit une reference d'incident
+        // qu'il peut citer — le numero du combat —, et la somme de controle reste dans l'audit.
+        $this->assertSame((string)$combat->id, $message->params['reference']);
+        $this->assertArrayNotHasKey('fingerprint', $message->params, 'The internal fingerprint reached the player.');
+        $this->assertStringNotContainsString('abcdef0123456789', GameMessageFactory::createGameMessage($message)->getBody(), 'The internal fingerprint is readable in the message body.');
         $this->assertSame(CombatCancellationCause::AdministrativeDecision->value, $message->params['cause_code']);
         $this->assertArrayNotHasKey('note', $message->params, 'The administrative note reached the player.');
     }
@@ -237,6 +241,45 @@ class CombatOutboxDeliveryTest extends FleetDispatchTestCase
         $anglais = __('t_messages.combat_rally_refused.reasons.rally_closed');
         $this->assertNotSame($francais, $anglais, 'French and English read the same: the language switch could not be observed.');
         $this->assertStringContainsString($anglais, $lecture->getBody());
+    }
+
+    /**
+     * Le destinataire est celui que l'avis porte, fige a la decision — pas le proprietaire du jour.
+     *
+     * ## Le cas que ce montage reproduit
+     *
+     * Le corps change de mains **avant** que l'avis ne soit livre. Un livreur qui redemanderait au
+     * corps vivant a qui il appartient donnerait cet avis au nouveau proprietaire : il apprendrait
+     * qu'une bataille qu'il n'a pas subie vient d'etre annulee, et celui qui l'a subie n'en saurait
+     * rien. Le destinataire voyage donc avec le fait.
+     */
+    public function testTheNoticeGoesToThePlayerItNamesEvenWhenTheBodyChangedHands(): void
+    {
+        $combat = $this->anEngagedCombat();
+        $maintenant = (int)now()->timestamp;
+        $subi = (int)DB::table('planets')->where('id', $combat->target_planet_id)->value('user_id');
+        $tiers = (int)DB::table('users')->whereNotIn('id', [$subi, $this->currentUserId])->orderByDesc('id')->value('id');
+        $this->assertGreaterThan(0, $tiers);
+        $this->assertNotSame($subi, $tiers);
+
+        // L'avis nomme celui qui subit, et l'inscription est effacee : sans le destinataire fige,
+        // le livreur n'aurait plus que le corps vivant pour trancher.
+        $this->aNotice($combat, CombatParticipantKey::forPlanet((int)$combat->target_planet_id), CombatOutboxKind::CombatCancelled, [
+            'recipient_id' => $subi,
+            'cause' => CombatCancellationCause::TargetDisappeared->value,
+            'galaxy' => (int)$combat->galaxy,
+            'system' => (int)$combat->system,
+            'position' => (int)$combat->position,
+        ], $maintenant);
+        DB::table('combat_participants')->where('combat_instance_id', $combat->id)->delete();
+
+        // **Le corps change de mains avant la livraison.**
+        DB::table('planets')->where('id', $combat->target_planet_id)->update(['user_id' => $tiers]);
+
+        $this->assertSame(1, (new CombatOutboxDelivery())->deliver($maintenant));
+
+        $this->assertSame(1, Message::query()->where('user_id', $subi)->where('key', 'combat_cancelled')->count(), 'The player who suffered the cancellation was not told.');
+        $this->assertSame(0, Message::query()->where('user_id', $tiers)->where('key', 'combat_cancelled')->count(), 'The new owner of the body was told about a battle it never fought.');
     }
 
     /**

@@ -33,11 +33,9 @@
                         <a href="{{ route('galaxy.index', ['galaxy' => $combat['target']['galaxy'], 'system' => $combat['target']['system'], 'position' => $combat['target']['position']]) }}">{{ $combat['target']['name'] !== '' ? $combat['target']['name'] . ' ' : '' }}[{{ $combat['target']['galaxy'] }}:{{ $combat['target']['system'] }}:{{ $combat['target']['position'] }}]</a>
                     </div>
                     <div class="combatpanel_line">
+                        {{-- L'etat, et rien qui dise quand la bataille finit : ni instant, ni secondes
+                             restantes, que l'heure du navigateur suffirait a retourner en instant. --}}
                         <span class="combatpanel_status">{{ $combat['status_label'] }}</span>
-                        @if ($combat['seconds_remaining'] > 0)
-                            <br>{{ $combat['countdown_label'] }}
-                            <span class="combatpanel_countdown textBeefy" data-seconds="{{ $combat['seconds_remaining'] }}">{{ gmdate('H:i:s', $combat['seconds_remaining']) }}</span>
-                        @endif
                     </div>
                     <div class="combatpanel_losses">
                         <div class="combatpanel_losses_title">{{ __('t_ingame.combat.losses_title') }}</div>

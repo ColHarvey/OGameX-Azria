@@ -2,15 +2,14 @@
  * Le panneau des combats durables, vivant.
  *
  * Ce que ce script fait, et rien de plus : il redemande au serveur le fragment du panneau a
- * cadence fixe, remplace l'ancien par le nouveau, et arme les comptes a rebours que le fragment
- * porte. A zero, un compte a rebours redemande le fragment au lieu de deviner la suite.
+ * cadence fixe et remplace l'ancien par le nouveau.
  *
- * Ce qu'il ne fait jamais : calculer une perte, deduire une frontiere de round, ou choisir
- * l'heure et le joueur — le serveur seul les connait. La cadence est fixe precisement pour que
- * rien du futur ne transite : un « prochaine mise a jour dans N secondes » revelerait les periodes
- * de la bataille. Dix secondes quand un combat est affiche, une minute sinon.
+ * Ce qu'il ne fait jamais : calculer une perte, deduire une frontiere de round, armer un compte
+ * a rebours sur la fin de la bataille, ou choisir l'heure et le joueur — le serveur seul les
+ * connait, et il n'envoie aucune echeance. La cadence est fixe pour la meme raison : un
+ * « prochaine mise a jour dans N secondes » revelerait les periodes de la bataille.
  *
- * Il s'appuie sur jQuery et sur `simpleCountdown`, deja charges par le bundle du jeu.
+ * Il s'appuie sur jQuery, deja charge par le bundle du jeu.
  */
 (function () {
     var CADENCE_EN_COMBAT = 10000;
@@ -44,32 +43,6 @@
         minuterie = window.setTimeout(rafraichir, afficheUnCombat() ? CADENCE_EN_COMBAT : CADENCE_AU_REPOS);
     }
 
-    function armerLesComptes() {
-        var courant = panneau();
-
-        if (!courant || typeof simpleCountdown !== 'function') {
-            return;
-        }
-
-        var comptes = courant.querySelectorAll('.combatpanel_countdown');
-
-        for (var i = 0; i < comptes.length; i++) {
-            var element = comptes[i];
-            var secondes = parseInt(element.getAttribute('data-seconds'), 10);
-
-            if (isNaN(secondes) || element.getAttribute('data-armed') === '1') {
-                continue;
-            }
-
-            element.setAttribute('data-armed', '1');
-
-            // A zero, on redemande au serveur : c'est lui qui sait ce qui vient ensuite.
-            new simpleCountdown(element, secondes, function () {
-                rafraichir();
-            });
-        }
-    }
-
     function rafraichir() {
         if (requeteEnCours || !url) {
             planifier();
@@ -95,7 +68,6 @@
 
                 if (neuf) {
                     courant.parentNode.replaceChild(neuf, courant);
-                    armerLesComptes();
                 }
             },
             complete: function () {
@@ -105,6 +77,5 @@
         });
     }
 
-    armerLesComptes();
     planifier();
 })();

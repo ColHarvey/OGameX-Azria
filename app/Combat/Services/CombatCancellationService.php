@@ -14,8 +14,10 @@ use OGame\GameMissions\Models\ResolvedReturnDestination;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatOutboxMessage;
+use OGame\Models\CombatParticipant;
 use OGame\Models\FleetMission;
 use OGame\Models\FleetUnion;
+use OGame\Models\Planet;
 use RuntimeException;
 
 /**
@@ -262,7 +264,7 @@ final class CombatCancellationService
                         'kind' => CombatOutboxKind::CombatCancelled->value,
                     ],
                     [
-                        'payload' => $this->noticePayload($combat, $cause, $note, $now, $empreinteAbandonnee),
+                        'payload' => ['recipient_id' => (int)$mission->user_id] + $this->noticePayload($combat, $cause, $note, $now, $empreinteAbandonnee),
                         'available_at' => $now,
                     ]
                 );
@@ -295,7 +297,7 @@ final class CombatCancellationService
                     'kind' => CombatOutboxKind::CombatCancelled->value,
                 ],
                 [
-                    'payload' => $this->noticePayload($combat, $cause, $note, $now, $empreinteAbandonnee),
+                    'payload' => ['recipient_id' => $this->targetOwnerOf($combat)] + $this->noticePayload($combat, $cause, $note, $now, $empreinteAbandonnee),
                     'available_at' => $now,
                 ]
             );
@@ -329,6 +331,29 @@ final class CombatCancellationService
      *
      * @return array<string, mixed>
      */
+    /**
+     * Le proprietaire du corps vise, tel que la photographie le connait.
+     *
+     * L'inscription fait foi : elle porte le joueur fige a la cloture. Avant la cloture personne
+     * n'est inscrit, et le corps vivant est alors la seule source — il n'a pas encore pu changer
+     * de mains sous une bataille qui n'existait pas.
+     */
+    private function targetOwnerOf(CombatInstance $combat): int
+    {
+        $corps = (int)$combat->target_planet_id;
+
+        $inscrit = CombatParticipant::query()
+            ->where('combat_instance_id', $combat->id)
+            ->where('participant_key', CombatParticipantKey::forPlanet($corps))
+            ->value('player_id');
+
+        if ($inscrit !== null) {
+            return (int)$inscrit;
+        }
+
+        return (int)(Planet::query()->whereKey($corps)->value('user_id') ?? 0);
+    }
+
     private function noticePayload(CombatInstance $combat, CombatCancellationCause $cause, string $note, int $now, string|null $empreinteAbandonnee): array
     {
         return [

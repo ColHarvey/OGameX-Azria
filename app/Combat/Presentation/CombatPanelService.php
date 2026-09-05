@@ -2,10 +2,8 @@
 
 namespace OGame\Combat\Presentation;
 
-use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Services\CombatsInvolvingPlayer;
 use OGame\Combat\Support\CombatParticipantKey;
-use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatParticipant;
 use OGame\Models\FleetMission;
@@ -19,14 +17,14 @@ use Throwable;
  *
  * ## Ce que le panneau dit, et ce qu'il tait
  *
- * Il dit le role du joueur, la cible, la phase, le temps qui reste avant le prochain instant
- * decide par le serveur — fermeture du ralliement, echeance de la bataille — et **les pertes du
- * joueur deja visibles** : celles dont l'instant de visibilite est passe, lues sur le fil fige.
+ * Il dit le role du joueur, la cible, la phase, et **les pertes du joueur deja visibles** : celles
+ * dont l'instant de visibilite est passe, lues sur le fil fige.
  *
- * Il tait tout le reste, et c'est une regle : aucune perte future, meme masquee ; aucun numero de
- * round ni frontiere de round ; rien des autres participants. Le navigateur recoit des secondes
- * restantes calculees ici, jamais un instant qu'il pourrait comparer a sa propre horloge, et le
- * joueur comme l'heure viennent du serveur, jamais d'un parametre libre.
+ * Il tait tout le reste, et c'est une regle de jeu : aucune perte future, meme masquee ; aucun
+ * numero ni frontiere de round ; rien des autres participants ; et **aucune echeance de la
+ * bataille**, sous aucune forme. Des secondes restantes accompagnees de l'heure du serveur
+ * reconstituent l'instant de fin aussi surement que l'instant lui-meme : le panneau n'en envoie
+ * donc aucune. Les horaires des vols ordinaires, eux, restent ceux du jeu, ailleurs.
  *
  * ## Pourquoi un service, comme le panneau des PNJ
  *
@@ -80,7 +78,6 @@ final class CombatPanelService
     public function describe(CombatInstance $combat, int $playerId, array $corps, int $now): array
     {
         $statut = $combat->status;
-        $secondes = $this->secondsRemaining($combat, $now);
 
         return [
             'id' => (int)$combat->id,
@@ -94,8 +91,6 @@ final class CombatPanelService
                 'system' => (int)$combat->system,
                 'position' => (int)$combat->position,
             ],
-            'seconds_remaining' => $secondes,
-            'countdown_label' => __($statut === CombatState::Rallying ? 't_ingame.combat.closes_in' : 't_ingame.combat.settles_in'),
             'events' => $this->visibleLosses($combat, $playerId, $now, 0),
         ];
     }
@@ -121,22 +116,6 @@ final class CombatPanelService
         }
 
         return $lignes;
-    }
-
-    /**
-     * Les secondes avant le prochain instant que le serveur a decide — jamais l'instant lui-meme.
-     */
-    public function secondsRemaining(CombatInstance $combat, int $now): int
-    {
-        $echeance = match ($combat->status) {
-            CombatState::Rallying => (int)(CelestialBodyCombatBarrier::query()
-                ->where('combat_instance_id', $combat->id)
-                ->value('owned_through_effect_at') ?? $now),
-            CombatState::Active => (int)($combat->ends_at ?? $now),
-            default => $now,
-        };
-
-        return max(0, $echeance - $now);
     }
 
     /**

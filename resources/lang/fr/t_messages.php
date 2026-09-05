@@ -102,8 +102,7 @@ Raison : :reason',
         'from' => 'Commandement de flotte',
         'subject' => 'Combat annulé',
         'body' => 'Le combat en :coordinates a été annulé : :cause.
-Vos flottes rentrent à leur base. Empreinte des faits abandonnés : :fingerprint',
-        'no_fingerprint' => 'aucune (le combat n\'avait pas encore été figé)',
+Vos flottes rentrent à leur base. Référence de l\'incident : :reference',
         'causes' => [
             'target_disappeared' => 'le corps visé n\'existe plus',
             'attacker_removed' => 'l\'attaquant s\'est retiré du jeu',

@@ -49,6 +49,9 @@ final class RefusedFleetNotice
         $lisibleDes = ReturnOrder::departureInstant($decidedAt, $mission);
 
         $canonique = [
+            // **Le destinataire est fige ici, avec le fait.** Un corps ou une flotte peut changer de
+            // mains entre la decision et la livraison ; l'avis appartient a qui l'a subie.
+            'recipient_id' => (int)$mission->user_id,
             'reason' => $reason->value,
             'target_body_id' => (int)$combat->target_planet_id,
             'galaxy' => (int)$combat->galaxy,
