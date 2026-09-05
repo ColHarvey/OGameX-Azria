@@ -720,7 +720,7 @@ class CombatLiveBroadcastTest extends FleetDispatchTestCase
     {
         $camps = [];
 
-        foreach (CombatPresentationEvent::query()->where('combat_instance_id', $combat->id)->orderBy('visible_at')->get() as $evenement) {
+        foreach (CombatPresentationEvent::query()->where('combat_instance_id', $combat->id)->oldest('visible_at')->get() as $evenement) {
             $camps[(string)$evenement->side] = true;
 
             if (count($camps) === 2) {

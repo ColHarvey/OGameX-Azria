@@ -14,6 +14,7 @@ use OGame\Combat\Enums\FlightLeg;
 use OGame\Combat\Enums\TargetScope;
 use OGame\Combat\Exceptions\MovementLocksOutdated;
 use OGame\Combat\Services\AccountCombatWithdrawal;
+use OGame\Combat\Services\FleetMovementGate;
 use OGame\Enums\AccountDeletionState;
 use OGame\GameObjects\Models\Calculations\CalculationType;
 use OGame\Models\BuildingQueue;
@@ -782,7 +783,17 @@ class PlayerService
 
         foreach ($gouverneesParLeCombat as $mission) {
             try {
-                $fleetMissionService->updateMission($mission);
+                if ($this->gatesItself($mission)) {
+                    $fleetMissionService->updateMission($mission);
+                } else {
+                    // **Par la porte, et par elle seule.** Une arrivee que la fermeture peut appliquer
+                    // elle-meme — un transport, un deploiement — n'est livree qu'une fois : la porte
+                    // attend la barriere que la fermeture tient, relit la mission sous verrou, et le
+                    // gestionnaire trouve `processed` deja pose.
+                    resolve(FleetMovementGate::class)->decideUnderLock($mission, static function (FleetMission $tenue) use ($fleetMissionService): void {
+                        $fleetMissionService->updateMission($tenue);
+                    });
+                }
             } catch (MovementLocksOutdated $perime) {
                 // **Un lien de cette mission a change plus vite que la porte ne le rattrape.** La
                 // porte a relache sa transaction et l'a dit au journal. Faire tomber la page serait
@@ -838,6 +849,21 @@ class PlayerService
             // to the fleet missions are reflected in the player/planet objects.
             $this->load($this->getId());
         }
+    }
+
+    /**
+     * Cette mission prend-elle la porte elle-meme a son traitement ?
+     *
+     * L'arrivee attaquante (ouvrir, rejoindre, se rattacher) et la Defense ACS a l'aller passent par
+     * `decideUnderLock()` dans leur propre traitement ; les faire entrer une seconde fois par la
+     * porte ne changerait rien mais doublerait la couche. Tout autre genre gouverne est conduit par
+     * le travailleur lui-meme.
+     */
+    private function gatesItself(FleetMission $mission): bool
+    {
+        $type = (int)$mission->mission_type;
+
+        return $mission->parent_id === null && ($type === 1 || $type === 5);
     }
 
     /**

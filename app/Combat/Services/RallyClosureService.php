@@ -16,10 +16,12 @@ use OGame\Combat\Admission\DefensiveRallyCandidate;
 use OGame\Combat\Admission\FoundingGroup;
 use OGame\Combat\Admission\FrozenAllianceMembership;
 use OGame\Combat\Admission\RallyGrouping;
+use OGame\Combat\Decisions\CombatSituation;
 use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\FleetDispositionKind;
+use OGame\Combat\Enums\FlightLeg;
 use OGame\Combat\Enums\SnapshotContribution;
 use OGame\Combat\Exceptions\ContradictorySnapshotInclusion;
 use OGame\Combat\Projection\SnapshotProjectionRegistry;
@@ -35,6 +37,7 @@ use OGame\Models\CombatSnapshotInclusion;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet;
 use OGame\Models\User;
+use OGame\Services\FleetMissionService;
 use RuntimeException;
 
 /**
@@ -201,6 +204,11 @@ final class RallyClosureService
         // duree, le rapport et le butin regle doivent venir du meme resultat. Si l'engagement
         // echoue, la transaction efface les participants avec lui : un combat sans bataille ne
         // s'ecrit pas.
+        //
+        // **Les effets admissibles encore en attente d'abord** : la bataille lit le stock et la
+        // garnison du corps ; ce qui appartient a la photographie doit y etre, quel que soit le
+        // retard du travailleur.
+        $this->applyPendingEligibleEffects($combat, $corps, $openedAt, $closedAt);
         $this->engagement->engage($combat, $closedAt);
 
         $combat->status = CombatState::Active;
@@ -431,6 +439,87 @@ final class RallyClosureService
      * meme comparaison. Un doublon devient alors soit un rejeu silencieux, soit une contradiction —
      * jamais une seconde ligne.
      */
+    /**
+     * Les effets admissibles encore en attente s'appliquent avant que la bataille se fige.
+     *
+     * ## La regle, et pourquoi elle ne peut pas dependre du travailleur
+     *
+     * `CausalOrderReconciler` la fixe : un effet appartient a la photographie si sa decision precede
+     * strictement l'ouverture, si son effet precede strictement la fermeture, et s'il n'est pas deja
+     * dans l'etat protege. Un transport parti avant l'ouverture et arrive dans la fenetre y appartient
+     * donc — que le travailleur des pages l'ait deja livre ou non. Lire le stock vivant sans rien
+     * appliquer faisait dependre le butin gele de l'ordre des processus : le bac MariaDB l'a montre,
+     * la cargaison n'entrait dans le butin que si le travailleur passait avant la fermeture.
+     *
+     * ## Ce qui est applique, et par qui
+     *
+     * Les arrivees aller encore non traitees vers ce corps dont le genre livre quelque chose au corps
+     * — cargaison ou flotte, d'apres `CombatSituation::possibleProjections()` : transport,
+     * deploiement —, parties strictement avant l'ouverture, arrivees strictement avant la fermeture.
+     * Chacune est verrouillee puis livree par son gestionnaire canonique, `updateMission()`, qui la
+     * relit et qui est idempotent par `processed` : le travailleur qui passe ensuite — par la porte,
+     * donc apres cette transaction — la trouve traitee. L'inclusion s'ecrit avec sa provenance, comme
+     * celle d'une flotte admise.
+     *
+     * ## Ce que cette methode ne fait pas encore, et qui est dit
+     *
+     * Un effet **inadmissible** deja livre par le travailleur — decide apres l'ouverture, arrive avant
+     * la fermeture — reste dans le stock que la bataille lit : l'en exclure demanderait la photographie
+     * de l'ouverture, qui n'existe pas encore. Les retours vers ce corps ne sont pas appliques ici.
+     */
+    private function applyPendingEligibleEffects(CombatInstance $combat, int $corps, int $openedAt, int $closedAt): void
+    {
+        $genres = [];
+        $apports = [];
+        foreach (CombatMissionKind::byMissionType() as $type => $genre) {
+            if ($genre->opensCombat() || $genre->reinforcesTheDefence()) {
+                continue;
+            }
+            $situation = new CombatSituation($genre, FlightLeg::Outbound, ActorKind::Player, CombatState::Rallying);
+            $livre = array_values(array_filter(
+                $situation->possibleProjections(),
+                static fn (SnapshotContribution $projection): bool => in_array($projection, [SnapshotContribution::DeliveredCargo, SnapshotContribution::DeliveredFleet], true)
+            ));
+            if ($livre === []) {
+                continue;
+            }
+            $genres[] = (int)$type;
+            $apports[(int)$type] = SnapshotContributionSet::of($livre);
+        }
+
+        if ($genres === []) {
+            return;
+        }
+
+        $enAttente = FleetMission::query()
+            ->where('planet_id_to', $corps)
+            ->whereNull('parent_id')
+            ->where('processed', 0)
+            ->whereIn('mission_type', $genres)
+            ->where('time_departure', '<', $openedAt)
+            ->where('time_arrival', '<', $closedAt)
+            ->orderBy('time_arrival')
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get();
+
+        if ($enAttente->isEmpty()) {
+            return;
+        }
+
+        $service = resolve(FleetMissionService::class);
+        $projection = $this->frozenProjectionOf($combat);
+        foreach ($enAttente as $mission) {
+            $service->updateMission($mission);
+            $this->includeOnce(
+                $combat,
+                CombatEventIdentity::forFleetArrival((int)$mission->id),
+                $apports[(int)$mission->mission_type],
+                $projection
+            );
+        }
+    }
+
     private function includeOnce(
         CombatInstance $combat,
         string $eventIdentity,
