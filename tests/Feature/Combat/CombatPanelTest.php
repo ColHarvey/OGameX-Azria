@@ -4,6 +4,7 @@ namespace Tests\Feature\Combat;
 
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Testing\TestResponse;
 use OGame\Combat\Presentation\CombatPresentationTimelineReader;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\CombatInstance;
@@ -95,8 +96,9 @@ class CombatPanelTest extends FleetDispatchTestCase
 
         $avant = $this->get('/ajax/fleet/eventlist/fetch');
         $avant->assertStatus(200);
-        $avant->assertSee(__('t_ingame.combat.role_target'));
-        $avant->assertSee(__('t_ingame.combat.no_losses_yet'));
+        $carteAvant = $this->cardOf($avant, $combat);
+        $this->assertStringContainsString(e(__('t_ingame.combat.role_target')), $carteAvant);
+        $this->assertStringContainsString(e(__('t_ingame.combat.no_losses_yet')), $carteAvant);
 
         // **A la fin de la premiere periode, la garnison a perdu quelque chose.**
         $fin = $debut + $premierePeriode;
@@ -106,8 +108,9 @@ class CombatPanelTest extends FleetDispatchTestCase
 
         $apres = $this->get('/ajax/fleet/eventlist/fetch');
         $apres->assertStatus(200);
-        $apres->assertDontSee(__('t_ingame.combat.no_losses_yet'));
-        $apres->assertSee(ObjectService::getUnitObjectByMachineName($visibles[0]->unit)->title);
+        $carteApres = $this->cardOf($apres, $combat);
+        $this->assertStringNotContainsString(e(__('t_ingame.combat.no_losses_yet')), $carteApres);
+        $this->assertStringContainsString(e(ObjectService::getUnitObjectByMachineName($visibles[0]->unit)->title), $carteApres);
     }
 
     /**
@@ -269,6 +272,33 @@ class CombatPanelTest extends FleetDispatchTestCase
 
         $this->get('/ajax/combat/panel')->assertRedirect('/login');
         $this->get('/ajax/combat/1/timeline')->assertRedirect('/login');
+    }
+
+    /**
+     * La carte de ce combat seul, dans le deroulant.
+     *
+     * Le proprietaire de la planete propre est partage par les essais d'un meme processus : sa page
+     * porte aussi les cartes des batailles que les essais voisins ont laissees. Une assertion sur
+     * la page entiere lisait « aucune perte » sur l'une pendant que l'autre montrait les siennes —
+     * l'echec intermittent du 5 septembre. On lit la carte, pas la page.
+     */
+    private function cardOf(TestResponse $reponse, CombatInstance $combat): string
+    {
+        $page = (string)$reponse->getContent();
+        $debut = strpos($page, 'id="combatRow-' . $combat->id . '"');
+        if ($debut === false) {
+            $this->fail("The dropdown carries no card for combat {$combat->id}.");
+        }
+        $details = strpos($page, 'id="combatDetails-' . $combat->id . '"', $debut);
+        if ($details === false) {
+            $this->fail("The dropdown carries no details for combat {$combat->id}.");
+        }
+        $fin = strpos($page, '</tr>', $details);
+        if ($fin === false) {
+            $this->fail("The details of combat {$combat->id} are not closed.");
+        }
+
+        return substr($page, $debut, $fin - $debut);
     }
 
     private function ownerOf(CombatInstance $combat): User
