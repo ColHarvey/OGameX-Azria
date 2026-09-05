@@ -110,21 +110,32 @@ trait RunsInParallelProcesses
     }
 
     /**
-     * Attend qu'une transaction de la base soit en attente d'un verrou — celle d'un enfant qui bute
-     * sur ce que le parent tient. Le fait est lu dans `information_schema.INNODB_TRX`, pas suppose.
+     * Attend qu'un autre processus soit en attente d'un verrou — l'enfant qui bute sur ce que le parent
+     * tient. Le fait est lu dans la base, pas suppose : sa requete `for update` reste visible dans
+     * `information_schema.PROCESSLIST` tant qu'elle attend, et sa transaction se dit `LOCK WAIT` dans
+     * `information_schema.INNODB_TRX`. L'un ou l'autre suffit ; un echec dit ce que la base montrait.
      */
     protected function waitUntilAProcessWaitsOnALock(int $timeoutMs = 15_000): void
     {
         $limite = microtime(true) + $timeoutMs / 1000;
         do {
-            $enAttente = DB::selectOne("SELECT COUNT(*) AS n FROM information_schema.INNODB_TRX WHERE trx_state = 'LOCK WAIT'");
-            if ($enAttente !== null && (int)$enAttente->n > 0) {
+            $requete = DB::selectOne("SELECT COUNT(*) AS n FROM information_schema.PROCESSLIST WHERE ID <> CONNECTION_ID() AND INFO LIKE '%for update%'");
+            $transaction = DB::selectOne("SELECT COUNT(*) AS n FROM information_schema.INNODB_TRX WHERE trx_state = 'LOCK WAIT'");
+            if (($requete !== null && (int)$requete->n > 0) || ($transaction !== null && (int)$transaction->n > 0)) {
                 return;
             }
             usleep(20_000);
         } while (microtime(true) < $limite);
 
-        $this->fail('No process came to wait on the lock: the scenario would prove nothing.');
+        $vu = [];
+        foreach (DB::select('SELECT ID, COMMAND, TIME, STATE, LEFT(INFO, 120) AS INFO FROM information_schema.PROCESSLIST WHERE ID <> CONNECTION_ID()') as $ligne) {
+            $vu[] = implode(' | ', [(string)$ligne->ID, (string)$ligne->COMMAND, (string)$ligne->TIME, (string)$ligne->STATE, (string)$ligne->INFO]);
+        }
+        foreach (DB::select('SELECT trx_state, LEFT(trx_query, 120) AS trx_query FROM information_schema.INNODB_TRX') as $ligne) {
+            $vu[] = 'trx ' . (string)$ligne->trx_state . ' | ' . (string)$ligne->trx_query;
+        }
+
+        $this->fail("No process came to wait on the lock: the scenario would prove nothing. Seen:\n" . implode("\n", $vu));
     }
 
     /**

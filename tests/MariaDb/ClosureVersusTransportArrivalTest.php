@@ -5,6 +5,7 @@ namespace Tests\MariaDb;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Replay\BattleResultCodec;
 use OGame\Combat\Services\RallyClosureService;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\CombatInstance;
@@ -26,10 +27,12 @@ use Tests\FleetDispatchTestCase;
  * ## Ce que la matrice decide, et ce que la base doit tenir
  *
  * Un transport qui arrive sur un corps en ralliement livre normalement (`completeNormally`) ; la
- * fermeture fige le potentiel de butin sur le stock qu'elle lit. Deux issues sont donc legitimes :
- * la cargaison livree avant la fermeture entre dans le potentiel, livree apres elle n'y entre pas.
- * Ce qui n'est jamais legitime : une cargaison livree deux fois ou perdue, un transport sans
- * retour, un potentiel qui ne correspond a aucun des deux stocks, une fermeture qui echoue.
+ * fermeture calcule et fige la bataille — butin compris — sur le stock qu'elle lit. Deux issues sont
+ * donc legitimes : la cargaison livree avant la fermeture entre dans le butin gele, livree apres
+ * elle n'y entre pas. Ce qui n'est jamais legitime : une cargaison livree deux fois ou perdue, un
+ * transport sans retour, un butin gele qui ne correspond a aucun des deux stocks, une fermeture
+ * qui echoue. Les colonnes du potentiel, elles, ne s'ecrivent qu'au reglement : ce n'est pas la
+ * qu'on lit ce que la fermeture a vu, c'est dans le resultat de bataille gele.
  *
  * Les deux ordres sont forces par une attente sur un fait de la base (le statut du combat, le
  * drapeau `processed` du transport) ; le troisieme scenario laisse les deux processus partir
@@ -89,7 +92,7 @@ final class ClosureVersusTransportArrivalTest extends FleetDispatchTestCase
 
         $this->assertBothHappened($issues);
         $this->assertConservation($combat, $transport, $cible);
-        $this->assertSame(self::frozenShareOf($combat, self::STOCK_METAL), $this->frozenMetalOf($combat), 'A cargo delivered after the closure entered the frozen loot.');
+        $this->assertSame(self::frozenShareOf($combat, self::STOCK_METAL), $this->frozenMetalOf($combat), 'A cargo delivered after the closure entered the loot the closure froze.');
     }
 
     public function testACargoDeliveredBeforeTheClosureEntersTheFrozenLoot(): void
@@ -159,24 +162,24 @@ final class ClosureVersusTransportArrivalTest extends FleetDispatchTestCase
 
         $combat->refresh();
         $this->assertSame(CombatState::Active, $combat->status, 'The rally did not end up closed.');
-        $this->assertNotNull($combat->potential_loot_frozen_at, 'The closure froze no loot potential.');
+        $this->assertNotNull($combat->battle_result, 'The closure froze no battle result.');
     }
 
     private function frozenMetalOf(CombatInstance $combat): int
     {
         $combat->refresh();
 
-        return (int)$combat->potential_loot_metal;
+        return (int)BattleResultCodec::fromStorage($combat->battle_result)->loot->metal->get();
     }
 
     /**
-     * La part du stock que la fermeture fige, au taux qu'elle a ecrit — lu, jamais suppose.
+     * La part du stock que la fermeture fige, au taux que le resultat gele porte — lu, jamais suppose.
      */
     private static function frozenShareOf(CombatInstance $combat, int $stock): int
     {
         $combat->refresh();
 
-        return intdiv($stock * (int)$combat->potential_loot_rate_in_basis_points, 10_000);
+        return intdiv($stock * BattleResultCodec::fromStorage($combat->battle_result)->lootRateInBasisPoints, 10_000);
     }
 
     /**
