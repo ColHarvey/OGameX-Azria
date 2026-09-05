@@ -1033,7 +1033,8 @@ class CombatCancellationTest extends FleetDispatchTestCase
         DB::table('combat_instances')->where('id', $combat->id)->update(['status' => CombatState::Resolved->value]);
 
         $this->assertSame(Command::SUCCESS, Artisan::call('ogamex:comptes:reprendre-suppressions', ['--compte' => $compte]));
-        $this->assertNull(DB::table('users')->where('id', $compte)->first(), 'The deletion did not resume once the combat was over.');
+        $reste = DB::table('users')->where('id', $compte)->first();
+        $this->assertNull($reste, 'The deletion did not resume once the combat was over: ' . ($reste->deletion_deferred_reason ?? 'no deferred reason recorded') . '.');
 
         $dit = Artisan::output();
         $this->assertStringContainsString('a ete supprime', $dit, 'The command did not report the deletion it performed.');
@@ -1145,7 +1146,8 @@ class CombatCancellationTest extends FleetDispatchTestCase
 
         resolve(PlayerServiceFactory::class)->make($compte, true)->delete();
 
-        $this->assertNull(DB::table('users')->where('id', $compte)->first(), 'The account was not deleted.');
+        $reste = DB::table('users')->where('id', $compte)->first();
+        $this->assertNull($reste, 'The account was not deleted: ' . ($reste->deletion_deferred_reason ?? 'no deferred reason recorded') . '.');
         $this->assertNull(FleetMission::query()->find($orpheline->id), 'A mission with no body links outlived its owner.');
     }
 

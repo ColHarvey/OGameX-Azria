@@ -262,4 +262,5 @@ jobs:
           path: |
             storage/logs/junit-mariadb.xml
             storage/logs/console-mariadb.txt
+            storage/logs/laravel*.log
           if-no-files-found: warn
