@@ -1694,6 +1694,21 @@ Taux d\'évasion de la flotte amélioré',
      * Le systeme doit pouvoir etre joue deliberement, pas seulement subi : le joueur voit
      * sa jauge, son plafond reel, ce qui l'a fait monter et quand elle redescendra.
      */
+    'combat' => [
+        'panel_title' => 'Combats en cours',
+        'target' => 'Cible',
+        'role_attacker' => 'Vous attaquez',
+        'role_target' => 'Votre planète est attaquée',
+        'role_reinforcement' => 'Vous renforcez la défense',
+        'status_rallying' => 'Ralliement en cours',
+        'status_active' => 'Bataille en cours',
+        'status_resolving' => 'Bilan en cours',
+        'closes_in' => 'Fermeture du ralliement dans',
+        'settles_in' => 'Fin de la bataille dans',
+        'losses_title' => 'Vos pertes',
+        'no_losses_yet' => 'Aucune perte constatée pour le moment.',
+        'loss_line' => ':amount × :unit',
+    ],
     'npc' => [
         'threat_title' => 'Taux de provocation',
         'threat_level' => 'Niveau',

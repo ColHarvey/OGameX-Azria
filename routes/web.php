@@ -13,6 +13,7 @@ use OGame\Http\Controllers\BuddiesController;
 use OGame\Http\Controllers\ChangeNickController;
 use OGame\Http\Controllers\CharacterClassController;
 use OGame\Http\Controllers\ChatController;
+use OGame\Http\Controllers\CombatController;
 use OGame\Http\Controllers\DefenseController;
 use OGame\Http\Controllers\EventsController;
 use OGame\Http\Controllers\FacilitiesController;
@@ -170,6 +171,11 @@ Route::middleware(['auth', 'banned', 'globalgame', 'locale', 'firstlogin'])->gro
     Route::get('/ajax/messages', [MessagesController::class, 'ajaxGetTabContents'])->name('messages.ajax.gettabcontents');
     // For handling individual message AJAX requests by ID
     Route::get('/ajax/messages/{messageId}', [MessagesController::class, 'ajaxGetMessage'])->name('messages.ajax.getmessage');
+
+    // Combats durables : le panneau de la vue generale et le fil des pertes visibles. Le joueur
+    // et l'heure viennent du serveur ; aucun parametre du navigateur ne les choisit.
+    Route::get('/ajax/combat/panel', [CombatController::class, 'panel'])->name('combat.panel');
+    Route::get('/ajax/combat/{combatId}/timeline', [CombatController::class, 'timeline'])->name('combat.timeline');
 
     // Misc
     Route::get('/merchant', [MerchantController::class, 'index'])->name('merchant.index');

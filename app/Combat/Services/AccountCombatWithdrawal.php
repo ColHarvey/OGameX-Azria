@@ -181,33 +181,20 @@ final class AccountCombatWithdrawal
     }
 
     /**
-     * Les combats non finaux ou ce compte figure, par identifiant croissant.
+     * Les combats non finaux ou ce compte est partie.
+     *
+     * La lecture vit dans `CombatsInvolvingPlayer`, partagee avec la presentation : le retrait et
+     * les pages doivent voir exactement les memes combats, sinon un joueur serait retenu par un
+     * combat qu'aucune page ne lui montre.
      *
      * @param array<int, int> $planetIds
      * @return Collection<int, CombatInstance>
      */
     private function combatsStillRunningFor(int $userId, array $planetIds): Collection
     {
-        return CombatInstance::query()
-            ->whereIn('status', array_map(static fn (CombatState $etat): string => $etat->value, self::statesStillRunning()))
-            ->where(function ($requete) use ($userId, $planetIds): void {
-                // **Les deux liens, pas seulement l'inscription.** Avant la fermeture personne n'est
-                // inscrit : un combat en ralliement ouvert par ce compte ne serait trouve par
-                // aucune des deux premieres conditions.
-                $requete
-                    ->whereIn('target_planet_id', $planetIds)
-                    ->orWhereIn('id', CombatParticipant::query()->select('combat_instance_id')->where('player_id', $userId))
-                    ->orWhereIn('id', FleetMission::query()->select('combat_instance_id')->whereNotNull('combat_instance_id')->where('user_id', $userId));
-            })
-            ->orderBy('id')
-            ->get();
+        return CombatsInvolvingPlayer::stillRunning($userId, $planetIds);
     }
 
-    /**
-     * La cause qui s'applique a ce combat, ou `null` si le compte n'y est que renfort defensif.
-     *
-     * @param array<int, int> $planetIds
-     */
     private function causeFor(CombatInstance $combat, int $userId, array $planetIds): CombatCancellationCause|null
     {
         if (in_array((int)$combat->target_planet_id, $planetIds, true)) {
@@ -238,13 +225,5 @@ final class AccountCombatWithdrawal
         }
 
         return null;
-    }
-
-    /**
-     * @return array<int, CombatState>
-     */
-    private static function statesStillRunning(): array
-    {
-        return array_values(array_filter(CombatState::cases(), static fn (CombatState $etat): bool => !$etat->isFinal()));
     }
 }

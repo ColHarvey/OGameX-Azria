@@ -6,6 +6,7 @@ use Cache;
 use Exception;
 use Illuminate\Support\Facades\Date;
 use Illuminate\View\View;
+use OGame\Combat\Presentation\CombatPanelService;
 use OGame\Facades\AppUtil;
 use OGame\Models\Highscore;
 use OGame\Services\BuildingQueueService;
@@ -112,6 +113,7 @@ class OverviewController extends OGameController
             // qu'il ouvre a chaque visite, donc la seule ou l'information le touche
             // avant de lui servir.
             'npcThreat' => resolve(NpcThreatPanelService::class)->forPlayer($player),
+            'combatPanel' => resolve(CombatPanelService::class)->forPlayer($player, (int)Date::now()->timestamp),
             'header_filename' => $planet->isMoon() ? 'moon/' . $planet->getPlanetImageType() : $planet->getPlanetBiomeType(),
             'planet_name' => $planet->getPlanetName(),
             'planet_diameter' => $planet->getPlanetDiameter(),

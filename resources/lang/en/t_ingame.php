@@ -2033,6 +2033,21 @@ Improved fleet escape rate',
      * The system must be playable on purpose, not merely suffered: the player sees their
      * gauge, its real ceiling, what pushed it up and when it will fall back.
      */
+    'combat' => [
+        'panel_title' => 'Ongoing combats',
+        'target' => 'Target',
+        'role_attacker' => 'You are attacking',
+        'role_target' => 'Your planet is under attack',
+        'role_reinforcement' => 'You are reinforcing the defence',
+        'status_rallying' => 'Rally in progress',
+        'status_active' => 'Battle in progress',
+        'status_resolving' => 'Settlement in progress',
+        'closes_in' => 'Rally closes in',
+        'settles_in' => 'Battle ends in',
+        'losses_title' => 'Your losses',
+        'no_losses_yet' => 'No losses observed so far.',
+        'loss_line' => ':amount × :unit',
+    ],
     'npc' => [
         'threat_title'            => 'Provocation level',
         'threat_level'            => 'Level',

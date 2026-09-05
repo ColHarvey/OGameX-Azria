@@ -121,6 +121,17 @@ class CombatParticipantKey
     }
 
     /**
+     * La clef designe-t-elle un corps — la garnison — plutot qu'une flotte ?
+     *
+     * Le lecteur du panneau s'en sert pour dire le role d'un defenseur inscrit : le proprietaire
+     * du corps vise, ou un renfort venu d'ailleurs. La forme est celle que `forPlanet()` ecrit.
+     */
+    public static function isBody(string $key): bool
+    {
+        return str_starts_with($key, 'planet:');
+    }
+
+    /**
      * Dit si une chaine relue est une cle que cette classe aurait pu produire.
      *
      * Une porte de confiance — la relecture d'un resultat gele, par exemple — recoit des clefs
