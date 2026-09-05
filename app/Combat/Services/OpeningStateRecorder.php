@@ -14,7 +14,9 @@ use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\CombatInstance;
 use OGame\Models\Planet;
 use OGame\Models\Resources;
+use OGame\Services\CharacterClassService;
 use OGame\Services\ObjectService;
+use OGame\Services\PlanetService;
 use RuntimeException;
 
 /**
@@ -42,15 +44,22 @@ use RuntimeException;
  * et le moteur se battra contre cet effectif : jamais contre ce que le corps porte au moment ou la
  * fermeture passe, qui dependrait de ce que le monde a fait pendant le ralliement.
  *
- * ## Ce qui n'est pas encore capture, et qui est dit
+ * ## Le defenseur, capture aussi
  *
- * Les technologies de combat du proprietaire, son bonus de classe et le niveau du chantier spatial
- * restent lus vivants a la fermeture. Ce document porte une version pour qu'ils s'y ajoutent sans
- * casser la relecture des combats ouverts sous celle-ci.
+ * Les niveaux d'armes, de boucliers et de blindage du proprietaire, son bonus de classe au combat et
+ * le niveau du chantier spatial : les quatre faits que la bataille consomme de lui. Une recherche
+ * achevee pendant le ralliement sur une decision **posterieure** a l'ouverture ne renforce donc plus
+ * une defense deja engagee.
+ *
+ * ## Ce qui reste lu vivant, et qui est dit
+ *
+ * Les reglages d'univers qui entrent dans le resultat sont geles a la **cloture**, par
+ * `FrozenCombatApplicationContext`, et non a l'ouverture : un changement d'administration pendant le
+ * seul ralliement les atteindrait encore. La fenetre est courte et l'ecart est dit, pas ignore.
  */
 final class OpeningStateRecorder
 {
-    public const int VERSION = 2;
+    public const int VERSION = 3;
 
     public function __construct(
         private CausalEventReader $reader = new CausalEventReader(),
@@ -97,6 +106,7 @@ final class OpeningStateRecorder
                 'deuterium' => ResourceBoundary::wholeUnitsOfLivingStock($ressources->deuterium->get(), 'deuterium', 'etat_d_ouverture')->units,
             ],
             'units' => DefenderFleet::fromPlanet($corps)->units->toArray(),
+            'defender' => self::defenderFactsOf($corps),
             'provenance' => $recus,
         ];
 
@@ -150,6 +160,43 @@ final class OpeningStateRecorder
     }
 
     /**
+     * Les faits du defenseur a l'ouverture, avant tout effet admissible.
+     */
+    public static function openingDefenderOf(CombatInstance $combat): PhotographedDefender
+    {
+        $document = self::documentOf($combat);
+        $faits = $document['defender'] ?? null;
+
+        if (!is_array($faits)) {
+            throw new MissingOpeningState('L etat d ouverture du combat ' . $combat->id . ' ne porte pas les faits du defenseur : il a ete ouvert sous une version anterieure.');
+        }
+
+        return PhotographedDefender::fromFrozenFacts($faits);
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    private static function defenderFactsOf(PlanetService $corps): array
+    {
+        $proprietaire = $corps->getPlayer();
+        if ($proprietaire === null) {
+            throw new RuntimeException('Le corps ' . $corps->getPlanetId() . ' n a pas de proprietaire a l ouverture du combat.');
+        }
+
+        // Le chantier spatial d'une lune est celui de sa planete : c'est la que le moteur le lit.
+        $chantier = $corps->isMoon() ? $corps->planet() : $corps;
+
+        return (new PhotographedDefender(
+            $proprietaire->getResearchLevel('weapon_technology'),
+            $proprietaire->getResearchLevel('shielding_technology'),
+            $proprietaire->getResearchLevel('armor_technology'),
+            resolve(CharacterClassService::class)->getAdditionalCombatResearchLevels($proprietaire->getUser()),
+            $chantier->getObjectLevel('space_dock'),
+        ))->toFrozenFacts();
+    }
+
+    /**
      * L'effectif du corps a l'ouverture : la garnison avant tout effet admissible.
      */
     public static function openingUnitsOf(CombatInstance $combat): UnitCollection
@@ -165,8 +212,9 @@ final class OpeningStateRecorder
             throw new MissingOpeningState('L etat d ouverture du combat ' . $combat->id . ' ne porte pas d effectif : il a ete ouvert sous une version anterieure, et sa garnison ne peut pas etre reconstituee.');
         }
 
-        foreach ($photographie as $nom => $quantite) {
-            $quantite = (int)$quantite;
+        foreach (array_keys($photographie) as $nom) {
+            // Meme exigence qu'aux autres portes : une quantite est un entier, ou le document est abime.
+            $quantite = FrozenFact::int($photographie, (string)$nom);
             if ($quantite > 0) {
                 $unites->addUnit(ObjectService::getUnitObjectByMachineName((string)$nom), $quantite);
             }

@@ -103,6 +103,7 @@ final class ClosureReconciliation
             $photographie,
             $this->protectedResourcesOf($combat, $photographie->inTheSnapshot()),
             $this->photographedGarrisonOf($combat, $photographie->inTheSnapshot()),
+            $this->photographedDefenderOf($combat, $photographie->inTheSnapshot()),
             $appliques,
             $this->inclusionsOf($photographie->inTheSnapshot()),
         );
@@ -212,6 +213,43 @@ final class ClosureReconciliation
         }
 
         return $effectif;
+    }
+
+    /**
+     * Les quatre faits que la bataille prend au defenseur, releves par les seuls effets admissibles.
+     *
+     * Une recherche de combat achevee dans la fenetre, engagee avant l'ouverture, porte son niveau ;
+     * un chantier spatial acheve de meme porte le sien. Une recherche engagee **apres** l'ouverture ne
+     * releve rien, meme achevee avant la fermeture, meme deja appliquee par le monde : elle n'appartient
+     * pas a ce combat. Comme pour les files d'unites, l'effet est compte sans etre applique.
+     *
+     * @param array<int, ReconciledEvent> $dansLaPhotographie
+     */
+    private function photographedDefenderOf(CombatInstance $combat, array $dansLaPhotographie): PhotographedDefender
+    {
+        $defenseur = OpeningStateRecorder::openingDefenderOf($combat);
+
+        foreach ($dansLaPhotographie as $reconcilie) {
+            if ($reconcilie->admission !== CausalAdmission::AppliedBeforeSnapshot) {
+                continue;
+            }
+
+            $recherche = $this->reader->researchOf($reconcilie->event->identity);
+            if ($recherche !== null) {
+                $defenseur = $defenseur->withResearchLevel(
+                    ObjectService::getResearchObjectById($recherche->objectId)->machine_name,
+                    $recherche->levelTarget
+                );
+                continue;
+            }
+
+            $batiment = $this->reader->buildingQueueOf($reconcilie->event->identity);
+            if ($batiment !== null && ObjectService::getObjectById($batiment->objectId)->machine_name === 'space_dock') {
+                $defenseur = $defenseur->withSpaceDockLevel($batiment->levelTarget);
+            }
+        }
+
+        return $defenseur;
     }
 
     /**

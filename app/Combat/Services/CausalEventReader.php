@@ -61,6 +61,12 @@ final class CausalEventReader
     /** @var array<string, QueuedCompletion> */
     private array $files = [];
 
+    /** @var array<string, QueuedCompletion> */
+    private array $batiments = [];
+
+    /** @var array<string, QueuedCompletion> */
+    private array $recherches = [];
+
     /**
      * Tous les evenements dont l'effet tombe **au plus tard** au curseur, sous verrou.
      *
@@ -83,6 +89,8 @@ final class CausalEventReader
         $evenements = [];
         $this->missions = [];
         $this->files = [];
+        $this->batiments = [];
+        $this->recherches = [];
 
         $missions = FleetMission::query()
             ->where('planet_id_to', $body)
@@ -106,11 +114,15 @@ final class CausalEventReader
         // Un batiment n'apporte rien a la photographie du combat, mais la source est lue et classee :
         // une source qu'on n'interroge pas produit une tranche plausible et incomplete.
         foreach (self::completionsDue('building_queues', [$body], $cursorAt) as $file) {
-            $evenements[] = self::queueEvent(CombatEventIdentity::forBuildingQueueCompletion($file->id), self::BUILDING_QUEUE_KIND, $file, $body, $order, CombatEventType::QueueCompletion, []);
+            $evenement = self::queueEvent(CombatEventIdentity::forBuildingQueueCompletion($file->id), self::BUILDING_QUEUE_KIND, $file, $body, $order, CombatEventType::QueueCompletion, [SnapshotContribution::TargetDefences]);
+            $this->batiments[$evenement->identity] = $file;
+            $evenements[] = $evenement;
         }
 
         foreach (self::completionsDue('research_queues', self::bodiesOf($ownerId), $cursorAt) as $file) {
-            $evenements[] = self::queueEvent(CombatEventIdentity::forResearchCompletion($file->id), self::RESEARCH_KIND, $file, $body, $order, CombatEventType::ResearchCompletion, [SnapshotContribution::CombatTechnology]);
+            $evenement = self::queueEvent(CombatEventIdentity::forResearchCompletion($file->id), self::RESEARCH_KIND, $file, $body, $order, CombatEventType::ResearchCompletion, [SnapshotContribution::CombatTechnology]);
+            $this->recherches[$evenement->identity] = $file;
+            $evenements[] = $evenement;
         }
 
         return $evenements;
@@ -190,6 +202,24 @@ final class CausalEventReader
     public function unitQueueOf(string $identity): QueuedCompletion|null
     {
         return $this->files[$identity] ?? null;
+    }
+
+    /**
+     * Le batiment qu'un evenement designe. Un seul compte pour la bataille — le chantier spatial,
+     * qui decide la part d'epave recuperable — mais tous sont lus : la completude de la tranche ne
+     * se decide pas au cas par cas.
+     */
+    public function buildingQueueOf(string $identity): QueuedCompletion|null
+    {
+        return $this->batiments[$identity] ?? null;
+    }
+
+    /**
+     * La recherche qu'un evenement designe, telle qu'elle a ete lue sous verrou.
+     */
+    public function researchOf(string $identity): QueuedCompletion|null
+    {
+        return $this->recherches[$identity] ?? null;
     }
 
     public function fleetArrivalEvent(FleetMission $mission, CausalEventOrder $order, int $openerMissionId): CausalEvent

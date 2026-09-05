@@ -27,6 +27,7 @@ final readonly class QueuedCompletion
         public bool $alreadyApplied,
         public int $objectId = 0,
         public int $amount = 0,
+        public int $levelTarget = 0,
     ) {
     }
 
@@ -51,6 +52,8 @@ final readonly class QueuedCompletion
             // Une file d'unites produit une quantite ; une file de batiments ou de recherche produit
             // un niveau, et n'ajoute rien a l'effectif. Le champ vaut alors zero, et personne ne le lit.
             (int)($ligne['object_amount'] ?? 0),
+            // Une recherche et un batiment atteignent un niveau ; une file d'unites n'en a pas.
+            (int)($ligne['object_level_target'] ?? 0),
         );
     }
 }

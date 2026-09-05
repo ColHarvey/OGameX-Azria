@@ -8,6 +8,7 @@ use OGame\Combat\Allocation\LootAllocator;
 use OGame\Combat\Allocation\LootAllocatorRegistry;
 use OGame\Combat\Exceptions\IncoherentRoundAttribution;
 use OGame\Combat\Policies\CargoWeightedV1;
+use OGame\Combat\Services\PhotographedDefender;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\LootContext;
 use OGame\Combat\Support\ResourceNormalizationDiagnostics;
@@ -157,6 +158,23 @@ abstract class BattleEngine
     /**
      * Configure whether attackers withdraw without a fight when the defender flees.
      */
+    /**
+     * Les faits que ce combat a photographies du defenseur.
+     *
+     * Un combat durable les fixe a son ouverture et ne les relit jamais : une recherche achevee
+     * pendant le ralliement sur une decision posterieure ne renforce pas une defense deja engagee.
+     * Un combat instantane n'a pas de fenetre — rien ne se passe entre sa decision et son effet — et
+     * lit le joueur, comme il l'a toujours fait.
+     */
+    protected PhotographedDefender|null $photographedDefender = null;
+
+    public function withPhotographedDefender(PhotographedDefender $defender): self
+    {
+        $this->photographedDefender = $defender;
+
+        return $this;
+    }
+
     public function setRetreatAfterDefenderRetreat(bool $retreatAfterDefenderRetreat): self
     {
         $this->retreatAfterDefenderRetreat = $retreatAfterDefenderRetreat;
@@ -222,14 +240,15 @@ abstract class BattleEngine
         if ($defenderPlayer === null) {
             throw new RuntimeException('Battle defender planet has no owner.');
         }
-        $defenderWeaponBase = $defenderPlayer->getResearchLevel('weapon_technology');
-        $defenderShieldBase = $defenderPlayer->getResearchLevel('shielding_technology');
-        $defenderArmorBase = $defenderPlayer->getResearchLevel('armor_technology');
+        $photographie = $this->photographedDefender;
+        $defenderWeaponBase = $photographie !== null ? $photographie->weaponLevel : $defenderPlayer->getResearchLevel('weapon_technology');
+        $defenderShieldBase = $photographie !== null ? $photographie->shieldLevel : $defenderPlayer->getResearchLevel('shielding_technology');
+        $defenderArmorBase = $photographie !== null ? $photographie->armorLevel : $defenderPlayer->getResearchLevel('armor_technology');
 
         // Apply General class combat research bonus (+2 levels)
         $characterClassService = app(CharacterClassService::class);
         $attackerCombatBonus = $characterClassService->getAdditionalCombatResearchLevels($attackerPlayer->getUser());
-        $defenderCombatBonus = $characterClassService->getAdditionalCombatResearchLevels($defenderPlayer->getUser());
+        $defenderCombatBonus = $photographie !== null ? $photographie->classCombatBonus : $characterClassService->getAdditionalCombatResearchLevels($defenderPlayer->getUser());
 
         $result->attackerWeaponLevel = $attackerWeaponBase + $attackerCombatBonus;
         $result->attackerShieldLevel = $attackerShieldBase + $attackerCombatBonus;
@@ -973,7 +992,7 @@ abstract class BattleEngine
     protected function calculateWreckField(UnitCollection $defenderUnitsLost, UnitCollection $defenderUnitsStart): array
     {
         $spaceDockPlanet = $this->defenderPlanet->isMoon() ? $this->defenderPlanet->planet() : $this->defenderPlanet;
-        $spaceDockLevel = max(1, $spaceDockPlanet->getObjectLevel('space_dock'));
+        $spaceDockLevel = max(1, $this->photographedDefender !== null ? $this->photographedDefender->spaceDockLevel : $spaceDockPlanet->getObjectLevel('space_dock'));
         $spaceDockPlayer = $spaceDockPlanet->getPlayer();
         if ($spaceDockPlayer === null) {
             throw new RuntimeException('Wreck field calculation planet has no owner.');

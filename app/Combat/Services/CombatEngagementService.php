@@ -73,7 +73,7 @@ final class CombatEngagementService
      * @param CombatInstance $combat Sous verrou, ses participants deja inscrits.
      * @param int $startsAt L'echeance du ralliement : le combat commence la, et sa fin se compte de la.
      */
-    public function engage(CombatInstance $combat, int $startsAt, Resources|null $protectedResources = null, UnitCollection|null $photographedGarrison = null): CombatEngagement
+    public function engage(CombatInstance $combat, int $startsAt, Resources|null $protectedResources = null, UnitCollection|null $photographedGarrison = null, PhotographedDefender|null $photographedDefender = null): CombatEngagement
     {
         // **Un combat durable ne se calcule jamais sur le stock vivant.** Le moteur retombe sur le
         // corps quand le contexte ne porte pas de reserve protegee — c'est le chemin instantane, qui
@@ -87,8 +87,8 @@ final class CombatEngagementService
 
         // Meme raison pour l'effectif : une garnison relue vivante ferait combattre ce que le monde a
         // construit pendant le ralliement.
-        if ($photographedGarrison === null) {
-            throw new MissingOpeningState('Le combat ' . $combat->id . ' s engage sans garnison photographiee : sa photographie n a pas ete construite.');
+        if ($photographedGarrison === null || $photographedDefender === null) {
+            throw new MissingOpeningState('Le combat ' . $combat->id . ' s engage sans garnison ni faits de defenseur photographies : sa photographie n a pas ete construite.');
         }
 
         // **Un combat deja engage garde son resultat.** Une cloture rejouee — un travail relivre,
@@ -136,6 +136,7 @@ final class CombatEngagementService
             $lootContext
         );
         $moteur->setRetreatAfterDefenderRetreat((bool)$effectif->initiator->retreat_after_defender_retreat);
+        $moteur->withPhotographedDefender($photographedDefender);
 
         $resultat = $moteur->simulateBattle();
         $resultat->attackerPlanetId = (int)$effectif->initiator->planet_id_from;

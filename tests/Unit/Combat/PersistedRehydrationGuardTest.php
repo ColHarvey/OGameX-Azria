@@ -76,6 +76,10 @@ class PersistedRehydrationGuardTest extends TestCase
             'tests/Unit/Combat/BattleResultCodecTest.php',
             'testAnIdentityWithANumericStringCombatIsRefused',
         ],
+        'Services/PhotographedDefender::fromFrozenFacts' => [
+            'tests/Unit/Combat/PhotographedDefenderFactsTest.php',
+            'testANumericStringLevelIsRefused',
+        ],
         'Support/FrozenCombatVersionSet::fromInstance' => [
             'tests/Unit/Combat/FrozenCombatVersionSetTest.php',
             'testAnInstanceWithAMissingVersionIsRefused',

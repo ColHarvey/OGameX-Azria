@@ -207,7 +207,7 @@ final class RallyClosureService
         // appliques, ceux qui y sont deja sont reconnus a leur provenance, et la reserve protegee
         // qui en resulte est celle contre laquelle la bataille plafonne son butin.
         $photographie = $this->reconcileTheSnapshot($combat, $corps, $openedAt, $closedAt);
-        $this->engagement->engage($combat, $closedAt, $photographie->protectedResources, $photographie->photographedGarrison);
+        $this->engagement->engage($combat, $closedAt, $photographie->protectedResources, $photographie->photographedGarrison, $photographie->photographedDefender);
 
         $combat->status = CombatState::Active;
         $combat->fleets_admitted = $this->countFleets($cotesAttaquants)
