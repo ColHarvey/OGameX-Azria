@@ -2,9 +2,15 @@
 
 namespace OGame\Combat\Presentation;
 
+use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Events\CombatLossesPublished;
+use OGame\Events\CombatStateChanged;
+use OGame\Models\CombatInstance;
 use OGame\Models\CombatParticipant;
 use OGame\Models\CombatPresentationEvent;
+use OGame\Models\FleetMission;
+use OGame\Models\Planet;
 use OGame\Services\ObjectService;
 use Throwable;
 
@@ -41,6 +47,14 @@ use Throwable;
  * ecrit a la cloture, la resolution economique est terminee depuis longtemps —, et la marque est une
  * ecriture d'une ligne, posee apres. Tenir un verrou de reglement pendant un aller-retour reseau
  * ferait attendre une bataille sur la disponibilite d'un serveur de diffusion.
+ *
+ * ## Le debut et la fin s'annoncent aussi, meme sans aucune perte
+ *
+ * Un canal qui ne porterait que des pertes laisserait le premier combat — et le rapport, a la
+ * fin — attendre le rafraichissement de secours. `publishStateChanges()` compare l'etat de chaque
+ * bataille au dernier etat annonce (`broadcast_status`) et envoie la difference a **toutes** les
+ * parties. La meme garantie s'applique : au moins une fois, marque posee apres l'envoi ; une annonce
+ * d'etat repetee est sans effet, le navigateur ne fait que relire sa carte.
  *
  * ## A qui, et quoi
  *
@@ -118,6 +132,94 @@ final class CombatPresentationBroadcaster
         }
 
         return $envoyees;
+    }
+
+    /**
+     * Annonce les batailles dont l'etat a change depuis la derniere annonce. Rend le nombre
+     * d'annonces envoyees.
+     */
+    public function publishStateChanges(int $now, int $batchSize = 200): int
+    {
+        $batailles = CombatInstance::query()
+            ->where(function ($requete): void {
+                $requete->whereNull('broadcast_status')->orWhereColumn('broadcast_status', '!=', 'status');
+            })
+            ->orderBy('id')
+            ->limit($batchSize)
+            ->get();
+
+        $annonces = 0;
+
+        foreach ($batailles as $bataille) {
+            $etat = $bataille->status;
+            $rapport = $etat === CombatState::Resolved && $bataille->battle_report_id !== null;
+            $libelle = __('t_ingame.combat.status_' . $etat->value);
+
+            try {
+                foreach ($this->partiesOf($bataille) as $joueur) {
+                    event(new CombatStateChanged($joueur, (int)$bataille->id, $etat->value, $libelle, $rapport));
+                    $annonces++;
+                }
+            } catch (Throwable) {
+                // Une partie n'a pas ete jointe : l'etat reste a annoncer, et le passage suivant
+                // le renverra a toutes — une annonce repetee ne coute rien au navigateur.
+                continue;
+            }
+
+            CombatInstance::query()->whereKey($bataille->id)->update(['broadcast_status' => $etat->value]);
+        }
+
+        return $annonces;
+    }
+
+    /**
+     * Les joueurs qui sont partie a cette bataille, quel que soit son etat.
+     *
+     * Les inscrits d'abord — la photographie, qui fige le joueur. Puis les proprietaires des
+     * missions liees et l'initiateur, seules traces pendant le ralliement ou personne n'est encore
+     * inscrit. Et le proprietaire vivant du corps vise, **seulement** si la garnison n'est pas
+     * inscrite : avant la cloture il n'existe aucune autre source, et le corps n'a pas encore pu
+     * changer de mains sous une bataille qui n'existait pas.
+     *
+     * @return array<int, int>
+     */
+    private function partiesOf(CombatInstance $bataille): array
+    {
+        $joueurs = [];
+        $garnisonInscrite = false;
+        $clefGarnison = $bataille->target_planet_id === null ? null : CombatParticipantKey::forPlanet((int)$bataille->target_planet_id);
+
+        foreach (CombatParticipant::query()->where('combat_instance_id', $bataille->id)->get(['participant_key', 'player_id']) as $inscription) {
+            $joueurs[(int)$inscription->player_id] = true;
+
+            if ($clefGarnison !== null && (string)$inscription->participant_key === $clefGarnison) {
+                $garnisonInscrite = true;
+            }
+        }
+
+        foreach (FleetMission::query()->where('combat_instance_id', $bataille->id)->pluck('user_id') as $proprietaire) {
+            $joueurs[(int)$proprietaire] = true;
+        }
+
+        if ($bataille->mission_id !== null) {
+            $initiateur = FleetMission::query()->whereKey($bataille->mission_id)->value('user_id');
+
+            if ($initiateur !== null) {
+                $joueurs[(int)$initiateur] = true;
+            }
+        }
+
+        if (!$garnisonInscrite && $bataille->target_planet_id !== null) {
+            $proprietaire = Planet::query()->whereKey($bataille->target_planet_id)->value('user_id');
+
+            if ($proprietaire !== null) {
+                $joueurs[(int)$proprietaire] = true;
+            }
+        }
+
+        unset($joueurs[0]);
+
+        return array_keys($joueurs);
     }
 
     /**

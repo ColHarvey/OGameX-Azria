@@ -31,6 +31,7 @@ use OGame\Combat\Enums\CombatState;
  *
  * @property int $id
  * @property CombatState $status
+ * @property string|null $broadcast_status Le dernier etat annonce aux joueurs, nul tant qu aucun ne l a ete.
  * @property CombatCancellationCause|null $cancellation_cause
  * @property string|null $cancellation_note Ce que l'administrateur a ecrit en annulant.
  * @property int|null $cancelled_at L'instant de l'annulation, en secondes.
@@ -95,6 +96,7 @@ use OGame\Combat\Enums\CombatState;
  */
 #[Fillable([
     'status',
+    'broadcast_status',
     'cancellation_cause',
     'cancellation_note',
     'cancelled_at',

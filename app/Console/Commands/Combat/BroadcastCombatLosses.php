@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Date;
 use OGame\Combat\Presentation\CombatPresentationBroadcaster;
 
 /**
- * Envoie les pertes devenues visibles, a la seconde.
+ * Envoie les pertes et les changements d'etat devenus visibles, a la seconde.
  *
  * ## Pourquoi une boucle, et pas un passage par minute
  *
@@ -17,25 +17,42 @@ use OGame\Combat\Presentation\CombatPresentationBroadcaster;
  * precedente. Un passage par minute ferait attendre le joueur jusqu'a cinquante-neuf secondes ; la
  * commande boucle donc pendant sa minute, en regardant l'heure chaque seconde.
  *
- * Elle est planifiee chaque minute avec `withoutOverlapping()` : la boucle sortante et la suivante
- * ne se chevauchent pas, et si un passage meurt, le suivant reprend ce qui n'est pas parti — rien
- * n'est perdu, puisque c'est la colonne `broadcast_at` qui dit ce qui reste a faire.
+ * ## La jonction entre deux minutes
  *
- * `--duree` et `--pas` existent pour les essais et l'exploitation ; le jeu ne les emploie pas.
+ * Elle est planifiee chaque minute avec `withoutOverlapping()`. Si un passage debordait sur la
+ * minute suivante, le tick suivant serait **saute**, et personne ne veillerait pendant une minute
+ * entiere. La veille s'arrete donc **avant la frontiere de la minute** ou elle a commence, avec une
+ * marge — jamais a « N secondes apres le depart », qui deborderait des que le planificateur part
+ * en retard. Ce qui devient visible dans la marge part au tick suivant : la source est durable, et
+ * rien ne se perd. Le planificateur du serveur derive de quelques secondes par tick ; ce creux-la
+ * se mesure, il ne se suppose pas.
+ *
+ * `--duree` court-circuite cette regle pour les essais et l'exploitation ; `0` fait un seul passage.
  */
-#[Description('Diffuser aux joueurs les pertes de combat devenues visibles')]
-#[Signature('ogamex:combat:diffuser {--duree=55 : Secondes de veille} {--pas=1 : Secondes entre deux regards}')]
+#[Description('Diffuser aux joueurs les pertes de combat et les changements d etat devenus visibles')]
+#[Signature('ogamex:combat:diffuser {--duree= : Secondes de veille, vide pour veiller jusqu a la fin de la minute} {--pas=1 : Secondes entre deux regards}')]
 class BroadcastCombatLosses extends Command
 {
+    /**
+     * Secondes gardees avant la frontiere de la minute, pour ne jamais deborder sur le tick suivant.
+     */
+    public const MARGIN = 2;
+
     public function handle(CombatPresentationBroadcaster $diffuseur): int
     {
-        $duree = max(0, (int)$this->option('duree'));
         $pas = max(1, (int)$this->option('pas'));
-        $fin = (int)Date::now()->timestamp + $duree;
-        $total = 0;
+        $duree = $this->option('duree');
+        $maintenant = (int)Date::now()->timestamp;
+        $fin = $duree === null || $duree === ''
+            ? self::endOfWatch($maintenant)
+            : $maintenant + max(0, (int)$duree);
+        $pertes = 0;
+        $etats = 0;
 
         do {
-            $total += $diffuseur->publish((int)Date::now()->timestamp);
+            $instant = (int)Date::now()->timestamp;
+            $etats += $diffuseur->publishStateChanges($instant);
+            $pertes += $diffuseur->publish($instant);
 
             if ((int)Date::now()->timestamp >= $fin) {
                 break;
@@ -44,10 +61,21 @@ class BroadcastCombatLosses extends Command
             sleep($pas);
         } while (true);
 
-        if ($total > 0) {
-            $this->line('  ' . $total . ' perte(s) diffusee(s).');
+        if ($pertes > 0 || $etats > 0) {
+            $this->line('  ' . $pertes . ' perte(s) et ' . $etats . ' etat(s) diffuses.');
         }
 
         return self::SUCCESS;
+    }
+
+    /**
+     * L'instant ou une veille commencee a cet instant doit s'arreter : la frontiere de la minute en
+     * cours, moins la marge. Jamais au-dela de cette minute, quelle que soit l'heure du depart.
+     */
+    public static function endOfWatch(int $now): int
+    {
+        $frontiere = (intdiv($now, 60) + 1) * 60;
+
+        return $frontiere - self::MARGIN;
     }
 }

@@ -321,6 +321,31 @@
                     if (ajoutees === 0 && !document.getElementById('combatRow-' + recu.combatId)) {
                         rafraichir();
                     }
+                })
+                // **Le debut et la fin arrivent aussi en direct**, meme sans aucune perte : la carte
+                // est redemandee — c'est le serveur qui la dessine, avec l'acces au rapport quand il
+                // existe — et le bandeau recompte. Une annonce repetee ne fait que relire.
+                .listen('.CombatStateChanged', function (recu) {
+                    if (!recu || !recu.combatId) {
+                        return;
+                    }
+
+                    var ligne = document.getElementById('combatRow-' + recu.combatId);
+
+                    if (ligne && recu.status_label) {
+                        ligne.setAttribute('data-combat-status', recu.status);
+                        var etat = ligne.querySelector('.combatEvent_state');
+
+                        if (etat) {
+                            etat.textContent = recu.status_label;
+                        }
+                    }
+
+                    rafraichir();
+
+                    if (typeof getAjaxEventbox === 'function') {
+                        getAjaxEventbox();
+                    }
                 });
         } catch (erreur) {
             // Pas de temps reel : le secours periodique reste.

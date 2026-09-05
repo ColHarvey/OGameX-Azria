@@ -48,6 +48,37 @@ final class CombatsInvolvingPlayer
      *
      * @param array<int, int> $planetIds
      */
+    /**
+     * Les batailles finies — reglees ou annulees — depuis un instant, ou ce joueur etait partie.
+     *
+     * L'instant de fin lu est l'echeance pour un reglement et l'instant d'annulation sinon : les
+     * deux sont poses par le serveur, jamais par le navigateur.
+     *
+     * @param array<int, int> $planetIds
+     * @return Collection<int, CombatInstance>
+     */
+    public static function recentlyFinished(int $userId, array $planetIds, int $since): Collection
+    {
+        return CombatInstance::query()
+            ->where(function ($requete) use ($since): void {
+                $requete
+                    ->where(function ($regle) use ($since): void {
+                        $regle->where('status', CombatState::Resolved->value)->where('ends_at', '>=', $since);
+                    })
+                    ->orWhere(function ($annule) use ($since): void {
+                        $annule->where('status', CombatState::Cancelled->value)->where('cancelled_at', '>=', $since);
+                    });
+            })
+            ->where(function ($requete) use ($userId, $planetIds): void {
+                $requete
+                    ->whereIn('target_planet_id', $planetIds)
+                    ->orWhereIn('id', CombatParticipant::query()->select('combat_instance_id')->where('player_id', $userId))
+                    ->orWhereIn('id', FleetMission::query()->select('combat_instance_id')->whereNotNull('combat_instance_id')->where('user_id', $userId));
+            })
+            ->orderBy('id')
+            ->get();
+    }
+
     public static function isPartyTo(CombatInstance $combat, int $userId, array $planetIds): bool
     {
         if ($combat->target_planet_id !== null && in_array((int)$combat->target_planet_id, $planetIds, true)) {

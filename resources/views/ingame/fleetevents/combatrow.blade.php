@@ -55,6 +55,10 @@
 <tr class="partnerInfo combat{{ $combat['id'] }} combatEvent_details" id="combatDetails-{{ $combat['id'] }}" style="display: none;">
     <td colspan="12">
         <div class="combatEvent_panel">
+            @if ($combat['report_available'])
+                {{-- Le rapport n'est propose que lorsqu'il est reellement accessible. --}}
+                <p class="combatEvent_report"><a href="{{ route('messages.index') }}" class="combatEvent_report_link">{{ __('t_ingame.combat.report_link') }}</a></p>
+            @endif
             <div class="combatEvent_losses_title">{{ __('t_ingame.combat.losses_title') }}</div>
             @if ($combat['events'] === [])
                 <p class="combatEvent_empty">{{ __('t_ingame.combat.no_losses_yet') }}</p>

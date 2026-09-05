@@ -8,8 +8,14 @@ use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Presentation\CombatPanelService;
 use OGame\Combat\Presentation\CombatPresentationBroadcaster;
+use OGame\Combat\Services\PersistentCombatAdvancer;
+use OGame\Console\Commands\Combat\BroadcastCombatLosses;
 use OGame\Events\CombatLossesPublished;
+use OGame\Events\CombatStateChanged;
+use OGame\Models\CombatInstance;
 use OGame\Models\CombatPresentationEvent;
 use OGame\Models\User;
 use OGame\Services\SettingsService;
@@ -348,6 +354,132 @@ class CombatLiveBroadcastTest extends FleetDispatchTestCase
 
         $this->assertNotSame([], $niveaux, 'Nothing was broadcast: the scenario would prove nothing.');
         $this->assertSame([0], array_values(array_unique($niveaux)), 'The broadcast happened inside a transaction.');
+    }
+
+    /**
+     * Le debut d'une bataille est annonce a toutes ses parties, avant la moindre perte.
+     *
+     * Un canal qui ne porterait que des pertes laisserait le premier combat attendre le
+     * rafraichissement de secours : l'attaquant et la cible ne sauraient rien avant la fin de la
+     * premiere periode. L'annonce part a la cloture, quand rien n'est encore visible.
+     */
+    public function testTheStartOfABattleIsAnnouncedToEveryPartyBeforeAnyLoss(): void
+    {
+        $combat = $this->anEngagedCombat();
+        $debut = (int)$combat->started_at;
+        $attaquant = (int)DB::table('fleet_missions')->where('id', $combat->mission_id)->value('user_id');
+        $proprietaire = (int)DB::table('planets')->where('id', $combat->target_planet_id)->value('user_id');
+        $diffuseur = new CombatPresentationBroadcaster();
+
+        // **Precondition : aucune perte n'est encore visible**, et rien n'a ete annonce.
+        $this->assertSame(0, CombatPresentationEvent::query()->where('combat_instance_id', $combat->id)->where('visible_at', '<=', $debut)->count());
+        $this->assertNull(CombatInstance::query()->whereKey($combat->id)->value('broadcast_status'));
+
+        // La base du processus porte les batailles des essais precedents, jamais annoncees : on ne
+        // retient que les annonces de **cette** bataille, et on exige qu'elles aillent a ses deux
+        // parties, a elles seules, une fois chacune.
+        $annonces = [];
+        Event::listen(CombatStateChanged::class, static function (CombatStateChanged $annonce) use (&$annonces, $combat): void {
+            if ($annonce->combatInstanceId === (int)$combat->id) {
+                $annonces[] = $annonce;
+            }
+        });
+
+        $this->assertGreaterThanOrEqual(2, $diffuseur->publishStateChanges($debut));
+
+        $destinataires = array_map(static fn (CombatStateChanged $annonce): int => $annonce->playerId, $annonces);
+        sort($destinataires);
+        $attendus = [$attaquant, $proprietaire];
+        sort($attendus);
+        $this->assertSame($attendus, $destinataires, 'The start was not announced to exactly the two parties, once each.');
+
+        foreach ($annonces as $annonce) {
+            $this->assertSame(CombatState::Active->value, $annonce->status);
+            $this->assertFalse($annonce->reportAvailable);
+
+            // Ce qui part ne dit pas quand la bataille finit.
+            $charge = $annonce->broadcastWith();
+            $valeurs = [];
+            array_walk_recursive($charge, static function (mixed $valeur) use (&$valeurs): void {
+                $valeurs[] = $valeur;
+            });
+            $this->assertNotContains((int)$combat->ends_at, $valeurs, 'The battle deadline was announced with its start.');
+            $this->assertSame(['combatId', 'status', 'status_label', 'report_available'], array_keys($charge));
+        }
+
+        $this->assertSame(CombatState::Active->value, CombatInstance::query()->whereKey($combat->id)->value('broadcast_status'));
+
+        // **Une seule fois** : rien ne repart tant que l'etat ne change pas.
+        $annonces = [];
+        $diffuseur->publishStateChanges($debut + 30);
+        $this->assertSame([], $annonces, 'An unchanged state was announced again.');
+    }
+
+    /**
+     * La fin d'une bataille est annoncee avec son rapport, et la carte le propose.
+     */
+    public function testTheEndOfABattleIsAnnouncedWithItsReportAndTheCardOffersIt(): void
+    {
+        $combat = $this->anEngagedCombat();
+        $echeance = (int)$combat->ends_at;
+        $proprietaire = (int)DB::table('planets')->where('id', $combat->target_planet_id)->value('user_id');
+        $diffuseur = new CombatPresentationBroadcaster();
+
+        // Le debut est deja annonce : seule la fin doit partir ensuite.
+        $diffuseur->publishStateChanges((int)$combat->started_at);
+
+        $this->travelTo(Date::createFromTimestamp($echeance));
+        (new PersistentCombatAdvancer())->advance($echeance);
+
+        $regle = CombatInstance::query()->findOrFail($combat->id);
+        $this->assertSame(CombatState::Resolved, $regle->status, 'The battle was not settled: the scenario would prove nothing.');
+        $this->assertNotNull($regle->battle_report_id, 'The settlement wrote no report: the scenario would prove nothing.');
+
+        Event::fake([CombatStateChanged::class]);
+
+        $this->assertGreaterThanOrEqual(2, $diffuseur->publishStateChanges($echeance), 'The end was not announced to the parties.');
+        Event::assertDispatched(CombatStateChanged::class, static fn (CombatStateChanged $annonce): bool => $annonce->playerId === $proprietaire
+            && $annonce->status === CombatState::Resolved->value
+            && $annonce->reportAvailable === true);
+
+        // **La carte reste, et propose le rapport** — parce qu'il existe.
+        $this->actingAs(User::query()->findOrFail($proprietaire));
+        $deroulant = $this->get('/ajax/fleet/eventlist/fetch');
+        $deroulant->assertStatus(200);
+        $deroulant->assertSee('id="combatRow-' . $combat->id . '"', false);
+        $deroulant->assertSee(__('t_ingame.combat.status_resolved'));
+        $deroulant->assertSee(__('t_ingame.combat.report_link'));
+
+        // Mais le bandeau ne la compte plus parmi les batailles en cours.
+        $this->get('/ajax/fleet/eventbox/fetch')->assertJsonFragment(['combats' => 0]);
+
+        // Et une demi-heure plus tard, la carte a disparu : le deroulant n'est pas une archive.
+        $this->travelTo(Date::createFromTimestamp($echeance + CombatPanelService::FINISHED_STAYS_FOR + 1));
+        $this->get('/ajax/fleet/eventlist/fetch')->assertDontSee('combatRow-' . $combat->id, false);
+    }
+
+    /**
+     * La veille d'un passage s'arrete avant la frontiere de sa minute, d'ou qu'elle parte.
+     *
+     * Un passage qui deborderait sur la minute suivante ferait sauter le tick suivant sous
+     * `withoutOverlapping()`, et personne ne veillerait pendant une minute entiere. La regle est
+     * verifiee pour chacune des soixante secondes de depart possibles.
+     */
+    public function testAWatchNeverCrossesTheMinuteItStartedIn(): void
+    {
+        $minute = 1_700_000_000 - (1_700_000_000 % 60);
+
+        for ($seconde = 0; $seconde < 60; $seconde++) {
+            $depart = $minute + $seconde;
+            $fin = BroadcastCombatLosses::endOfWatch($depart);
+
+            $this->assertLessThan($minute + 60, $fin, 'A watch started at second ' . $seconde . ' would cross into the next minute.');
+            $this->assertSame($minute + 60 - BroadcastCombatLosses::MARGIN, $fin, 'The watch does not stop at the margin before the boundary.');
+        }
+
+        // La marge est reelle, et courte : quelques secondes de creux, pas une minute d'absence.
+        $this->assertGreaterThan(0, BroadcastCombatLosses::MARGIN);
+        $this->assertLessThanOrEqual(5, BroadcastCombatLosses::MARGIN);
     }
 
     /**

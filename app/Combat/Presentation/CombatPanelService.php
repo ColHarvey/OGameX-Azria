@@ -2,6 +2,7 @@
 
 namespace OGame\Combat\Presentation;
 
+use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Services\CombatsInvolvingPlayer;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Models\CombatInstance;
@@ -33,6 +34,11 @@ use Throwable;
  */
 final class CombatPanelService
 {
+    /**
+     * Combien de temps une bataille finie reste sur la carte, en secondes.
+     */
+    public const FINISHED_STAYS_FOR = 1800;
+
     public const string ROLE_ATTACKER = 'attacker';
 
     public const string ROLE_TARGET = 'target';
@@ -55,6 +61,13 @@ final class CombatPanelService
         $lignes = [];
 
         foreach (CombatsInvolvingPlayer::stillRunning($player->getId(), $corps) as $combat) {
+            $lignes[] = $this->describe($combat, $player->getId(), $corps, $now);
+        }
+
+        // **Une bataille finie reste sur la carte une demi-heure** : c'est la que le joueur apprend
+        // que son rapport est disponible, sans attendre d'ouvrir sa messagerie. Passe ce delai, la
+        // messagerie seule en garde la trace — le deroulant n'est pas une archive.
+        foreach (CombatsInvolvingPlayer::recentlyFinished($player->getId(), $corps, $now - self::FINISHED_STAYS_FOR) as $combat) {
             $lignes[] = $this->describe($combat, $player->getId(), $corps, $now);
         }
 
@@ -92,6 +105,9 @@ final class CombatPanelService
                 'system' => (int)$combat->system,
                 'position' => (int)$combat->position,
             ],
+            // Le rapport n'est propose que lorsqu'il existe reellement : une bataille reglee sans
+            // rapport ecrit n'offre aucun lien, plutot qu'un lien vers rien.
+            'report_available' => $statut === CombatState::Resolved && $combat->battle_report_id !== null,
             'events' => $pertes,
             // Le resume ferme de la carte : combien d'unites le joueur a perdues, tout compris. Une
             // synthese, pour que la liste depliee reste une consultation et non un mur.
