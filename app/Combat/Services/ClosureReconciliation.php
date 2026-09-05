@@ -25,6 +25,7 @@ use OGame\Models\CombatInstance;
 use OGame\Models\Resources;
 use OGame\Services\FleetMissionService;
 use OGame\Services\ObjectService;
+use RuntimeException;
 
 /**
  * La fermeture reconciliee : les faits relus sous verrou, le reconciliateur qui decide, les
@@ -45,18 +46,22 @@ use OGame\Services\ObjectService;
  * defense ne sont pas livrees ici : les selecteurs d'admission les decident, sous la meme fenetre, et
  * les inscrivent eux-memes.
  *
- * ## Pourquoi les files ne sont pas appliquees ici
+ * ## Les files : appliquees au monde, comptees a moitie
  *
  * `updateUnitQueue()` et ses voisines traitent **toute la file echue** du corps, pas l'element qu'on
- * leur designe : il n'existe pas de gestionnaire d'un achevement precis. Les appeler pour un
- * achevement admissible drainerait au passage les achevements **inadmissibles** echus, dont les
- * unites entreraient dans une garnison encore lue vivante. Leur idempotence ne protege pas de cela.
+ * leur designe : il n'existe pas de gestionnaire d'un achevement precis. La fermeture les appelle
+ * quand meme, et c'est le bon choix : ces achevements **sont echus**, le monde a le droit d'avancer,
+ * et leur refuser l'application n'y changerait rien — il les appliquerait a la page suivante.
  *
- * Les files sont donc lues, classees et comptees dans la tranche — une source qu'on n'interroge pas
- * rend la tranche incomplete —, mais leur effet reste au monde, qui les appliquera a la page
- * suivante de leur proprietaire. La photographie de l'effectif et des technologies, ou cet effet a
- * sa place, est la tranche suivante du raccordement : les deux vont ensemble, et l'une sans l'autre
- * donnerait une garnison composee au hasard de qui est passe.
+ * Ce qui compte est ailleurs : la photographie n'en retient que l'element **admissible**. Les unites
+ * inadmissibles existent donc dans le monde sans se battre, et c'est exactement ce qu'on veut. Le
+ * drainage a lieu **avant** toute mesure de delta (voir `drainTheQueuesFirst()`).
+ *
+ * **Compter sans appliquer serait une faute de conservation**, et c'est ce que faisait la version
+ * precedente : la bataille tuait des unites que le corps ne portait pas, le reglement retirait ce
+ * qui n'existait pas, et le monde, en appliquant la file plus tard, **ressuscitait** ce qui venait de
+ * mourir. `AppliedBeforeSnapshot` dit ce qu'il faut faire dans l'ordre : applique **puis**
+ * photographie, jamais photographie sans application.
  *
  * ## La reserve protegee
  *
@@ -127,10 +132,12 @@ final class ClosureReconciliation
         $appliques = [];
         $this->measuredDelta = [];
 
+        $this->drainTheQueuesFirst($aAppliquer, $targetBodyId);
+
         foreach ($aAppliquer as $reconcilie) {
             $mission = $this->reader->missionOf($reconcilie->event->identity);
 
-            // Une file : lue et classee, mais laissee au monde (voir le contrat de cette classe).
+            // Une file : deja drainee au monde ci-dessus, et comptee par la photographie seule.
             if ($mission === null) {
                 continue;
             }
@@ -161,6 +168,51 @@ final class ClosureReconciliation
         }
 
         return $appliques;
+    }
+
+    /**
+     * Les files echues sont drainees au monde **avant** toute mesure de delta.
+     *
+     * ## Pourquoi elles sont appliquees
+     *
+     * Ces achevements **sont echus** : le monde a le droit d'avancer, et le lui refuser ne change
+     * rien — il les appliquerait a la page suivante de leur proprietaire. Le gestionnaire traite
+     * toute la file echue, admissibles et inadmissibles ensemble, et c'est acceptable parce que la
+     * photographie, elle, ne retient que l'admissible : les unites inadmissibles existent dans le
+     * monde sans se battre.
+     *
+     * **Compter sans appliquer serait une faute de conservation** : la bataille tuait des unites que
+     * le corps ne portait pas, le reglement retirait ce qui n'existait pas, et le monde, en appliquant
+     * la file plus tard, ressuscitait ce qui venait de mourir. `AppliedBeforeSnapshot` dit l'ordre :
+     * applique **puis** photographie.
+     *
+     * ## Pourquoi avant, et pas apres
+     *
+     * `MissileMission` et `MoonDestructionMission` appellent `$corps->update()`, qui draine la file
+     * echue au passage. Un drainage laisse apres la boucle tomberait donc **dans la fenetre de mesure**
+     * d'un de ces gestionnaires : l'apport admissible serait compte deux fois — une par le delta, une
+     * par la photographie — et l'apport **inadmissible** entrerait dans la photographie par le delta,
+     * ce que tout le contrat interdit. Draine d'abord, la file n'est plus dans aucune fenetre.
+     *
+     * @param array<int, ReconciledEvent> $aAppliquer
+     */
+    private function drainTheQueuesFirst(array $aAppliquer, int $targetBodyId): void
+    {
+        // L'appel n'a lieu que si ce combat a une file a compter : sans cela, la fermeture ferait
+        // avancer une file qui ne la regarde pas.
+        foreach ($aAppliquer as $reconcilie) {
+            if ($this->reader->unitQueueOf($reconcilie->event->identity) === null) {
+                continue;
+            }
+
+            $corps = resolve(PlanetServiceFactory::class)->make($targetBodyId, true);
+            if ($corps === null) {
+                throw new RuntimeException('Le corps ' . $targetBodyId . ' a disparu pendant la fermeture.');
+            }
+            $corps->updateUnitQueue();
+
+            return;
+        }
     }
 
     /**
@@ -196,13 +248,13 @@ final class ClosureReconciliation
      * L'effectif contre lequel la bataille se joue : celui de l'ouverture, plus les unites que des
      * effets admissibles ont produites.
      *
-     * ## Compter sans appliquer
+     * ## Les files : drainees au monde, comptees a moitie
      *
      * Une file de vaisseaux ou de defenses achevee dans la fenetre, engagee avant l'ouverture, produit
-     * des unites qui appartiennent a ce combat. Elles sont **comptees ici** sans que la fermeture
-     * touche a la file : le gestionnaire d'une file traite toute la file echue, et l'appeler drainerait
-     * les achevements inadmissibles. Le monde appliquera la file a la page suivante de son
-     * proprietaire ; la photographie, elle, sait deja ce qu'elle vaut.
+     * des unites qui appartiennent a ce combat. La fermeture a **draine toute la file echue** avant de
+     * mesurer quoi que ce soit — le gestionnaire ne sait pas traiter un achevement precis — et cette
+     * methode n'en compte que l'element **admissible**. Les unites inadmissibles sont donc bien sur le
+     * corps, et hors de la bataille.
      *
      * Les effets **appliques** — une flotte deposee, un retour qui rentre, un missile qui detruit des
      * defenses — sont comptes par le **delta mesure** autour de leur application : ce que le corps
@@ -216,7 +268,7 @@ final class ClosureReconciliation
     {
         $effectif = OpeningStateRecorder::openingUnitsOf($combat)->toArray();
 
-        // Les files admissibles ne sont pas appliquees : leur apport est celui qu'elles portent.
+        // Le monde porte les deux files ; la photographie ne prend que l'apport de l'admissible.
         foreach ($dansLaPhotographie as $reconcilie) {
             if ($reconcilie->admission !== CausalAdmission::AppliedBeforeSnapshot) {
                 continue;

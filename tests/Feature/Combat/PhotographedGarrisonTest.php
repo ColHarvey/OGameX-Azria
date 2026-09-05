@@ -22,10 +22,12 @@ use Tests\FleetDispatchTestCase;
  * un joueur qui visitait sa page pendant le ralliement faisait entrer dans la bataille des defenses
  * decidees apres l'ouverture.
  *
- * Et l'appel du gestionnaire ne peut pas trancher a la place de la photographie :
- * `updateUnitQueue()` traite **toute la file echue** du corps. L'appeler pour l'achevement admissible
- * drainerait l'inadmissible avec lui. La photographie **compte** donc l'effet admissible sans que la
- * fermeture touche a la file ; le monde l'appliquera a la page suivante de son proprietaire.
+ * Le gestionnaire ne peut pas trancher a la place de la photographie : `updateUnitQueue()` traite
+ * **toute la file echue** du corps. La fermeture l'appelle quand meme — ces achevements sont echus,
+ * le monde a le droit d'avancer — et c'est la **photographie** qui ne retient que l'admissible.
+ *
+ * Compter sans appliquer serait pire : la bataille tuerait des unites que le corps ne porte pas, et le
+ * monde les ressusciterait en appliquant la file plus tard (`PhotographedQueueConservationTest`).
  *
  * ## Ce que l'essai exige
  *
@@ -84,10 +86,12 @@ final class PhotographedGarrisonTest extends FleetDispatchTestCase
             'The battle was fought against a garrison that either missed the eligible queue or counted the ineligible one.'
         );
 
-        // **Ni l'une ni l'autre n'a ete appliquee** : la fermeture ne draine pas la file du corps.
-        $this->assertSame(0, (int)DB::table('unit_queues')->where('id', $admissible)->value('processed'), 'The closure applied the eligible queue, and would have drained the other with it.');
-        $this->assertSame(0, (int)DB::table('unit_queues')->where('id', $inadmissible)->value('processed'), 'The closure applied an ineligible queue.');
-        $this->assertSame($depart, $this->garrisonOf($cible, 'light_laser'), 'The closure changed the body units it only had to photograph.');
+        // **Les deux files sont appliquees au monde** — elles sont echues, il en a le droit — et le
+        // corps porte donc les deux lots. La photographie, elle, n a compte que l admissible : c est la
+        // seule facon de tuer des unites qui existent, et de ne rien ressusciter apres la bataille.
+        $this->assertSame(1, (int)DB::table('unit_queues')->where('id', $admissible)->value('processed'), 'The eligible queue was counted in the battle without being applied to the world.');
+        $this->assertSame(1, (int)DB::table('unit_queues')->where('id', $inadmissible)->value('processed'), 'The closure applied one queue of the body and not the other.');
+        $this->assertSame($depart + self::ADMISSIBLE + self::INADMISSIBLE, $this->garrisonOf($cible, 'light_laser'), 'The body does not carry both finished queues.');
     }
 
     /**

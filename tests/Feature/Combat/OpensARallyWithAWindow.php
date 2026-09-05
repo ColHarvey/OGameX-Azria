@@ -33,6 +33,8 @@ trait OpensARallyWithAWindow
 
     protected const int RALLY_WINDOW_SECONDS = 18;
 
+    protected const int RALLY_DEFENCES = 20;
+
     protected function basicSetupForARally(): void
     {
         $this->planetAddUnit('small_cargo', 60);
@@ -50,9 +52,13 @@ trait OpensARallyWithAWindow
     /**
      * Ouvre le ralliement et s'arrete a l'ouverture : le temps est celui de l'ouverture.
      *
+     * La garnison se choisit **avant** l'ouverture, jamais apres : la photographie est prise dans la
+     * transaction qui cree l'instance, et une defense posee ensuite n'en fait deja plus partie.
+     *
+     * @param int $defences Lance-missiles poses sur la cible avant que le combat ne s'ouvre.
      * @return array{0: CombatInstance, 1: int, 2: int} Le combat, la planete visee, l'instant d'ouverture.
      */
-    protected function anOpenRally(): array
+    protected function anOpenRally(int $defences = self::RALLY_DEFENCES): array
     {
         for ($i = 0; $i < 6; $i++) {
             $this->createAndLoginUser();
@@ -80,7 +86,7 @@ trait OpensARallyWithAWindow
             'metal' => self::RALLY_STOCK_METAL,
             'crystal' => 50_000,
             'deuterium' => 10_000,
-            'rocket_launcher' => 20,
+            'rocket_launcher' => $defences,
             'time_last_update' => (int)now()->timestamp + 86_400,
         ]);
 
