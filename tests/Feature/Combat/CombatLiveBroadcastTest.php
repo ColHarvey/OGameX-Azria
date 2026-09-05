@@ -9,10 +9,10 @@ use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Presentation\CombatBroadcasterLease;
 use OGame\Combat\Presentation\CombatPanelService;
 use OGame\Combat\Presentation\CombatPresentationBroadcaster;
 use OGame\Combat\Services\PersistentCombatAdvancer;
-use OGame\Console\Commands\Combat\BroadcastCombatLosses;
 use OGame\Events\CombatLossesPublished;
 use OGame\Events\CombatStateChanged;
 use OGame\Models\CombatInstance;
@@ -21,6 +21,7 @@ use OGame\Models\User;
 use OGame\Services\SettingsService;
 use ReflectionProperty;
 use RuntimeException;
+use stdClass;
 use Tests\FleetDispatchTestCase;
 
 /**
@@ -428,6 +429,12 @@ class CombatLiveBroadcastTest extends FleetDispatchTestCase
         // Le debut est deja annonce : seule la fin doit partir ensuite.
         $diffuseur->publishStateChanges((int)$combat->started_at);
 
+        // Le bandeau du proprietaire compte cette bataille parmi celles en cours — et peut-etre
+        // d'autres, laissees par les essais voisins du meme processus : on mesure l'ecart, pas zero.
+        $this->actingAs(User::query()->findOrFail($proprietaire));
+        $avant = (int)$this->get('/ajax/fleet/eventbox/fetch')->json('combats');
+        $this->assertGreaterThanOrEqual(1, $avant, 'The running battle is not counted: the scenario would prove nothing.');
+
         $this->travelTo(Date::createFromTimestamp($echeance));
         (new PersistentCombatAdvancer())->advance($echeance);
 
@@ -443,15 +450,14 @@ class CombatLiveBroadcastTest extends FleetDispatchTestCase
             && $annonce->reportAvailable === true);
 
         // **La carte reste, et propose le rapport** — parce qu'il existe.
-        $this->actingAs(User::query()->findOrFail($proprietaire));
         $deroulant = $this->get('/ajax/fleet/eventlist/fetch');
         $deroulant->assertStatus(200);
         $deroulant->assertSee('id="combatRow-' . $combat->id . '"', false);
         $deroulant->assertSee(__('t_ingame.combat.status_resolved'));
         $deroulant->assertSee(__('t_ingame.combat.report_link'));
 
-        // Mais le bandeau ne la compte plus parmi les batailles en cours.
-        $this->get('/ajax/fleet/eventbox/fetch')->assertJsonFragment(['combats' => 0]);
+        // Mais le bandeau ne la compte plus parmi les batailles en cours : une de moins qu'avant.
+        $this->assertSame($avant - 1, (int)$this->get('/ajax/fleet/eventbox/fetch')->json('combats'), 'The settled battle is still counted as running in the banner.');
 
         // Et une demi-heure plus tard, la carte a disparu : le deroulant n'est pas une archive.
         $this->travelTo(Date::createFromTimestamp($echeance + CombatPanelService::FINISHED_STAYS_FOR + 1));
@@ -459,27 +465,127 @@ class CombatLiveBroadcastTest extends FleetDispatchTestCase
     }
 
     /**
-     * La veille d'un passage s'arrete avant la frontiere de sa minute, d'ou qu'elle parte.
+     * Une annonce d'etat qui echoue pour la seconde partie ne laisse pas la premiere marquer l'etat.
      *
-     * Un passage qui deborderait sur la minute suivante ferait sauter le tick suivant sous
-     * `withoutOverlapping()`, et personne ne veillerait pendant une minute entiere. La regle est
-     * verifiee pour chacune des soixante secondes de depart possibles.
+     * `broadcast_status` est global a la bataille : s'il etait pose des que la premiere partie est
+     * servie, la seconde ne saurait jamais que la bataille a commence. La marque ne se pose que
+     * lorsque **toutes** les parties ont ete jointes, et le passage suivant reprend tout le monde —
+     * une annonce repetee ne coute rien au navigateur.
      */
-    public function testAWatchNeverCrossesTheMinuteItStartedIn(): void
+    public function testAStateAnnouncementThatFailsForOnePartyIsRetriedForEveryone(): void
     {
-        $minute = 1_700_000_000 - (1_700_000_000 % 60);
+        $combat = $this->anEngagedCombat();
+        $debut = (int)$combat->started_at;
+        $attaquant = (int)DB::table('fleet_missions')->where('id', $combat->mission_id)->value('user_id');
+        $proprietaire = (int)DB::table('planets')->where('id', $combat->target_planet_id)->value('user_id');
+        $diffuseur = new CombatPresentationBroadcaster();
 
-        for ($seconde = 0; $seconde < 60; $seconde++) {
-            $depart = $minute + $seconde;
-            $fin = BroadcastCombatLosses::endOfWatch($depart);
+        // Les autres batailles du processus sont annoncees d'abord, pour ne tenir que celle-ci.
+        CombatInstance::query()->whereKeyNot($combat->id)->update(['broadcast_status' => DB::raw('status')]);
 
-            $this->assertLessThan($minute + 60, $fin, 'A watch started at second ' . $seconde . ' would cross into the next minute.');
-            $this->assertSame($minute + 60 - BroadcastCombatLosses::MARGIN, $fin, 'The watch does not stop at the margin before the boundary.');
-        }
+        $recus = [];
+        // Un objet, pas un booleen capture par reference : l'analyse statique ne peut pas le tenir
+        // pour constant, et c'est bien un etat que l'essai fait changer en cours de route.
+        $transport = new stdClass();
+        $transport->refuse = true;
+        Event::listen(CombatStateChanged::class, static function (CombatStateChanged $annonce) use (&$recus, $transport, $proprietaire, $combat): void {
+            if ($annonce->combatInstanceId !== (int)$combat->id) {
+                return;
+            }
 
-        // La marge est reelle, et courte : quelques secondes de creux, pas une minute d'absence.
-        $this->assertGreaterThan(0, BroadcastCombatLosses::MARGIN);
-        $this->assertLessThanOrEqual(5, BroadcastCombatLosses::MARGIN);
+            if ($transport->refuse && $annonce->playerId === $proprietaire) {
+                throw new RuntimeException('le transport a refuse pour cette partie');
+            }
+
+            $recus[] = $annonce->playerId;
+        });
+
+        $diffuseur->publishStateChanges($debut);
+
+        // **Precondition** : la premiere partie a bien ete servie, la seconde refusee.
+        $this->assertSame([$attaquant], $recus, 'The first party was not served, or the second was: the scenario would prove nothing.');
+
+        // **Rien n'est marque** : la seconde partie n'est pas oubliee.
+        $this->assertNull(CombatInstance::query()->whereKey($combat->id)->value('broadcast_status'), 'The state was marked although one party was never told.');
+
+        // Le transport revient : tout le monde est repris, la seconde partie comprise.
+        $transport->refuse = false;
+        $recus = [];
+        $diffuseur->publishStateChanges($debut + 1);
+
+        sort($recus);
+        $attendus = [$attaquant, $proprietaire];
+        sort($attendus);
+        $this->assertSame($attendus, $recus, 'The retry did not reach every party.');
+        $this->assertSame(CombatState::Active->value, CombatInstance::query()->whereKey($combat->id)->value('broadcast_status'));
+    }
+
+    /**
+     * Le bail : un seul detenteur, une releve quand le battement cesse, jamais deux a la fois.
+     */
+    public function testTheLeaseHasOneHolderAndIsTakenOverOnlyWhenTheHeartbeatStops(): void
+    {
+        DB::table('combat_broadcaster_leases')->delete();
+        $maintenant = 1_700_000_000;
+
+        $premier = new CombatBroadcasterLease('banc:1');
+        $second = new CombatBroadcasterLease('banc:2');
+
+        $this->assertTrue($premier->acquire($maintenant), 'The first candidate could not take a free lease.');
+        $this->assertSame('banc:1', CombatBroadcasterLease::currentHolder());
+
+        // Un second candidat trouve un battement recent : il s'efface.
+        $this->assertFalse($second->acquire($maintenant + 1), 'A second broadcaster started while the first was still beating.');
+        $this->assertFalse($second->acquire($maintenant + CombatBroadcasterLease::TOLERANCE), 'The lease was taken over at the tolerance instead of after it.');
+        $this->assertSame('banc:1', CombatBroadcasterLease::currentHolder());
+
+        // Le premier bat : le bail reste a lui.
+        $this->assertTrue($premier->heartbeat($maintenant + 5));
+        $this->assertFalse($second->acquire($maintenant + 5 + CombatBroadcasterLease::TOLERANCE), 'A fresh heartbeat did not protect the lease.');
+
+        // Le battement cesse : la releve est prise, et l'ancien detenteur le decouvre a son battement.
+        $mort = $maintenant + 5 + CombatBroadcasterLease::TOLERANCE + 1;
+        $this->assertTrue($second->acquire($mort), 'A dead broadcaster kept the lease.');
+        $this->assertSame('banc:2', CombatBroadcasterLease::currentHolder());
+        $this->assertFalse($premier->heartbeat($mort + 1), 'The ousted holder still believes it holds the lease.');
+
+        // Rendre le bail libere aussitot, sans attendre la tolerance.
+        $second->release();
+        $this->assertNull(CombatBroadcasterLease::currentHolder());
+        $this->assertTrue($premier->acquire($mort + 2));
+    }
+
+    /**
+     * En mode continu, un diffuseur qui trouve un bail vivant ne diffuse rien ; un bail libre est
+     * pris, servi, puis rendu.
+     */
+    public function testAContinuousBroadcasterYieldsToALivingLeaseAndReleasesItsOwn(): void
+    {
+        $combat = $this->anEngagedCombat();
+        $premiere = (int)$combat->started_at + $this->secondsPerRoundOf($combat)[0];
+        $this->travelTo(Date::createFromTimestamp($premiere));
+        DB::table('combat_broadcaster_leases')->delete();
+
+        $dues = CombatPresentationEvent::query()->where('combat_instance_id', $combat->id)->where('visible_at', '<=', $premiere)->whereNull('broadcast_at')->count();
+        $this->assertGreaterThan(0, $dues, 'Nothing is due: the scenario would prove nothing.');
+
+        // Un autre diffuseur bat : celui-ci s'efface sans rien diffuser.
+        (new CombatBroadcasterLease('ailleurs:7'))->acquire($premiere);
+        Event::fake([CombatLossesPublished::class, CombatStateChanged::class]);
+
+        $this->assertSame(0, $this->app->make(Kernel::class)->call('ogamex:combat:diffuser', ['--continu' => true, '--tours' => 1]));
+        Event::assertNotDispatched(CombatLossesPublished::class);
+        $this->assertSame($dues, CombatPresentationEvent::query()->where('combat_instance_id', $combat->id)->where('visible_at', '<=', $premiere)->whereNull('broadcast_at')->count(), 'A yielding broadcaster still broadcast.');
+        $this->assertSame('ailleurs:7', CombatBroadcasterLease::currentHolder(), 'The yielding broadcaster took the lease anyway.');
+
+        // Le bail est libre : il est pris, la passe est faite, le bail est rendu.
+        DB::table('combat_broadcaster_leases')->delete();
+        Event::fake([CombatLossesPublished::class, CombatStateChanged::class]);
+
+        $this->assertSame(0, $this->app->make(Kernel::class)->call('ogamex:combat:diffuser', ['--continu' => true, '--tours' => 1]));
+        Event::assertDispatched(CombatLossesPublished::class);
+        $this->assertSame(0, CombatPresentationEvent::query()->where('combat_instance_id', $combat->id)->where('visible_at', '<=', $premiere)->whereNull('broadcast_at')->count(), 'The continuous broadcaster left due losses unsent.');
+        $this->assertNull(CombatBroadcasterLease::currentHolder(), 'The lease was not released on exit.');
     }
 
     /**

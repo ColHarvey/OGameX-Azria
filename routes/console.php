@@ -51,9 +51,17 @@ Schedule::command(DarkMatterRegenerateCommand::class)->everyFiveMinutes()->witho
 Schedule::command(AdvancePersistentCombats::class)->everyMinute()->withoutOverlapping();
 
 // Les pertes deviennent visibles a un instant, pas a un evenement : ce diffuseur regarde l'heure
-// chaque seconde pendant sa minute, et envoie a chaque joueur ce qui vient de devenir visible.
-// Sans lui, le navigateur attendrait son prochain rafraichissement — le secours degrade.
-Schedule::command(BroadcastCombatLosses::class)->everyMinute()->withoutOverlapping();
+// chaque seconde et envoie a chaque joueur ce qui vient de devenir visible. Sans lui, le navigateur
+// attendrait son prochain rafraichissement — le secours degrade.
+//
+// **Il est continu, et le planificateur n'est que son superviseur.** L'entrypoint enchaine
+// `schedule:run` puis `sleep 60` : la periode reelle d'un tick est soixante secondes **plus** la
+// duree de ce qui s'execute en ligne, et un tick peut sauter une minute entiere. Une veille bornee a
+// la minute laisserait donc des creux d'une minute a la jonction. Le diffuseur tient un bail en base
+// et tourne sans fin ; chaque tick tente d'en lancer un autre en arriere-plan, qui s'efface aussitot
+// si le bail bat encore — et prend la releve s'il est mort. `runInBackground()` : `schedule:run` ne
+// l'attend pas, et l'avanceur garde sa minute.
+Schedule::command(BroadcastCombatLosses::class, ['--continu'])->everyMinute()->runInBackground();
 
 // Factions hostiles : croissance des bases, releve des bases detruites, decision de raid.
 // Sans effet tant que npc_enabled est a non, et n envoie aucune flotte tant que

@@ -7,6 +7,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
 use OGame\Combat\Services\EngagedFleetCheck;
@@ -235,7 +236,11 @@ class FleetController extends OGameController
             $eventRowViewModel->fleet_units = $fleetMissionService->getFleetUnits($row);
             $eventRowViewModel->resources = $fleetMissionService->getResources($row);
 
-            $eventRowViewModel->active_recall_time = time() + (time() - $row->time_departure);
+            // L'horloge de l'application, pas `time()` : c'est elle que le jeu tient pour vraie, et
+            // c'est elle que les essais gelent — avec `time()`, toute flotte paraissait « a
+            // destination » au banc et la condition du rappel n'y etait jamais eprouvee.
+            $horloge = (int)Date::now()->timestamp;
+            $eventRowViewModel->active_recall_time = $horloge + ($horloge - $row->time_departure);
 
             // Determine friendly status based on mission type for styling
             $mission = GameMissionFactory::getMissionById($row->mission_type, []);
@@ -276,7 +281,7 @@ class FleetController extends OGameController
             }
 
             // Calculate timer values
-            $currentTime = time();
+            $currentTime = $horloge;
             $eventRowViewModel->is_at_destination = $eventRowViewModel->has_return_trip && $eventRowViewModel->mission_time_arrival <= $currentTime;
 
             // For expeditions at destination, use expedition end time for the main timer
@@ -901,6 +906,18 @@ class FleetController extends OGameController
                 'newAjaxToken' => csrf_token(),
                 'success' => false,
             ], 500);
+        }
+
+        // **Une flotte engagee ne se rappelle pas, et le serveur le dit.** Le service garde son
+        // filet — il ne fait rien pour une flotte engagee —, mais repondre « fait » a un appel qui
+        // n'a rien fait serait un mensonge : le navigateur rechargerait et ne verrait rien changer.
+        if (resolve(EngagedFleetCheck::class)->isEngaged($fleetMission)) {
+            return response()->json([
+                'components' => [],
+                'newAjaxToken' => csrf_token(),
+                'success' => false,
+                'error' => __('t_ingame.fleet.recall_refused_engaged'),
+            ], 409);
         }
 
         // Recall the fleet mission

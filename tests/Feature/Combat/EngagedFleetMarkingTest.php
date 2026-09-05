@@ -72,10 +72,15 @@ class EngagedFleetMarkingTest extends FleetDispatchTestCase
         $this->assertSame(1, substr_count($contenu, 'data-combat-id="' . $combat->id . '"'), 'The engaged fleet is not marked exactly once.');
 
         // **Le temoin qui discrimine** : l'expedition garde son minuteur, la flotte engagee ne l'a
-        // plus. (Le bouton de rappel de la page de mouvement depend de l'horloge reelle, pas de
-        // celle du banc : il ne peut pas servir de temoin ici.)
+        // plus. La page lit maintenant l'horloge de l'application, celle que le banc gele : le
+        // bouton de rappel temoigne lui aussi, ci-dessous.
         $this->assertStringContainsString('id="timer_' . $expeditionId . '"', $contenu, 'The expedition lost its countdown: the marking is not selective.');
         $this->assertStringNotContainsString('id="timer_' . $combat->mission_id . '"', $contenu, 'The engaged fleet still shows a countdown.');
+        // **Le contraste, et non la seule absence.** Avec `time()`, toute flotte paraissait « a
+        // destination » au banc et aucun bouton n'aurait ete montre pour personne — les deux etats
+        // seraient passes pour justes. L'expedition, encore en vol a l'horloge du banc, doit montrer
+        // l'action ; la flotte engagee, non.
+        $this->assertStringContainsString('recallFleet" data-fleet-id="' . $expeditionId . '"', $contenu, 'The free fleet in flight shows no recall: the temporal condition is always false and the contrast proves nothing.');
         $this->assertStringNotContainsString('recallFleet" data-fleet-id="' . $combat->mission_id . '"', $contenu, 'The engaged fleet is still offered a recall.');
     }
 
@@ -83,6 +88,39 @@ class EngagedFleetMarkingTest extends FleetDispatchTestCase
      * Dans la boite d'evenements : meme marquage pour l'attaquant, et le proprietaire de la cible
      * voit l'attaque entrante engagee.
      */
+    /**
+     * L'interface n'est jamais la protection : un appel direct au serveur est refuse, et le dit.
+     */
+    public function testADirectRecallOfAnEngagedFleetIsRefusedByTheServer(): void
+    {
+        $combat = $this->anEngagedCombat();
+
+        $reponse = $this->post('/ajax/fleet/dispatch/recall-fleet', ['fleet_mission_id' => $combat->mission_id]);
+
+        $reponse->assertStatus(409);
+        $reponse->assertJsonFragment(['success' => false]);
+        $reponse->assertJsonFragment(['error' => __('t_ingame.fleet.recall_refused_engaged')]);
+
+        // Et rien n'a bouge : ni retour cree, ni mission annulee.
+        $this->assertSame(0, (int)DB::table('fleet_missions')->where('parent_id', $combat->mission_id)->count(), 'A return trip was created for an engaged fleet.');
+        $this->assertSame(0, (int)DB::table('fleet_missions')->where('id', $combat->mission_id)->value('canceled'), 'The engaged fleet was cancelled.');
+
+        // **Le contraste** : la meme requete sur une flotte libre en vol reussit, et cree son retour.
+        $this->playerSetResearchLevel('astrophysics', 1);
+        $expedition = new UnitCollection();
+        $expedition->addUnit(ObjectService::getUnitObjectByMachineName('small_cargo'), 1);
+        $this->missionType = 15;
+        $this->sendMissionToPosition16($expedition, new Resources(0, 0, 0, 0));
+        $this->missionType = 1;
+        $expeditionId = (int)DB::table('fleet_missions')->where('user_id', $this->currentUserId)->where('mission_type', 15)->where('processed', 0)->value('id');
+        $this->assertGreaterThan(0, $expeditionId, 'The expedition was not dispatched: the scenario would prove nothing.');
+
+        $libre = $this->post('/ajax/fleet/dispatch/recall-fleet', ['fleet_mission_id' => $expeditionId]);
+        $libre->assertStatus(200);
+        $libre->assertJsonFragment(['success' => true]);
+        $this->assertSame(1, (int)DB::table('fleet_missions')->where('parent_id', $expeditionId)->count(), 'The free fleet was not recalled: the refusal above would prove nothing.');
+    }
+
     public function testTheEventListMarksTheEngagedFleetForBothSides(): void
     {
         $combat = $this->anEngagedCombat();
