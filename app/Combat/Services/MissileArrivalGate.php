@@ -2,6 +2,7 @@
 
 namespace OGame\Combat\Services;
 
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Enums\CombatReasonCode;
@@ -25,7 +26,7 @@ use RuntimeException;
  * | le combat est… | et le missile est parti… | verdict |
  * | --- | --- | --- |
  * | en ralliement | avant l'ouverture | **frappe** ; la fermeture lira son delta au registre |
- * | en ralliement | a l'ouverture ou apres | **anomalie** : le lancement aurait du etre refuse ; annule sans impact, missiles rendus, joueur averti, alerte |
+ * | en ralliement | a l'ouverture ou apres | **anomalie** : le lancement aurait du etre refuse ; annule sans impact, missiles rendus (decision de Keven, revue 94), joueur averti, alerte ; silo disparu : **retenu**, rien n'est rendu ni dit rendu |
  * | en bataille ou en reglement | — | **differe** : il attend le resultat, puis frappe ce qui reste — une seule fois |
  * | final, ou sans combat | — | frappe |
  *
@@ -36,9 +37,10 @@ use RuntimeException;
  * ## Le sort des missiles d'une anomalie
  *
  * La matrice dit « annulation et alerte », pas ce que deviennent les missiles. Ils sont **rendus** au
- * silo de depart : le joueur n'a rien fait d'autre que passer par une porte que le serveur a
- * laissee ouverte une seconde de trop, et les detruire serait la punition d'une course qui n'est
- * pas la sienne. C'est un choix d'implementation, dit au journal, que Keven peut renverser.
+ * silo de depart, **une fois** : Keven l'a tranche (revue 94) — ce n'est ni un droit de rappel des
+ * missiles normalement lances, ni une autorisation de tirer sur une cible verrouillee. Le
+ * remboursement est atomique et idempotent (`cancelWithoutImpact()`), et un silo disparu retient le
+ * missile au lieu de perdre les actifs en silence.
  */
 final class MissileArrivalGate
 {
@@ -47,6 +49,13 @@ final class MissileArrivalGate
     public const string DEFER = 'defer';
 
     public const string CANCELLED = 'cancelled';
+
+    /**
+     * L'anomalie est reconnue mais le silo d'origine n'existe plus : le missile est **retenu**, non
+     * traite, jusqu'a ce que l'exploitation tranche. Rien n'est perdu en silence, rien n'est annonce
+     * comme rendu.
+     */
+    public const string HELD = 'held';
 
     /**
      * Decide, et execute l'annulation si c'en est une. Rend le verdict pour que l'appelant sache
@@ -87,42 +96,77 @@ final class MissileArrivalGate
             return self::APPLY;
         }
 
-        $this->cancelWithoutImpact($mission, $corps);
-
-        return self::CANCELLED;
+        return $this->cancelWithoutImpact($mission, $corps);
     }
 
     /**
      * Cree apres l'ouverture malgre le verrou : ni applique — la photographie est prise — ni
      * silencieux.
      */
-    private function cancelWithoutImpact(FleetMission $mission, int $corps): void
+    /**
+     * Cree apres l'ouverture malgre le verrou : ni applique — la photographie est prise — ni
+     * silencieux. **Le remboursement est unique et atomique** : la mission est relue sous verrou dans
+     * une transaction, `processed` est pose **avant** le credit, et un second appelant — un autre
+     * travailleur, la mise a jour d'un corps, l'administration — trouve la mission traitee et ne
+     * rembourse rien. Une panne entre le credit et la validation ramene tout en arriere.
+     *
+     * Si le silo d'origine n'existe plus, rien n'est rendu et rien n'est dit rendu : le missile est
+     * retenu, non traite, et le journal le nomme a chaque passage jusqu'a ce que l'exploitation tranche.
+     */
+    private function cancelWithoutImpact(FleetMission $mission, int $corps): string
     {
-        $planetes = resolve(PlanetServiceFactory::class);
-        $origine = $mission->planet_id_from === null ? null : $planetes->make((int)$mission->planet_id_from, true);
-        $missiles = (int)$mission->interplanetary_missile;
+        return DB::transaction(function () use ($mission, $corps): string {
+            $tenue = FleetMission::query()->whereKey($mission->id)->lockForUpdate()->first();
+            if (!$tenue instanceof FleetMission) {
+                throw new RuntimeException('Le missile ' . $mission->id . ' a disparu avant son annulation.');
+            }
+            if ((int)$tenue->processed === 1) {
+                // Deja annule par un autre appelant : le remboursement a eu lieu une fois, pas deux.
+                return self::CANCELLED;
+            }
 
-        if ($origine !== null && $missiles > 0) {
-            $origine->addUnit('interplanetary_missile', $missiles);
-        }
+            $planetes = resolve(PlanetServiceFactory::class);
+            $origine = $tenue->planet_id_from === null ? null : $planetes->make((int)$tenue->planet_id_from, true);
+            $missiles = (int)$tenue->interplanetary_missile;
 
-        $mission->processed = 1;
-        $mission->save();
+            if ($origine === null && $missiles > 0) {
+                Log::warning('Missile lance apres l ouverture d un combat sur sa cible : annulation impossible, le silo d origine n existe plus ; missile retenu, rien n est rendu.', [
+                    'invariant' => InvariantCode::EffectCreatedAfterTheLock->value,
+                    'fleet_mission_id' => $tenue->id,
+                    'target_body_id' => $corps,
+                    'origin_body_id' => $tenue->planet_id_from,
+                    'missiles_held' => $missiles,
+                ]);
 
-        Log::warning('Missile lance apres l ouverture d un combat sur sa cible : annule sans impact, missiles rendus.', [
-            'invariant' => InvariantCode::EffectCreatedAfterTheLock->value,
-            'fleet_mission_id' => $mission->id,
-            'target_body_id' => $corps,
-            'time_departure' => (int)$mission->time_departure,
-            'missiles_returned' => $origine === null ? 0 : $missiles,
-        ]);
+                return self::HELD;
+            }
 
-        $lanceur = $origine?->getPlayer();
-        if ($lanceur !== null) {
-            resolve(MessageService::class, ['player' => $lanceur])->sendSystemMessageToPlayer($lanceur, CombatRallyRefused::class, [
-                'coordinates' => '[coordinates]' . (int)$mission->galaxy_to . ':' . (int)$mission->system_to . ':' . (int)$mission->position_to . '[/coordinates]',
-                'reason_code' => CombatReasonCode::TargetCombatLocked->value,
+            // **`processed` d'abord, le credit ensuite**, dans la meme transaction : c'est l'ordre qui
+            // rend un second appel inoffensif et une panne sans effet.
+            $tenue->processed = 1;
+            $tenue->save();
+
+            if ($origine !== null && $missiles > 0) {
+                $origine->addUnit('interplanetary_missile', $missiles);
+            }
+
+            Log::warning('Missile lance apres l ouverture d un combat sur sa cible : annule sans impact, missiles rendus.', [
+                'invariant' => InvariantCode::EffectCreatedAfterTheLock->value,
+                'fleet_mission_id' => $tenue->id,
+                'target_body_id' => $corps,
+                'time_departure' => (int)$tenue->time_departure,
+                'missiles_returned' => $missiles,
             ]);
-        }
+
+            $lanceur = $origine?->getPlayer();
+            if ($lanceur !== null) {
+                resolve(MessageService::class, ['player' => $lanceur])->sendSystemMessageToPlayer($lanceur, CombatRallyRefused::class, [
+                    'coordinates' => '[coordinates]' . (int)$tenue->galaxy_to . ':' . (int)$tenue->system_to . ':' . (int)$tenue->position_to . '[/coordinates]',
+                    'reason_code' => CombatReasonCode::TargetCombatLocked->value,
+                ]);
+            }
+
+            return self::CANCELLED;
+        });
     }
 }

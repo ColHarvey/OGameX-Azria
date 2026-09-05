@@ -5,6 +5,7 @@ namespace Tests\Feature\Combat;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Replay\BattleResultCodec;
+use OGame\Combat\Services\MissileArrivalGate;
 use OGame\Combat\Services\RallyClosureService;
 use OGame\Factories\GameMissionFactory;
 use OGame\GameMissions\AttackMission;
@@ -12,6 +13,7 @@ use OGame\GameMissions\MissileMission;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\CombatInstance;
 use OGame\Models\Enums\PlanetType;
+use OGame\Models\FleetMission;
 use OGame\Models\Planet\Coordinate;
 use OGame\Services\FleetMissionService;
 use OGame\Services\MessageService;
@@ -144,6 +146,50 @@ final class MissileAgainstAHeldBodyTest extends FleetDispatchTestCase
         $this->travelTo(Date::createFromTimestamp($fermeture));
         $this->assertTrue((new RallyClosureService())->close($combat->id, $fermeture)->closed, 'The rally did not close.');
         $this->assertSame(self::GARRISON, $this->defenderStartOf($combat, 'rocket_launcher'), 'The cancelled missile entered the photograph.');
+    }
+
+    /**
+     * Le remboursement est unique : un second appelant trouve la mission traitee et ne rend rien.
+     *
+     * Sous SQLite, `lockForUpdate()` ne compile a rien : cet essai prouve l'idempotence par
+     * `processed`, pas la course. La course — deux travailleurs au meme instant — est jouee sur le
+     * bac MariaDB (`MissileRefundRaceTest`).
+     */
+    public function testCancellingTheSameMissileTwiceRefundsItOnce(): void
+    {
+        [$combat, $cible, $ouverture] = $this->anOpenRally(self::GARRISON);
+        $silo = $this->planetService->getObjectAmount('interplanetary_missile');
+        $missile = $this->aPendingMissileTowards($cible, $ouverture + 1, $ouverture + 8, missiles: 2);
+        $this->travelTo(Date::createFromTimestamp($ouverture + 8));
+
+        $porte = resolve(MissileArrivalGate::class);
+        $this->assertSame(MissileArrivalGate::CANCELLED, $porte->decide(FleetMission::query()->findOrFail($missile->id)));
+        $this->assertSame(MissileArrivalGate::CANCELLED, $porte->decide(FleetMission::query()->findOrFail($missile->id)), 'The second call did not recognise a mission already cancelled.');
+        resolve(FleetMissionService::class)->updateMission(FleetMission::query()->findOrFail($missile->id));
+
+        $this->planetService->reloadPlanet();
+        $this->assertSame($silo + 2, $this->planetService->getObjectAmount('interplanetary_missile'), 'The missiles were refunded twice, or never.');
+        $this->assertSame(1, DB::table('messages')->where('user_id', $this->currentUserId)->where('key', 'combat_rally_refused')->count(), 'The launcher was told twice, or never.');
+    }
+
+    /**
+     * Le silo d'origine n'existe plus : rien n'est rendu, rien n'est dit rendu, le missile est retenu.
+     */
+    public function testAMissileWhoseSiloDisappearedIsHeldAndNothingIsClaimedReturned(): void
+    {
+        [$combat, $cible, $ouverture] = $this->anOpenRally(self::GARRISON);
+        $missile = $this->aPendingMissileTowards($cible, $ouverture + 1, $ouverture + 8, missiles: 2);
+        // Un corps supprime laisse aux missions des autres joueurs leurs coordonnees et leur retire le
+        // lien (`PlayerService::delete()`) : c est ainsi qu un silo disparait.
+        DB::table('fleet_missions')->where('id', $missile->id)->update(['planet_id_from' => null]);
+        $this->travelTo(Date::createFromTimestamp($ouverture + 8));
+
+        $this->assertSame(MissileArrivalGate::HELD, resolve(MissileArrivalGate::class)->decide(FleetMission::query()->findOrFail($missile->id)));
+        resolve(FleetMissionService::class)->updateMission(FleetMission::query()->findOrFail($missile->id));
+
+        $this->assertSame(0, (int)DB::table('fleet_missions')->where('id', $missile->id)->value('processed'), 'A missile whose silo is gone was marked processed: its missiles are lost in silence.');
+        $this->assertSame(self::GARRISON, $this->garrisonOf($cible, 'rocket_launcher'), 'The held missile struck the body.');
+        $this->assertSame(0, DB::table('messages')->where('user_id', $this->currentUserId)->where('key', 'combat_rally_refused')->count(), 'A refund was announced although nothing was returned.');
     }
 
     private function missileMission(): MissileMission
