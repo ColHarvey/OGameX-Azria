@@ -61,6 +61,7 @@ class CombatOutboxDeliveryTest extends FleetDispatchTestCase
         $avant = Message::query()->where('user_id', $this->currentUserId)->where('key', 'combat_rally_refused')->count();
 
         $this->aNotice($combat, CombatParticipantKey::forFleet((int)$combat->mission_id), CombatOutboxKind::RallyRefused, [
+            'recipient_id' => $this->currentUserId,
             'reason' => CombatReasonCode::RallyClosed->value,
             'target_body_id' => (int)$combat->target_planet_id,
             'galaxy' => (int)$combat->galaxy,
@@ -94,6 +95,7 @@ class CombatOutboxDeliveryTest extends FleetDispatchTestCase
         $maintenant = (int)now()->timestamp;
 
         $this->aNotice($combat, CombatParticipantKey::forFleet((int)$combat->mission_id), CombatOutboxKind::RallyRefused, [
+            'recipient_id' => $this->currentUserId,
             'reason' => CombatReasonCode::FleetLimitReached->value,
             'galaxy' => (int)$combat->galaxy,
             'system' => (int)$combat->system,
@@ -108,10 +110,54 @@ class CombatOutboxDeliveryTest extends FleetDispatchTestCase
     }
 
     /**
-     * La garnison recoit son avis par l'inscription : un corps reattribue apres la cloture ne le
-     * detourne pas vers le nouveau proprietaire.
+     * Un avis qui ne nomme pas son destinataire n'est pas livre : il est garde, compte, et laisse
+     * a l'exploitation.
+     *
+     * ## Pourquoi le refus plutot que la devinette
+     *
+     * Redemander au corps vivant a qui il appartient rouvrirait le defaut que `recipient_id` ferme —
+     * et precisement pour les avis les plus anciens, ceux dont le contexte a eu le plus de temps
+     * pour changer. Une decision humaine vaut mieux qu'un destinataire suppose.
+     *
+     * Le montage force le cas : la garnison est bien inscrite, le corps a bien un proprietaire, et
+     * pourtant rien ne part — c'est ce qui distingue un refus d'une simple absence de destinataire.
      */
-    public function testTheGarrisonNoticeFollowsTheEnrolmentNotTheLivingBody(): void
+    public function testANoticeWithoutAFrozenRecipientIsRefusedRatherThanGuessed(): void
+    {
+        $combat = $this->anEngagedCombat();
+        $maintenant = (int)now()->timestamp;
+        $clef = CombatParticipantKey::forPlanet((int)$combat->target_planet_id);
+
+        // **Precondition** : le repli aurait de quoi deviner — l'inscription existe, le corps aussi.
+        $inscrit = (int)DB::table('combat_participants')
+            ->where('combat_instance_id', $combat->id)
+            ->where('participant_key', $clef)
+            ->value('player_id');
+        $this->assertGreaterThan(0, $inscrit, 'The garrison is not enrolled: a refusal would prove nothing.');
+        $this->assertGreaterThan(0, (int)DB::table('planets')->where('id', $combat->target_planet_id)->value('user_id'));
+
+        $this->aNotice($combat, $clef, CombatOutboxKind::CombatCancelled, [
+            'cause' => CombatCancellationCause::AdministrativeDecision->value,
+            'galaxy' => (int)$combat->galaxy,
+            'system' => (int)$combat->system,
+            'position' => (int)$combat->position,
+        ], $maintenant);
+
+        $avantMessages = Message::query()->count();
+
+        $this->assertSame(0, (new CombatOutboxDelivery())->deliver($maintenant), 'A notice without a frozen recipient was delivered to someone.');
+        $this->assertSame($avantMessages, Message::query()->count(), 'A message was created for a guessed recipient.');
+
+        $avis = CombatOutboxMessage::query()->where('combat_instance_id', $combat->id)->firstOrFail();
+        $this->assertNull($avis->dispatched_at);
+        $this->assertSame(1, (int)$avis->attempts, 'The refusal was not counted.');
+        $this->assertStringContainsString('destinataire', (string)$avis->last_error);
+    }
+
+    /**
+     * Le contenu d'un avis d'annulation parvient au joueur qu'il nomme, sans l'empreinte technique.
+     */
+    public function testTheCancellationReachesThePlayerItNamesWithoutTheInternalFingerprint(): void
     {
         $combat = $this->anEngagedCombat();
         $maintenant = (int)now()->timestamp;
@@ -119,14 +165,10 @@ class CombatOutboxDeliveryTest extends FleetDispatchTestCase
             ->where('combat_instance_id', $combat->id)
             ->where('participant_key', CombatParticipantKey::forPlanet((int)$combat->target_planet_id))
             ->value('player_id');
-        $this->assertGreaterThan(0, $inscrit, 'The garrison is not enrolled: the scenario would prove nothing.');
-
-        // Le corps change de mains apres la cloture.
-        $tiers = (int)DB::table('users')->whereNotIn('id', [$inscrit, $this->currentUserId])->orderByDesc('id')->value('id');
-        $this->assertGreaterThan(0, $tiers);
-        DB::table('planets')->where('id', $combat->target_planet_id)->update(['user_id' => $tiers]);
+        $this->assertGreaterThan(0, $inscrit);
 
         $this->aNotice($combat, CombatParticipantKey::forPlanet((int)$combat->target_planet_id), CombatOutboxKind::CombatCancelled, [
+            'recipient_id' => $inscrit,
             'cause' => CombatCancellationCause::AdministrativeDecision->value,
             'note' => 'essai',
             'cancelled_at' => $maintenant,
@@ -138,9 +180,6 @@ class CombatOutboxDeliveryTest extends FleetDispatchTestCase
         ], $maintenant);
 
         $this->assertSame(1, (new CombatOutboxDelivery())->deliver($maintenant));
-
-        $this->assertSame(1, Message::query()->where('user_id', $inscrit)->where('key', 'combat_cancelled')->count(), 'The enrolled defender did not receive the cancellation.');
-        $this->assertSame(0, Message::query()->where('user_id', $tiers)->where('key', 'combat_cancelled')->count(), 'The new owner of the body received a notice for a battle it never fought.');
 
         $message = Message::query()->where('user_id', $inscrit)->where('key', 'combat_cancelled')->firstOrFail();
         // **L'empreinte technique ne parvient pas au joueur** : il recoit une reference d'incident
@@ -158,6 +197,7 @@ class CombatOutboxDeliveryTest extends FleetDispatchTestCase
         $maintenant = (int)now()->timestamp;
 
         $this->aNotice($combat, CombatParticipantKey::forFleet(999_999_999), CombatOutboxKind::RallyRefused, [
+            'recipient_id' => 0,
             'reason' => CombatReasonCode::RallyClosed->value,
             'galaxy' => 1,
             'system' => 1,
@@ -184,6 +224,7 @@ class CombatOutboxDeliveryTest extends FleetDispatchTestCase
         $maintenant = (int)now()->timestamp;
 
         $this->aNotice($combat, CombatParticipantKey::forFleet((int)$combat->mission_id), CombatOutboxKind::RallyRefused, [
+            'recipient_id' => $this->currentUserId,
             'reason' => CombatReasonCode::RallyClosed->value,
             'galaxy' => (int)$combat->galaxy,
             'system' => (int)$combat->system,

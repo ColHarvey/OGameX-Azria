@@ -61,7 +61,7 @@
             @else
                 <ul class="combatEvent_losses">
                     @foreach ($combat['events'] as $perte)
-                        <li data-sequence="{{ $perte['sequence'] }}">
+                        <li data-key="{{ $perte['key'] }}" data-sequence="{{ $perte['sequence'] }}">
                             <span class="combatEvent_at">{{ date('H:i:s', $perte['at']) }}</span>
                             <span class="overmark">{{ trans_choice('t_ingame.combat.loss_line', $perte['amount'], ['amount' => number_format($perte['amount'], 0, ',', ' '), 'unit' => $perte['unit_label']]) }}</span>
                         </li>

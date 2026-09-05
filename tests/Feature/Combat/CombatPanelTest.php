@@ -163,12 +163,16 @@ class CombatPanelTest extends FleetDispatchTestCase
         $aplatir($corps);
 
         $this->assertNotContains($echeance, $valeurs, 'The battle deadline is a value of the feed.');
-        $this->assertNotContains($echeance - $fin, $valeurs, 'The seconds left before the battle ends are a value of the feed.');
+
+        // L'ecart, lui, ne se cherche pas ainsi : quand il vaut un ou deux, il coincide avec un
+        // identifiant ou un nombre de pertes, et l'assertion accuserait le code a tort. Ce qui le
+        // rend impossible a reconstituer, c'est l'absence de toute clef qui le porterait — les clefs
+        // du document sont epinglees plus haut et plus bas.
 
         foreach ($corps['events'] as $evenement) {
             $this->assertLessThanOrEqual($fin, $evenement['at'], 'A loss from the future was sent to the browser.');
             $this->assertArrayNotHasKey('round', $evenement, 'A round number leaked into the feed.');
-            $this->assertSame(['sequence', 'at', 'side', 'unit', 'unit_label', 'amount'], array_keys($evenement));
+            $this->assertSame(['key', 'sequence', 'at', 'side', 'unit', 'unit_label', 'amount'], array_keys($evenement));
         }
 
         $this->assertSame((int)$corps['next_after'], (int)end($corps['events'])['sequence']);

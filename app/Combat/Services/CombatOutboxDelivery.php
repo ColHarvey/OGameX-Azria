@@ -4,15 +4,11 @@ namespace OGame\Combat\Services;
 
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Enums\CombatOutboxKind;
-use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameMessages\Abstracts\GameMessage;
 use OGame\GameMessages\CombatCancelled;
 use OGame\GameMessages\CombatRallyRefused;
 use OGame\Models\CombatOutboxMessage;
-use OGame\Models\CombatParticipant;
-use OGame\Models\FleetMission;
-use OGame\Models\Planet;
 use OGame\Services\MessageService;
 use RuntimeException;
 use Throwable;
@@ -30,13 +26,20 @@ use Throwable;
  *
  * ## A qui l'avis est livre
  *
- * **Au destinataire que l'avis porte**, fige par son ecrivain a l'instant de la decision. C'est le
- * seul repere sur : un corps ou une flotte peut changer de mains entre la decision et la livraison,
- * et l'avis appartient a qui a subi la decision, pas a qui possede la chose aujourd'hui.
+ * **Au destinataire que l'avis porte**, fige par son ecrivain a l'instant de la decision, et a
+ * personne d'autre. Un corps ou une flotte peut changer de mains entre la decision et la
+ * livraison ; l'avis appartient a qui a subi la decision, pas a qui possede la chose aujourd'hui.
  *
- * Un avis ecrit avant que ce champ n'existe n'en porte pas : il retombe alors sur l'inscription —
- * la photographie, qui fige elle aussi le joueur — puis sur la mission ou le corps. Ce repli existe
- * pour ne pas perdre un avis en attente au moment du deploiement, pas comme chemin ordinaire.
+ * ## Pourquoi aucun repli
+ *
+ * Un avis sans destinataire fige est **refuse**, pas devine. Redemander au corps vivant a qui il
+ * appartient rouvrirait exactement le defaut que ce champ ferme, pour les avis les plus anciens —
+ * ceux dont le contexte a eu le plus de temps pour changer.
+ *
+ * Aucun avis de ce genre ne peut exister sur ce candidat : le systeme n'a jamais tourne ailleurs
+ * qu'en essai, la table est vide partout, et tout ecrivain pose ce champ depuis qu'il existe. Si
+ * l'un s'y trouvait quand meme, il serait compte, garde avec sa raison, et laisse a l'exploitation
+ * apres cinq tentatives : une decision humaine vaut mieux qu'un destinataire suppose.
  *
  * Un avis sans destinataire ou dont le message echoue est garde, compte, et retente au passage
  * suivant ; au-dela de cinq tentatives il est laisse a l'exploitation avec sa derniere erreur.
@@ -114,28 +117,7 @@ final class CombatOutboxDelivery
             return (int)$contenu['recipient_id'];
         }
 
-        $clef = (string)$avis->participant_key;
-
-        $inscrit = CombatParticipant::query()
-            ->where('combat_instance_id', $avis->combat_instance_id)
-            ->where('participant_key', $clef)
-            ->value('player_id');
-
-        if ($inscrit !== null) {
-            return (int)$inscrit;
-        }
-
-        $identifiant = CombatParticipantKey::identifierOf($clef);
-
-        if ($identifiant === null) {
-            return null;
-        }
-
-        $proprietaire = CombatParticipantKey::isBody($clef)
-            ? Planet::query()->whereKey($identifiant)->value('user_id')
-            : FleetMission::query()->whereKey($identifiant)->value('user_id');
-
-        return $proprietaire === null ? null : (int)$proprietaire;
+        return null;
     }
 
     /**

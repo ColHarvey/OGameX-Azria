@@ -110,6 +110,10 @@ final class CombatPanelService
 
         foreach ($this->reader->visibleTo($combat, $playerId, $now, $afterSequence) as $evenement) {
             $lignes[] = [
+                // **L'identite stable d'une perte** : la bataille et le rang. Deux batailles
+                // simultanees portent chacune un rang 1 ; le navigateur deduplique sur cette clef,
+                // et sur elle seule, que la perte vienne du fil ou de la diffusion.
+                'key' => (int)$combat->id . ':' . $evenement->sequence,
                 'sequence' => $evenement->sequence,
                 'at' => $evenement->visibleAt,
                 'side' => $evenement->side,

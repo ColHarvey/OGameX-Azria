@@ -14,6 +14,7 @@ use OGame\Models\CombatPresentationEvent;
 use OGame\Models\User;
 use OGame\Services\SettingsService;
 use ReflectionProperty;
+use RuntimeException;
 use Tests\FleetDispatchTestCase;
 
 /**
@@ -126,7 +127,7 @@ class CombatLiveBroadcastTest extends FleetDispatchTestCase
             $this->assertSame(['combatId', 'losses'], array_keys($charge));
 
             foreach ($charge['losses'] as $perte) {
-                $this->assertSame(['sequence', 'at', 'side', 'unit', 'unit_label', 'amount'], array_keys($perte));
+                $this->assertSame(['key', 'sequence', 'at', 'side', 'unit', 'unit_label', 'amount'], array_keys($perte));
                 $this->assertLessThanOrEqual($premiere, $perte['at'], 'A loss from the future was broadcast.');
                 $this->assertNotSame($echeance, $perte['at']);
             }
@@ -198,6 +199,155 @@ class CombatLiveBroadcastTest extends FleetDispatchTestCase
             CombatPresentationEvent::query()->where('combat_instance_id', $combat->id)->whereNull('broadcast_at')->where('visible_at', '<=', $premiere)->count(),
             'The command left a visible loss unbroadcast.'
         );
+    }
+
+    /**
+     * Un transport qui refuse ne perd rien : la perte repart au passage suivant.
+     *
+     * C'est la moitie de la garantie « au moins une fois ». L'autre — la repetition possible — est
+     * eprouvee par l'essai suivant.
+     */
+    public function testATransportFailureLosesNothingAndIsRetried(): void
+    {
+        $combat = $this->anEngagedCombat();
+        $premiere = (int)$combat->started_at + $this->secondsPerRoundOf($combat)[0];
+        $diffuseur = new CombatPresentationBroadcaster();
+
+        $dues = CombatPresentationEvent::query()
+            ->where('combat_instance_id', $combat->id)
+            ->where('visible_at', '<=', $premiere)
+            ->count();
+        $this->assertGreaterThan(0, $dues, 'Nothing is due: the scenario would prove nothing.');
+
+        // Le transport refuse tout.
+        Event::listen(CombatLossesPublished::class, static function (): void {
+            throw new RuntimeException('le transport a refuse');
+        });
+
+        $this->assertSame(0, $diffuseur->publish($premiere), 'A refused broadcast was counted as sent.');
+
+        // **Rien n'est marque** : tout reste a faire, et rien n'est perdu.
+        $this->assertSame(
+            $dues,
+            CombatPresentationEvent::query()->where('combat_instance_id', $combat->id)->whereNull('broadcast_at')->where('visible_at', '<=', $premiere)->count(),
+            'A loss the transport refused was marked as attempted, and would never be sent again.'
+        );
+
+        // Le transport revient : tout repart.
+        Event::forget(CombatLossesPublished::class);
+        Event::fake([CombatLossesPublished::class]);
+
+        $this->assertSame($dues, $diffuseur->publish($premiere), 'The refused losses did not leave once the transport came back.');
+        Event::assertDispatched(CombatLossesPublished::class);
+    }
+
+    /**
+     * Un envoi accepte dont la marque se perd repart — et le navigateur ne le montre qu'une fois.
+     *
+     * ## Ce que cet essai etablit, et qui n'est pas confortable
+     *
+     * La garantie est **au moins une fois**, pas exactement une fois : entre l'envoi accepte par le
+     * transport et l'ecriture de la marque, un processus peut mourir. La perte repart alors, et le
+     * joueur la recevrait deux fois — si le navigateur ne la reconnaissait pas. C'est pourquoi
+     * chaque perte porte une identite stable : la bataille **et** le rang.
+     */
+    public function testAnAcknowledgedSendWhoseMarkIsLostIsRepeatedButCarriesAStableIdentity(): void
+    {
+        $combat = $this->anEngagedCombat();
+        $premiere = (int)$combat->started_at + $this->secondsPerRoundOf($combat)[0];
+        $diffuseur = new CombatPresentationBroadcaster();
+
+        $recus = [];
+        Event::listen(CombatLossesPublished::class, static function (CombatLossesPublished $envoi) use (&$recus): void {
+            foreach ($envoi->broadcastWith()['losses'] as $perte) {
+                $recus[] = $perte['key'];
+            }
+        });
+
+        $diffuseur->publish($premiere);
+        $this->assertNotSame([], $recus, 'Nothing was broadcast: the scenario would prove nothing.');
+        $premierEnvoi = $recus;
+
+        // La marque se perd — le processus est mort entre l'envoi et l'ecriture.
+        CombatPresentationEvent::query()->where('combat_instance_id', $combat->id)->update(['broadcast_at' => null]);
+
+        $recus = [];
+        $diffuseur->publish($premiere);
+
+        $this->assertSame($premierEnvoi, $recus, 'The repeated send does not carry the same losses.');
+
+        // **L'identite est stable et porte la bataille** : c'est elle qui rend la repetition
+        // invisible au joueur, et elle ne confond pas deux batailles de meme rang.
+        // Les deux envois portent les memes clefs : on lit celles du premier, dont l assertion
+        // ci-dessus vient d etablir qu il n est pas vide.
+        foreach ($premierEnvoi as $clef) {
+            $this->assertMatchesRegularExpression('/^' . $combat->id . ':\d+$/', (string)$clef, 'A loss identity does not name its battle.');
+        }
+
+        $this->assertSame(count($premierEnvoi), count(array_unique($premierEnvoi)), 'Two losses of the same battle share an identity.');
+    }
+
+    /**
+     * Une panne sur un destinataire n'emporte pas le sort de l'autre.
+     */
+    public function testAFailureForOneRecipientDoesNotMarkTheOther(): void
+    {
+        $combat = $this->anEngagedCombat();
+        $premiere = (int)$combat->started_at + $this->secondsPerRoundOf($combat)[0];
+        $attaquant = (int)DB::table('fleet_missions')->where('id', $combat->mission_id)->value('user_id');
+        $proprietaire = (int)DB::table('planets')->where('id', $combat->target_planet_id)->value('user_id');
+
+        // **Precondition** : les deux camps ont des pertes dues au meme instant.
+        $parJoueur = [];
+
+        foreach (CombatPresentationEvent::query()->where('combat_instance_id', $combat->id)->where('visible_at', '<=', $premiere)->get() as $evenement) {
+            $joueur = (int)DB::table('combat_participants')
+                ->where('combat_instance_id', $combat->id)
+                ->where('participant_key', $evenement->participant_key)
+                ->value('player_id');
+            $parJoueur[$joueur] = ($parJoueur[$joueur] ?? 0) + 1;
+        }
+
+        $this->assertArrayHasKey($attaquant, $parJoueur, 'The attacker lost nothing in the first period.');
+        $this->assertArrayHasKey($proprietaire, $parJoueur, 'The target owner lost nothing in the first period.');
+
+        // Le transport refuse pour le proprietaire seulement.
+        Event::listen(CombatLossesPublished::class, static function (CombatLossesPublished $envoi) use ($proprietaire): void {
+            if ($envoi->playerId === $proprietaire) {
+                throw new RuntimeException('le transport a refuse pour ce destinataire');
+            }
+        });
+
+        $this->assertSame($parJoueur[$attaquant], (new CombatPresentationBroadcaster())->publish($premiere), 'The failure of one recipient changed what the other received.');
+
+        // L'attaquant est marque, le proprietaire non : chacun son sort.
+        $restant = CombatPresentationEvent::query()
+            ->where('combat_instance_id', $combat->id)
+            ->where('visible_at', '<=', $premiere)
+            ->whereNull('broadcast_at')
+            ->count();
+
+        $this->assertSame($parJoueur[$proprietaire], $restant, 'The refused recipient losses were marked, or the accepted ones were not.');
+    }
+
+    /**
+     * L'emission ne se fait dans aucune transaction : un verrou tenu pendant un aller-retour reseau
+     * ferait attendre une bataille sur la disponibilite d'un serveur de diffusion.
+     */
+    public function testTheBroadcastRunsOutsideAnyTransaction(): void
+    {
+        $combat = $this->anEngagedCombat();
+        $premiere = (int)$combat->started_at + $this->secondsPerRoundOf($combat)[0];
+
+        $niveaux = [];
+        Event::listen(CombatLossesPublished::class, static function () use (&$niveaux): void {
+            $niveaux[] = DB::transactionLevel();
+        });
+
+        (new CombatPresentationBroadcaster())->publish($premiere);
+
+        $this->assertNotSame([], $niveaux, 'Nothing was broadcast: the scenario would prove nothing.');
+        $this->assertSame([0], array_values(array_unique($niveaux)), 'The broadcast happened inside a transaction.');
     }
 
     /**

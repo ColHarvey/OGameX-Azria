@@ -75198,9 +75198,11 @@ ogame.chat = {
  * navigateur sans WebSocket. Sa cadence est fixe et jamais annoncee : un « prochaine mise a jour
  * dans N secondes » revelerait les periodes de la bataille.
  *
- * Une perte recue en direct est ajoutee a sa carte et brievement mise en evidence. Le rang de
- * chaque perte sert a dedupliquer : apres une reconnexion, le fil rejoue ce qui a ete manque, et
- * un rang deja affiche n'ajoute rien ni ne rejoue son animation.
+ * Une perte recue en direct est ajoutee a sa carte et brievement mise en evidence. La diffusion
+ * garantit « au moins une fois » : une meme perte peut arriver deux fois, et c'est ce script qui
+ * rend la repetition invisible. La clef de deduplication est **(bataille, rang)** — jamais le rang
+ * seul, deux batailles simultanees portant chacune un rang 1. Une clef deja affichee n'ajoute rien
+ * et ne rejoue aucune animation, ce qui rend une reconnexion silencieuse.
  */
 (function () {
     var SECOURS_EN_COMBAT = 10000;
@@ -75396,7 +75398,12 @@ ogame.chat = {
             return false;
         }
 
-        if (details.querySelector('li[data-sequence="' + perte.sequence + '"]')) {
+        // **La deduplication porte sur (bataille, rang)**, jamais sur le rang seul : deux
+        // batailles simultanees portent chacune un rang 1. La diffusion garantit « au moins une
+        // fois » — une meme perte peut donc arriver deux fois, et c'est ici qu'elle est ignoree.
+        var clef = perte.key || (identifiantCombat + ':' + perte.sequence);
+
+        if (details.querySelector('li[data-key="' + clef + '"]')) {
             return false;
         }
 
@@ -75421,6 +75428,7 @@ ogame.chat = {
         }
 
         var ligne = document.createElement('li');
+        ligne.setAttribute('data-key', clef);
         ligne.setAttribute('data-sequence', perte.sequence);
         ligne.className = 'combatEvent_new';
 
