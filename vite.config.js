@@ -23,6 +23,7 @@ const ingameScripts = [
     'node_modules/laravel-echo/dist/echo.iife.js',
     'resources/js/ingame/echo.js',
     'resources/js/ingame/chat.js',
+    'resources/js/ingame/combat.js',
 ]
 
 const outgameScripts = [

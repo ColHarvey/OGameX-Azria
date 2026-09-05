@@ -27,3 +27,63 @@
     display: table;
     clear: both;
 }
+
+/*
+ * Le panneau des combats durables, sur la vue generale.
+ *
+ * Meme encadre que les boites de production et que le panneau des PNJ (content-box-s), meme
+ * largeur de 220 px : tout est empile, rien n'est mis en ligne. Les couleurs de gravite sont
+ * celles du jeu (undermark, middlemark, overmark) et ne sont pas redefinies ici.
+ */
+.combatpanel {
+    margin-top: 5px;
+}
+
+.combatpanel .content {
+    padding-bottom: 6px;
+}
+
+.combatpanel .combatpanel_combat {
+    padding: 3px 0 5px;
+    border-bottom: 1px solid #1d2f3d;
+}
+
+.combatpanel .combatpanel_combat:last-child {
+    border-bottom: 0;
+}
+
+.combatpanel .combatpanel_role {
+    font-weight: bold;
+    padding: 2px 0;
+}
+
+.combatpanel .combatpanel_line {
+    padding: 2px 0;
+    line-height: 13px;
+}
+
+.combatpanel .combatpanel_losses_title {
+    font-weight: bold;
+    padding-top: 4px;
+}
+
+.combatpanel .combatpanel_losses ul {
+    margin: 2px 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.combatpanel .combatpanel_losses li {
+    padding: 1px 0;
+    line-height: 13px;
+}
+
+.combatpanel .combatpanel_at {
+    color: #848484;
+    margin-right: 4px;
+}
+
+.combatpanel .combatpanel_empty {
+    margin: 2px 0;
+    color: #848484;
+}
