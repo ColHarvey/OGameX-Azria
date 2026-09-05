@@ -19,10 +19,20 @@ on:
     paths:
       - 'database/migrations/**'
       - '.github/workflows/migrations-mariadb.yml'
+      - 'app/Combat/**'
+      - 'app/GameMissions/**'
+      - 'tests/MariaDb/**'
+      - 'tests/Feature/Combat/**'
+      - 'phpunit.mariadb.xml'
   pull_request:
     paths:
       - 'database/migrations/**'
       - '.github/workflows/migrations-mariadb.yml'
+      - 'app/Combat/**'
+      - 'app/GameMissions/**'
+      - 'tests/MariaDb/**'
+      - 'tests/Feature/Combat/**'
+      - 'phpunit.mariadb.xml'
   # Lancement manuel : indispensable, parce qu'un filtre sur les chemins ne rattrape pas des
   # migrations poussees avant que ce workflow n'existe.
   workflow_dispatch:
@@ -164,3 +174,90 @@ jobs:
 
           # Et la colonne ajoutee a fleet_missions, qui designe le combat.
           verifier_bigint fleet_missions combat_instance_id
+
+  # Les courses et les transactions, sur la vraie base. SQLite ne verrouille rien ligne par ligne
+  # (`lockForUpdate()` n'y compile a rien) et ne connait qu'un ecrivain a la fois : un double
+  # reglement, une disposition consommee deux fois ou un rollback qui laisse une trace ne s'y
+  # voient pas. Ici, deux processus reels se disputent la meme ligne, et une seconde connexion
+  # mesure la portee des verrous. Les epreuves de rejeu et de rollback du reglement, deja vertes
+  # sous SQLite, rejouent sur de vraies transactions.
+  courses:
+    name: courses et transactions
+    runs-on: ubuntu-latest
+    needs: cycle
+    services:
+      mariadb:
+        image: mariadb:11.3.2-jammy
+        env:
+          MARIADB_ROOT_PASSWORD: essai
+          MARIADB_DATABASE: ogamex_essai
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          extensions: pdo_mysql, bcmath, gd, zip, intl, pcntl, posix
+          coverage: none
+
+      - name: Installer les dependances
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      # Le meme environnement minimal que la suite SQLite, la base en moins : tout le reste aux
+      # valeurs par defaut de Laravel. Partir de `.env.example` viserait Reverb sur localhost.
+      - name: Preparer l environnement
+        run: |
+          set -euo pipefail
+          {
+            echo "APP_NAME=OGameX"
+            echo "APP_ENV=testing"
+            echo "APP_DEBUG=true"
+            echo "APP_KEY="
+            echo "DB_CONNECTION=mysql"
+            echo "DB_HOST=127.0.0.1"
+            echo "DB_PORT=3306"
+            echo "DB_DATABASE=ogamex_essai"
+            echo "DB_USERNAME=root"
+            echo "DB_PASSWORD=essai"
+          } > .env
+          php artisan key:generate --force
+          grep -E "^(APP_ENV|DB_CONNECTION|DB_DATABASE)=" .env
+
+      - name: Verifier la base visee
+        run: |
+          BASE=$(php artisan tinker --execute="echo config('database.connections.mysql.database');")
+          echo "Laravel vise : $BASE"
+          test "$BASE" = "ogamex_essai" || { echo "ARRET : Laravel ne vise pas la base d'essai."; exit 1; }
+
+      - name: Appliquer les migrations
+        run: php artisan migrate --force
+
+      - name: Courses et transactions
+        run: |
+          set -o pipefail
+          mkdir -p storage/logs
+          vendor/bin/phpunit -c phpunit.mariadb.xml --log-junit storage/logs/junit-mariadb.xml 2>&1 | tee storage/logs/console-mariadb.txt
+
+      # Les quatre compteurs, pas seulement le code de sortie : un fichier qui ne charge pas
+      # rend zero essai et un vert vide.
+      - name: Lire les quatre compteurs
+        if: always()
+        run: php scripts/verifier-junit.php storage/logs/junit-mariadb.xml --minimum=124 --sans-ignores
+
+      - name: Publier les journaux
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mariadb-courses-${{ github.sha }}
+          path: |
+            storage/logs/junit-mariadb.xml
+            storage/logs/console-mariadb.txt
+          if-no-files-found: warn
