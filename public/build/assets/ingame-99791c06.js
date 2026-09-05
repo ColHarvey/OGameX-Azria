@@ -75192,9 +75192,15 @@ ogame.chat = {
  * rebours sur la fin de la bataille, ou choisir l'heure et le joueur. Le serveur seul les connait,
  * et il n'envoie aucune echeance — ni instant, ni secondes restantes.
  *
- * Le transport nominal est la diffusion serveur (Reverb) ; ce rafraichissement periodique est le
- * secours degrade, quand la connexion temps reel n'est pas disponible. Sa cadence est fixe, jamais
- * annoncee : un « prochaine mise a jour dans N secondes » revelerait les periodes de la bataille.
+ * Le transport nominal est la **diffusion serveur** : le navigateur ecoute son canal prive et recoit
+ * une perte des qu'elle devient visible, sans rechargement ni attente. Le rafraichissement
+ * periodique n'est que le secours degrade — connexion coupee, onglet revenu au premier plan,
+ * navigateur sans WebSocket. Sa cadence est fixe et jamais annoncee : un « prochaine mise a jour
+ * dans N secondes » revelerait les periodes de la bataille.
+ *
+ * Une perte recue en direct est ajoutee a sa carte et brievement mise en evidence. Le rang de
+ * chaque perte sert a dedupliquer : apres une reconnexion, le fil rejoue ce qui a ete manque, et
+ * un rang deja affiche n'ajoute rien ni ne rejoue son animation.
  */
 (function () {
     var SECOURS_EN_COMBAT = 10000;
@@ -75377,5 +75383,121 @@ ogame.chat = {
         }
     });
 
+    /**
+     * Ajoute a sa carte une perte recue en direct, si elle n'y est pas deja.
+     *
+     * Rend vrai quand la perte a ete ajoutee : un rang deja present n'ajoute rien, et ne rejoue
+     * donc aucune animation — c'est ce qui rend une reconnexion silencieuse.
+     */
+    function ajouterUnePerte(identifiantCombat, perte) {
+        var details = document.getElementById('combatDetails-' + identifiantCombat);
+
+        if (!details) {
+            return false;
+        }
+
+        if (details.querySelector('li[data-sequence="' + perte.sequence + '"]')) {
+            return false;
+        }
+
+        var liste = details.querySelector('ul.combatEvent_losses');
+
+        if (!liste) {
+            var vide = details.querySelector('.combatEvent_empty');
+
+            if (vide) {
+                vide.parentNode.removeChild(vide);
+            }
+
+            liste = document.createElement('ul');
+            liste.className = 'combatEvent_losses';
+            var panneau = details.querySelector('.combatEvent_panel');
+
+            if (!panneau) {
+                return false;
+            }
+
+            panneau.appendChild(liste);
+        }
+
+        var ligne = document.createElement('li');
+        ligne.setAttribute('data-sequence', perte.sequence);
+        ligne.className = 'combatEvent_new';
+
+        var heure = document.createElement('span');
+        heure.className = 'combatEvent_at';
+        heure.textContent = new Date(perte.at * 1000).toLocaleTimeString();
+
+        var texte = document.createElement('span');
+        texte.className = 'overmark';
+        texte.textContent = perte.amount + ' × ' + perte.unit_label;
+
+        ligne.appendChild(heure);
+        ligne.appendChild(texte);
+        liste.appendChild(ligne);
+
+        // La mise en evidence retombe d'elle-meme : elle signale une nouveaute, elle ne clignote pas.
+        window.setTimeout(function () {
+            ligne.classList.remove('combatEvent_new');
+        }, 4000);
+
+        return true;
+    }
+
+    function mettreAJourLeCumul(identifiantCombat, ajoutees) {
+        var ligne = document.getElementById('combatRow-' + identifiantCombat);
+
+        if (!ligne || !ajoutees) {
+            return;
+        }
+
+        var cumul = ligne.querySelector('.combatEvent_losses_total');
+
+        if (cumul) {
+            cumul.textContent = String((parseInt(cumul.textContent, 10) || 0) + ajoutees);
+        }
+    }
+
+    /**
+     * L'abonnement au canal prive du joueur. Sans Echo, le secours periodique suffit.
+     */
+    function ecouter() {
+        if (typeof window.Echo === 'undefined' || typeof window.Echo.private !== 'function') {
+            return;
+        }
+
+        if (typeof playerId === 'undefined' || !playerId) {
+            return;
+        }
+
+        try {
+            window.Echo.private('combat.player.' + playerId)
+                .listen('.CombatLossesPublished', function (recu) {
+                    if (!recu || !recu.losses) {
+                        return;
+                    }
+
+                    var ajoutees = 0;
+
+                    for (var i = 0; i < recu.losses.length; i++) {
+                        if (ajouterUnePerte(recu.combatId, recu.losses[i])) {
+                            ajoutees++;
+                        }
+                    }
+
+                    mettreAJourLeCumul(recu.combatId, ajoutees);
+
+                    // Une bataille dont la carte n'est pas encore affichee : on la demande une fois,
+                    // au lieu d'attendre le secours.
+                    if (ajoutees === 0 && !document.getElementById('combatRow-' + recu.combatId)) {
+                        rafraichir();
+                    }
+                });
+        } catch (erreur) {
+            // Pas de temps reel : le secours periodique reste.
+        }
+    }
+
+    ecouter();
     planifier();
 })();

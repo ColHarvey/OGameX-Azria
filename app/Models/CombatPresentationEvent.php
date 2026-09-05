@@ -37,6 +37,7 @@ use Illuminate\Support\Carbon;
     'version',
     'sequence',
     'visible_at',
+    'broadcast_at',
     'participant_key',
     'side',
     'unit',

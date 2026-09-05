@@ -26,3 +26,14 @@ Broadcast::channel('chat.user.{userId}', function ($user, $userId) {
 Broadcast::channel('chat.alliance.{allianceId}', function ($user, $allianceId) {
     return $user->alliance_id === (int) $allianceId;
 });
+
+/*
+ * Les pertes d'un joueur pendant une bataille durable.
+ *
+ * Un canal par joueur, et lui seul : ce que la bataille lui coute ne regarde ni son alliance,
+ * ni son adversaire. L'autorisation ne vaut que pour sa propre ligne, et elle est revocable —
+ * un compte supprime ou renomme cesse d'y avoir droit des la requete suivante.
+ */
+Broadcast::channel('combat.player.{playerId}', function ($user, $playerId) {
+    return (int) $user->id === (int) $playerId;
+});

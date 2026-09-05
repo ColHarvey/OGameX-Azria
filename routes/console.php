@@ -1,6 +1,7 @@
 <?php
 
 use OGame\Console\Commands\Combat\AdvancePersistentCombats;
+use OGame\Console\Commands\Combat\BroadcastCombatLosses;
 use OGame\Console\Commands\Npc\NpcTick;
 use OGame\Console\Commands\Scheduler\CleanupDestroyedPlanets;
 use OGame\Console\Commands\Scheduler\CleanupWreckFields;
@@ -48,6 +49,11 @@ Schedule::command(DarkMatterRegenerateCommand::class)->everyFiveMinutes()->witho
 // passage ne fait rien. La minute est la granularite du systeme : une bataille se termine a
 // l'echeance calculee a sa cloture, et l'attente ne doit pas s'y ajouter.
 Schedule::command(AdvancePersistentCombats::class)->everyMinute()->withoutOverlapping();
+
+// Les pertes deviennent visibles a un instant, pas a un evenement : ce diffuseur regarde l'heure
+// chaque seconde pendant sa minute, et envoie a chaque joueur ce qui vient de devenir visible.
+// Sans lui, le navigateur attendrait son prochain rafraichissement — le secours degrade.
+Schedule::command(BroadcastCombatLosses::class)->everyMinute()->withoutOverlapping();
 
 // Factions hostiles : croissance des bases, releve des bases detruites, decision de raid.
 // Sans effet tant que npc_enabled est a non, et n envoie aucune flotte tant que

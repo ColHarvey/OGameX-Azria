@@ -108,3 +108,22 @@
         animation: none;
     }
 }
+
+/*
+ * Une perte qui vient d arriver en direct : une breve mise en evidence, puis plus rien. Elle
+ * signale une nouveaute ; elle ne clignote pas et ne simule aucun degat.
+ */
+.combatEvent_panel li.combatEvent_new {
+    animation: combatEvent_arrivee 4s ease-out 1;
+}
+
+@keyframes combatEvent_arrivee {
+    0% { background-color: rgba(255, 150, 60, 0.35); }
+    100% { background-color: transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .combatEvent_panel li.combatEvent_new {
+        animation: none;
+    }
+}
