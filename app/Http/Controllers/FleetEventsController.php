@@ -5,6 +5,7 @@ namespace OGame\Http\Controllers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Date;
 use Illuminate\View\View;
+use OGame\Combat\Presentation\CombatPanelService;
 use OGame\Combat\Services\EngagedFleetCheck;
 use OGame\Enums\FleetMissionStatus;
 use OGame\Factories\PlanetServiceFactory;
@@ -114,8 +115,15 @@ class FleetEventsController extends OGameController
             }
         }
 
+        // **Le bandeau ferme signale la bataille**, avec un libelle et non une couleur seule. Il ne
+        // dit ni quand elle finit, ni ce qu'elle a coute : cela vit dans le deroulant, et seulement
+        // pour ce que le serveur a deja publie.
+        $combats = resolve(CombatPanelService::class)->forPlayer($player, $currentTime)['combats'];
+
         return new JsonResponse([
             'components' => [],
+            'combats' => count($combats),
+            'combatText' => $combats === [] ? '' : trans_choice('t_ingame.combat.eventbox_combats', count($combats), ['count' => count($combats)]),
             'hostile' => $hostileMissionCount,
             'neutral' => $neutralMissionCount,
             'friendly' => $friendlyMissionCount,
@@ -590,6 +598,7 @@ class FleetEventsController extends OGameController
             [
                 'fleet_events' => $fleet_events,
                 'espionage_probe_count' => $player->getEspionageProbesAmount() ?? 3,
+                'combatPanel' => resolve(CombatPanelService::class)->forPlayer($player, (int)Date::now()->timestamp),
             ]
         );
     }

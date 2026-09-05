@@ -78,6 +78,7 @@ final class CombatPanelService
     public function describe(CombatInstance $combat, int $playerId, array $corps, int $now): array
     {
         $statut = $combat->status;
+        $pertes = $this->visibleLosses($combat, $playerId, $now, 0);
 
         return [
             'id' => (int)$combat->id,
@@ -91,7 +92,10 @@ final class CombatPanelService
                 'system' => (int)$combat->system,
                 'position' => (int)$combat->position,
             ],
-            'events' => $this->visibleLosses($combat, $playerId, $now, 0),
+            'events' => $pertes,
+            // Le resume ferme de la carte : combien d'unites le joueur a perdues, tout compris. Une
+            // synthese, pour que la liste depliee reste une consultation et non un mur.
+            'losses_total' => array_sum(array_column($pertes, 'amount')),
         ];
     }
 

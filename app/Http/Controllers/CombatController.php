@@ -24,11 +24,15 @@ use OGame\Services\PlayerService;
 class CombatController extends OGameController
 {
     /**
-     * Le fragment du panneau, tel que la vue generale l'affiche.
+     * Les cartes de combat seules, telles que le deroulant « Evenements » les porte.
+     *
+     * Le navigateur les redemande pour rafraichir les batailles **sans** toucher aux lignes de
+     * mouvement : remplacer le deroulant entier fermerait un detail ouvert et deplacerait le
+     * defilement du joueur.
      */
     public function panel(PlayerService $player, CombatPanelService $panneau): View
     {
-        return view('ingame.overview.partials.combat', [
+        return view('ingame.fleetevents.combatrows', [
             'combatPanel' => $panneau->forPlayer($player, (int)Date::now()->timestamp),
         ]);
     }

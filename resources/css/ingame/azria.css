@@ -29,61 +29,82 @@
 }
 
 /*
- * Le panneau des combats durables, sur la vue generale.
+ * Les batailles en cours, dans les bandeaux du jeu.
  *
- * Meme encadre que les boites de production et que le panneau des PNJ (content-box-s), meme
- * largeur de 220 px : tout est empile, rien n'est mis en ligne. Les couleurs de gravite sont
- * celles du jeu (undermark, middlemark, overmark) et ne sont pas redefinies ici.
+ * Rien n'est invente : la carte est une ligne du tableau des evenements, son detail une ligne
+ * `partnerInfo` comme celle d'une union, et les couleurs sont les trois niveaux de gravite du jeu.
+ * Le halo est volontairement tres doux — il signale une activite, il ne simule pas des degats.
  */
-.combatpanel {
-    margin-top: 5px;
+#eventContent tr.combatEvent td {
+    background-color: #2b1a12;
 }
 
-.combatpanel .content {
-    padding-bottom: 6px;
+#eventContent tr.combatEvent .combatEvent_state {
+    display: inline-block;
+    padding: 1px 0;
 }
 
-.combatpanel .combatpanel_combat {
-    padding: 3px 0 5px;
-    border-bottom: 1px solid #1d2f3d;
+/* Une lueur ambre lente autour de l'etat, pour signaler l'activite sans clignoter. */
+#eventContent tr.combatEvent.detailsClosed .combatEvent_state,
+#eventContent tr.combatEvent.detailsOpened .combatEvent_state {
+    animation: combatEvent_halo 3.2s ease-in-out infinite;
 }
 
-.combatpanel .combatpanel_combat:last-child {
-    border-bottom: 0;
+@keyframes combatEvent_halo {
+    0%, 100% { text-shadow: 0 0 2px rgba(255, 150, 60, 0.25); }
+    50% { text-shadow: 0 0 6px rgba(255, 150, 60, 0.6); }
 }
 
-.combatpanel .combatpanel_role {
+#eventContent tr.combatEvent .combatEvent_role {
+    white-space: nowrap;
+}
+
+#eventContent tr.combatEvent_details td {
+    background-color: #1b120d;
+    padding: 4px 8px;
+}
+
+.combatEvent_panel .combatEvent_losses_title {
     font-weight: bold;
-    padding: 2px 0;
+    padding-bottom: 2px;
 }
 
-.combatpanel .combatpanel_line {
-    padding: 2px 0;
-    line-height: 13px;
-}
-
-.combatpanel .combatpanel_losses_title {
-    font-weight: bold;
-    padding-top: 4px;
-}
-
-.combatpanel .combatpanel_losses ul {
-    margin: 2px 0 0;
+.combatEvent_panel ul.combatEvent_losses {
+    margin: 0;
     padding: 0;
     list-style: none;
 }
 
-.combatpanel .combatpanel_losses li {
+.combatEvent_panel ul.combatEvent_losses li {
     padding: 1px 0;
-    line-height: 13px;
+    line-height: 14px;
 }
 
-.combatpanel .combatpanel_at {
+.combatEvent_panel .combatEvent_at {
     color: #848484;
-    margin-right: 4px;
+    margin-right: 6px;
 }
 
-.combatpanel .combatpanel_empty {
+.combatEvent_panel .combatEvent_empty {
     margin: 2px 0;
     color: #848484;
+}
+
+/* L'indication du bandeau ferme : une icone, un libelle, et pas une couleur seule. */
+#eventboxFilled .combatIndicator {
+    display: inline-block;
+    margin-right: 6px;
+    white-space: nowrap;
+}
+
+#eventboxFilled .combatIndicator img {
+    vertical-align: -1px;
+    margin-right: 2px;
+}
+
+/* Le texte reste parfaitement lisible sans animation. */
+@media (prefers-reduced-motion: reduce) {
+    #eventContent tr.combatEvent .combatEvent_state {
+        animation: none;
+    }
 }

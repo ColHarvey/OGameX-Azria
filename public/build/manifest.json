@@ -1,6 +1,6 @@
 {
     "resources/css/ingame.css": {
-        "file": "assets/ingame-bInQakwe.css",
+        "file": "assets/ingame-mUzphS6e.css",
         "name": "ingame",
         "names": [
             "ingame.css"
@@ -18,7 +18,7 @@
         "isEntry": true
     },
     "resources/js/ingame.js": {
-        "file": "assets/ingame-e069b53f.js",
+        "file": "assets/ingame-2fcc63f2.js",
         "src": "resources/js/ingame.js",
         "isEntry": true
     },

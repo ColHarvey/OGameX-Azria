@@ -953,6 +953,10 @@
                 ]) !!};
 
                 var ajaxEventboxURI = "{{ route('fleet.eventbox.fetch') }}";
+
+                // Les cartes de bataille du deroulant, redemandees seules : remplacer le deroulant
+                // entier fermerait un detail ouvert et deplacerait le defilement du joueur.
+                var combatRowsUrl = "{{ route('combat.panel') }}";
                 var ajaxRecallFleetURI = "{{ route('fleet.dispatch.recallfleet') }}";
                 var currentSpaceObjectId = 33624092;
                 var ajaxReloadComponentURI = "#TODO_index.php?page=standalone&ajax=1";

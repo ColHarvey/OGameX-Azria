@@ -384,7 +384,6 @@
             </div>
         </div>
 
-        @include("ingame.overview.partials.combat")
         @include("ingame.overview.partials.npc-threat")
     </div>
 @endsection

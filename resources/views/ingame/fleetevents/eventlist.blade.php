@@ -5,6 +5,13 @@
         <h2>{{ __('t_ingame.layout.eventbox_events') }}</h2>
     </div>
     <table id="eventContent">
+        <tbody id="combatEvents">
+        {{-- Les batailles en cours, dans le meme tableau que les mouvements : le joueur garde une
+             seule liste, et ses missions ordinaires ne bougent pas. --}}
+        @foreach ($combatPanel['combats'] as $combat)
+            @include ('ingame.fleetevents.combatrow', ['combat' => $combat])
+        @endforeach
+        </tbody>
         <tbody>
         {{-- Parse the fleet events as separate rows --}}
         @foreach ($fleet_events as $fleet_event)

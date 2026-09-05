@@ -1708,7 +1708,10 @@ Taux d\'évasion de la flotte amélioré',
         'status_resolving' => 'Bilan en cours',
         'losses_title' => 'Vos pertes',
         'no_losses_yet' => 'Aucune perte constatée pour le moment.',
-        'loss_line' => ':amount × :unit',
+        // Le nom du vaisseau reste celui du jeu, au singulier : seul le verbe s'accorde.
+        'loss_line' => '{0} aucun :unit perdu|{1} :amount :unit perdu|[2,*] :amount :unit perdus',
+        'eventbox_combats' => '{1} :count bataille en cours|[2,*] :count batailles en cours',
+        'losses_none' => 'Aucune perte',
     ],
     'npc' => [
         'threat_title' => 'Taux de provocation',

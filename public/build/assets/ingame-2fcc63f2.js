@@ -75176,43 +75176,130 @@ ogame.chat = {
             $(d).html(b.playerList)
         })
     }
-};;
+};
 /*
- * Le panneau des combats durables, vivant.
+ * Les batailles en cours, dans les bandeaux du jeu.
  *
- * Ce que ce script fait, et rien de plus : il redemande au serveur le fragment du panneau a
- * cadence fixe, remplace l'ancien par le nouveau, et arme les comptes a rebours que le fragment
- * porte. A zero, un compte a rebours redemande le fragment au lieu de deviner la suite.
+ * Ce script fait trois choses, et rien de plus :
  *
- * Ce qu'il ne fait jamais : calculer une perte, deduire une frontiere de round, ou choisir
- * l'heure et le joueur — le serveur seul les connait. La cadence est fixe precisement pour que
- * rien du futur ne transite : un « prochaine mise a jour dans N secondes » revelerait les periodes
- * de la bataille. Dix secondes quand un combat est affiche, une minute sinon.
+ *   1. il pose dans le bandeau ferme une indication discrete — icone et libelle — quand une
+ *      bataille est en cours, a partir de ce que la boite d'evenements du jeu renvoie deja ;
+ *   2. il remplace, dans le deroulant « Evenements », **les seules cartes de combat** — jamais le
+ *      deroulant entier : cela fermerait un detail ouvert et deplacerait le defilement du joueur ;
+ *   3. il ouvre et ferme le detail d'une carte, comme le jeu ouvre celui d'une union.
  *
- * Il s'appuie sur jQuery et sur `simpleCountdown`, deja charges par le bundle du jeu.
+ * Ce qu'il ne fait jamais : calculer une perte, deduire une frontiere de round, armer un compte a
+ * rebours sur la fin de la bataille, ou choisir l'heure et le joueur. Le serveur seul les connait,
+ * et il n'envoie aucune echeance — ni instant, ni secondes restantes.
+ *
+ * Le transport nominal est la diffusion serveur (Reverb) ; ce rafraichissement periodique est le
+ * secours degrade, quand la connexion temps reel n'est pas disponible. Sa cadence est fixe, jamais
+ * annoncee : un « prochaine mise a jour dans N secondes » revelerait les periodes de la bataille.
  */
 (function () {
-    var CADENCE_EN_COMBAT = 10000;
-    var CADENCE_AU_REPOS = 60000;
+    var SECOURS_EN_COMBAT = 10000;
+    var SECOURS_AU_REPOS = 60000;
 
-    var initial = document.getElementById('combatpanelcomponent');
+    var minuterie = null;
+    var requeteEnCours = false;
 
-    if (!initial) {
-        return;
+    function url() {
+        return typeof combatRowsUrl === 'undefined' ? null : combatRowsUrl;
     }
 
-    var url = initial.getAttribute('data-refresh-url');
-    var requeteEnCours = false;
-    var minuterie = null;
-
-    function panneau() {
-        return document.getElementById('combatpanelcomponent');
+    function corpsDesCombats() {
+        return document.getElementById('combatEvents');
     }
 
     function afficheUnCombat() {
-        var courant = panneau();
+        var corps = corpsDesCombats();
 
-        return courant !== null && courant.querySelector('.combatpanel_combat') !== null;
+        return corps !== null && corps.querySelector('.combatEvent') !== null;
+    }
+
+    /**
+     * Les identifiants des cartes dont le detail est ouvert, pour les rouvrir apres remplacement.
+     */
+    function detailsOuverts() {
+        var ouverts = [];
+        var corps = corpsDesCombats();
+
+        if (!corps) {
+            return ouverts;
+        }
+
+        var lignes = corps.querySelectorAll('.combatEvent.detailsOpened');
+
+        for (var i = 0; i < lignes.length; i++) {
+            ouverts.push(lignes[i].getAttribute('data-combat-id'));
+        }
+
+        return ouverts;
+    }
+
+    function rouvrir(identifiants) {
+        for (var i = 0; i < identifiants.length; i++) {
+            basculer(identifiants[i], true);
+        }
+    }
+
+    /**
+     * Ouvre ou ferme le detail d'une carte. `force` ouvre sans basculer.
+     */
+    function basculer(identifiant, force) {
+        var ligne = document.getElementById('combatRow-' + identifiant);
+        var details = document.getElementById('combatDetails-' + identifiant);
+
+        if (!ligne || !details) {
+            return;
+        }
+
+        var ouvrir = force === true || details.style.display === 'none';
+
+        details.style.display = ouvrir ? '' : 'none';
+        ligne.classList.toggle('detailsOpened', ouvrir);
+        ligne.classList.toggle('detailsClosed', !ouvrir);
+
+        var bouton = ligne.querySelector('.toggleCombat a');
+
+        if (bouton) {
+            bouton.setAttribute('aria-expanded', ouvrir ? 'true' : 'false');
+        }
+    }
+
+    /**
+     * L'indication du bandeau ferme, posee a cote du resume des missions.
+     */
+    function marquerLeBandeau(nombre, libelle) {
+        var bandeau = document.getElementById('eventboxFilled');
+
+        if (!bandeau) {
+            return;
+        }
+
+        var marque = bandeau.querySelector('.combatIndicator');
+
+        if (!nombre) {
+            if (marque) {
+                marque.parentNode.removeChild(marque);
+            }
+
+            return;
+        }
+
+        if (!marque) {
+            marque = document.createElement('span');
+            marque.className = 'combatIndicator overmark';
+            // L'icone accompagne le libelle : une couleur seule ne se lit pas.
+            marque.innerHTML = '<img src="/img/fleet/2.gif" height="12" width="12" alt="" /> <span class="combatIndicator_text"></span>';
+            bandeau.insertBefore(marque, bandeau.firstChild);
+        }
+
+        var texte = marque.querySelector('.combatIndicator_text');
+
+        if (texte && texte.textContent !== libelle) {
+            texte.textContent = libelle;
+        }
     }
 
     function planifier() {
@@ -75220,37 +75307,17 @@ ogame.chat = {
             window.clearTimeout(minuterie);
         }
 
-        minuterie = window.setTimeout(rafraichir, afficheUnCombat() ? CADENCE_EN_COMBAT : CADENCE_AU_REPOS);
+        minuterie = window.setTimeout(rafraichir, afficheUnCombat() ? SECOURS_EN_COMBAT : SECOURS_AU_REPOS);
     }
 
-    function armerLesComptes() {
-        var courant = panneau();
-
-        if (!courant || typeof simpleCountdown !== 'function') {
-            return;
-        }
-
-        var comptes = courant.querySelectorAll('.combatpanel_countdown');
-
-        for (var i = 0; i < comptes.length; i++) {
-            var element = comptes[i];
-            var secondes = parseInt(element.getAttribute('data-seconds'), 10);
-
-            if (isNaN(secondes) || element.getAttribute('data-armed') === '1') {
-                continue;
-            }
-
-            element.setAttribute('data-armed', '1');
-
-            // A zero, on redemande au serveur : c'est lui qui sait ce qui vient ensuite.
-            new simpleCountdown(element, secondes, function () {
-                rafraichir();
-            });
-        }
-    }
-
+    /**
+     * Redemande les cartes et remplace **elles seules**, en rouvrant ce qui l'etait.
+     */
     function rafraichir() {
-        if (requeteEnCours || !url) {
+        var adresse = url();
+        var corps = corpsDesCombats();
+
+        if (requeteEnCours || !adresse || !corps) {
             planifier();
 
             return;
@@ -75259,23 +75326,18 @@ ogame.chat = {
         requeteEnCours = true;
 
         $.ajax({
-            url: url,
+            url: adresse,
             dataType: 'html',
             success: function (html) {
-                var courant = panneau();
+                var courant = corpsDesCombats();
 
                 if (!courant) {
                     return;
                 }
 
-                var conteneur = document.createElement('div');
-                conteneur.innerHTML = html;
-                var neuf = conteneur.querySelector('#combatpanelcomponent');
-
-                if (neuf) {
-                    courant.parentNode.replaceChild(neuf, courant);
-                    armerLesComptes();
-                }
+                var ouverts = detailsOuverts();
+                courant.innerHTML = html;
+                rouvrir(ouverts);
             },
             complete: function () {
                 requeteEnCours = false;
@@ -75284,6 +75346,36 @@ ogame.chat = {
         });
     }
 
-    armerLesComptes();
+    // Le bouton de details, delegue : les cartes sont remplacees, un abonnement direct mourrait
+    // avec elles.
+    $(document).on('click', '#combatEvents .toggleCombat a', function (e) {
+        e.preventDefault();
+        var ligne = $(this).closest('.combatEvent');
+        basculer(ligne.attr('data-combat-id'), false);
+
+        return false;
+    });
+
+    // Le bandeau du jeu se recharge tout seul ; on lit sa reponse au passage pour poser l'indication.
+    $(document).ajaxSuccess(function (evenement, requete, options, donnees) {
+        if (!options || typeof options.url !== 'string' || options.url.indexOf('/ajax/fleet/eventbox/fetch') === -1) {
+            return;
+        }
+
+        var lu = donnees;
+
+        if (typeof lu === 'string') {
+            try {
+                lu = JSON.parse(lu);
+            } catch (erreur) {
+                return;
+            }
+        }
+
+        if (lu && typeof lu.combats !== 'undefined') {
+            marquerLeBandeau(lu.combats, lu.combatText || '');
+        }
+    });
+
     planifier();
 })();
