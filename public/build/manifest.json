@@ -1,30 +1,30 @@
 {
-    "resources/css/ingame.css": {
-        "file": "assets/ingame-01eQljzN.css",
-        "name": "ingame",
-        "names": [
-            "ingame.css"
-        ],
-        "src": "resources/css/ingame.css",
-        "isEntry": true
-    },
-    "resources/css/outgame.css": {
-        "file": "assets/outgame-Bd4b_3cr.css",
-        "name": "outgame",
-        "names": [
-            "outgame.css"
-        ],
-        "src": "resources/css/outgame.css",
-        "isEntry": true
-    },
-    "resources/js/ingame.js": {
-        "file": "assets/ingame-446d938d.js",
-        "src": "resources/js/ingame.js",
-        "isEntry": true
-    },
-    "resources/js/outgame.js": {
-        "file": "assets/outgame-10de045b.js",
-        "src": "resources/js/outgame.js",
-        "isEntry": true
-    }
+  "resources/css/ingame.css": {
+    "file": "assets/ingame-01eQljzN.css",
+    "name": "ingame",
+    "names": [
+      "ingame.css"
+    ],
+    "src": "resources/css/ingame.css",
+    "isEntry": true
+  },
+  "resources/css/outgame.css": {
+    "file": "assets/outgame-Bd4b_3cr.css",
+    "name": "outgame",
+    "names": [
+      "outgame.css"
+    ],
+    "src": "resources/css/outgame.css",
+    "isEntry": true
+  },
+  "resources/js/ingame.js": {
+    "file": "assets/ingame-446d938d.js",
+    "src": "resources/js/ingame.js",
+    "isEntry": true
+  },
+  "resources/js/outgame.js": {
+    "file": "assets/outgame-10de045b.js",
+    "src": "resources/js/outgame.js",
+    "isEntry": true
+  }
 }
