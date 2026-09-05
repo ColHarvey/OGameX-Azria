@@ -27,10 +27,13 @@ final class RustEngineAnswer
     /**
      * Un `char*` nul est-il revenu ?
      *
-     * Un pointeur nul rendu par C arrive en PHP comme un objet `FFI\CData` nul, pas comme la valeur
-     * `null` : un client qui teste `=== null` le laisse passer jusqu'a `FFI::string()`. Le contrat
-     * FFI se lit par `FFI::isNull()` ; la valeur PHP `null` est admise aussi, pour une couture de
-     * banc qui ne rendrait rien.
+     * ## Deux representations possibles, une seule mesuree
+     *
+     * PHP peut rendre un pointeur C nul de deux facons : la valeur `null`, ou un objet `FFI\CData`
+     * nul qu'un test `=== null` laisserait passer jusqu'a `FFI::string()`. **Sur PHP 8.5 avec un
+     * `char*`, la mesure dit `null`** — `RustEngineContractTest` la refait a chaque run, contre une
+     * bibliotheque qui rend un vrai `(char*)0`. La forme dependant de la version et du type declare,
+     * les deux sont acceptees ici : celle qui arrive est constatee, jamais supposee.
      */
     public static function isNullPointer(mixed $pointer): bool
     {

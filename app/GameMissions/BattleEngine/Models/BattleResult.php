@@ -55,7 +55,7 @@ class BattleResult
     public int $defenderReaperCargoCapacity = 0;
 
     /**
-     * @var array{count: int, digest: string}|null Ce que la source a graine a tire pendant les rounds.
+     * @var array{count: int, raw: int, digest: string}|null Ce que la source a graine a tire pendant les rounds.
      *
      * Transitoire, jamais persiste : il n'existe que sur un banc, ou la source a une graine, et il
      * sert au banc de parite a verifier que les deux moteurs ont consomme la meme bande —

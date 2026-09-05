@@ -130,10 +130,10 @@ jobs:
 
       # C'est ici que le job gagne son sens : ces essais sont **ignores** partout ailleurs faute de
       # bibliotheque. Un code de sortie vert ne suffit pas — une suite entierement sautee sort verte
-      # aussi. 42 : les 30 essais historiques du moteur, les pertes par participant (2), le contrat
-      # FFI (4) et le banc de parite (6). Un fichier d'essai qui disparaitrait ferait tomber le compte.
+      # aussi. 44 : les 30 essais historiques du moteur, les pertes par participant (2), le contrat
+      # FFI (5) et le banc de parite (7). Un fichier d'essai qui disparaitrait ferait tomber le compte.
       - name: Exiger les essais Rust executes, aucun ignore
-        run: php scripts/verifier-junit.php storage/logs/junit-rust.xml --minimum=42 --sans-ignores
+        run: php scripts/verifier-junit.php storage/logs/junit-rust.xml --minimum=44 --sans-ignores
 
       - name: Resumer le verdict
         if: always()

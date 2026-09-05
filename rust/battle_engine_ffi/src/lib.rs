@@ -144,7 +144,15 @@ impl SeededDraws {
     }
 
     /// A uniform integer from 0 to `bound - 1`, by rejection — the same algorithm as PHP.
+    ///
+    /// A bound outside `1..=2^32` is not rejected, it loops: above the range, `RANGE % bound` is
+    /// `RANGE`, the limit falls to zero and no draw is ever accepted. The refusal therefore comes
+    /// before the first consumption, so the journal never counts draws made in vain. The caller
+    /// is inside this library, so a refusal here is a defect, not an input: it panics, and the FFI
+    /// boundary catches it as it catches any other.
     fn bounded(&mut self, bound: u64) -> u64 {
+        assert!(bound >= 1 && bound <= RANGE, "a bound lies between 1 and 2^32, got {}", bound);
+
         let limit = RANGE - (RANGE % bound);
         loop {
             let raw = self.raw.next() as u64;
@@ -1156,6 +1164,23 @@ mod tests {
         assert_eq!(270369, raw.next());
         assert_eq!(67634689, raw.next());
         assert_eq!(2647435461, raw.next());
+    }
+
+    /// The bound 1 never rejects; 2^32 accepts every raw draw as itself; above it, the algorithm
+    /// would loop forever, so it is refused before consuming anything. PHP asserts the same.
+    #[test]
+    fn a_bound_outside_the_domain_is_refused_before_any_draw_is_consumed() {
+        let mut draws = SeededDraws::over(Box::new(Dictated { values: vec![7], next: 0 }));
+        assert_eq!(0, draws.bounded(1), "bound 1 always answers 0");
+        assert_eq!(7, draws.bounded(RANGE), "bound 2^32 answers the raw draw itself");
+        assert_eq!(2, draws.journal().unwrap().raw);
+
+        let refus = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            let mut draws = SeededDraws::over(Box::new(Dictated { values: vec![7], next: 0 }));
+            draws.bounded(RANGE + 1)
+        }));
+
+        assert!(refus.is_err(), "a bound above 2^32 was accepted: the loop would never end");
     }
 
     /// A dictated raw sequence, to force a rejection and pin how many raw draws are consumed.

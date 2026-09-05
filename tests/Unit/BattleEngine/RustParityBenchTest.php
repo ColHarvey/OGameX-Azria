@@ -2,20 +2,13 @@
 
 namespace Tests\Unit\BattleEngine;
 
-use OGame\Combat\Allocation\FrozenLootAllocation;
-use OGame\Combat\Support\LiveLootContextFactory;
-use OGame\GameMissions\BattleEngine\BattleEngine;
-use OGame\GameMissions\BattleEngine\Draws\SeededDraws;
-use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
+use OGame\Combat\Enums\NoLootReason;
+use OGame\Combat\Policies\CargoWeightedV1;
+use OGame\Combat\Policies\NoLootV1;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
-use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
 use OGame\GameMissions\BattleEngine\Parity\CanonicalProjection;
 use OGame\GameMissions\BattleEngine\PhpBattleEngine;
 use OGame\GameMissions\BattleEngine\RustBattleEngine;
-use OGame\GameObjects\Models\Units\UnitCollection;
-use OGame\Models\Resources;
-use OGame\Services\ObjectService;
-use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\UnitTestCase;
 
 /**
@@ -27,72 +20,151 @@ use Tests\UnitTestCase;
  * survivants et pertes par participant et par periode, capacites survivantes, taux et versions,
  * butin et parts, debris. Une difference nomme **le premier chemin divergent** et laisse les deux
  * projections JSON dans `storage/logs/` comme artefacts — pas un `assertEquals` illisible sur deux
- * gros tableaux.
+ * gros tableaux. Il exige en plus que **la bande ait ete consommee a l'identique** : meme nombre de
+ * tirages semantiques, meme nombre de tirages bruts — rejets compris —, meme empreinte.
+ *
+ * ## Des joueurs distincts, et pourquoi cela compte
+ *
+ * Chaque flotte a **son propre proprietaire**, avec ses technologies et sa classe (voir
+ * `BuildsParityScenarios`). Un banc ou toutes les flottes partagent un joueur ne peut pas prouver
+ * qu'une caracteristique propre a un participant traverse la couture : un aplatissement par type de
+ * vaisseau, ou une classe lue sur le mauvais joueur, y passerait inapercu.
+ *
+ * **Que le montage porte bien ces faits est verifie ailleurs** — `ParityScenarioFixturesTest`, qui
+ * s'execute meme sans bibliotheque. Ce fichier-ci ne s'execute que la ou le `.so` existe, et si son
+ * montage mentait, personne ne le verrait sur le poste de developpement.
  *
  * ## Ce qu'il ne prouve pas
  *
  * Que l'un des deux moteurs a raison. Il prouve qu'ils disent la meme chose ; les regles, elles,
- * sont eprouvees par les bancs de chaque moteur. Et il n'est joue que la ou la bibliotheque existe.
+ * sont eprouvees par les bancs de chaque moteur.
  */
 class RustParityBenchTest extends UnitTestCase
 {
-    private const int GRAINE = 20260904;
+    use BuildsParityScenarios;
 
     protected function setUp(): void
     {
         $this->skipWhenTheRustLibraryIsUnavailable();
 
         parent::setUp();
-
-        $this->createAndSetUserTechModel([]);
     }
 
     /**
-     * @return iterable<string, array{0: string, 1: array<string, int>, 2: array<array<string, int>>, 3: array<array<string, int>>}>
+     * Un duel sans butin possible : la cible n'a rien, et les deux moteurs le disent pareil.
      */
-    public static function scenarios(): iterable
+    public function testADuelWithNothingToTakeIsFoughtIdenticallyByBothEngines(): void
     {
-        // 1. Un duel sans pillage : la cible n'a rien.
-        yield 'duel sans pillage' => ['duel', ['rocket_launcher' => 60], [['light_fighter' => 80]], []];
-
-        // 2. Une attaque pillarde : la cible est riche, l'attaquant a du fret.
-        yield 'attaque pillarde' => ['pillage', ['metal' => 400_000, 'crystal' => 200_000, 'deuterium' => 50_000, 'rocket_launcher' => 30], [['small_cargo' => 40, 'light_fighter' => 200]], []];
-
-        // 3. Deux attaquantes en union, avec du fret : la ponderation par le fret donne un taux non entier.
-        yield 'union ponderee par le fret' => ['union', ['metal' => 600_000, 'crystal' => 300_000, 'deuterium' => 100_000, 'rocket_launcher' => 40], [['small_cargo' => 60, 'light_fighter' => 120], ['large_cargo' => 10, 'cruiser' => 15]], []];
-
-        // 4. Une garnison et deux renforts : les pertes defensives par participant ont trois noms.
-        yield 'defense avec deux renforts' => ['acs', ['metal' => 50_000, 'crystal' => 50_000, 'rocket_launcher' => 100], [['light_fighter' => 150, 'cruiser' => 20]], [['light_fighter' => 60], ['heavy_fighter' => 25]]];
-
-        // 5. Un fret limitant et un butin qui ne se divise pas : les plus forts restes departagent.
-        yield 'fret limitant et restes' => ['restes', ['metal' => 1_000_003, 'crystal' => 500_001, 'deuterium' => 250_007, 'rocket_launcher' => 5], [['small_cargo' => 7, 'light_fighter' => 30], ['small_cargo' => 3, 'light_fighter' => 30]], []];
+        $this->assertBothEnginesAgree('duel', $this->aDuelWithNothingToTake());
     }
 
     /**
-     * @param array<string, int> $planete
-     * @param array<array<string, int>> $attaquantes
-     * @param array<array<string, int>> $renforts
+     * **Interdit de piller n'est pas « rien a prendre ».** La cible est riche, la flotte a du fret,
+     * et pourtant le butin est nul des deux cotes : c'est la politique qui le dit, sous sa version
+     * et son motif. Sans ce scenario, le duel a stock nul ne traversait jamais `no_loot_v1`.
      */
-    #[DataProvider('scenarios')]
-    public function testBothEnginesFightTheSameBattle(string $nom, array $planete, array $attaquantes, array $renforts): void
+    public function testAForbiddenLootIsForbiddenIdenticallyByBothEngines(): void
     {
-        $resultatPhp = $this->fight(PhpBattleEngine::class, $planete, $attaquantes, $renforts, self::GRAINE);
-        $resultatRust = $this->fight(RustBattleEngine::class, $planete, $attaquantes, $renforts, self::GRAINE);
+        $bataille = $this->aBattleWhereLootingIsForbidden();
 
-        $php = CanonicalProjection::of($resultatPhp);
-        $rust = CanonicalProjection::of($resultatRust);
+        $this->assertSame(NoLootV1::VERSION, $bataille['contexte']->policyVersion);
+        $this->assertSame(NoLootReason::NpcEncounter, $bataille['contexte']->noLootBecause);
+        $this->assertGreaterThan(0, $bataille['contexte']->totalCargo, 'The fleet carries no free cargo: the refusal would hold trivially.');
 
-        $this->assertNotSame([], $php['rounds'], 'The PHP battle had no round: the projection would compare nothing.');
+        [$php, $rust] = $this->assertBothEnginesAgree('interdit', $bataille);
 
-        $this->assertProjectionsAgree($nom, $php, $rust);
+        foreach (['PHP' => $php, 'Rust' => $rust] as $moteur => $resultat) {
+            $this->assertSame(NoLootV1::VERSION, $resultat->lootPolicyVersion, $moteur . ' fought under another loot policy.');
+            $this->assertSame(0, (int)$resultat->loot->sum(), $moteur . ' took loot from a battle where looting is forbidden.');
+        }
+    }
 
-        // **La bande a ete consommee entierement et a l'identique** : meme nombre de tirages, meme
-        // empreinte de genre, borne et valeur. Deux batailles egales tirees differemment seraient une
-        // coincidence, pas une parite.
-        $this->assertNotNull($resultatPhp->drawsConsumed, 'The PHP engine kept no journal of its draws.');
-        $this->assertNotNull($resultatRust->drawsConsumed, 'The Rust engine returned no journal of its draws.');
-        $this->assertGreaterThan(0, $resultatPhp->drawsConsumed['count']);
-        $this->assertSame($resultatPhp->drawsConsumed, $resultatRust->drawsConsumed, 'Scenario « ' . $nom . ' » : the two engines did not consume the same draws.');
+    /**
+     * Une attaque pillarde ordinaire : le butin existe, et les deux moteurs le repartissent pareil.
+     */
+    public function testAPlunderingAttackIsFoughtIdenticallyByBothEngines(): void
+    {
+        [$php] = $this->assertBothEnginesAgree('pillage', $this->aPlunderingAttack());
+
+        $this->assertGreaterThan(0, (int)$php->loot->sum(), 'Nothing was taken: the loot paths were never exercised.');
+    }
+
+    /**
+     * Une union de deux classes differentes, contre une cible inactive : le taux pondere vaut
+     * exactement 5833 points de base — ni 5000, ni 7500, ni un multiple de cent.
+     */
+    public function testAUnionOfTwoClassesAgainstAnInactiveTargetIsWeightedIdenticallyByBothEngines(): void
+    {
+        $bataille = $this->aUnionOfTwoClassesAgainstAnInactiveTarget();
+
+        $this->assertSame(ParityScenarioFixturesTest::TAUX_UNION_PONDEREE, $bataille['contexte']->rateInBasisPoints);
+
+        [$php, $rust] = $this->assertBothEnginesAgree('union', $bataille);
+
+        foreach (['PHP' => $php, 'Rust' => $rust] as $moteur => $resultat) {
+            $this->assertSame(ParityScenarioFixturesTest::TAUX_UNION_PONDEREE, $resultat->lootRateInBasisPoints, $moteur . ' fought under another loot rate.');
+            $this->assertSame(CargoWeightedV1::VERSION, $resultat->lootPolicyVersion);
+        }
+    }
+
+    /**
+     * **Un meme type de vaisseau des deux cotes de la defense, avec des technologies differentes.**
+     *
+     * Si la couture aplatissait les caracteristiques par type de vaisseau, les deux flottes
+     * combattraient avec les memes, et l'une perdrait ce qu'elle ne doit pas perdre.
+     */
+    public function testDefendingFleetsSharingAUnitTypeKeepTheirOwnTechnologies(): void
+    {
+        [$php, $rust] = $this->assertBothEnginesAgree('renforts', $this->aDefenceSharingAUnitTypeWithDifferentTechnologies());
+
+        foreach (['PHP' => $php, 'Rust' => $rust] as $moteur => $resultat) {
+            $pertes = [];
+
+            foreach ($resultat->defenderFleetResults as $flotte) {
+                $pertes[$flotte->fleetMissionId] = (int)$flotte->unitsLost->getAmount();
+            }
+
+            $this->assertGreaterThan(0, $pertes[0] ?? 0, $moteur . ': the unshielded garrison lost nothing.');
+            $this->assertSame(0, $pertes[2000] ?? -1, $moteur . ': the shielded reinforcement lost fighters it could not lose.');
+        }
+    }
+
+    /**
+     * Le symetrique chez deux attaquants : meme type, technologies differentes.
+     */
+    public function testAttackingFleetsSharingAUnitTypeKeepTheirOwnTechnologies(): void
+    {
+        [$php, $rust] = $this->assertBothEnginesAgree('attaquants', $this->anAttackSharingAUnitTypeWithDifferentTechnologies());
+
+        foreach (['PHP' => $php, 'Rust' => $rust] as $moteur => $resultat) {
+            $pertes = [];
+
+            foreach ($resultat->attackerFleetResults as $flotte) {
+                $pertes[$flotte->fleetMissionId] = (int)$flotte->unitsLost->getAmount();
+            }
+
+            $this->assertGreaterThan(0, $pertes[1000] ?? 0, $moteur . ': the unshielded attacker lost nothing.');
+            $this->assertSame(0, $pertes[1001] ?? -1, $moteur . ': the shielded attacker lost fighters it could not lose.');
+        }
+    }
+
+    /**
+     * Un fret limitant, et un butin qui ne se divise pas : le plafonnement et les plus forts restes
+     * sont reellement exerces, et les deux moteurs partagent pareil.
+     */
+    public function testALimitingCargoAndIndivisibleRemaindersAreSharedIdenticallyByBothEngines(): void
+    {
+        [$php, $rust] = $this->assertBothEnginesAgree('restes', $this->aLimitingCargoWithIndivisibleRemainders());
+
+        $parts = [];
+
+        foreach ($php->attackerFleetResults as $flotte) {
+            $parts[$flotte->fleetMissionId] = (int)$flotte->lootShare->sum();
+        }
+
+        foreach ($rust->attackerFleetResults as $flotte) {
+            $this->assertSame($parts[$flotte->fleetMissionId], (int)$flotte->lootShare->sum(), 'Rust shared the loot differently.');
+        }
     }
 
     /**
@@ -100,70 +172,47 @@ class RustParityBenchTest extends UnitTestCase
      */
     public function testAPermutationOfTheFleetsFightsTheSameBattleInBothEngines(): void
     {
-        $planete = ['metal' => 50_000, 'crystal' => 50_000, 'rocket_launcher' => 100];
-        $attaquantes = [['light_fighter' => 150, 'cruiser' => 20], ['heavy_fighter' => 30]];
-        $renforts = [['light_fighter' => 60], ['heavy_fighter' => 25]];
+        $droit = $this->aDefenceSharingAUnitTypeWithDifferentTechnologies();
+        $permute = $this->aDefenceSharingAUnitTypeWithDifferentTechnologies(permute: true);
 
-        $droit = CanonicalProjection::of($this->fight(PhpBattleEngine::class, $planete, $attaquantes, $renforts, 77));
-        $permute = CanonicalProjection::of($this->fight(PhpBattleEngine::class, $planete, array_reverse($attaquantes), array_reverse($renforts), 77, permute: true));
-        $this->assertProjectionsAgree('permutation-php', $droit, $permute);
+        $phpDroit = CanonicalProjection::of($this->fight(PhpBattleEngine::class, $droit));
+        $phpPermute = CanonicalProjection::of($this->fight(PhpBattleEngine::class, $permute));
+        $this->assertProjectionsAgree('permutation-php', $phpDroit, $phpPermute);
 
-        $rustDroit = CanonicalProjection::of($this->fight(RustBattleEngine::class, $planete, $attaquantes, $renforts, 77));
-        $rustPermute = CanonicalProjection::of($this->fight(RustBattleEngine::class, $planete, array_reverse($attaquantes), array_reverse($renforts), 77, permute: true));
+        $rustDroit = CanonicalProjection::of($this->fight(RustBattleEngine::class, $droit));
+        $rustPermute = CanonicalProjection::of($this->fight(RustBattleEngine::class, $permute));
         $this->assertProjectionsAgree('permutation-rust', $rustDroit, $rustPermute);
 
-        $this->assertProjectionsAgree('permutation', $droit, $rustDroit);
+        $this->assertProjectionsAgree('permutation', $phpDroit, $rustDroit);
     }
 
     /**
-     * @param class-string<BattleEngine> $classe
-     * @param array<string, int> $planete
-     * @param array<array<string, int>> $attaquantes
-     * @param array<array<string, int>> $renforts
+     * Joue la bataille dans les deux moteurs et exige la meme projection et la meme bande.
+     *
+     * @param array<string, mixed> $bataille
+     * @return array{0: BattleResult, 1: BattleResult}
      */
-    private function fight(string $classe, array $planete, array $attaquantes, array $renforts, int $graine, bool $permute = false): BattleResult
+    private function assertBothEnginesAgree(string $nom, array $bataille): array
     {
-        $this->createAndSetPlanetModel($planete + ['metal' => 0, 'crystal' => 0, 'deuterium' => 0]);
+        $php = $this->fight(PhpBattleEngine::class, $bataille);
+        $rust = $this->fight(RustBattleEngine::class, $bataille);
 
-        // Les identifiants de mission sont fixes par le contenu, pas par la position : une flotte
-        // permutee garde son identifiant, et c'est ce qui rend la bataille invariante.
-        $flottes = [];
-        foreach ($attaquantes as $rang => $composition) {
-            $flotte = new AttackerFleet();
-            $flotte->units = $this->units($composition);
-            $flotte->player = $this->playerService;
-            $flotte->fleetMissionId = 1000 + ($permute ? count($attaquantes) - 1 - $rang : $rang);
-            $flotte->ownerId = $this->playerService->getId();
-            $flotte->cargoResources = new Resources(0, 0, 0, 0);
-            $flotte->isInitiator = $flotte->fleetMissionId === 1000;
-            $flotte->fleetMission = null;
-            $flottes[] = $flotte;
-        }
+        $projectionPhp = CanonicalProjection::of($php);
+        $projectionRust = CanonicalProjection::of($rust);
 
-        // L'initiatrice est toujours la flotte 1000, quel que soit l'ordre donne : le moteur exige
-        // qu'elle soit en tete de liste.
-        usort($flottes, static fn (AttackerFleet $a, AttackerFleet $b): int => $b->isInitiator <=> $a->isInitiator);
+        $this->assertNotSame([], $projectionPhp['rounds'], 'The battle had no round: the projection would compare nothing.');
 
-        $defenseurs = [DefenderFleet::fromPlanet($this->planetService)];
-        foreach ($renforts as $rang => $composition) {
-            $renfort = new DefenderFleet();
-            $renfort->units = $this->units($composition);
-            $renfort->player = $this->playerService;
-            $renfort->fleetMissionId = 2000 + ($permute ? count($renforts) - 1 - $rang : $rang);
-            $renfort->ownerId = 5;
-            $renfort->fleetMission = null;
-            $defenseurs[] = $renfort;
-        }
+        $this->assertProjectionsAgree($nom, $projectionPhp, $projectionRust);
 
-        $moteur = new $classe(
-            $flottes,
-            $this->planetService,
-            $defenseurs,
-            $this->settingsService,
-            LiveLootContextFactory::forBattle($flottes, $this->planetService, FrozenLootAllocation::atOperationStart())
-        );
+        // **La bande a ete consommee entierement et a l'identique** : memes tirages semantiques,
+        // memes tirages bruts — rejets compris —, meme empreinte de genre, borne et valeur.
+        $this->assertNotNull($php->drawsConsumed, 'The PHP engine kept no journal of its draws.');
+        $this->assertNotNull($rust->drawsConsumed, 'The Rust engine returned no journal of its draws.');
+        $this->assertGreaterThan(0, $php->drawsConsumed['count']);
+        $this->assertGreaterThanOrEqual($php->drawsConsumed['count'], $php->drawsConsumed['raw']);
+        $this->assertSame($php->drawsConsumed, $rust->drawsConsumed, 'Scenario « ' . $nom . ' » : the two engines did not consume the same draws.');
 
-        return $moteur->withDraws(new SeededDraws($graine))->simulateBattle();
+        return [$php, $rust];
     }
 
     /**
@@ -186,19 +235,5 @@ class RustParityBenchTest extends UnitTestCase
         file_put_contents($dossier . '/parite-' . $etiquette . '-rust.json', json_encode($rust, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
         $this->fail('Scenario « ' . $nom . ' » : the two engines diverge at ' . $divergence . ' (both projections are in storage/logs/parite-' . $etiquette . '-*.json).');
-    }
-
-    /**
-     * @param array<string, int> $composition
-     */
-    private function units(array $composition): UnitCollection
-    {
-        $unites = new UnitCollection();
-
-        foreach ($composition as $nom => $montant) {
-            $unites->addUnit(ObjectService::getUnitObjectByMachineName($nom), $montant);
-        }
-
-        return $unites;
     }
 }

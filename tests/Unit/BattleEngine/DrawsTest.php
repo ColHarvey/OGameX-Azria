@@ -88,8 +88,41 @@ class DrawsTest extends TestCase
 
         // Une suite dictee n'a pas de graine : le moteur Rust ne pourrait pas la rejouer.
         $this->assertNull($tirages->seed());
-        $this->expectException(InvalidArgumentException::class);
-        $tirages->forRounds();
+
+        try {
+            $tirages->forRounds();
+            $this->fail('A dictated raw sequence claimed it could start afresh.');
+        } catch (InvalidArgumentException) {
+            $this->addToAssertionCount(1);
+        }
+    }
+
+    /**
+     * Une borne hors du domaine ne se rejette pas, elle boucle : elle se refuse avant tout tirage.
+     *
+     * Au-dela de 2^32, `RANGE % borne` vaut `RANGE`, la limite tombe a zero et aucun tirage n'est
+     * jamais accepte. Le moteur Rust affirme la meme chose
+     * (`a_bound_outside_the_domain_is_refused_before_any_draw_is_consumed`).
+     */
+    public function testABoundOutsideTheDomainIsRefusedBeforeAnyDrawIsConsumed(): void
+    {
+        $tirages = new SeededDraws($this->dictated([7]));
+
+        $this->assertSame(0, $tirages->targetIndex(1), 'bound 1 always answers 0');
+        $this->assertSame(7, $tirages->targetIndex(0x100000000), 'bound 2^32 answers the raw draw itself');
+        $this->assertSame(2, $tirages->journal()->rawCount());
+
+        foreach ([0, -1, 0x100000001] as $borne) {
+            try {
+                $tirages->targetIndex($borne);
+                $this->fail('A bound of ' . $borne . ' was accepted: the loop would never end.');
+            } catch (InvalidArgumentException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+
+        // **Rien n'a ete consomme par les refus** : le journal ne compte que les deux tirages admis.
+        $this->assertSame(2, $tirages->journal()->rawCount(), 'A refused bound consumed a raw draw anyway.');
     }
 
     /**

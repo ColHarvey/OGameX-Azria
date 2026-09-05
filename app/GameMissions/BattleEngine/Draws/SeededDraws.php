@@ -110,6 +110,14 @@ final class SeededDraws implements BattleDraws
      */
     private function bounded(int $bound): int
     {
+        // **Une borne au-dela du domaine ne se rejette pas : elle boucle.** Pour `$bound > 2^32`,
+        // `RANGE % $bound` vaut `RANGE`, la limite tombe a zero, et aucun tirage n'est jamais
+        // accepte. Le refus vient donc avant la premiere consommation, pour que le journal ne
+        // compte pas des tirages faits en pure perte.
+        if ($bound < 1 || $bound > self::RANGE) {
+            throw new InvalidArgumentException('A bound lies between 1 and 2^32, got ' . $bound . '.');
+        }
+
         $limite = self::RANGE - (self::RANGE % $bound);
 
         do {

@@ -236,10 +236,19 @@ class CombatPresentationTimelineTest extends FleetDispatchTestCase
         );
         $this->assertSame([], $lecteur->visibleTo($combat, $tiers, $echeance), 'The new owner was given the losses of a battle it did not fight.');
 
-        // **Et le corps disparait.** L'inscription, elle, reste.
-        DB::table('planets')->where('id', $combat->target_planet_id)->update(['user_id' => $proprietaire]);
+        // **Et le corps disparait vraiment** : la ligne `planets` est supprimee, pas seulement le
+        // lien de la cible. Un lecteur qui interrogerait encore le corps ne trouverait plus rien ;
+        // l'inscription, elle, reste.
+        $corps = (int)$combat->target_planet_id;
+        DB::table('planets')->where('id', $corps)->update(['user_id' => $proprietaire]);
+        DB::table('fleet_missions')->where('planet_id_to', $corps)->update(['planet_id_to' => null]);
+        DB::table('fleet_missions')->where('planet_id_from', $corps)->update(['planet_id_from' => null]);
         DB::table('combat_instances')->where('id', $combat->id)->update(['target_planet_id' => null]);
+        DB::table('celestial_body_combat_barriers')->where('celestial_body_id', $corps)->delete();
+        DB::table('planets')->where('id', $corps)->delete();
         $combat->refresh();
+
+        $this->assertSame(0, DB::table('planets')->where('id', $corps)->count(), 'The body still exists: the scenario would prove nothing about a vanished one.');
 
         $this->assertSame(
             array_map(static fn (PresentationEvent $e): array => $e->toRow(), $avant),
