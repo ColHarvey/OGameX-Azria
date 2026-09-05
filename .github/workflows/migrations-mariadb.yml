@@ -252,7 +252,7 @@ jobs:
       # rend zero essai et un vert vide.
       - name: Lire les quatre compteurs
         if: always()
-        run: php scripts/verifier-junit.php storage/logs/junit-mariadb.xml --minimum=135 --sans-ignores
+        run: php scripts/verifier-junit.php storage/logs/junit-mariadb.xml --minimum=137 --sans-ignores
 
       - name: Publier les journaux
         if: always()
