@@ -65,7 +65,7 @@ use RuntimeException;
  */
 final class OpeningStateRecorder
 {
-    public const int VERSION = 4;
+    public const int VERSION = 5;
 
     public function __construct(
         private CausalEventReader $reader = new CausalEventReader(),
@@ -112,6 +112,9 @@ final class OpeningStateRecorder
                 'deuterium' => ResourceBoundary::wholeUnitsOfLivingStock($ressources->deuterium->get(), 'deuterium', 'etat_d_ouverture')->units,
             ],
             'units' => DefenderFleet::fromPlanet($corps)->units->toArray(),
+            // Les antimissiles ne se battent pas dans la garnison, mais une salve admissible les consomme :
+            // la fermeture projette chaque salve sur la photographie, et il lui faut ceux de l'ouverture.
+            'interceptors' => $corps->getObjectAmount('anti_ballistic_missile'),
             'defender' => self::defenderFactsOf($corps),
             // **Les reglages sous lesquels cette bataille se calculera.** Lus une fois, ici, dans la
             // transaction d'ouverture : ce que l'administration changera pendant le ralliement ne
@@ -182,6 +185,19 @@ final class OpeningStateRecorder
         }
 
         return PhotographedDefender::fromFrozenFacts($faits);
+    }
+
+    /**
+     * Les antimissiles que le corps portait a l'ouverture.
+     */
+    public static function openingInterceptorsOf(CombatInstance $combat): int
+    {
+        $document = self::documentOf($combat);
+        if (!array_key_exists('interceptors', $document)) {
+            throw new MissingOpeningState('L etat d ouverture du combat ' . $combat->id . ' ne porte pas les antimissiles : il a ete ouvert sous une version anterieure.');
+        }
+
+        return FrozenFact::int($document, 'interceptors');
     }
 
     /**

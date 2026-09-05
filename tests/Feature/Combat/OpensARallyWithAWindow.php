@@ -56,9 +56,10 @@ trait OpensARallyWithAWindow
      * transaction qui cree l'instance, et une defense posee ensuite n'en fait deja plus partie.
      *
      * @param int $defences Lance-missiles poses sur la cible avant que le combat ne s'ouvre.
+     * @param array<string, int> $moreUnits D'autres unites posees de meme, par nom de machine.
      * @return array{0: CombatInstance, 1: int, 2: int} Le combat, la planete visee, l'instant d'ouverture.
      */
-    protected function anOpenRally(int $defences = self::RALLY_DEFENCES): array
+    protected function anOpenRally(int $defences = self::RALLY_DEFENCES, array $moreUnits = []): array
     {
         for ($i = 0; $i < 6; $i++) {
             $this->createAndLoginUser();
@@ -88,7 +89,7 @@ trait OpensARallyWithAWindow
             'deuterium' => 10_000,
             'rocket_launcher' => $defences,
             'time_last_update' => (int)now()->timestamp + 86_400,
-        ]);
+        ] + $moreUnits);
 
         resolve(SettingsService::class)->set('persistent_combat_enabled', '1');
         $this->travelTo(Date::createFromTimestamp($ouverture));
@@ -136,7 +137,7 @@ trait OpensARallyWithAWindow
     /**
      * Un seul missile interplanetaire, non traite, sans intercepteur en face.
      */
-    protected function aPendingMissileTowards(int $planetId, int $departure, int $arrival): FleetMission
+    protected function aPendingMissileTowards(int $planetId, int $departure, int $arrival, int $missiles = 1, int $priority = 0): FleetMission
     {
         $origine = $this->planetService;
         $depart = $origine->getPlanetCoordinates();
@@ -159,8 +160,8 @@ trait OpensARallyWithAWindow
             'mission_type' => 10,
             'time_departure' => $departure,
             'time_arrival' => $arrival,
-            'interplanetary_missile' => 1,
-            'target_priority' => 0,
+            'interplanetary_missile' => $missiles,
+            'target_priority' => $priority,
             'metal' => 0,
             'crystal' => 0,
             'deuterium' => 0,

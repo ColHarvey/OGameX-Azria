@@ -5,6 +5,7 @@ namespace OGame\Combat\Services;
 use Closure;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Exceptions\ContradictoryEffectRecord;
 use OGame\Combat\Support\CombatEventIdentity;
 use OGame\Factories\PlanetServiceFactory;
@@ -74,6 +75,10 @@ final class CombatEffectLedger
             return;
         }
 
+        // **Les faits d'une salve se relevent avant qu'elle frappe** : ce que le monde detruit ne dit
+        // pas ce que la photographie perd, et la fermeture rejouera la salve sur la photographie.
+        $faits = self::isAMissileSalvo($tenue) ? $this->missileFactsBefore($tenue, $corps) : null;
+
         $avant = self::garrisonOf($corps);
         $apply();
         $apres = self::garrisonOf($corps);
@@ -86,24 +91,60 @@ final class CombatEffectLedger
             (int)$barriere->combat_instance_id,
             CombatEventIdentity::forFleetArrival((int)$tenue->id),
             self::deltaBetween($avant, $apres),
-            (int)Date::now()->timestamp
+            (int)Date::now()->timestamp,
+            $faits
+        );
+    }
+
+    private static function isAMissileSalvo(FleetMission $mission): bool
+    {
+        return $mission->parent_id === null
+            && CombatMissionKind::fromMissionType((int)$mission->mission_type) === CombatMissionKind::Missile;
+    }
+
+    /**
+     * Ce que la salve etait, lu dans le monde juste avant qu'elle frappe : ses missiles, sa priorite,
+     * la technologie d'armes du lanceur, et les antimissiles que le corps et sa planete mere pouvaient
+     * lui opposer.
+     */
+    private function missileFactsBefore(FleetMission $tenue, int $corps): MissileStrikeFacts
+    {
+        $planetes = resolve(PlanetServiceFactory::class);
+        $cible = $planetes->make($corps, true);
+        if ($cible === null) {
+            throw new RuntimeException('Le corps ' . $corps . ' vise par la salve ' . $tenue->id . ' n existe pas.');
+        }
+        $lanceur = $tenue->planet_id_from === null ? null : $planetes->make((int)$tenue->planet_id_from, true)?->getPlayer();
+        if ($lanceur === null) {
+            throw new RuntimeException('La salve ' . $tenue->id . ' n a pas de lanceur : sa technologie d armes ne peut pas etre relevee.');
+        }
+
+        $mere = $cible->isMoon() ? $cible->planet() : null;
+
+        return new MissileStrikeFacts(
+            (int)$tenue->interplanetary_missile,
+            (int)($tenue->target_priority ?? 0),
+            $lanceur->getResearchLevel('weapon_technology'),
+            $cible->getObjectAmount('anti_ballistic_missile'),
+            $mere === null ? 0 : $mere->getObjectAmount('anti_ballistic_missile')
         );
     }
 
     /**
      * @param array<string, int> $unitDelta
      */
-    public function record(int $combatInstanceId, string $eventIdentity, array $unitDelta, int $appliedAt): void
+    public function record(int $combatInstanceId, string $eventIdentity, array $unitDelta, int $appliedAt, MissileStrikeFacts|null $facts = null): void
     {
         ksort($unitDelta);
         $existante = DB::table('combat_effect_ledger')
             ->where('combat_instance_id', $combatInstanceId)
             ->where('event_identity', $eventIdentity)
-            ->first(['unit_delta']);
+            ->first(['unit_delta', 'facts']);
 
         if ($existante !== null) {
             $relu = json_decode((string)$existante->unit_delta, true);
-            if ($relu !== $unitDelta) {
+            $faitsRelus = $existante->facts === null ? null : json_decode((string)$existante->facts, true);
+            if ($relu !== $unitDelta || $faitsRelus !== $facts?->toFrozenFacts()) {
                 throw new ContradictoryEffectRecord($combatInstanceId, $eventIdentity, is_array($relu) ? $relu : [], $unitDelta);
             }
 
@@ -114,10 +155,33 @@ final class CombatEffectLedger
             'combat_instance_id' => $combatInstanceId,
             'event_identity' => $eventIdentity,
             'unit_delta' => json_encode($unitDelta, JSON_THROW_ON_ERROR),
+            'facts' => $facts === null ? null : json_encode($facts->toFrozenFacts(), JSON_THROW_ON_ERROR),
             'applied_at' => $appliedAt,
             'created_at' => Date::now(),
             'updated_at' => Date::now(),
         ]);
+    }
+
+    /**
+     * Les faits de la salve inscrite pour cet effet, ou `null` s'il n'en porte pas.
+     */
+    public function factsOf(int $combatInstanceId, string $eventIdentity): MissileStrikeFacts|null
+    {
+        $ligne = DB::table('combat_effect_ledger')
+            ->where('combat_instance_id', $combatInstanceId)
+            ->where('event_identity', $eventIdentity)
+            ->first(['facts']);
+
+        if ($ligne === null || $ligne->facts === null) {
+            return null;
+        }
+
+        $faits = json_decode((string)$ligne->facts, true);
+        if (!is_array($faits)) {
+            throw new RuntimeException('Le registre des effets du combat ' . $combatInstanceId . ' porte des faits de salve illisibles pour ' . $eventIdentity . '.');
+        }
+
+        return MissileStrikeFacts::fromFrozenFacts($faits);
     }
 
     /**

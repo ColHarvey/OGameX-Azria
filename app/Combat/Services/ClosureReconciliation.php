@@ -14,6 +14,7 @@ use OGame\Combat\Causality\ReconciledEvent;
 use OGame\Combat\Causality\VerifiedCompleteEventSlice;
 use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Enums\SnapshotContribution;
+use OGame\Combat\Projection\MissileStrikeProjection;
 use OGame\Combat\Support\CombatEventIdentity;
 use OGame\Combat\Support\EffectOrderKey;
 use OGame\Combat\Support\ResourceBoundary;
@@ -78,13 +79,6 @@ final class ClosureReconciliation
     ) {
     }
 
-    /**
-     * Ce que les effets appliques ont change dans l'effectif du corps, unite par unite.
-     *
-     * @var array<string, int>
-     */
-    private array $measuredDelta = [];
-
     public function reconcile(CombatInstance $combat, int $targetBodyId, int $openedAt, int $closedAt): ReconciledClosure
     {
         $ouverture = OpeningStateRecorder::protectedStateOf($combat);
@@ -116,7 +110,7 @@ final class ClosureReconciliation
         return new ReconciledClosure(
             $photographie,
             $this->protectedResourcesOf($combat, $photographie->inTheSnapshot()),
-            $this->photographedGarrisonOf($combat, $photographie->inTheSnapshot()),
+            $this->photographedGarrisonOf($combat, $photographie->inTheSnapshot(), $openedAt),
             $this->photographedDefenderOf($combat, $photographie->inTheSnapshot()),
             // **Les reglages ne se reconcilient pas** : aucun evenement causal ne les change, et
             // aucune barriere ne s'y applique. Ils sont lus tels que l'ouverture les a fixes.
@@ -133,7 +127,6 @@ final class ClosureReconciliation
     private function apply(array $aAppliquer, CombatInstance $combat, int $targetBodyId, int $openedAt): array
     {
         $appliques = [];
-        $this->measuredDelta = [];
 
         $this->drainTheQueuesFirst($aAppliquer, $targetBodyId);
 
@@ -168,10 +161,6 @@ final class ClosureReconciliation
                     throw new RuntimeException('Le combat ' . $combat->id . ' ne peut pas photographier l effet ' . $reconcilie->event->identity . ' : applique pendant le ralliement sans passer par la porte, son delta n a pas ete inscrit au registre.');
                 }
 
-                foreach ($delta as $nom => $quantite) {
-                    $this->measuredDelta[$nom] = ($this->measuredDelta[$nom] ?? 0) + $quantite;
-                }
-
                 continue;
             }
 
@@ -184,10 +173,6 @@ final class ClosureReconciliation
             $delta = $this->ledger->deltaOf((int)$combat->id, $reconcilie->event->identity);
             if ($delta === null) {
                 throw new RuntimeException('Le combat ' . $combat->id . ' a applique l effet ' . $reconcilie->event->identity . ' sans que le registre en garde le delta : la barriere n a pas ete vue par la porte, ou l effet n a pas eu lieu.');
-            }
-
-            foreach ($delta as $nom => $quantite) {
-                $this->measuredDelta[$nom] = ($this->measuredDelta[$nom] ?? 0) + $quantite;
             }
 
             $appliques[] = $reconcilie->event->identity;
@@ -271,48 +256,106 @@ final class ClosureReconciliation
     }
 
     /**
-     * L'effectif contre lequel la bataille se joue : celui de l'ouverture, plus les unites que des
-     * effets admissibles ont produites.
+     * L'effectif contre lequel la bataille se joue, reconstruit **dans l'ordre des effets**.
      *
-     * ## Les files : drainees au monde, comptees a moitie
+     * ## Pourquoi un parcours ordonne, et pas une somme
      *
-     * Une file de vaisseaux ou de defenses achevee dans la fenetre, engagee avant l'ouverture, produit
-     * des unites qui appartiennent a ce combat. La fermeture a **draine toute la file echue** avant de
-     * mesurer quoi que ce soit — le gestionnaire ne sait pas traiter un achevement precis — et cette
-     * methode n'en compte que l'element **admissible**. Les unites inadmissibles sont donc bien sur le
-     * corps, et hors de la bataille.
+     * Une somme — ouverture, plus les files admissibles, plus les deltas — suffisait tant que chaque
+     * effet etait lineaire. Le missile ne l'est pas : il intercepte avec les antimissiles presents a
+     * cet instant, il detruit par priorite dans ce qui est present a cet instant, et le delta que le
+     * monde a subi ne dit rien de ce que la photographie admissible aurait perdu. La photographie se
+     * construit donc effet par effet, dans l'ordre que le reconciliateur a fixe : chaque salve
+     * admissible est **projetee** (`MissileStrikeProjection`, la formule meme du jeu) sur l'etat de la
+     * photographie a son rang, avec les antimissiles de la photographie et le blindage de la
+     * photographie ; chaque livraison ajoute son delta ; chaque file admissible ajoute son apport.
      *
-     * Les effets **appliques** — une flotte deposee, un retour qui rentre, un missile qui detruit des
-     * defenses — sont comptes par le **delta mesure** autour de leur application : ce que le corps
-     * portait avant, ce qu'il porte apres. C'est la seule facon juste : additionner ce qu'on croit
-     * connaitre du genre marcherait pour un depot et se tromperait pour une destruction, et rejouer
-     * l'effet pour le connaitre creerait une seconde implementation de chaque gestionnaire.
+     * Le monde, lui, a recu chaque salve une fois, par son gestionnaire, sous la porte unique. Les deux
+     * ordres — salve appliquee par le monde avant la fermeture, ou par la fermeture elle-meme —
+     * donnent la meme photographie, parce que la fermeture ne lit jamais le delta d'une salve : elle
+     * lit ses **faits** (`MissileStrikeFacts`) et rejoue.
+     *
+     * ## Ce que l'on sait, et ce que l'on ne sait pas
+     *
+     * Les antimissiles de la planete mere d'une lune ne sont pas photographies — la planete mere n'est
+     * pas le corps tenu — : la projection prend ceux que le monde avait a l'impact, releves dans les
+     * faits. C'est un fait du monde, dit comme tel.
      *
      * @param array<int, ReconciledEvent> $dansLaPhotographie
      */
-    private function photographedGarrisonOf(CombatInstance $combat, array $dansLaPhotographie): UnitCollection
+    private function photographedGarrisonOf(CombatInstance $combat, array $dansLaPhotographie, int $openedAt): UnitCollection
     {
         $effectif = OpeningStateRecorder::openingUnitsOf($combat)->toArray();
+        $antimissiles = OpeningStateRecorder::openingInterceptorsOf($combat);
+        $blindage = OpeningStateRecorder::openingDefenderOf($combat)->armorLevel;
 
-        // Le monde porte les deux files ; la photographie ne prend que l'apport de l'admissible.
         foreach ($dansLaPhotographie as $reconcilie) {
             if ($reconcilie->admission !== CausalAdmission::AppliedBeforeSnapshot) {
                 continue;
             }
-            $file = $this->reader->unitQueueOf($reconcilie->event->identity);
-            if ($file === null || $file->amount <= 0) {
-                continue;
-            }
-            $objet = ObjectService::getUnitObjectById($file->objectId);
-            if (!self::fightsInAGarrison($objet->machine_name)) {
-                continue;
-            }
-            $effectif[$objet->machine_name] = ($effectif[$objet->machine_name] ?? 0) + $file->amount;
-        }
+            $identite = $reconcilie->event->identity;
 
-        // Les effets appliques ont deja change le corps : on retient ce qu'ils y ont change.
-        foreach ($this->measuredDelta as $nom => $delta) {
-            $effectif[$nom] = max(0, ($effectif[$nom] ?? 0) + $delta);
+            $recherche = $this->reader->researchOf($identite);
+            if ($recherche !== null) {
+                if (ObjectService::getResearchObjectById($recherche->objectId)->machine_name === 'armor_technology') {
+                    $blindage = max($blindage, $recherche->levelTarget);
+                }
+
+                continue;
+            }
+
+            $file = $this->reader->unitQueueOf($identite);
+            if ($file !== null) {
+                if ($file->amount <= 0) {
+                    continue;
+                }
+                $nom = ObjectService::getUnitObjectById($file->objectId)->machine_name;
+                if ($nom === 'anti_ballistic_missile') {
+                    $antimissiles += $file->amount;
+                } elseif (self::fightsInAGarrison($nom)) {
+                    $effectif[$nom] = ($effectif[$nom] ?? 0) + $file->amount;
+                }
+
+                continue;
+            }
+
+            $mission = $this->reader->missionOf($identite);
+            if ($mission === null) {
+                // Un batiment : rien dans l'effectif.
+                continue;
+            }
+            $genre = CombatMissionKind::fromMissionType((int)$mission->mission_type);
+            if ($mission->parent_id === null && ($genre->opensCombat() || $genre->reinforcesTheDefence())) {
+                // Les arrivees qui composent les camps sont decidees par les selecteurs d'admission.
+                continue;
+            }
+            if ((int)$mission->processed === 1 && (int)$mission->time_arrival < $openedAt) {
+                // Traite et arrive avant l'ouverture : l'etat d'ouverture le reflete deja.
+                continue;
+            }
+
+            if ($mission->parent_id === null && $genre === CombatMissionKind::Missile) {
+                $faits = $this->ledger->factsOf((int)$combat->id, $identite);
+                if ($faits === null) {
+                    throw new RuntimeException('Le combat ' . $combat->id . ' ne peut pas projeter la salve ' . $identite . ' : le registre n en porte pas les faits.');
+                }
+
+                $interceptes = MissileStrikeProjection::intercepted($faits->missiles, $antimissiles + $faits->parentInterceptorsBefore);
+                foreach (MissileStrikeProjection::destroyedOn($effectif, $faits->missiles - $interceptes, $faits->weaponTech, $blindage, $faits->priority) as $nom => $nombre) {
+                    $effectif[$nom] = max(0, ($effectif[$nom] ?? 0) - $nombre);
+                }
+                // La planete mere prete les siens en premier, comme le gestionnaire le fait.
+                $antimissiles = max(0, $antimissiles - max(0, $interceptes - $faits->parentInterceptorsBefore));
+
+                continue;
+            }
+
+            $delta = $this->ledger->deltaOf((int)$combat->id, $identite);
+            if ($delta === null) {
+                throw new RuntimeException('Le combat ' . $combat->id . ' ne peut pas photographier l effet ' . $identite . ' : le registre n en porte pas le delta.');
+            }
+            foreach ($delta as $nom => $quantite) {
+                $effectif[$nom] = max(0, ($effectif[$nom] ?? 0) + $quantite);
+            }
         }
 
         $photographie = new UnitCollection();

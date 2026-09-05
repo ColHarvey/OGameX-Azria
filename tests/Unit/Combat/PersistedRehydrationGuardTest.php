@@ -80,6 +80,10 @@ class PersistedRehydrationGuardTest extends TestCase
             'tests/Unit/Combat/PhotographedDefenderFactsTest.php',
             'testANumericStringLevelIsRefused',
         ],
+        'Services/MissileStrikeFacts::fromFrozenFacts' => [
+            'tests/Unit/Combat/MissileStrikeFactsTest.php',
+            'testANumericStringMissileCountIsRefused',
+        ],
         'Services/PhotographedUniverse::fromFrozenFacts' => [
             'tests/Unit/Combat/PhotographedUniverseFactsTest.php',
             'testANumericStringSettingIsRefused',
