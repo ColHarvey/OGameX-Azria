@@ -18,12 +18,9 @@ use OGame\Combat\Support\CombatEventIdentity;
 use OGame\Combat\Support\EffectOrderKey;
 use OGame\Combat\Support\ResourceBoundary;
 use OGame\Combat\Support\SnapshotContributionSet;
-use OGame\Factories\PlanetServiceFactory;
-use OGame\Factories\PlayerServiceFactory;
 use OGame\Models\CombatInstance;
 use OGame\Models\Resources;
 use OGame\Services\FleetMissionService;
-use RuntimeException;
 
 /**
  * La fermeture reconciliee : les faits relus sous verrou, le reconciliateur qui decide, les
@@ -38,12 +35,24 @@ use RuntimeException;
  *
  * ## Ce qui est applique, et par qui
  *
- * Un evenement « a appliquer » est livre par son gestionnaire canonique — `updateMission()` pour une
- * flotte, les files du corps et de son proprietaire pour les constructions et les recherches —,
- * chacun idempotent : ce que le travailleur a deja fait ne se refait pas, ce qu'il n'a pas encore
- * fait se fait ici, sous les verrous de la fermeture. Les arrivees qui ouvrent un combat ou
- * renforcent la defense ne sont pas livrees ici : les selecteurs d'admission les decident, sous la
- * meme fenetre, et les inscrivent eux-memes.
+ * Une **arrivee** admissible est livree par son gestionnaire canonique, `updateMission()`, idempotent
+ * par `processed` : ce que le travailleur a deja fait ne se refait pas, ce qu'il n'a pas encore fait
+ * se fait ici, sous les verrous de la fermeture. Les arrivees qui ouvrent un combat ou renforcent la
+ * defense ne sont pas livrees ici : les selecteurs d'admission les decident, sous la meme fenetre, et
+ * les inscrivent eux-memes.
+ *
+ * ## Pourquoi les files ne sont pas appliquees ici
+ *
+ * `updateUnitQueue()` et ses voisines traitent **toute la file echue** du corps, pas l'element qu'on
+ * leur designe : il n'existe pas de gestionnaire d'un achevement precis. Les appeler pour un
+ * achevement admissible drainerait au passage les achevements **inadmissibles** echus, dont les
+ * unites entreraient dans une garnison encore lue vivante. Leur idempotence ne protege pas de cela.
+ *
+ * Les files sont donc lues, classees et comptees dans la tranche — une source qu'on n'interroge pas
+ * rend la tranche incomplete —, mais leur effet reste au monde, qui les appliquera a la page
+ * suivante de leur proprietaire. La photographie de l'effectif et des technologies, ou cet effet a
+ * sa place, est la tranche suivante du raccordement : les deux vont ensemble, et l'une sans l'autre
+ * donnerait une garnison composee au hasard de qui est passe.
  *
  * ## La reserve protegee
  *
@@ -57,8 +66,6 @@ final class ClosureReconciliation
         private CausalEventReader $reader = new CausalEventReader(),
         private CausalOrderReconciler $reconciler = new CausalOrderReconciler(),
         private CausalEventOrderRegistry|null $orders = null,
-        private PlanetServiceFactory|null $planets = null,
-        private PlayerServiceFactory|null $players = null,
     ) {
     }
 
@@ -88,7 +95,7 @@ final class ClosureReconciliation
             $tranche
         );
 
-        $appliques = $this->apply($photographie->toApply(), $targetBodyId, $proprietaire);
+        $appliques = $this->apply($photographie->toApply());
 
         return new ReconciledClosure(
             $photographie,
@@ -102,50 +109,25 @@ final class ClosureReconciliation
      * @param array<int, ReconciledEvent> $aAppliquer
      * @return array<int, string>
      */
-    private function apply(array $aAppliquer, int $targetBodyId, int $ownerId): array
+    private function apply(array $aAppliquer): array
     {
         $appliques = [];
-        $files = false;
-        $recherches = false;
 
         foreach ($aAppliquer as $reconcilie) {
-            $identite = $reconcilie->event->identity;
-            $mission = $this->reader->missionOf($identite);
+            $mission = $this->reader->missionOf($reconcilie->event->identity);
 
-            if ($mission !== null) {
-                $genre = CombatMissionKind::fromMissionType((int)$mission->mission_type);
-                if ($mission->parent_id === null && ($genre->opensCombat() || $genre->reinforcesTheDefence())) {
-                    continue;
-                }
-                resolve(FleetMissionService::class)->updateMission($mission);
-                $appliques[] = $identite;
+            // Une file : lue et classee, mais laissee au monde (voir le contrat de cette classe).
+            if ($mission === null) {
                 continue;
             }
 
-            // Une recherche appartient au proprietaire, une file au corps : leurs gestionnaires ne
-            // sont pas les memes, et le prefixe de l'identite dit lequel — sans reconstruire l'identite
-            // ni deviner d'apres l'ordre de lecture.
-            if (str_starts_with($identite, CombatEventIdentity::prefixOf('research'))) {
-                $recherches = true;
-                $appliques[] = $identite;
+            $genre = CombatMissionKind::fromMissionType((int)$mission->mission_type);
+            if ($mission->parent_id === null && ($genre->opensCombat() || $genre->reinforcesTheDefence())) {
                 continue;
             }
 
-            $files = true;
-            $appliques[] = $identite;
-        }
-
-        if ($files) {
-            $corps = $this->planets()->make($targetBodyId, true);
-            if ($corps === null) {
-                throw new RuntimeException('Le corps ' . $targetBodyId . ' a disparu pendant la fermeture.');
-            }
-            $corps->updateBuildingQueue();
-            $corps->updateUnitQueue();
-        }
-
-        if ($recherches && $ownerId > 0) {
-            $this->players()->make($ownerId, true)->updateResearchQueue();
+            resolve(FleetMissionService::class)->updateMission($mission);
+            $appliques[] = $reconcilie->event->identity;
         }
 
         return $appliques;
@@ -196,7 +178,12 @@ final class ClosureReconciliation
                 continue;
             }
             $mission = $this->reader->missionOf($evenement->identity);
-            if ($mission !== null && $mission->parent_id === null) {
+            // Une file n'est pas incluse : son effet n'est pas applique par la fermeture, et une
+            // inclusion affirmerait qu'il est dans la photographie.
+            if ($mission === null) {
+                continue;
+            }
+            if ($mission->parent_id === null) {
                 $genre = CombatMissionKind::fromMissionType((int)$mission->mission_type);
                 if ($genre->opensCombat() || $genre->reinforcesTheDefence()) {
                     continue;
@@ -206,15 +193,5 @@ final class ClosureReconciliation
         }
 
         return $inclusions;
-    }
-
-    private function planets(): PlanetServiceFactory
-    {
-        return $this->planets ??= resolve(PlanetServiceFactory::class);
-    }
-
-    private function players(): PlayerServiceFactory
-    {
-        return $this->players ??= resolve(PlayerServiceFactory::class);
     }
 }

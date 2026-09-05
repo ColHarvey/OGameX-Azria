@@ -9,6 +9,7 @@ use OGame\Combat\Allocation\LootAllocatorRegistry;
 use OGame\Combat\Application\CombatApplicationContext;
 use OGame\Combat\Application\FrozenCombatApplicationContext;
 use OGame\Combat\Application\LiveCombatApplicationContext;
+use OGame\Combat\Exceptions\MissingOpeningState;
 use OGame\Combat\Presentation\CombatPresentationTimelineWriter;
 use OGame\Combat\Replay\BattleResultCodec;
 use OGame\Combat\Replay\CombatResultIdentity;
@@ -73,6 +74,16 @@ final class CombatEngagementService
      */
     public function engage(CombatInstance $combat, int $startsAt, Resources|null $protectedResources = null): CombatEngagement
     {
+        // **Un combat durable ne se calcule jamais sur le stock vivant.** Le moteur retombe sur le
+        // corps quand le contexte ne porte pas de reserve protegee — c'est le chemin instantane, qui
+        // n'a pas de fenetre. Ici, une reserve absente signifierait que la photographie n'a pas ete
+        // construite : le repli donnerait un butin plausible, calcule sur ce que le monde a fait
+        // pendant le ralliement, et rien ne le signalerait. Le refus est explicite et arrete la
+        // fermeture.
+        if ($protectedResources === null) {
+            throw new MissingOpeningState('Le combat ' . $combat->id . ' s engage sans reserve protegee : sa photographie n a pas ete construite, et calculer la bataille sur le stock vivant ferait dependre le butin de ce que le monde a fait depuis l ouverture.');
+        }
+
         // **Un combat deja engage garde son resultat.** Une cloture rejouee — un travail relivre,
         // un combat remis en ralliement pour reprendre son travail — retrouve la bataille calculee
         // la premiere fois et ne la recalcule pas : le moteur tire au sort, et deux calculs ne

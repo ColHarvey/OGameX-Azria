@@ -111,7 +111,24 @@ final class CausalEventReader
     }
 
     /**
-     * Ce que l'etat du corps reflete deja a cet instant : un recu par effet deja applique.
+     * Ce que l'etat du corps reflete deja a cet instant : un recu par effet **reellement present**.
+     *
+     * ## `processed` n'est pas un recu
+     *
+     * Une mission traitee n'a pas forcement livre quelque chose a ce corps. Une attaque traitee a
+     * pille, pas depose ; une flotte refusee par un combat est traitee et **repartie**, sans avoir
+     * rien remis. Emettre un recu pour elles ferait dire a la provenance « cet effet est deja dans
+     * l'etat » alors qu'il n'y est pas : le reconciliateur renoncerait a l'appliquer, et la
+     * photographie compterait une cargaison que le corps n'a jamais recue.
+     *
+     * Un recu n'est donc emis que si les deux conditions tiennent : le genre de la mission **livre**
+     * quelque chose au corps (cargaison ou flotte, d'apres la matrice), et la mission ne porte pas de
+     * disposition de retour — la marque, ecrite par le combat lui-meme, d'une flotte renvoyee.
+     *
+     * Les files ne donnent pas de recu ici : leur effet vit dans l'effectif du corps, qui n'est pas
+     * encore photographie. Les inclure ferait porter a la provenance une affirmation que rien ne
+     * verifie — une file achevee puis dont les unites ont ete perdues au combat suivant reste
+     * `processed`, et son effet n'est plus la.
      *
      * @return array<int, AppliedEffectReceipt>
      */
@@ -119,27 +136,38 @@ final class CausalEventReader
     {
         $recus = [];
 
+        $renvoyees = DB::table('combat_fleet_dispositions')->pluck('fleet_mission_id')->map(static fn (mixed $id): int => (int)$id)->all();
+
         foreach (FleetMission::query()->where('planet_id_to', $body)->where('processed', 1)->orderBy('id')->get() as $mission) {
+            if (!self::deliversToTheBody($mission) || in_array((int)$mission->id, $renvoyees, true)) {
+                continue;
+            }
             $identite = CombatEventIdentity::forFleetArrival((int)$mission->id);
             $recus[] = new AppliedEffectReceipt($identite, self::FLEET_ARRIVAL_KIND, self::fleetEffectFingerprint($mission), $body, (int)$mission->time_arrival, self::receiptId($combatInstanceId, $identite));
         }
 
-        foreach (self::completionsApplied('unit_queues', [$body]) as $file) {
-            $identite = CombatEventIdentity::forUnitQueueCompletion($file->id);
-            $recus[] = new AppliedEffectReceipt($identite, self::UNIT_QUEUE_KIND, $file->effectFingerprint, $body, $file->completedAt, self::receiptId($combatInstanceId, $identite));
-        }
-
-        foreach (self::completionsApplied('building_queues', [$body]) as $file) {
-            $identite = CombatEventIdentity::forBuildingQueueCompletion($file->id);
-            $recus[] = new AppliedEffectReceipt($identite, self::BUILDING_QUEUE_KIND, $file->effectFingerprint, $body, $file->completedAt, self::receiptId($combatInstanceId, $identite));
-        }
-
-        foreach (self::completionsApplied('research_queues', self::bodiesOf($ownerId)) as $file) {
-            $identite = CombatEventIdentity::forResearchCompletion($file->id);
-            $recus[] = new AppliedEffectReceipt($identite, self::RESEARCH_KIND, $file->effectFingerprint, $body, $file->completedAt, self::receiptId($combatInstanceId, $identite));
-        }
-
         return $recus;
+    }
+
+    /**
+     * Ce genre de mission depose-t-il quelque chose sur le corps a son arrivee ?
+     *
+     * La matrice le dit : une cargaison livree, une flotte livree. Une attaque, une expedition, un
+     * espionnage n'y deposent rien — leur traitement ne laisse pas d'effet a refleter.
+     */
+    private static function deliversToTheBody(FleetMission $mission): bool
+    {
+        $genre = CombatMissionKind::fromMissionType((int)$mission->mission_type);
+        $etape = $mission->parent_id === null ? FlightLeg::Outbound : FlightLeg::Return;
+        $situation = new CombatSituation($genre, $etape, ActorKind::Player, CombatState::Rallying);
+
+        foreach ($situation->possibleProjections() as $projection) {
+            if ($projection === SnapshotContribution::DeliveredCargo || $projection === SnapshotContribution::DeliveredFleet) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -211,23 +239,6 @@ final class CausalEventReader
             ->orderBy('id')
             ->lockForUpdate()
             ->get();
-
-        return array_map(static fn (object $ligne): QueuedCompletion => QueuedCompletion::fromRow((array)$ligne), $lignes->all());
-    }
-
-    /**
-     * Les achevements de cette file deja produits dans le monde.
-     *
-     * @param array<int, int> $bodies
-     * @return array<int, QueuedCompletion>
-     */
-    private static function completionsApplied(string $table, array $bodies): array
-    {
-        if ($bodies === []) {
-            return [];
-        }
-
-        $lignes = DB::table($table)->whereIn('planet_id', $bodies)->where('processed', 1)->orderBy('id')->get();
 
         return array_map(static fn (object $ligne): QueuedCompletion => QueuedCompletion::fromRow((array)$ligne), $lignes->all());
     }
