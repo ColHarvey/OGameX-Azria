@@ -1024,7 +1024,14 @@ abstract class BattleEngine
         if ($spaceDockPlayer === null) {
             throw new RuntimeException('Wreck field calculation planet has no owner.');
         }
-        $wreckFieldService = new WreckFieldService($spaceDockPlayer, $this->settings);
+        // **La part d'epaves vient de la photographie**, comme celle des debris : le service la
+        // relirait sinon sur les reglages vivants au moment de la cloture, et un changement
+        // d'administration pendant le ralliement changerait ce qu'une epave rend.
+        $wreckFieldService = new WreckFieldService(
+            $spaceDockPlayer,
+            $this->settings,
+            $this->photographedUniverse !== null ? $this->photographedUniverse->debrisFieldFromShips : null
+        );
         $wreckFieldPercentage = $wreckFieldService->getRecoverableWreckFieldPercentage($spaceDockLevel) / 100;
         $wreckFieldData = $wreckFieldService->calculateShipsForWreckField($defenderUnitsLost, $spaceDockLevel);
 

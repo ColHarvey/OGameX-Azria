@@ -67,6 +67,30 @@ class SettingsSeenByTheEngineTest extends UnitTestCase
     }
 
     /**
+     * Une lecture indirecte est une lecture : le service d'epaves relit `debris_field_from_ships` sur
+     * les reglages vivants quand on ne lui donne pas la part. Le moteur doit la lui donner, prise dans
+     * la photographie — sinon la garde ci-dessus, qui ne voit que `$this->settings->`, ne verrait rien.
+     */
+    public function testTheEngineNeverBuildsTheWreckFieldServiceWithoutThePhotographedShare(): void
+    {
+        $source = '';
+        foreach ($this->engineFiles() as $chemin) {
+            $source .= (string)file_get_contents(base_path($chemin));
+        }
+
+        $n = preg_match_all('/new WreckFieldService\(\s*([^;]*?)\);/s', $source, $constructions);
+        $this->assertGreaterThan(0, $n, 'The engine no longer builds a WreckFieldService: this guard would pass on anything.');
+
+        foreach ($constructions[1] as $arguments) {
+            $this->assertStringContainsString(
+                'photographedUniverse',
+                $arguments,
+                'The engine builds a WreckFieldService without the photographed debris share: the wreck would follow the living setting at the closure. Arguments: ' . preg_replace('/\s+/', ' ', $arguments)
+            );
+        }
+    }
+
+    /**
      * Le temoin inverse de la liste : chaque fait photographie sert vraiment au moteur.
      *
      * Une photographie qui porterait un reglage que personne ne lit ferait croire a une protection
