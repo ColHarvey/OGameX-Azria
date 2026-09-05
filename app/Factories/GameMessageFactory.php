@@ -15,6 +15,8 @@ use OGame\GameMessages\BuddyRequestAccepted;
 use OGame\GameMessages\BuddyRequestReceived;
 use OGame\GameMessages\ColonyEstablished;
 use OGame\GameMessages\ColonyEstablishFailAstrophysics;
+use OGame\GameMessages\CombatCancelled;
+use OGame\GameMessages\CombatRallyRefused;
 use OGame\GameMessages\DebrisFieldHarvest;
 use OGame\GameMessages\DefenderEspionageDetected;
 use OGame\GameMessages\EspionageReport;
@@ -81,6 +83,8 @@ class GameMessageFactory
         'espionage_detected' => DefenderEspionageDetected::class,
         'battle_report' => BattleReport::class,
         'fleet_lost_contact' => FleetLostContact::class,
+        'combat_rally_refused' => CombatRallyRefused::class,
+        'combat_cancelled' => CombatCancelled::class,
         'debris_field_harvest' => DebrisFieldHarvest::class,
 
         'expedition_battle' => ExpeditionBattle::class,

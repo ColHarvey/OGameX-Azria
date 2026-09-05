@@ -94,6 +94,45 @@ Metal: :metal Crystal: :crystal Deuterium: :deuterium',
     ],
 
     // ------------------------
+    'combat_rally_refused' => [
+        'from' => 'Fleet Command',
+        'subject' => 'Fleet refused at the rally',
+        'body' => 'Your fleet could not join the combat at :coordinates and is returning to base.
+Reason: :reason',
+        'reasons' => [
+            'origin_combat_locked' => 'its planet of origin is engaged in a combat',
+            'target_combat_locked' => 'the target is already engaged in another combat',
+            'rally_closed' => 'the rally was already closed when it arrived',
+            'alliance_not_eligible' => 'your alliance cannot join this combat',
+            'fleet_limit_reached' => 'the maximum number of fleets has been reached',
+            'player_limit_reached' => 'the maximum number of players has been reached',
+            'npc_side_not_reinforceable' => 'this side cannot be reinforced',
+            'already_engaged' => 'it is already engaged elsewhere',
+            'resolution_in_progress' => 'the combat was being resolved',
+            'own_fleet_coming_home' => 'one of your fleets was already coming home',
+            'no_combat_effect' => 'its mission has no effect on this combat',
+            'undecided' => 'the rule for this case has not been settled yet',
+            'position_no_longer_free' => 'the position is no longer free',
+            'wrong_target_body' => 'it was not aimed at this body',
+            'not_already_in_flight' => 'it was not in flight yet when the combat opened',
+            'rally_window_limit' => 'it would have arrived after the rally window',
+            'candidate_recalled' => 'it was recalled before the closure',
+            'no_return_destination' => 'no return destination could be established',
+        ],
+    ],
+    'combat_cancelled' => [
+        'from' => 'Fleet Command',
+        'subject' => 'Combat cancelled',
+        'body' => 'The combat at :coordinates has been cancelled: :cause.
+Your fleets are returning to base. Fingerprint of the abandoned facts: :fingerprint',
+        'no_fingerprint' => 'none (the combat had not been frozen yet)',
+        'causes' => [
+            'target_disappeared' => 'the targeted body no longer exists',
+            'attacker_removed' => 'the attacker left the game',
+            'administrative_decision' => 'administrative decision',
+            'inconsistent_snapshot' => 'the combat snapshot turned out to be inconsistent',
+        ],
+    ],
     'acs_defend_arrival_host' => [
         'from' => 'Space Monitoring',
         'subject' => 'Fleet is stopping',

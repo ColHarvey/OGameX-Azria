@@ -53,6 +53,7 @@ final class PersistentCombatAdvancer
         private RallyClosureService $closure = new RallyClosureService(),
         private AttackMission|null $mission = null,
         private int $batchSize = 200,
+        private CombatOutboxDelivery $delivery = new CombatOutboxDelivery(),
     ) {
     }
 
@@ -87,7 +88,11 @@ final class PersistentCombatAdvancer
             }
         }
 
-        return new PersistentCombatAdvance($fermes, $regles, $echecs, $this->quarantined());
+        // **Les avis partent apres les decisions du passage**, et chacun une seule fois : un refus
+        // ecrit par la fermeture ci-dessus est livre des maintenant, pas a la minute suivante.
+        $livres = $this->delivery->deliver($now, $this->batchSize);
+
+        return new PersistentCombatAdvance($fermes, $regles, $echecs, $this->quarantined(), $livres);
     }
 
     /**

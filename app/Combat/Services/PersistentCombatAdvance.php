@@ -16,17 +16,19 @@ final readonly class PersistentCombatAdvance
      * @param int $settled Combats regles pendant ce passage.
      * @param array<int, string> $failures Les combats qui ont leve, par identifiant, avec leur raison.
      * @param int $quarantined Combats laisses de cote parce qu'ils ont deja trop echoue.
+     * @param int $delivered Avis de la boite d'envoi devenus des messages du jeu.
      */
     public function __construct(
         public int $closed,
         public int $settled,
         public array $failures,
         public int $quarantined,
+        public int $delivered = 0,
     ) {
     }
 
     public function didSomething(): bool
     {
-        return $this->closed > 0 || $this->settled > 0;
+        return $this->closed > 0 || $this->settled > 0 || $this->delivered > 0;
     }
 }

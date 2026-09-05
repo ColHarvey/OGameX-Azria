@@ -132,6 +132,18 @@ class CombatParticipantKey
     }
 
     /**
+     * L'identifiant que la clef porte — mission ou corps —, ou null si la clef n'en porte aucun.
+     */
+    public static function identifierOf(string $key): int|null
+    {
+        if (preg_match('/^(?:fleet|planet):(\d+)$/', $key, $m) !== 1) {
+            return null;
+        }
+
+        return (int)$m[1];
+    }
+
+    /**
      * Dit si une chaine relue est une cle que cette classe aurait pu produire.
      *
      * Une porte de confiance — la relecture d'un resultat gele, par exemple — recoit des clefs

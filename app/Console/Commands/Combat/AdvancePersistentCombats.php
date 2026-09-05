@@ -35,7 +35,7 @@ class AdvancePersistentCombats extends Command
         $avance = $this->avanceur->advance((int)Date::now()->timestamp);
 
         if ($avance->didSomething()) {
-            $this->line('  ' . $avance->closed . ' ralliement(s) ferme(s), ' . $avance->settled . ' combat(s) regle(s).');
+            $this->line('  ' . $avance->closed . ' ralliement(s) ferme(s), ' . $avance->settled . ' combat(s) regle(s), ' . $avance->delivered . ' avis livre(s).');
         }
 
         foreach ($avance->failures as $combat => $raison) {
