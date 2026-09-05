@@ -378,7 +378,7 @@ abstract class AccountTestCase extends TestCase
             // trahirait le nom du helper. La distance d'abord, puis la position, puis l'identifiant :
             // deterministe, et reellement proche.
             ->orderByRaw('ABS(system - ?)', [$coordinates->system])
-            ->orderBy('position')
+            ->orderBy('planet')
             ->orderBy('id')
             ->value('id');
 
