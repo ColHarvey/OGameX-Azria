@@ -18,6 +18,11 @@
       <file>./tests/Feature/Combat/PersistentCombatAdvancerTest.php</file>
     </testsuite>
   </testsuites>
+  <groups>
+    <exclude>
+      <group>sqlite</group>
+    </exclude>
+  </groups>
   <php>
     <env name="APP_ENV" value="testing"/>
     <env name="CACHE_DRIVER" value="array"/>

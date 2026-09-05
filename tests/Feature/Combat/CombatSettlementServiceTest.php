@@ -324,7 +324,7 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
 
         DB::listen(function (QueryExecuted $requete) use (&$tables, $suivies): void {
             foreach ($suivies as $table) {
-                if (str_contains($requete->sql, '"' . $table . '"') && !in_array($table, $tables, true)) {
+                if (str_contains(self::sql($requete), '"' . $table . '"') && !in_array($table, $tables, true)) {
                     $tables[] = $table;
                 }
             }
@@ -363,9 +363,9 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
         // identifiants — et c'est elle que MariaDB verrouillera.
         DB::listen(function (QueryExecuted $requete) use (&$demandes): void {
             if ($demandes === null
-                && str_contains($requete->sql, 'from "planets"')
-                && str_contains($requete->sql, '"id" in (')
-                && str_contains($requete->sql, 'order by "id" asc')) {
+                && str_contains(self::sql($requete), 'from "planets"')
+                && str_contains(self::sql($requete), '"id" in (')
+                && str_contains(self::sql($requete), 'order by "id" asc')) {
                 $demandes = $requete->bindings;
             }
         });
@@ -1408,6 +1408,18 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
     /**
      * Regle par le service construit sur les dependances de production.
      */
+    /**
+     * La requete, dans une forme que les deux moteurs partagent.
+     *
+     * SQLite cite les identifiants entre guillemets doubles, MariaDB en accents graves : un motif
+     * ecrit pour l'un ne voit rien chez l'autre, et le bac MariaDB a d'abord conclu qu'aucun verrou
+     * n'etait pris. Les accents graves deviennent des guillemets ; les motifs restent ceux de SQLite.
+     */
+    private static function sql(QueryExecuted $requete): string
+    {
+        return str_replace('`', '"', $requete->sql);
+    }
+
     private function settleIt(CombatInstance $combat, int $instant, Closure|null $retour = null): CombatSettlementOutcome
     {
         $service = new CombatSettlementService(resolve(CombatResolutionService::class));

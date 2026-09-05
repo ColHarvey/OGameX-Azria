@@ -39,6 +39,10 @@ final class SettlementRaceTest extends FleetDispatchTestCase
     use EngagesAPersistentCombat;
     use RunsInParallelProcesses;
 
+    protected int $missionType = 1;
+
+    protected string $missionName = 'Attaquer';
+
     protected function setUp(): void
     {
         parent::setUp();

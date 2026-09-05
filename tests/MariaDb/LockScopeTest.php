@@ -35,6 +35,10 @@ final class LockScopeTest extends FleetDispatchTestCase
     use EngagesAPersistentCombat;
     use RunsInParallelProcesses;
 
+    protected int $missionType = 1;
+
+    protected string $missionName = 'Attaquer';
+
     private const int LOCK_WAIT_TIMEOUT = 1205;
 
     protected function setUp(): void

@@ -4,6 +4,7 @@ namespace Tests\Feature\Combat;
 
 use ArrayObject;
 use Closure;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use OGame\Combat\Enums\CombatState;
@@ -21,6 +22,7 @@ use OGame\Models\Planet;
 use OGame\Models\User;
 use OGame\Services\FleetMissionService;
 use OGame\Services\MessageService;
+use PHPUnit\Framework\Attributes\Group;
 use ReflectionClass;
 use ReflectionMethod;
 use RuntimeException;
@@ -129,14 +131,14 @@ class FleetMovementGateTest extends TestCase
         $this->aBarrierOver($corps, $combat);
 
         $tables = [];
-        DB::listen(function ($requete) use (&$tables): void {
+        DB::listen(function (QueryExecuted $requete) use (&$tables): void {
             foreach ([
                 'celestial_body_combat_barriers',
                 'combat_instances',
                 'fleet_unions',
                 'fleet_missions',
             ] as $table) {
-                if (str_contains($requete->sql, '"' . $table . '"') || str_contains($requete->sql, '`' . $table . '`')) {
+                if (str_contains(self::sql($requete), '"' . $table . '"')) {
                     $tables[] = $table;
 
                     return;
@@ -170,8 +172,8 @@ class FleetMovementGateTest extends TestCase
         $this->assertSame(0, CombatParticipant::query()->where('fleet_mission_id', $mission->id)->count());
 
         $liaisons = [];
-        DB::listen(function ($requete) use (&$liaisons): void {
-            if (str_contains($requete->sql, 'combat_instances')) {
+        DB::listen(function (QueryExecuted $requete) use (&$liaisons): void {
+            if (str_contains(self::sql($requete), 'combat_instances')) {
                 $liaisons[] = $requete->bindings;
             }
         });
@@ -291,8 +293,8 @@ class FleetMovementGateTest extends TestCase
             DB::table('fleet_missions')->where('id', $mission->id)->update(['union_id' => $union->id]);
 
             $unionsDemandees = [];
-            DB::listen(function ($requete) use (&$unionsDemandees): void {
-                if (str_contains($requete->sql, '"fleet_unions"')) {
+            DB::listen(function (QueryExecuted $requete) use (&$unionsDemandees): void {
+                if (str_contains(self::sql($requete), '"fleet_unions"')) {
                     $unionsDemandees[] = $requete->bindings;
                 }
             });
@@ -326,8 +328,8 @@ class FleetMovementGateTest extends TestCase
             DB::table('fleet_missions')->where('id', $mission->id)->update(['combat_instance_id' => $combat->id]);
 
             $combatsDemandes = [];
-            DB::listen(function ($requete) use (&$combatsDemandes): void {
-                if (str_contains($requete->sql, '"combat_instances"')) {
+            DB::listen(function (QueryExecuted $requete) use (&$combatsDemandes): void {
+                if (str_contains(self::sql($requete), '"combat_instances"')) {
                     $combatsDemandes[] = $requete->bindings;
                 }
             });
@@ -369,10 +371,10 @@ class FleetMovementGateTest extends TestCase
         // fin de l'essai : il reste enregistre sur la connexion. L'etat vit dans un objet, pour
         // qu'une analyse statique ne conclue pas qu'il ne change jamais.
         $course = new ArrayObject(['actif' => true, 'passages' => 0]);
-        DB::listen(function ($requete) use ($course, $unions, $mission): void {
+        DB::listen(function (QueryExecuted $requete) use ($course, $unions, $mission): void {
             $passages = (int)$course['passages'];
 
-            if ($course['actif'] === true && str_contains($requete->sql, '"fleet_unions"') && $passages < count($unions)) {
+            if ($course['actif'] === true && str_contains(self::sql($requete), '"fleet_unions"') && $passages < count($unions)) {
                 DB::table('fleet_missions')->where('id', $mission->id)->update(['union_id' => $unions[$passages]]);
                 $course['passages'] = $passages + 1;
             }
@@ -422,8 +424,8 @@ class FleetMovementGateTest extends TestCase
         DB::table('fleet_missions')->where('id', $mission->id)->update(['union_id' => $union->id]);
 
         $prises = 0;
-        DB::listen(function ($requete) use (&$prises): void {
-            if (str_contains($requete->sql, '"fleet_unions"')) {
+        DB::listen(function (QueryExecuted $requete) use (&$prises): void {
+            if (str_contains(self::sql($requete), '"fleet_unions"')) {
                 $prises++;
             }
         });
@@ -459,8 +461,8 @@ class FleetMovementGateTest extends TestCase
         $this->assertNull($mission->union_id);
 
         $unionsDemandees = [];
-        DB::listen(function ($requete) use (&$unionsDemandees): void {
-            if (str_contains($requete->sql, '"fleet_unions"')) {
+        DB::listen(function (QueryExecuted $requete) use (&$unionsDemandees): void {
+            if (str_contains(self::sql($requete), '"fleet_unions"')) {
                 $unionsDemandees[] = $requete->bindings;
             }
         });
@@ -468,6 +470,21 @@ class FleetMovementGateTest extends TestCase
         (new FleetMovementGate())->decideUnderLock($mission, fn (FleetMission $tenue): int => $tenue->id, [$visee->id]);
 
         $this->assertContains([$visee->id], $unionsDemandees, 'The union a join is about to enter was not held.');
+    }
+
+    /**
+     * @param class-string $classe
+     */
+    /**
+     * La requete, dans une forme que les deux moteurs partagent.
+     *
+     * SQLite cite les identifiants entre guillemets doubles, MariaDB en accents graves : un motif
+     * ecrit pour l'un ne voit rien chez l'autre, et le bac MariaDB a d'abord conclu qu'aucun verrou
+     * n'etait pris. Les accents graves deviennent des guillemets ; les motifs restent ceux de SQLite.
+     */
+    private static function sql(QueryExecuted $requete): string
+    {
+        return str_replace('`', '"', $requete->sql);
     }
 
     /**
@@ -535,7 +552,11 @@ class FleetMovementGateTest extends TestCase
      * photographie des identifiants etait prise avant, cet identifiant y figurait — et la mission
      * que l'essai cree hors transaction, qui le reutilise, paraissait « ancienne » au nettoyage.
      * Elle restait, et polluait exactement la base que le helper devait proteger.
+     *
+     * **Propre a SQLite**, qui reutilise l'identifiant d'une ligne annulee : InnoDB ne le rend jamais,
+     * le scenario n'existe pas sur MariaDB, et le bac l'exclut par son groupe.
      */
+    #[Group('sqlite')]
     public function testLeavingTheEnvelopeCleansEvenARowWhoseIdTheEnvelopeHadUsed(): void
     {
         // Une ligne de l'enveloppe, condamnee par le rollback qui vient.
