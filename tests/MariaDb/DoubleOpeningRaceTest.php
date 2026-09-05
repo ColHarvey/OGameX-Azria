@@ -79,7 +79,11 @@ final class DoubleOpeningRaceTest extends TestCase
         $this->assertSame(1, CelestialBodyCombatBarrier::query()->where('target_body_id', $corps->id)->count(), 'More than one barrier holds this body.');
 
         $combat = CombatInstance::query()->findOrFail((int)$issues[0]);
-        $this->assertSame(CombatState::Rallying, $combat->status);
+        // **L etat depend de la fenetre, pas de la course.** Deux attaquantes qui arrivent ensemble
+        // peuvent fermer leur ralliement dans la transaction d ouverture — une fenetre nulle est
+        // legitime. Ce que cet essai etablit est qu un seul combat gouverne, pas lequel des deux etats
+        // il porte ; exiger « en ralliement » ferait dependre le temoin du calcul de la fenetre.
+        $this->assertFalse($combat->status->isFinal(), "The governing combat is already final: it never fought.");
         $this->assertNotNull($combat->opening_state, 'The governing combat has no opening state: it could never close.');
         $this->assertSame((int)$combat->opening_captured_at, (int)$combat->started_at, 'The opening state was not captured at the opening.');
     }
