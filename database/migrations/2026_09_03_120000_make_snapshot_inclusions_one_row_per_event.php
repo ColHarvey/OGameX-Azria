@@ -53,14 +53,22 @@ return new class () extends Migration {
                 ->update(['contributions' => json_encode([$ligne->contribution])]);
         }
 
+        // **Un evenement n'entre qu'une fois dans une photographie.** La projection n'y est plus :
+        // l'instance n'en a qu'une, et l'y laisser aurait permis a un defaut d'ecrire le meme
+        // evenement deux fois sous deux versions.
+        //
+        // **Le nouvel index se pose avant que l'ancien parte**, et dans une instruction a lui.
+        // `combat_incl_unique` commence par `combat_instance_id` : MariaDB s'en sert comme index de
+        // support de la clef etrangere et refuse sa suppression tant qu'aucun autre ne couvre cette
+        // colonne (« needed in a foreign key constraint »). SQLite recree la table entiere a chaque
+        // changement et ne voit jamais la difference — c'est le bac MariaDB qui l'a trouvee.
+        Schema::table('combat_snapshot_inclusions', function (Blueprint $table) {
+            $table->unique(['combat_instance_id', 'event_identity'], 'combat_incl_event_unique');
+        });
+
         Schema::table('combat_snapshot_inclusions', function (Blueprint $table) {
             $table->dropUnique('combat_incl_unique');
             $table->dropColumn('contribution');
-
-            // **Un evenement n'entre qu'une fois dans une photographie.** La projection n'y est
-            // plus : l'instance n'en a qu'une, et l'y laisser aurait permis a un defaut d'ecrire le
-            // meme evenement deux fois sous deux versions.
-            $table->unique(['combat_instance_id', 'event_identity'], 'combat_incl_event_unique');
         });
     }
 
@@ -94,14 +102,17 @@ return new class () extends Migration {
                 ->update(['contribution' => is_array($liste) && $liste !== [] ? (string)$liste[0] : null]);
         }
 
+        // Meme regle dans l'autre sens : l'index d'origine revient avant que le nouveau parte.
         Schema::table('combat_snapshot_inclusions', function (Blueprint $table) {
-            $table->dropUnique('combat_incl_event_unique');
-            $table->dropColumn('contributions');
-
             $table->unique(
                 ['combat_instance_id', 'event_identity', 'projection_version'],
                 'combat_incl_unique'
             );
+        });
+
+        Schema::table('combat_snapshot_inclusions', function (Blueprint $table) {
+            $table->dropUnique('combat_incl_event_unique');
+            $table->dropColumn('contributions');
         });
     }
 };
