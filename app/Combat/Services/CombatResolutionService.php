@@ -240,6 +240,17 @@ class CombatResolutionService
             }
         }
 
+        // **La collecte des Faucheurs attaquants, attribuee flotte par flotte avant tout retour.** Elle
+        // etait calculee apres la boucle, pour l'initiateur seul, et retiree du champ sans entrer dans
+        // aucun retour d'une attaque groupee : des debris quittaient le jeu. Chaque flotte survivante dont
+        // le proprietaire collecte (classe gelee) et qui garde des Faucheurs recoit sa part, au prorata de
+        // ses Faucheurs, plafonnee par sa part de la capacite Faucheur gelee ; la place libre de son fret
+        // gele plafonne encore ci-dessous. Ce qui n'entre nulle part reste dans le champ.
+        $collectesParFlotte = count($battleResult->attackerFleetResults) > 1
+            ? $this->reaperCollectionsPerFleet($battleResult, $context, $allocation, $diagnostics)
+            : [];
+        $collecteGroupee = new Resources(0, 0, 0, 0);
+
         // Process attacker fleet results (handle multi-fleet ACS battles)
         // Only use this loop for multi-attacker battles (count > 1)
         // Single-attacker battles use the original logic below
@@ -266,14 +277,34 @@ class CombatResolutionService
                     // Fleet survived - create return mission with survivors
                     $fleetOwner = $this->playerServiceFactory->make($fleetResult->playerId);
 
-                    // TODO: Include Reaper-collected debris share for multi-attacker battles.
-                    // Currently Reaper debris collection only works for single-attacker path.
                     $totalResources = new Resources(
                         $fleetResult->survivingCargo->metal->get() + $fleetResult->lootShare->metal->get(),
                         $fleetResult->survivingCargo->crystal->get() + $fleetResult->lootShare->crystal->get(),
                         $fleetResult->survivingCargo->deuterium->get() + $fleetResult->lootShare->deuterium->get(),
                         0
                     );
+
+                    // **La part de collecte de cette flotte entre dans son retour**, dans la place que son
+                    // fret gele laisse libre ; le reste demeure dans le champ, il ne disparait pas.
+                    $collecte = $collectesParFlotte[(int)$fleetResult->fleetMissionId] ?? null;
+                    if ($collecte !== null && $collecte->sum() > 0) {
+                        $placeLibre = max(0, (int)($fleetResult->survivingCargoCapacity - $totalResources->sum()));
+                        if ($collecte->sum() > $placeLibre) {
+                            $collecte = $this->capAndCollect($collecte, $placeLibre, $allocation, $diagnostics, CombatResolutionOutcome::PHASE_ATTACKER_REAPER);
+                        }
+                        $totalResources = new Resources(
+                            $totalResources->metal->get() + $collecte->metal->get(),
+                            $totalResources->crystal->get() + $collecte->crystal->get(),
+                            $totalResources->deuterium->get() + $collecte->deuterium->get(),
+                            0
+                        );
+                        $collecteGroupee = new Resources(
+                            $collecteGroupee->metal->get() + $collecte->metal->get(),
+                            $collecteGroupee->crystal->get() + $collecte->crystal->get(),
+                            $collecteGroupee->deuterium->get() + $collecte->deuterium->get(),
+                            0
+                        );
+                    }
 
                     // Ensure total doesn't exceed surviving cargo capacity
                     // La capacite survivante de cette flotte, gelee a la cloture.
@@ -293,13 +324,16 @@ class CombatResolutionService
                         $fleetOwner,
                         $fleetMission->planet_id_from
                     );
-                    $naturalReturnDuration = $this->fleetMissionService->calculateFleetMissionDuration(
+                    // **La duree vient du contexte** : gelee a la cloture pour un combat durable, calculee
+                    // sur place pour le chemin instantane. Relue sur le joueur vivant, une propulsion
+                    // recherchee pendant la bataille changeait l'heure d'arrivee d'un retour deja decide.
+                    $naturalReturnDuration = $context->returnDurationOf((int)$fleetMission->id, fn (): int => $this->fleetMissionService->calculateFleetMissionDuration(
                         $originPlanet,
                         $defenderPlanet->getPlanetCoordinates(),
                         $fleetResult->unitsResult,
                         $missionDeJeu,
                         10
-                    );
+                    ));
 
                     // Calculate wreck field for General class attacker
                     // General perk: wreck field from attacker's lost ships is transported back with the return mission
@@ -325,9 +359,12 @@ class CombatResolutionService
         // Check if attacker has Reaper ships for automatic debris collection (General class only)
         $attackerCollectedDebris = new Resources(0, 0, 0, 0);
         $defenderCollectedDebris = new Resources(0, 0, 0, 0);
-        // Attacker Reaper collection
+        // Attacker Reaper collection — chemin mono-attaquant. En attaque groupee, la collecte a ete
+        // attribuee flotte par flotte ci-dessus, et ce qui a ete credite est ce qui quitte le champ.
         $attackerDebrisCollectionPercentage = $context->reaperDebrisCollectionPercentage($attackerPlayer);
-        if ($attackerDebrisCollectionPercentage > 0 && $battleResult->attackerUnitsResult->getAmountByMachineName('reaper') > 0) {
+        if (count($battleResult->attackerFleetResults) > 1) {
+            $attackerCollectedDebris = $collecteGroupee;
+        } elseif ($attackerDebrisCollectionPercentage > 0 && $battleResult->attackerUnitsResult->getAmountByMachineName('reaper') > 0) {
             // Calculate 30% of the debris to be collected automatically
             $collectionAmount = new Resources(
                 (int)($battleResult->debris->metal->get() * $attackerDebrisCollectionPercentage),
@@ -995,5 +1032,58 @@ class CombatResolutionService
         }
 
         return array_values($players);
+    }
+
+    /**
+     * La collecte des Faucheurs attaquants d'une attaque groupee, flotte par flotte.
+     *
+     * Une flotte collecte si son proprietaire collecte (part gelee a la cloture, `isGeneral`) et si
+     * des Faucheurs lui survivent. La part collectable des debris — celle du proprietaire — se repartit
+     * entre ses Faucheurs survivants et ceux des autres flottes collectrices ; chaque part est
+     * plafonnee par la part de la capacite Faucheur gelee que ses Faucheurs representent. Les restes
+     * entiers de la division vont a la premiere flotte, par ordre d'identifiant.
+     *
+     * @return array<int, Resources> Identifiant de mission => collecte, avant le plafond du fret libre.
+     */
+    private function reaperCollectionsPerFleet(BattleResult $battleResult, CombatApplicationContext $context, FrozenLootAllocation $allocation, ResourceNormalizationDiagnostics $diagnostics): array
+    {
+        $collectrices = [];
+        $faucheursCollecteurs = 0;
+        $faucheursSurvivants = 0;
+        foreach ($battleResult->attackerFleetResults as $flotte) {
+            $faucheurs = $flotte->unitsResult->getAmountByMachineName('reaper');
+            $faucheursSurvivants += $faucheurs;
+            if ($faucheurs <= 0 || !$flotte->hasSurvivors()) {
+                continue;
+            }
+            $part = $context->reaperDebrisCollectionPercentage($this->playerServiceFactory->make($flotte->playerId));
+            if ($part <= 0) {
+                continue;
+            }
+            $collectrices[(int)$flotte->fleetMissionId] = ['faucheurs' => $faucheurs, 'part' => $part];
+            $faucheursCollecteurs += $faucheurs;
+        }
+        if ($collectrices === [] || $faucheursSurvivants <= 0) {
+            return [];
+        }
+        ksort($collectrices);
+
+        $collectes = [];
+        foreach ($collectrices as $identifiant => ['faucheurs' => $faucheurs, 'part' => $part]) {
+            $quotite = $faucheurs / $faucheursCollecteurs;
+            $collecte = new Resources(
+                (int)floor($battleResult->debris->metal->get() * $part * $quotite),
+                (int)floor($battleResult->debris->crystal->get() * $part * $quotite),
+                (int)floor($battleResult->debris->deuterium->get() * $part * $quotite),
+                0
+            );
+            $capacite = (int)floor($battleResult->attackerReaperCargoCapacity * $faucheurs / $faucheursSurvivants);
+            if ($collecte->sum() > $capacite) {
+                $collecte = $this->capAndCollect($collecte, $capacite, $allocation, $diagnostics, CombatResolutionOutcome::PHASE_ATTACKER_REAPER);
+            }
+            $collectes[$identifiant] = $collecte;
+        }
+
+        return $collectes;
     }
 }

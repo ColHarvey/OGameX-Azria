@@ -249,8 +249,11 @@ class LootAccountingTest extends UnitTestCase
         // donnerait deux cargaisons differentes pour un meme etat.
         $service = (string)file_get_contents(base_path('app/Combat/Services/CombatResolutionService.php'));
 
+        // Sept sites depuis la revue 92 : les cinq d origine, plus les deux de la collecte des
+        // Faucheurs attribuee flotte par flotte en attaque groupee — la part de la capacite Faucheur
+        // gelee de chaque flotte, et la place libre de son fret gele.
         $this->assertSame(
-            5,
+            7,
             substr_count($service, '$this->capAndCollect('),
             'A capping site was added or removed: each one must go through the same versioned rule.'
         );

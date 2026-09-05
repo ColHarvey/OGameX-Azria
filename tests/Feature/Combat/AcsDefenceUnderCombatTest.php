@@ -336,6 +336,11 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
                     throw MissingHeldFleetCargo::because($fleetMissionId);
                 }
 
+                public function returnDurationOf(int $fleetMissionId, Closure $computeLive): int
+                {
+                    return 1;
+                }
+
                 public function wreckFieldMinResourcesLoss(): int
                 {
                     return 150_000;

@@ -15,12 +15,19 @@ use OGame\Combat\Replay\BattleResultCodec;
 use OGame\Combat\Replay\CombatResultIdentity;
 use OGame\Combat\Support\FrozenCombatVersionSet;
 use OGame\Combat\Support\LootContextForMission;
+use OGame\Factories\GameMissionFactory;
+use OGame\Factories\PlanetServiceFactory;
+use OGame\Factories\PlayerServiceFactory;
 use OGame\GameMissions\BattleEngine\BattleEngineFactory;
+use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Jobs\SettlePersistentCombat;
 use OGame\Models\CombatInstance;
+use OGame\Models\FleetMission;
 use OGame\Models\Resources;
 use OGame\Services\CharacterClassService;
+use OGame\Services\FleetMissionService;
+use OGame\Services\MessageService;
 use OGame\Services\SettingsService;
 
 /**
@@ -168,7 +175,11 @@ final class CombatEngagementService
             // **L'instant d'application est l'echeance**, fixee ici meme : un travailleur en retard
             // n'y change rien, et un champ d'epaves ne vit pas plus longtemps parce que le serveur a
             // eu du retard.
-            $startsAt + $estimation->seconds
+            $startsAt + $estimation->seconds,
+            // **La duree du retour de chaque attaquante, calculee ici sur ses survivants.** Le reglement
+            // la relisait sur le joueur vivant : une propulsion recherchee pendant la bataille changeait
+            // l'heure d'arrivee du retour d'un combat deja calcule.
+            $this->returnDurationsOf($effectif, $resultat)
         )->toStorage();
 
         // **Le resultat part avec son identite** : ce combat, cette cible, ces participants — inscrits
@@ -219,6 +230,38 @@ final class CombatEngagementService
         }
 
         return new CombatEngagement($duree, $echeance, (bool)$combat->duration_implausible, count($calendrier));
+    }
+
+    /**
+     * @return array<int, int> Identifiant de mission => duree du retour naturel en secondes (zero sans survivant).
+     */
+    private function returnDurationsOf(CombatRoster $effectif, BattleResult $resultat): array
+    {
+        $missions = resolve(FleetMissionService::class);
+        $planetes = resolve(PlanetServiceFactory::class);
+        $genres = resolve(GameMissionFactory::class);
+        $durees = [];
+
+        foreach ($resultat->attackerFleetResults as $flotte) {
+            $identifiant = (int)$flotte->fleetMissionId;
+            if ($identifiant < 1) {
+                continue;
+            }
+            if (!$flotte->hasSurvivors()) {
+                $durees[$identifiant] = 0;
+
+                continue;
+            }
+            $mission = FleetMission::query()->whereKey($identifiant)->first();
+            if (!$mission instanceof FleetMission || $mission->planet_id_from === null) {
+                throw new LogicException('Le combat ' . $effectif->initiator->combat_instance_id . ' compte une attaquante ' . $identifiant . ' sans mission ni corps d origine : sa duree de retour ne peut pas etre gelee.');
+            }
+            $origine = $planetes->makeForPlayer(resolve(PlayerServiceFactory::class)->make((int)$mission->user_id), (int)$mission->planet_id_from);
+            $genre = $genres->getMissionById((int)$mission->mission_type, ['fleetMissionService' => $missions, 'messageService' => resolve(MessageService::class)]);
+            $durees[$identifiant] = $missions->calculateFleetMissionDuration($origine, $effectif->target->getPlanetCoordinates(), $flotte->unitsResult, $genre, 10);
+        }
+
+        return $durees;
     }
 
     private function settings(): SettingsService

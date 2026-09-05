@@ -2,6 +2,7 @@
 
 namespace OGame\Combat\Application;
 
+use Closure;
 use Illuminate\Support\Facades\Date;
 use OGame\Combat\Exceptions\MissingHeldFleetCargo;
 use OGame\Enums\CharacterClass;
@@ -74,6 +75,11 @@ final class LiveCombatApplicationContext implements CombatApplicationContext
         }
 
         return new Resources((float)$mission->metal, (float)$mission->crystal, (float)$mission->deuterium, 0);
+    }
+
+    public function returnDurationOf(int $fleetMissionId, Closure $computeLive): int
+    {
+        return max(1, (int)$computeLive());
     }
 
     public function wreckFieldMinResourcesLoss(): int

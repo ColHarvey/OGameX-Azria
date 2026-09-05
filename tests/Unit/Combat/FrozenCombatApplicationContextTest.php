@@ -372,6 +372,9 @@ class FrozenCombatApplicationContextTest extends UnitTestCase
             'held_fleet_cargo' => [
                 11 => ['metal' => 1_000, 'crystal' => 500, 'deuterium' => 250],
             ],
+            // La duree du retour naturel de chaque attaquante, gelee a la cloture : relue sur le joueur
+            // vivant, une propulsion recherchee pendant la bataille changeait l'heure du retour.
+            'return_durations' => [21 => 3_600, 22 => 0],
             'wreck_field' => [
                 'min_resources_loss' => 150_000,
                 'min_fleet_percentage' => 5,

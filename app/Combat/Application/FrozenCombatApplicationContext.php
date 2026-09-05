@@ -2,6 +2,7 @@
 
 namespace OGame\Combat\Application;
 
+use Closure;
 use OGame\Combat\Exceptions\CorruptedFrozenApplicationContext;
 use OGame\Combat\Services\CombatRoster;
 use OGame\Combat\Support\ResourceBoundary;
@@ -56,7 +57,7 @@ use OGame\Services\PlayerService;
  */
 final readonly class FrozenCombatApplicationContext implements CombatApplicationContext
 {
-    private const array KEYS = ['schema', 'applied_at', 'players', 'space_docks', 'held_fleet_cargo', 'wreck_field', 'npc_narrative'];
+    private const array KEYS = ['schema', 'applied_at', 'players', 'space_docks', 'held_fleet_cargo', 'return_durations', 'wreck_field', 'npc_narrative'];
 
     private const array NARRATIVE_KEYS = ['motive', 'variation', 'variations'];
 
@@ -73,7 +74,7 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
      * schemas anterieurs n'a jamais ete ecrit hors des essais : ils se refusent, ils ne se
      * convertissent pas.
      */
-    public const int SCHEMA = 3;
+    public const int SCHEMA = 4;
 
     /**
      * @param array<int, array{is_general: bool, reaper_debris_percentage: float, character_class: int|null}> $players
@@ -86,6 +87,7 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
         private array $players,
         private array $spaceDocks,
         private array $heldFleetCargo,
+        private array $returnDurations,
         private int $minResourcesLoss,
         private int $minFleetPercentage,
         private int $debrisFieldFromShips,
@@ -106,7 +108,12 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
      * @param int $appliedAt L'instant auquel l'application sera datee : l'echeance du combat, fixee
      *                       ici meme. Un travailleur en retard ne date rien a sa propre heure.
      */
-    public static function photograph(CombatRoster $roster, CombatApplicationContext $live, int $narrativeVariations, int $appliedAt): self
+    /**
+     * @param array<int, int> $returnDurations La duree du retour naturel de chaque flotte attaquante,
+     *                                        calculee a la cloture sur les survivants ; zero pour une
+     *                                        flotte detruite, qui n'a pas de retour.
+     */
+    public static function photograph(CombatRoster $roster, CombatApplicationContext $live, int $narrativeVariations, int $appliedAt, array $returnDurations = []): self
     {
         $joueurs = [];
 
@@ -160,6 +167,7 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
             $joueurs,
             $chantiers,
             $cargaisons,
+            self::returnDurationsOf($roster, $returnDurations),
             $live->wreckFieldMinResourcesLoss(),
             $live->wreckFieldMinFleetPercentage(),
             $live->debrisFieldFromShips(),
@@ -181,6 +189,7 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
             'players' => $this->players,
             'space_docks' => $this->spaceDocks,
             'held_fleet_cargo' => $this->heldFleetCargo,
+            'return_durations' => $this->returnDurations,
             'wreck_field' => [
                 'min_resources_loss' => $this->minResourcesLoss,
                 'min_fleet_percentage' => $this->minFleetPercentage,
@@ -288,6 +297,16 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
             ];
         }
 
+        $durees = [];
+        foreach (self::structure($stored, 'return_durations', 'contexte') as $flotte => $duree) {
+            if (!is_int($flotte) || $flotte < 1) {
+                throw new CorruptedFrozenApplicationContext('« return_durations » porte une flotte dont l identifiant est ' . self::describe($flotte) . ' et non un entier positif', $stored);
+            }
+            if (!is_int($duree) || $duree < 0) {
+                throw new CorruptedFrozenApplicationContext('« return_durations[' . $flotte . '] » est ' . self::describe($duree) . ' et non une duree entiere en secondes', $stored);
+            }
+            $durees[$flotte] = $duree;
+        }
         $epaves = self::structure($stored, 'wreck_field', 'contexte');
         self::refuseUnknownKeys($epaves, self::WRECK_FIELD_KEYS, 'contexte.wreck_field');
 
@@ -351,6 +370,7 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
             $joueurs,
             $chantiers,
             $cargaisons,
+            $durees,
             $perteMinimale,
             $partMinimale,
             $partDebris,
@@ -404,6 +424,22 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
             );
         }
 
+        $attaquantesAttendues = [];
+        foreach ($roster->attackers as $attaquante) {
+            if ((int)$attaquante->fleetMissionId > 0) {
+                $attaquantesAttendues[] = (int)$attaquante->fleetMissionId;
+            }
+        }
+        $attaquantesFigees = array_keys($this->returnDurations);
+        sort($attaquantesAttendues);
+        sort($attaquantesFigees);
+        if ($attaquantesFigees !== $attaquantesAttendues) {
+            throw new CorruptedFrozenApplicationContext(
+                'la photographie porte les durees de retour des flottes ' . implode(', ', $attaquantesFigees)
+                . ' alors que l effectif compte les attaquantes ' . implode(', ', $attaquantesAttendues),
+                $this->returnDurations
+            );
+        }
         $corpsAttendus = array_keys(self::bodiesOf($roster));
         $corpsFiges = array_keys($this->spaceDocks);
         sort($corpsAttendus);
@@ -469,6 +505,38 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
             'held_fleet_cargo_photograph',
             'mission ' . $fleetMissionId
         )->units;
+    }
+
+    /**
+     * @return array<int, int>
+     */
+    private static function returnDurationsOf(CombatRoster $roster, array $returnDurations): array
+    {
+        $durees = [];
+        foreach ($roster->attackers as $attaquante) {
+            $identifiant = (int)$attaquante->fleetMissionId;
+            if ($identifiant < 1) {
+                continue;
+            }
+            if (!array_key_exists($identifiant, $returnDurations)) {
+                throw new CorruptedFrozenApplicationContext('la duree du retour de la flotte ' . $identifiant . ' n a pas ete calculee a la cloture', $returnDurations);
+            }
+            $durees[$identifiant] = max(0, (int)$returnDurations[$identifiant]);
+        }
+
+        return $durees;
+    }
+
+    public function returnDurationOf(int $fleetMissionId, Closure $computeLive): int
+    {
+        if (!array_key_exists($fleetMissionId, $this->returnDurations)) {
+            throw new CorruptedFrozenApplicationContext(
+                'la photographie ne porte pas la duree du retour de la flotte ' . $fleetMissionId,
+                $this->returnDurations
+            );
+        }
+
+        return max(1, $this->returnDurations[$fleetMissionId]);
     }
 
     public function applicationInstant(): int

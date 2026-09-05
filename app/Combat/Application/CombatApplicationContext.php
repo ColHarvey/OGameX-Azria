@@ -2,6 +2,7 @@
 
 namespace OGame\Combat\Application;
 
+use Closure;
 use OGame\Enums\CharacterClass;
 use OGame\Models\Resources;
 use OGame\Services\PlanetService;
@@ -78,6 +79,18 @@ interface CombatApplicationContext
      * @return Resources
      */
     public function heldFleetCargo(int $fleetMissionId): Resources;
+
+    /**
+     * La duree du retour naturel d'une flotte attaquante survivante, en secondes.
+     *
+     * Gelee a la cloture pour un combat durable : les technologies de propulsion et la classe du
+     * proprietaire peuvent changer pendant les heures que dure la bataille, et le retour de deux
+     * rejeux du meme combat n'arriverait pas a la meme heure. Le chemin instantane la calcule sur
+     * place, par `$computeLive`, que le contexte gele ignore.
+     *
+     * @param Closure(): int $computeLive
+     */
+    public function returnDurationOf(int $fleetMissionId, Closure $computeLive): int;
 
     /**
      * La perte minimale, en ressources, au-dessous de laquelle aucun champ d'epaves n'existe.
