@@ -17,6 +17,7 @@ use OGame\Models\Resources;
 use OGame\Services\CharacterClassService;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
+use OGame\Services\SettingsService;
 use RuntimeException;
 
 /**
@@ -51,15 +52,20 @@ use RuntimeException;
  * achevee pendant le ralliement sur une decision **posterieure** a l'ouverture ne renforce donc plus
  * une defense deja engagee.
  *
- * ## Ce qui reste lu vivant, et qui est dit
+ * ## Les reglages d'univers, captures ici depuis la revue 89
  *
- * Les reglages d'univers qui entrent dans le resultat sont geles a la **cloture**, par
- * `FrozenCombatApplicationContext`, et non a l'ouverture : un changement d'administration pendant le
- * seul ralliement les atteindrait encore. La fenetre est courte et l'ecart est dit, pas ignore.
+ * Les sept reglages que le moteur consomme (`PhotographedUniverse`) sont pris **a l'ouverture**, et
+ * plus a la cloture : un ralliement dure, et un administrateur qui ajustait la part d'epaves ou le
+ * seuil d'un champ changeait une bataille deja engagee. Les attaquants sont partis sous un univers ;
+ * ils se battent sous celui-la.
+ *
+ * `FrozenCombatApplicationContext` continue de geler a la cloture ce dont **l'application** depend —
+ * classes, chantiers, instant d'application. Les deux photographies ne se recouvrent pas : l'une dit
+ * sous quelles regles la bataille se calcule, l'autre sous quelles regles son resultat s'ecrit.
  */
 final class OpeningStateRecorder
 {
-    public const int VERSION = 3;
+    public const int VERSION = 4;
 
     public function __construct(
         private CausalEventReader $reader = new CausalEventReader(),
@@ -107,6 +113,10 @@ final class OpeningStateRecorder
             ],
             'units' => DefenderFleet::fromPlanet($corps)->units->toArray(),
             'defender' => self::defenderFactsOf($corps),
+            // **Les reglages sous lesquels cette bataille se calculera.** Lus une fois, ici, dans la
+            // transaction d'ouverture : ce que l'administration changera pendant le ralliement ne
+            // touchera que les combats ouverts apres.
+            'universe' => PhotographedUniverse::fromLiveSettings(resolve(SettingsService::class))->toFrozenFacts(),
             'provenance' => $recus,
         ];
 
@@ -172,6 +182,25 @@ final class OpeningStateRecorder
         }
 
         return PhotographedDefender::fromFrozenFacts($faits);
+    }
+
+    /**
+     * Les reglages d'univers sous lesquels ce combat s'est ouvert.
+     *
+     * Un combat ouvert sous une version anterieure n'en porte pas, et **on ne retombe pas sur les
+     * reglages vivants** : ce serait rendre a l'administration le pouvoir que cette capture lui
+     * retire, en silence et seulement pour les vieux combats.
+     */
+    public static function openingUniverseOf(CombatInstance $combat): PhotographedUniverse
+    {
+        $document = self::documentOf($combat);
+        $faits = $document['universe'] ?? null;
+
+        if (!is_array($faits)) {
+            throw new MissingOpeningState('L etat d ouverture du combat ' . $combat->id . ' ne porte pas les reglages d univers : il a ete ouvert sous une version anterieure.');
+        }
+
+        return PhotographedUniverse::fromFrozenFacts($faits);
     }
 
     /**

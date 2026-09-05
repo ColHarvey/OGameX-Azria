@@ -118,6 +118,9 @@ final class ClosureReconciliation
             $this->protectedResourcesOf($combat, $photographie->inTheSnapshot()),
             $this->photographedGarrisonOf($combat, $photographie->inTheSnapshot()),
             $this->photographedDefenderOf($combat, $photographie->inTheSnapshot()),
+            // **Les reglages ne se reconcilient pas** : aucun evenement causal ne les change, et
+            // aucune barriere ne s'y applique. Ils sont lus tels que l'ouverture les a fixes.
+            OpeningStateRecorder::openingUniverseOf($combat),
             $appliques,
             $this->inclusionsOf($photographie->inTheSnapshot()),
         );

@@ -9,6 +9,7 @@ use OGame\Combat\Allocation\LootAllocatorRegistry;
 use OGame\Combat\Exceptions\IncoherentRoundAttribution;
 use OGame\Combat\Policies\CargoWeightedV1;
 use OGame\Combat\Services\PhotographedDefender;
+use OGame\Combat\Services\PhotographedUniverse;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\LootContext;
 use OGame\Combat\Support\ResourceNormalizationDiagnostics;
@@ -171,6 +172,26 @@ abstract class BattleEngine
     public function withPhotographedDefender(PhotographedDefender $defender): self
     {
         $this->photographedDefender = $defender;
+
+        return $this;
+    }
+
+    /**
+     * Les reglages d'univers sous lesquels ce combat se calcule.
+     *
+     * Un combat durable les fixe a son **ouverture** : entre l'ouverture et la fermeture, un
+     * ralliement dure des heures, et un administrateur qui ajuste la part d'epaves ou le seuil d'un
+     * champ changerait une bataille deja engagee. Un combat instantane n'a pas de fenetre et lit les
+     * reglages vivants, comme il l'a toujours fait.
+     *
+     * `SettingsSeenByTheEngineTest` compare cette photographie a ce que le moteur lit reellement :
+     * un reglage ajoute ici sans etre photographie fait tomber ce controle.
+     */
+    protected PhotographedUniverse|null $photographedUniverse = null;
+
+    public function withPhotographedUniverse(PhotographedUniverse $universe): self
+    {
+        $this->photographedUniverse = $universe;
 
         return $this;
     }
@@ -369,7 +390,12 @@ abstract class BattleEngine
         // According to game rules, approximately 70% of destroyed defenses are repaired after battle.
         // Ingenieur : la part reconstruite passe de 70 % a 85 %. Cette methode appartient
         // a la classe de base partagee, le bonus vaut donc pour les deux moteurs de combat.
-        $defenseRepairRate = $defenderPlayer->hasEngineer() ? 85 : $this->settings->defenseRepairRate();
+        $univers = $this->photographedUniverse;
+        $defenseRepairRate = match (true) {
+            $defenderPlayer->hasEngineer() => 85,
+            $univers !== null => $univers->defenseRepairRate,
+            default => $this->settings->defenseRepairRate(),
+        };
         $defenseRepairService = new DefenseRepairService($defenseRepairRate, null, $this->draws);
         $result->repairedDefenses = $defenseRepairService->calculateRepairedDefenses($result->defenderUnitsLost);
 
@@ -948,9 +974,10 @@ abstract class BattleEngine
         $deuterium = 0;
 
         // Calculate actual debris percentage after accounting for wreck fields
-        $shipsToDebrisPercentage = $this->settings->debrisFieldFromShips();
-        $defenseToDebrisPercentage = $this->settings->debrisFieldFromDefense();
-        $deuteriumOn = $this->settings->debrisFieldDeuteriumOn();
+        $univers = $this->photographedUniverse;
+        $shipsToDebrisPercentage = $univers !== null ? $univers->debrisFieldFromShips : $this->settings->debrisFieldFromShips();
+        $defenseToDebrisPercentage = $univers !== null ? $univers->debrisFieldFromDefense : $this->settings->debrisFieldFromDefense();
+        $deuteriumOn = $univers !== null ? $univers->debrisFieldDeuteriumOn : $this->settings->debrisFieldDeuteriumOn();
 
         // Combine the attacker and defender losses to calculate the debris.
         $allUnitsLost = new UnitCollection();
@@ -1011,8 +1038,9 @@ abstract class BattleEngine
 
         if ($totalFleetValue > 0) {
             $destroyedPercentage = ($totalLostValue / $totalFleetValue) * 100;
-            $minResourcesRequired = $this->settings->wreckFieldMinResourcesLoss();
-            $minFleetPercentageRequired = $this->settings->wreckFieldMinFleetPercentage();
+            $univers = $this->photographedUniverse;
+            $minResourcesRequired = $univers !== null ? $univers->wreckFieldMinResourcesLoss : $this->settings->wreckFieldMinResourcesLoss();
+            $minFleetPercentageRequired = $univers !== null ? $univers->wreckFieldMinFleetPercentage : $this->settings->wreckFieldMinFleetPercentage();
 
             // Only return wreck field data if conditions are met
             if ($totalLostValue >= $minResourcesRequired && $destroyedPercentage >= $minFleetPercentageRequired) {
@@ -1082,7 +1110,7 @@ abstract class BattleEngine
      */
     protected function calculateMoonChance(Resources $debris): int
     {
-        $max_moon_chance = $this->settings->maximumMoonChance();
+        $max_moon_chance = $this->photographedUniverse !== null ? $this->photographedUniverse->maximumMoonChance : $this->settings->maximumMoonChance();
 
         // Every 100k debris results in 1% moon chance, up to a maximum
         // of max moon chance configured in server settings.
