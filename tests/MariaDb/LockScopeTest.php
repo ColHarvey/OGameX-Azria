@@ -5,6 +5,7 @@ namespace Tests\MariaDb;
 use Illuminate\Database\Connection;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use OGame\Services\SettingsService;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\Feature\Combat\EngagesAPersistentCombat;
 use Tests\FleetDispatchTestCase;
@@ -49,6 +50,7 @@ final class LockScopeTest extends FleetDispatchTestCase
 
     protected function tearDown(): void
     {
+        resolve(SettingsService::class)->set('persistent_combat_enabled', '0');
         if (DB::transactionLevel() > 0) {
             DB::rollBack();
         }

@@ -11,6 +11,7 @@ use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\BattleReport;
 use OGame\Models\FleetMission;
 use OGame\Models\Resources;
+use OGame\Services\SettingsService;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\Feature\Combat\EngagesAPersistentCombat;
 use Tests\FleetDispatchTestCase;
@@ -48,6 +49,14 @@ final class SettlementRaceTest extends FleetDispatchTestCase
         parent::setUp();
         $this->requiresMariaDb();
         $this->requiresProcesses();
+    }
+
+    protected function tearDown(): void
+    {
+        // Le montage leve l'interrupteur des combats durables ; la base survit a l'essai, et une
+        // classe voisine qui ne le pose pas heriterait de ce qu'on a laisse.
+        resolve(SettingsService::class)->set('persistent_combat_enabled', '0');
+        parent::tearDown();
     }
 
     public function testTwoSettlementsAtTheSameInstantApplyTheBattleOnce(): void

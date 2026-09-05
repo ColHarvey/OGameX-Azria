@@ -7,6 +7,7 @@ use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\FleetDispositionKind;
 use OGame\Combat\Services\FleetDispositionRegistry;
 use OGame\Models\CombatFleetDisposition;
+use OGame\Services\SettingsService;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\Feature\Combat\EngagesAPersistentCombat;
 use Tests\FleetDispatchTestCase;
@@ -34,6 +35,14 @@ final class DispositionConsumptionRaceTest extends FleetDispatchTestCase
         parent::setUp();
         $this->requiresMariaDb();
         $this->requiresProcesses();
+    }
+
+    protected function tearDown(): void
+    {
+        // Le montage leve l'interrupteur des combats durables ; la base survit a l'essai, et une
+        // classe voisine qui ne le pose pas heriterait de ce qu'on a laisse.
+        resolve(SettingsService::class)->set('persistent_combat_enabled', '0');
+        parent::tearDown();
     }
 
     public function testADispositionIsConsumedByExactlyOneOfTwoWorkers(): void

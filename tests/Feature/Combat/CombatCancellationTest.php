@@ -76,6 +76,13 @@ class CombatCancellationTest extends FleetDispatchTestCase
     {
         parent::setUp();
 
+        // **Ces essais ouvrent leurs combats par le service, pas par l'interrupteur.** Ceux qui ont
+        // besoin de l'interrupteur leve le posent eux-memes, et le rabaissent. Les autres supposaient
+        // qu'il etait ferme sans l'etablir : sur une base partagee par un seul processus, une classe
+        // voisine l'avait laisse leve, et une flotte en vol retenait une suppression que l'essai
+        // attendait immediate. Le bac MariaDB l'a vu ; la suite SQLite ne le voyait que par l'ordre.
+        resolve(SettingsService::class)->set('persistent_combat_enabled', '0');
+
         DB::table('fleet_missions')->whereNotNull('combat_instance_id')->update(['combat_instance_id' => null]);
 
         foreach ([
