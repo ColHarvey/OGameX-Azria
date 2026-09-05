@@ -2,6 +2,7 @@
 
 namespace OGame\Console\Commands\Combat;
 
+use Closure;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
@@ -29,9 +30,20 @@ use OGame\Combat\Presentation\CombatPresentationBroadcaster;
  *
  * En mode `--continu`, la commande prend un bail en base et tourne **sans fin**. Le planificateur
  * n'est que son superviseur : chaque tick en lance une autre en arriere-plan, qui s'efface aussitot
- * si le bail bat encore, et prend la releve s'il a cesse de battre. Un seul diffuseur effectif ; une
- * releve apres panne au tick suivant, plus la tolerance du bail — un creux dit, apres une panne,
- * jamais a la jonction nominale.
+ * si le bail bat encore, et prend la releve s'il a cesse de battre. Une releve apres panne attend
+ * le tick suivant plus la tolerance du bail — un creux dit, apres une panne, jamais a la jonction
+ * nominale.
+ *
+ * ## Ce que le bail garantit exactement
+ *
+ * Un detenteur en base — pas un seul emetteur. Un diffuseur suspendu pendant un appel reseau plus
+ * longtemps que la tolerance peut voir un autre prendre la releve avant de reprendre. Le contrat
+ * qui tient : la validite du bail est verifiee **avant chaque lot** (le battement, conditionne au
+ * detenteur, sert de garde) ; un battement perdu arrete immediatement, sans autre lot ; la
+ * liberation est conditionnee au detenteur, si bien qu'un diffuseur depasse ne libere jamais le
+ * bail de son successeur ; les appels transport sont bornes par la configuration du client. Un
+ * lot deja engage au moment de la releve peut partir deux fois — une par diffuseur — et c'est
+ * admis : chaque perte porte son identite, le navigateur deduplique.
  *
  * Sans `--continu`, la commande fait un passage borne : `--duree` secondes, ou un seul passage a
  * zero. C'est la forme des essais et de l'exploitation manuelle.
@@ -86,11 +98,13 @@ class BroadcastCombatLosses extends Command
         $this->line('  Bail pris : ' . self::holderName());
         [$pertes, $etats, $tour] = [0, 0, 0];
 
+        // **La garde** : un battement, conditionne au detenteur. Consultee avant chaque lot par le
+        // diffuseur, elle arrete l'emission des que le bail est passe a un autre.
+        $garde = static fn (): bool => $bail->heartbeat((int)Date::now()->timestamp);
+
         try {
             while (true) {
-                $instant = (int)Date::now()->timestamp;
-
-                if (!$bail->heartbeat($instant)) {
+                if (!$garde()) {
                     // La releve a ete prise pendant qu'on dormait : s'effacer sans rien diffuser de
                     // plus, sinon deux diffuseurs tourneraient.
                     $this->line('  Bail perdu : un autre diffuseur a pris la releve.');
@@ -98,7 +112,7 @@ class BroadcastCombatLosses extends Command
                     break;
                 }
 
-                [$p, $e] = $this->pass($diffuseur);
+                [$p, $e] = $this->pass($diffuseur, $garde);
                 $pertes += $p;
                 $etats += $e;
                 $tour++;
@@ -119,13 +133,14 @@ class BroadcastCombatLosses extends Command
     }
 
     /**
+     * @param Closure(): bool|null $garde
      * @return array{0: int, 1: int}
      */
-    private function pass(CombatPresentationBroadcaster $diffuseur): array
+    private function pass(CombatPresentationBroadcaster $diffuseur, Closure|null $garde = null): array
     {
         $instant = (int)Date::now()->timestamp;
 
-        return [$diffuseur->publish($instant), $diffuseur->publishStateChanges($instant)];
+        return [$diffuseur->publish($instant, 500, $garde), $diffuseur->publishStateChanges($instant, 200, $garde)];
     }
 
     private function report(int $pertes, int $etats): void

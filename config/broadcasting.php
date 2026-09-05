@@ -43,6 +43,13 @@ return [
             ],
             'client_options' => [
                 // Guzzle client options: https://docs.guzzlephp.org/en/stable/request-options.html
+                //
+                // Un appel au serveur de diffusion est borne : sans cela, un diffuseur suspendu sur un
+                // serveur muet tiendrait son bail sans battre, et sa releve attendrait la fin de
+                // l'attente reseau, pas la tolerance du bail. Cinq secondes suffisent a un aller-retour
+                // local ; au-dela, le lot est tenu pour non parti et repartira.
+                'connect_timeout' => 2,
+                'timeout' => 5,
             ],
         ],
 

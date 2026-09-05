@@ -2,6 +2,7 @@
 
 namespace OGame\Combat\Presentation;
 
+use Closure;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Events\CombatLossesPublished;
@@ -56,6 +57,15 @@ use Throwable;
  * parties. La meme garantie s'applique : au moins une fois, marque posee apres l'envoi ; une annonce
  * d'etat repetee est sans effet, le navigateur ne fait que relire sa carte.
  *
+ * ## La garde, avant chaque lot
+ *
+ * Sous bail, un diffuseur peut etre suspendu pendant un appel reseau plus longtemps que la
+ * tolerance, et un autre prend alors la releve sans qu'il le sache. Le bail ne prouve qu'un
+ * detenteur en base, pas un seul emetteur : c'est pourquoi la garde — un battement conditionne au
+ * detenteur — est consultee **avant chaque lot**, et non une fois par tour. Un lot deja engage
+ * peut donc partir deux fois, une fois par chacun ; c'est admis, le navigateur deduplique. Ce qui
+ * n'est jamais admis : qu'un diffuseur qui a perdu son bail commence un lot de plus.
+ *
  * ## A qui, et quoi
  *
  * L'inscription decide : un evenement porte la clef d'un participant, et le joueur inscrit sous
@@ -68,7 +78,11 @@ final class CombatPresentationBroadcaster
     /**
      * Diffuse ce qui est devenu visible a cet instant. Rend le nombre de pertes envoyees.
      */
-    public function publish(int $now, int $batchSize = 500): int
+    /**
+     * @param Closure(): bool|null $stillHolds Rend faux des que ce diffuseur ne doit plus emettre ;
+     *                                          consultee avant chaque lot.
+     */
+    public function publish(int $now, int $batchSize = 500, Closure|null $stillHolds = null): int
     {
         $evenements = CombatPresentationEvent::query()
             ->whereNull('broadcast_at')
@@ -111,6 +125,12 @@ final class CombatPresentationBroadcaster
         $envoyees = 0;
 
         foreach ($lots as $clef => $lot) {
+            // **La garde avant chaque lot** : un bail perdu pendant le lot precedent arrete ici, et
+            // ce qui reste repartira par le detenteur suivant.
+            if ($stillHolds !== null && !$stillHolds()) {
+                break;
+            }
+
             [$joueur, $combat] = array_map('intval', explode('|', $clef));
 
             try {
@@ -138,7 +158,11 @@ final class CombatPresentationBroadcaster
      * Annonce les batailles dont l'etat a change depuis la derniere annonce. Rend le nombre
      * d'annonces envoyees.
      */
-    public function publishStateChanges(int $now, int $batchSize = 200): int
+    /**
+     * @param Closure(): bool|null $stillHolds Rend faux des que ce diffuseur ne doit plus emettre ;
+     *                                          consultee avant chaque bataille.
+     */
+    public function publishStateChanges(int $now, int $batchSize = 200, Closure|null $stillHolds = null): int
     {
         $batailles = CombatInstance::query()
             ->where(function ($requete): void {
@@ -151,6 +175,10 @@ final class CombatPresentationBroadcaster
         $annonces = 0;
 
         foreach ($batailles as $bataille) {
+            if ($stillHolds !== null && !$stillHolds()) {
+                break;
+            }
+
             $etat = $bataille->status;
             $rapport = $etat === CombatState::Resolved && $bataille->battle_report_id !== null;
             $libelle = __('t_ingame.combat.status_' . $etat->value);

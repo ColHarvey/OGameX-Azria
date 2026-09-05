@@ -300,7 +300,7 @@ class CombatLiveBroadcastTest extends FleetDispatchTestCase
     public function testAFailureForOneRecipientDoesNotMarkTheOther(): void
     {
         $combat = $this->anEngagedCombat();
-        $premiere = (int)$combat->started_at + $this->secondsPerRoundOf($combat)[0];
+        $premiere = $this->firstInstantWhereBothSidesLost($combat);
         $attaquant = (int)DB::table('fleet_missions')->where('id', $combat->mission_id)->value('user_id');
         $proprietaire = (int)DB::table('planets')->where('id', $combat->target_planet_id)->value('user_id');
 
@@ -589,6 +589,85 @@ class CombatLiveBroadcastTest extends FleetDispatchTestCase
     }
 
     /**
+     * A est suspendu pendant un lot, B prend la releve, A revient : A n'emet plus rien, ne libere
+     * pas le bail de B, et rien n'est perdu.
+     *
+     * ## Le contrat que cet essai fixe
+     *
+     * Le bail prouve un detenteur en base, pas un seul emetteur. Un diffuseur suspendu plus longtemps
+     * que la tolerance — un appel reseau qui traine, un processus mis en pause — peut voir un autre
+     * prendre la releve. Ce qui est admis : le lot deja engage par A part deux fois, une par
+     * diffuseur, et le navigateur deduplique. Ce qui ne l'est jamais : qu'A commence un lot de plus
+     * apres la releve, ou qu'il libere le bail de B en sortant.
+     */
+    public function testASuspendedBroadcasterYieldsToItsSuccessorWithoutLosingOrReleasingAnything(): void
+    {
+        $combat = $this->anEngagedCombat();
+        $premiere = $this->firstInstantWhereBothSidesLost($combat);
+        DB::table('combat_broadcaster_leases')->delete();
+
+        // **Precondition** : deux lots sont dus — un par camp — sinon « pas de lot de plus » ne se
+        // distingue pas de « rien a faire ».
+        $parJoueur = [];
+        foreach (CombatPresentationEvent::query()->where('combat_instance_id', $combat->id)->where('visible_at', '<=', $premiere)->get() as $evenement) {
+            $joueur = (int)DB::table('combat_participants')->where('combat_instance_id', $combat->id)->where('participant_key', $evenement->participant_key)->value('player_id');
+            $parJoueur[$joueur] = ($parJoueur[$joueur] ?? 0) + 1;
+        }
+        $this->assertCount(2, $parJoueur, 'Fewer than two lots are due: the scenario would prove nothing.');
+
+        $a = new CombatBroadcasterLease('banc:A');
+        $b = new CombatBroadcasterLease('banc:B');
+        $this->assertTrue($a->acquire($premiere));
+
+        // Le transport « suspend » A pendant son premier lot : le temps passe au-dela de la
+        // tolerance, et B prend la releve pendant que A est encore dans l'appel.
+        $horloge = new stdClass();
+        $horloge->maintenant = $premiere;
+        $emisParA = [];
+        $releve = new stdClass();
+        $releve->faite = false;
+        Event::listen(CombatLossesPublished::class, static function (CombatLossesPublished $envoi) use (&$emisParA, $horloge, $releve, $b): void {
+            $emisParA[] = $envoi->playerId;
+
+            if (!$releve->faite) {
+                $horloge->maintenant += CombatBroadcasterLease::TOLERANCE + 1;
+                $releve->faite = $b->acquire($horloge->maintenant);
+            }
+        });
+
+        // La garde de A : son battement, a l'horloge qui a avance pendant l'appel.
+        $garde = static fn (): bool => $a->heartbeat($horloge->maintenant);
+
+        $envoyees = (new CombatPresentationBroadcaster())->publish($premiere, 500, $garde);
+
+        // **A a engage un seul lot, puis s'est arrete** : la garde a refuse le second.
+        $this->assertTrue($releve->faite, 'B could not take over: the scenario would prove nothing.');
+        $this->assertCount(1, $emisParA, 'A went on with another lot after losing its lease.');
+        $this->assertSame($parJoueur[$emisParA[0]], $envoyees, 'A counted more than its single lot as sent.');
+        $this->assertSame('banc:B', CombatBroadcasterLease::currentHolder());
+
+        // **A ne libere pas le bail de B en sortant.**
+        $a->release();
+        $this->assertSame('banc:B', CombatBroadcasterLease::currentHolder(), 'The ousted broadcaster released its successor lease.');
+
+        // **Rien n'est perdu** : ce que A n'a pas emis reste du, et B l'emet.
+        $restant = CombatPresentationEvent::query()->where('combat_instance_id', $combat->id)->where('visible_at', '<=', $premiere)->whereNull('broadcast_at')->count();
+        $this->assertGreaterThan(0, $restant, 'Nothing was left for the successor: A sent everything, so the guard did not stop it.');
+
+        Event::forget(CombatLossesPublished::class);
+        $emisParB = [];
+        Event::listen(CombatLossesPublished::class, static function (CombatLossesPublished $envoi) use (&$emisParB): void {
+            $emisParB[] = $envoi->playerId;
+        });
+        $gardeB = static fn (): bool => $b->heartbeat($horloge->maintenant);
+        // B publie a l'instant de A : a son horloge, plus tard, d'autres periodes seraient devenues
+        // visibles et le compte ne dirait plus « ce que A a laisse ».
+        $this->assertSame($restant, (new CombatPresentationBroadcaster())->publish($premiere, 500, $gardeB), 'The successor did not send what A left.');
+        $this->assertSame(0, CombatPresentationEvent::query()->where('combat_instance_id', $combat->id)->where('visible_at', '<=', $premiere)->whereNull('broadcast_at')->count());
+        $this->assertNotSame($emisParA, $emisParB, 'The successor resent the very lot A had already sent, and only that one.');
+    }
+
+    /**
      * Le canal d'un joueur n'est ouvert qu'a lui.
      *
      * ## Deux preuves, et pourquoi elles different
@@ -631,6 +710,27 @@ class CombatLiveBroadcastTest extends FleetDispatchTestCase
     /**
      * Le callback d'autorisation enregistre pour ce motif de canal.
      */
+    /**
+     * Le premier instant ou les deux camps ont au moins une perte visible.
+     *
+     * La bataille est tiree au sort : la premiere periode ne coute pas toujours aux deux camps. Un
+     * essai qui exige deux lots doit chercher l'instant qui les rend dus, pas le supposer.
+     */
+    private function firstInstantWhereBothSidesLost(CombatInstance $combat): int
+    {
+        $camps = [];
+
+        foreach (CombatPresentationEvent::query()->where('combat_instance_id', $combat->id)->orderBy('visible_at')->get() as $evenement) {
+            $camps[(string)$evenement->side] = true;
+
+            if (count($camps) === 2) {
+                return (int)$evenement->visible_at;
+            }
+        }
+
+        $this->fail('Only one side ever loses anything in this battle: the scenario would prove nothing.');
+    }
+
     private function channelRule(string $motif): callable
     {
         $diffuseur = Broadcast::driver('log');
