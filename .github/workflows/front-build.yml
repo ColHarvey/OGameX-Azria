@@ -61,6 +61,10 @@ jobs:
       - name: Installer les dependances
         run: npm ci
 
+      # **Les assets construits voyagent avec le rapport.** Le poste de developpement n'a pas Node :
+      # sans eux, la seule facon de commiter un vrai build serait d'installer Node ailleurs. Avec eux,
+      # le resultat de cette construction peut etre repris tel quel dans le depot.
+
       # Ce que le depot porte aujourd'hui, mis de cote avant d'etre ecrase.
       - name: Photographier les assets commites
         run: |
@@ -138,6 +142,7 @@ jobs:
             /tmp/commite/assets.txt
             /tmp/construit/build/manifest.json
             /tmp/construit/assets.txt
+            /tmp/construit/build/assets
 
       # Le verdict est dit, jamais devine : un manifeste different demande une decision humaine,
       # et le workflow le signale sans faire echouer la validation du candidat.
