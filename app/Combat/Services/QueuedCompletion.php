@@ -2,6 +2,8 @@
 
 namespace OGame\Combat\Services;
 
+use OGame\Combat\Support\UnitQueueProduction;
+
 /**
  * Une ligne de file — construction, vaisseaux, defenses, recherche — lue sous verrou.
  *
@@ -34,6 +36,23 @@ final readonly class QueuedCompletion
     /**
      * @param array<string, mixed> $ligne
      */
+    /**
+     * Les unites d'un lot terminees a un instant, par la formule meme du monde. Une file de
+     * batiments ou de recherche n'a pas de quantite : zero.
+     */
+    public function unitsFinishedBy(int $instant): int
+    {
+        return UnitQueueProduction::unitsFinishedBy($this->decidedAt, $this->completedAt, $this->amount, $instant);
+    }
+
+    /**
+     * L'instant ou la derniere unite terminee a `$instant` s'est achevee — le debut si aucune.
+     */
+    public function lastFinishInstantBy(int $instant): int
+    {
+        return UnitQueueProduction::finishInstantOf($this->decidedAt, $this->completedAt, $this->amount, $this->unitsFinishedBy($instant));
+    }
+
     public static function fromRow(array $ligne): self
     {
         $faits = $ligne;

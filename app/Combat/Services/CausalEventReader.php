@@ -105,8 +105,13 @@ final class CausalEventReader
             $evenements[] = $evenement;
         }
 
-        foreach (self::completionsDue('unit_queues', [$body], $cursorAt) as $file) {
-            $evenement = self::queueEvent(CombatEventIdentity::forUnitQueueCompletion($file->id), self::UNIT_QUEUE_KIND, $file, $body, $order, CombatEventType::QueueCompletion, [SnapshotContribution::TargetDefences]);
+        // **Un lot d'unites produit unite par unite.** Le monde materialise une unite toutes les
+        // `(fin − debut) / quantite` secondes : un lot qui finit apres le curseur a deja pose des unites
+        // avant lui. La lecture prend donc tout lot commence avant le curseur, et date son effet a sa
+        // **derniere unite terminee strictement avant le curseur** — un lot dont aucune unite n'est
+        // terminee n'a pas d'effet dans la partition, et n'est pas lu.
+        foreach (self::unitBatchesStartedBy([$body], $cursorAt) as $file) {
+            $evenement = self::queueEvent(CombatEventIdentity::forUnitQueueCompletion($file->id), self::UNIT_QUEUE_KIND, $file, $body, $order, CombatEventType::QueueCompletion, [SnapshotContribution::TargetDefences], $file->completedAt <= $cursorAt ? $file->completedAt : $file->lastFinishInstantBy($cursorAt - 1));
             $this->files[$evenement->identity] = $file;
             $evenements[] = $evenement;
         }
@@ -288,6 +293,40 @@ final class CausalEventReader
     }
 
     /**
+     * Les lots d'unites commences avant le curseur qui ont au moins une unite terminee strictement
+     * avant lui — ou qui sont finis avant lui, meme deja traites : la fermeture compte leur apport
+     * depuis l'avancement materialise a l'ouverture, et un lot fini avant l'ouverture apporte zero.
+     *
+     * @param array<int, int> $bodies
+     * @return array<int, QueuedCompletion>
+     */
+    private static function unitBatchesStartedBy(array $bodies, int $cursorAt): array
+    {
+        if ($bodies === []) {
+            return [];
+        }
+
+        $lignes = DB::table('unit_queues')
+            ->whereIn('planet_id', $bodies)
+            ->where('time_start', '>', 0)
+            ->where('time_start', '<=', $cursorAt)
+            ->orderBy('time_end')
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get();
+
+        $lots = [];
+        foreach ($lignes as $ligne) {
+            $lot = QueuedCompletion::fromRow((array)$ligne);
+            if ($lot->completedAt <= $cursorAt || $lot->unitsFinishedBy($cursorAt - 1) > 0) {
+                $lots[] = $lot;
+            }
+        }
+
+        return $lots;
+    }
+
+    /**
      * @return array<int, int>
      */
     private static function bodiesOf(int $ownerId): array
@@ -302,13 +341,13 @@ final class CausalEventReader
     /**
      * @param array<int, SnapshotContribution> $contributions
      */
-    private static function queueEvent(string $identity, string $kind, QueuedCompletion $file, int $body, CausalEventOrder $order, CombatEventType $type, array $contributions): CausalEvent
+    private static function queueEvent(string $identity, string $kind, QueuedCompletion $file, int $body, CausalEventOrder $order, CombatEventType $type, array $contributions, int|null $effectAt = null): CausalEvent
     {
         return new CausalEvent(
             $identity,
             $kind,
             new DecisionOrder($file->decidedAt, $file->id),
-            EffectOrderKey::forEvent($file->completedAt, $type, $file->id, $order),
+            EffectOrderKey::forEvent($effectAt ?? $file->completedAt, $type, $file->id, $order),
             $body,
             TargetScope::CelestialBody,
             $contributions,

@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
+use OGame\Combat\Support\UnitQueueProduction;
 use OGame\Exceptions\UnrepresentableWholeUnits;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
@@ -1864,15 +1865,11 @@ class PlanetService
 
             // If difference between last update and now is equal to or bigger
             // than the time per unit, give the unit and record progress.
-            if ($last_update_diff >= $time_per_unit) {
-                // Get exact amount of units to reward
-                $unit_amount = (int)floor($last_update_diff / $time_per_unit);
-
-                // Unit amount cannot be more than the order in total.
-                if ($item->object_amount_progress + $unit_amount > $item->object_amount) {
-                    $unit_amount = $item->object_amount - $item->object_amount_progress;
-                }
-
+            // **Le compte vient d'une seule formule** (`UnitQueueProduction`), la meme que la fermeture
+            // d'un combat durable emploie pour savoir ce qu'un lot a pose avant la barriere : deux
+            // comptes divergeraient d'une unite a la premiere arrondie.
+            $unit_amount = UnitQueueProduction::unitsFinishedBy((int)$item->time_start, (int)$item->time_end, (int)$item->object_amount, $now) - (int)$item->object_amount_progress;
+            if ($unit_amount > 0) {
                 $new_time_progress = $last_update + ($time_per_unit * $unit_amount);
 
                 // Update build record

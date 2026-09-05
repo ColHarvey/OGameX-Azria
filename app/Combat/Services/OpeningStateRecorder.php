@@ -2,6 +2,7 @@
 
 namespace OGame\Combat\Services;
 
+use Illuminate\Support\Facades\DB;
 use OGame\Combat\Causality\AppliedEffectReceipt;
 use OGame\Combat\Causality\OpeningProvenance;
 use OGame\Combat\Causality\ProtectedOpeningState;
@@ -65,7 +66,7 @@ use RuntimeException;
  */
 final class OpeningStateRecorder
 {
-    public const int VERSION = 5;
+    public const int VERSION = 6;
 
     public function __construct(
         private CausalEventReader $reader = new CausalEventReader(),
@@ -115,6 +116,10 @@ final class OpeningStateRecorder
             // Les antimissiles ne se battent pas dans la garnison, mais une salve admissible les consomme :
             // la fermeture projette chaque salve sur la photographie, et il lui faut ceux de l'ouverture.
             'interceptors' => $corps->getObjectAmount('anti_ballistic_missile'),
+            // **L'avancement materialise de chaque lot d'unites** : ce que le monde a deja pose sur le
+            // corps. La fermeture compte l'apport d'un lot depuis la, et un lot fini avant l'ouverture
+            // apporte zero — ses unites sont deja dans l'effectif ci-dessus.
+            'queue_progress' => self::queueProgressOf($targetBodyId),
             'defender' => self::defenderFactsOf($corps),
             // **Les reglages sous lesquels cette bataille se calculera.** Lus une fois, ici, dans la
             // transaction d'ouverture : ce que l'administration changera pendant le ralliement ne
@@ -185,6 +190,41 @@ final class OpeningStateRecorder
         }
 
         return PhotographedDefender::fromFrozenFacts($faits);
+    }
+
+    /**
+     * @return array<string, int> Identifiant du lot (en chaine, pour le document) => unites deja materialisees.
+     */
+    private static function queueProgressOf(int $targetBodyId): array
+    {
+        $avancement = [];
+        foreach (DB::table('unit_queues')->where('planet_id', $targetBodyId)->where('time_start', '>', 0)->orderBy('id')->get(['id', 'object_amount_progress']) as $lot) {
+            $avancement[(string)$lot->id] = (int)$lot->object_amount_progress;
+        }
+
+        return $avancement;
+    }
+
+    /**
+     * L'avancement materialise de chaque lot a l'ouverture. Un lot absent n'existait pas encore : il
+     * n'avait rien materialise.
+     *
+     * @return array<int, int>
+     */
+    public static function openingQueueProgressOf(CombatInstance $combat): array
+    {
+        $document = self::documentOf($combat);
+        $avancement = $document['queue_progress'] ?? null;
+        if (!is_array($avancement)) {
+            throw new MissingOpeningState('L etat d ouverture du combat ' . $combat->id . ' ne porte pas l avancement des lots : il a ete ouvert sous une version anterieure.');
+        }
+
+        $relu = [];
+        foreach (array_keys($avancement) as $id) {
+            $relu[(int)$id] = FrozenFact::int($avancement, (string)$id);
+        }
+
+        return $relu;
     }
 
     /**

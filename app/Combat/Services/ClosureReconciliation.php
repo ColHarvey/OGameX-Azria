@@ -110,7 +110,7 @@ final class ClosureReconciliation
         return new ReconciledClosure(
             $photographie,
             $this->protectedResourcesOf($combat, $photographie->inTheSnapshot()),
-            $this->photographedGarrisonOf($combat, $photographie->inTheSnapshot(), $openedAt),
+            $this->photographedGarrisonOf($combat, $photographie->inTheSnapshot(), $openedAt, $closedAt),
             $this->photographedDefenderOf($combat, $photographie->inTheSnapshot()),
             // **Les reglages ne se reconcilient pas** : aucun evenement causal ne les change, et
             // aucune barriere ne s'y applique. Ils sont lus tels que l'ouverture les a fixes.
@@ -282,9 +282,10 @@ final class ClosureReconciliation
      *
      * @param array<int, ReconciledEvent> $dansLaPhotographie
      */
-    private function photographedGarrisonOf(CombatInstance $combat, array $dansLaPhotographie, int $openedAt): UnitCollection
+    private function photographedGarrisonOf(CombatInstance $combat, array $dansLaPhotographie, int $openedAt, int $closedAt): UnitCollection
     {
         $effectif = OpeningStateRecorder::openingUnitsOf($combat)->toArray();
+        $avancementOuverture = OpeningStateRecorder::openingQueueProgressOf($combat);
         $antimissiles = OpeningStateRecorder::openingInterceptorsOf($combat);
         $blindage = OpeningStateRecorder::openingDefenderOf($combat)->armorLevel;
 
@@ -305,14 +306,20 @@ final class ClosureReconciliation
 
             $file = $this->reader->unitQueueOf($identite);
             if ($file !== null) {
-                if ($file->amount <= 0) {
+                // **Un lot produit unite par unite.** Son apport est ce qu'il a termine strictement
+                // avant la fermeture — l'egalite avec la barriere compte pour apres — moins ce que le
+                // monde avait deja materialise a l'ouverture : un lot fini et applique avant
+                // l'ouverture apporte zero, un lot qui finit apres la fermeture apporte ses unites deja
+                // terminees. Le monde, lui, materialise a son rythme, par la meme formule.
+                $apport = $file->unitsFinishedBy($closedAt - 1) - ($avancementOuverture[$file->id] ?? 0);
+                if ($apport <= 0) {
                     continue;
                 }
                 $nom = ObjectService::getUnitObjectById($file->objectId)->machine_name;
                 if ($nom === 'anti_ballistic_missile') {
-                    $antimissiles += $file->amount;
+                    $antimissiles += $apport;
                 } elseif (self::fightsInAGarrison($nom)) {
-                    $effectif[$nom] = ($effectif[$nom] ?? 0) + $file->amount;
+                    $effectif[$nom] = ($effectif[$nom] ?? 0) + $apport;
                 }
 
                 continue;
