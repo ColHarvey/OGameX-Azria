@@ -18,6 +18,8 @@ use OGame\Combat\Support\CombatEventIdentity;
 use OGame\Combat\Support\EffectOrderKey;
 use OGame\Combat\Support\ResourceBoundary;
 use OGame\Combat\Support\SnapshotContributionSet;
+use OGame\Factories\PlanetServiceFactory;
+use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\CombatInstance;
 use OGame\Models\Resources;
@@ -71,6 +73,13 @@ final class ClosureReconciliation
     ) {
     }
 
+    /**
+     * Ce que les effets appliques ont change dans l'effectif du corps, unite par unite.
+     *
+     * @var array<string, int>
+     */
+    private array $measuredDelta = [];
+
     public function reconcile(CombatInstance $combat, int $targetBodyId, int $openedAt, int $closedAt): ReconciledClosure
     {
         $ouverture = OpeningStateRecorder::protectedStateOf($combat);
@@ -97,7 +106,7 @@ final class ClosureReconciliation
             $tranche
         );
 
-        $appliques = $this->apply($photographie->toApply());
+        $appliques = $this->apply($photographie->toApply(), $targetBodyId);
 
         return new ReconciledClosure(
             $photographie,
@@ -113,9 +122,10 @@ final class ClosureReconciliation
      * @param array<int, ReconciledEvent> $aAppliquer
      * @return array<int, string>
      */
-    private function apply(array $aAppliquer): array
+    private function apply(array $aAppliquer, int $targetBodyId): array
     {
         $appliques = [];
+        $this->measuredDelta = [];
 
         foreach ($aAppliquer as $reconcilie) {
             $mission = $this->reader->missionOf($reconcilie->event->identity);
@@ -130,7 +140,23 @@ final class ClosureReconciliation
                 continue;
             }
 
+            // **Le delta reel, mesure autour de l'effet.** Une flotte deposee ajoute des vaisseaux,
+            // un missile en detruit : la photographie ne peut pas se contenter d'additionner ce
+            // qu'elle croit connaitre du genre. Elle lit le corps avant et apres, et retient la
+            // difference — quel que soit le sens, quel que soit le genre, sans rejouer l'effet.
+            $avant = self::garrisonOf($targetBodyId);
             resolve(FleetMissionService::class)->updateMission($mission);
+            $apres = self::garrisonOf($targetBodyId);
+
+            foreach ($apres as $nom => $quantite) {
+                $this->measuredDelta[$nom] = ($this->measuredDelta[$nom] ?? 0) + $quantite - ($avant[$nom] ?? 0);
+            }
+            foreach ($avant as $nom => $quantite) {
+                if (!array_key_exists($nom, $apres)) {
+                    $this->measuredDelta[$nom] = ($this->measuredDelta[$nom] ?? 0) - $quantite;
+                }
+            }
+
             $appliques[] = $reconcilie->event->identity;
         }
 
@@ -178,41 +204,47 @@ final class ClosureReconciliation
      * les achevements inadmissibles. Le monde appliquera la file a la page suivante de son
      * proprietaire ; la photographie, elle, sait deja ce qu'elle vaut.
      *
-     * Une flotte **deposee** par un deploiement admissible ajoute ses vaisseaux de la meme facon. Elle,
-     * en revanche, a bien ete appliquee : `updateMission()` ne traite qu'une mission, il ne draine rien.
+     * Les effets **appliques** — une flotte deposee, un retour qui rentre, un missile qui detruit des
+     * defenses — sont comptes par le **delta mesure** autour de leur application : ce que le corps
+     * portait avant, ce qu'il porte apres. C'est la seule facon juste : additionner ce qu'on croit
+     * connaitre du genre marcherait pour un depot et se tromperait pour une destruction, et rejouer
+     * l'effet pour le connaitre creerait une seconde implementation de chaque gestionnaire.
      *
      * @param array<int, ReconciledEvent> $dansLaPhotographie
      */
     private function photographedGarrisonOf(CombatInstance $combat, array $dansLaPhotographie): UnitCollection
     {
-        $effectif = OpeningStateRecorder::openingUnitsOf($combat);
+        $effectif = OpeningStateRecorder::openingUnitsOf($combat)->toArray();
 
+        // Les files admissibles ne sont pas appliquees : leur apport est celui qu'elles portent.
         foreach ($dansLaPhotographie as $reconcilie) {
             if ($reconcilie->admission !== CausalAdmission::AppliedBeforeSnapshot) {
                 continue;
             }
-
             $file = $this->reader->unitQueueOf($reconcilie->event->identity);
-            if ($file !== null && $file->amount > 0) {
-                $objet = ObjectService::getUnitObjectById($file->objectId);
-                if (!self::fightsInAGarrison($objet->machine_name)) {
-                    continue;
-                }
-                $effectif->addUnit($objet, $file->amount);
+            if ($file === null || $file->amount <= 0) {
                 continue;
             }
-
-            if (!in_array(SnapshotContribution::DeliveredFleet, $reconcilie->event->contributions, true)) {
+            $objet = ObjectService::getUnitObjectById($file->objectId);
+            if (!self::fightsInAGarrison($objet->machine_name)) {
                 continue;
             }
-            $mission = $this->reader->missionOf($reconcilie->event->identity);
-            if ($mission === null) {
-                continue;
-            }
-            $effectif->addCollection(resolve(FleetMissionService::class)->getFleetUnits($mission));
+            $effectif[$objet->machine_name] = ($effectif[$objet->machine_name] ?? 0) + $file->amount;
         }
 
-        return $effectif;
+        // Les effets appliques ont deja change le corps : on retient ce qu'ils y ont change.
+        foreach ($this->measuredDelta as $nom => $delta) {
+            $effectif[$nom] = max(0, ($effectif[$nom] ?? 0) + $delta);
+        }
+
+        $photographie = new UnitCollection();
+        foreach ($effectif as $nom => $quantite) {
+            if ($quantite > 0) {
+                $photographie->addUnit(ObjectService::getUnitObjectByMachineName((string)$nom), (int)$quantite);
+            }
+        }
+
+        return $photographie;
     }
 
     /**
@@ -250,6 +282,18 @@ final class ClosureReconciliation
         }
 
         return $defenseur;
+    }
+
+    /**
+     * L'effectif de combat du corps, tel que la garnison l'emploie, a cet instant.
+     *
+     * @return array<string, int>
+     */
+    private static function garrisonOf(int $targetBodyId): array
+    {
+        $corps = resolve(PlanetServiceFactory::class)->make($targetBodyId, true);
+
+        return $corps === null ? [] : DefenderFleet::fromPlanet($corps)->units->toArray();
     }
 
     /**
