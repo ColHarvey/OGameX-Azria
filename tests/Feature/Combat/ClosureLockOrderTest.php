@@ -129,6 +129,11 @@ final class ClosureLockOrderTest extends FleetDispatchTestCase
             // personne tant que la fermeture n a pas valide, et un retour en arriere l emporte avec le
             // reste. C est l inverse d une notification partie avant le commit.
             'jobs',
+            // **Le registre des effets.** La fermeture applique un effet admissible par la porte unique,
+            // `updateMission()`, qui mesure le corps avant et apres et inscrit le delta sous la barriere
+            // que cette fermeture tient : la ligne est ecrite ici, et lue juste apres par la meme
+            // fermeture. Une seule source pour l effet applique ici et pour celui que le monde a livre.
+            'combat_effect_ledger',
         ];
         $inattendues = array_values(array_diff(array_keys($ecrites), $attendues));
 

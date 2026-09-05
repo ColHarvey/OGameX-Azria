@@ -49,11 +49,13 @@ final class CombatEffectLedger
      * Applique un effet sur le corps qu'une mission vise et, si une barriere tient ce corps, inscrit au
      * registre du combat ce que l'effet y a change.
      *
-     * A appeler depuis le decideur de la porte : la barriere et la mission sont deja tenues par la
-     * transaction courante, et rien ne peut s'ecrire sur le corps entre la lecture d'avant et celle
-     * d'apres. **La ligne n'est ecrite que si l'effet a reellement eu lieu ici** — `processed` passe
-     * de zero a un pendant l'application — pour qu'un rejeu a vide n'inscrive pas un delta nul sous
-     * l'identite d'un effet que la fermeture a peut-etre deja mesure elle-meme.
+     * Appelee par `FleetMissionService::updateMission()`, la porte unique de toute arrivee — c'est
+     * la seule place ou l'ecriture couvre tous les chemins : le travailleur des pages sous la porte
+     * des mouvements, la mise a jour d'un corps, l'administration, le bac, la fermeture elle-meme.
+     * Une premiere version l'ecrivait dans le seul decideur de `PlayerService`, et le bac MariaDB a
+     * montre aussitot un chemin qui passait a cote. **La ligne n'est ecrite que si l'effet a
+     * reellement eu lieu ici** — `processed` passe de zero a un pendant l'application — pour qu'un
+     * rejeu a vide n'inscrive pas un delta nul sous l'identite d'un effet deja inscrit.
      */
     public function applyUnderAnOpenBarrier(FleetMission $tenue, Closure $apply): void
     {
@@ -62,7 +64,11 @@ final class CombatEffectLedger
             ? null
             : CelestialBodyCombatBarrier::query()->where('target_body_id', $corps)->first();
 
-        if ($corps === null || $barriere === null || (int)$tenue->processed === 1) {
+        // **`processed` se lit en base, pas sur l'objet recu** : un appelant peut tenir un modele
+        // d'avant, et un effet deja livre rejoue a vide — inscrire ce zero sous son identite
+        // contredirait la ligne que sa vraie application a ecrite.
+        $dejaTraitee = (int)FleetMission::query()->whereKey($tenue->id)->value('processed') === 1;
+        if ($corps === null || $barriere === null || $dejaTraitee) {
             $apply();
 
             return;

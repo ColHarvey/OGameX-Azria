@@ -6,6 +6,7 @@ use Exception;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use OGame\Combat\Services\CombatEffectLedger;
 use OGame\Combat\Services\EngagedFleetCheck;
 use OGame\Combat\Services\FleetDispositionRegistry;
 use OGame\Combat\Services\FleetMovementGate;
@@ -698,7 +699,15 @@ class FleetMissionService
             'fleetMissionService' => $this,
             'messageService' => $this->messageService,
         ]);
-        $missionObject->process($mission);
+
+        // **Sous une barriere ouverte, l'effet est mesure et inscrit au registre du combat.** Cette
+        // methode est la porte unique de toute arrivee — travailleur des pages, mise a jour d'un
+        // corps, administration, fermeture — et c'est ici, et nulle part en amont, que l'ecriture
+        // tient : la fermeture ne rejoue pas ce que le monde a deja livre, elle lit ce que l'effet a
+        // reellement change (`CombatEffectLedger`).
+        resolve(CombatEffectLedger::class)->applyUnderAnOpenBarrier($mission, function () use ($missionObject, $mission): void {
+            $missionObject->process($mission);
+        });
     }
 
     /**

@@ -175,15 +175,18 @@ final class ClosureReconciliation
                 continue;
             }
 
-            // **Le delta reel, mesure autour de l'effet.** Une flotte deposee ajoute des vaisseaux,
-            // un missile en detruit : la photographie ne peut pas se contenter d'additionner ce
-            // qu'elle croit connaitre du genre. Elle lit le corps avant et apres, et retient la
-            // difference — quel que soit le sens, quel que soit le genre, sans rejouer l'effet.
-            $avant = self::garrisonOf($targetBodyId);
+            // **Applique par la porte unique, et lu au registre.** `updateMission()` mesure le corps
+            // avant et apres le gestionnaire — cette fermeture tient la barriere — et inscrit le
+            // delta reel, quel que soit le sens et le genre : une flotte deposee ajoute, un missile
+            // retire. La fermeture ne mesure rien elle-meme : une seule source, la meme que pour un
+            // effet que le monde a livre avant elle.
             resolve(FleetMissionService::class)->updateMission($mission);
-            $apres = self::garrisonOf($targetBodyId);
+            $delta = $this->ledger->deltaOf((int)$combat->id, $reconcilie->event->identity);
+            if ($delta === null) {
+                throw new RuntimeException('Le combat ' . $combat->id . ' a applique l effet ' . $reconcilie->event->identity . ' sans que le registre en garde le delta : la barriere n a pas ete vue par la porte, ou l effet n a pas eu lieu.');
+            }
 
-            foreach (CombatEffectLedger::deltaBetween($avant, $apres) as $nom => $quantite) {
+            foreach ($delta as $nom => $quantite) {
                 $this->measuredDelta[$nom] = ($this->measuredDelta[$nom] ?? 0) + $quantite;
             }
 
@@ -357,16 +360,6 @@ final class ClosureReconciliation
         }
 
         return $defenseur;
-    }
-
-    /**
-     * L'effectif de combat du corps, tel que la garnison l'emploie, a cet instant.
-     *
-     * @return array<string, int>
-     */
-    private static function garrisonOf(int $targetBodyId): array
-    {
-        return CombatEffectLedger::garrisonOf($targetBodyId);
     }
 
     /**
