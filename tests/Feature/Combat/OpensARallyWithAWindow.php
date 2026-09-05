@@ -133,6 +133,40 @@ trait OpensARallyWithAWindow
         ]);
     }
 
+    /**
+     * Un seul missile interplanetaire, non traite, sans intercepteur en face.
+     */
+    protected function aPendingMissileTowards(int $planetId, int $departure, int $arrival): FleetMission
+    {
+        $origine = $this->planetService;
+        $depart = $origine->getPlanetCoordinates();
+        $arrivee = DB::table('planets')->where('id', $planetId)->first(['galaxy', 'system', 'planet']);
+        $this->assertNotNull($arrivee);
+        $this->assertSame(0, (int)DB::table('planets')->where('id', $planetId)->value('anti_ballistic_missile'), 'The target holds interceptors: the destruction would not be the one this test computes.');
+
+        return FleetMission::forceCreate([
+            'user_id' => $this->currentUserId,
+            'planet_id_from' => $origine->getPlanetId(),
+            'type_from' => 1,
+            'galaxy_from' => $depart->galaxy,
+            'system_from' => $depart->system,
+            'position_from' => $depart->position,
+            'planet_id_to' => $planetId,
+            'type_to' => 1,
+            'galaxy_to' => (int)$arrivee->galaxy,
+            'system_to' => (int)$arrivee->system,
+            'position_to' => (int)$arrivee->planet,
+            'mission_type' => 10,
+            'time_departure' => $departure,
+            'time_arrival' => $arrival,
+            'interplanetary_missile' => 1,
+            'target_priority' => 0,
+            'metal' => 0,
+            'crystal' => 0,
+            'deuterium' => 0,
+        ]);
+    }
+
     protected function lastMissionDispatched(): FleetMission
     {
         $mission = FleetMission::query()

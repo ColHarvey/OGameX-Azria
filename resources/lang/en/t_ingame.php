@@ -523,6 +523,7 @@ return [
         'launched_success'             => 'Missiles launched successfully!',
         'launch_failed'                => 'Failed to launch missiles',
         'insufficient_range'           => 'Insufficient range (research level impulse drive) of your interplanetary missiles!',
+        'missile_target_combat_locked'  => 'This target is engaged in a combat: no missile can be launched against it before the battle ends.',
         'alliance_page'   => 'Alliance Page',
         'apply'           => 'Apply',
         'contact_support' => 'Contact support',

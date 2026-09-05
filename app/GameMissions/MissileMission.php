@@ -5,6 +5,7 @@ namespace OGame\GameMissions;
 use Exception;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use OGame\Combat\Services\HeldTargetCheck;
 use OGame\Enums\FleetMissionStatus;
 use OGame\GameMessages\MissileAttackReport;
 use OGame\GameMessages\MissileDefenseReport;
@@ -84,6 +85,15 @@ class MissileMission extends GameMission
 
         if ($adminCheck = $this->checkAdminProtection($targetPlanet, __('This planet belongs to an administrator and cannot be attacked.'))) {
             return $adminCheck;
+        }
+
+        // **Un corps qu'un combat tient ne recoit aucun nouveau lancement.** La matrice distingue le
+        // lancement de l'arrivee ; un missile tire pendant un ralliement ne serait a l'arrivee qu'une
+        // anomalie a annuler. Le refus vit ici et au point de lancement de la Galaxie, avec le meme
+        // message : l'interface n'est jamais le controle.
+        $tenue = resolve(HeldTargetCheck::class);
+        if ($tenue->isHeld($targetPlanet->getPlanetId())) {
+            return new MissionPossibleStatus(false, $tenue->refusal());
         }
 
         // Check if target is within missile range

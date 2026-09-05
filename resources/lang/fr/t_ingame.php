@@ -395,6 +395,7 @@ return [
         'launched_success' => 'Missiles lancés avec succès !',
         'launch_failed' => 'Échec du lancement des missiles',
         'insufficient_range' => 'Portée insuffisante (entraînement à impulsion niveau recherche) de vos missiles interplanétaires !',
+        'missile_target_combat_locked' => 'Cette cible est engagée dans un combat : aucun missile ne peut être lancé contre elle avant la fin de la bataille.',
         'alliance_page' => 'Page de l\'alliance',
         'apply' => 'Appliquer',
         'contact_support' => 'Contacter le support',

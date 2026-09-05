@@ -10,6 +10,7 @@ use OGame\Combat\Services\CombatEffectLedger;
 use OGame\Combat\Services\EngagedFleetCheck;
 use OGame\Combat\Services\FleetDispositionRegistry;
 use OGame\Combat\Services\FleetMovementGate;
+use OGame\Combat\Services\MissileArrivalGate;
 use OGame\Enums\FleetSpeedType;
 use OGame\Factories\GameMissionFactory;
 use OGame\Factories\PlanetServiceFactory;
@@ -692,6 +693,13 @@ class FleetMissionService
 
         // Sanity check: only process missions that have not been processed yet.
         if ($mission->processed) {
+            return;
+        }
+
+        // **Un missile face a un corps tenu suit la matrice** : il frappe pendant le ralliement s'il
+        // est parti avant l'ouverture, il est annule sans impact s'il est parti apres, et il attend
+        // le reglement si la bataille est engagee — pour frapper ce qui reste, une seule fois.
+        if (resolve(MissileArrivalGate::class)->decide($mission) !== MissileArrivalGate::APPLY) {
             return;
         }
 

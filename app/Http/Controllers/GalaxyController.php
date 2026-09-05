@@ -7,6 +7,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
 use Log;
+use OGame\Combat\Services\HeldTargetCheck;
 use OGame\Facades\AppUtil;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\Models\Alliance;
@@ -1047,6 +1048,15 @@ class GalaxyController extends OGameController
                 'success' => false,
                 'error' => __('You cannot attack your own planet'),
             ], 403);
+        }
+
+        // Un corps qu'un combat tient ne recoit aucun nouveau lancement (meme refus que la mission).
+        $tenue = resolve(HeldTargetCheck::class);
+        if ($tenue->isHeld($targetPlanet->getPlanetId())) {
+            return response()->json([
+                'success' => false,
+                'error' => $tenue->refusal(),
+            ], 409);
         }
 
         // Check range
