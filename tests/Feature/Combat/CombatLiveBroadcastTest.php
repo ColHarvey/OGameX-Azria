@@ -12,6 +12,7 @@ use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Presentation\CombatBroadcasterLease;
 use OGame\Combat\Presentation\CombatPanelService;
 use OGame\Combat\Presentation\CombatPresentationBroadcaster;
+use OGame\Combat\Services\CombatsInvolvingPlayer;
 use OGame\Combat\Services\PersistentCombatAdvancer;
 use OGame\Events\CombatLossesPublished;
 use OGame\Events\CombatStateChanged;
@@ -457,7 +458,13 @@ class CombatLiveBroadcastTest extends FleetDispatchTestCase
         $deroulant->assertSee(__('t_ingame.combat.report_link'));
 
         // Mais le bandeau ne la compte plus parmi les batailles en cours : une de moins qu'avant.
-        $this->assertSame($avant - 1, (int)$this->get('/ajax/fleet/eventbox/fetch')->json('combats'), 'The settled battle is still counted as running in the banner.');
+        // **Cette bataille-la n est plus comptee.** Le bandeau rend un total, et la base d un processus
+        // garde les batailles des essais voisins : comparer deux totaux pris a deux instants faisait
+        // echouer l essai des qu un voisin en ouvrait une entre les deux. On lit donc ce que le total
+        // compte — les combats en cours de ce joueur — et on verifie que celui-ci n y est plus.
+        $enCours = CombatsInvolvingPlayer::stillRunning($proprietaire, [(int)$combat->target_planet_id]);
+        $this->assertNotContains($combat->id, $enCours->pluck('id')->map(static fn (mixed $id): int => (int)$id)->all(), 'The settled battle is still counted as running in the banner.');
+        $this->assertLessThanOrEqual($avant, (int)$this->get('/ajax/fleet/eventbox/fetch')->json('combats'), 'The banner counts more running battles after a settlement than before it.');
 
         // Et une demi-heure plus tard, la carte a disparu : le deroulant n'est pas une archive.
         $this->travelTo(Date::createFromTimestamp($echeance + CombatPanelService::FINISHED_STAYS_FOR + 1));

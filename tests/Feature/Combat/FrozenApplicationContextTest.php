@@ -350,7 +350,10 @@ class FrozenApplicationContextTest extends FleetDispatchTestCase
         $units->addUnit(ObjectService::getUnitObjectByMachineName('small_cargo'), 50);
         $units->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 350);
 
-        $cible = $this->sendMissionToOtherPlayerPlanet($units, new Resources(0, 0, 0, 0));
+        // **Une planete propre, et pas la voisine partagee.** Celle-la porte ce que les essais du
+        // meme processus y ont laisse — des milliers de tourelles, parfois —, et cet essai compte sur
+        // un rapport dont les faits sont ceux qu il a poses. Il echouait environ une fois sur deux.
+        $cible = $this->sendMissionToOtherPlayerCleanPlanet($units, new Resources(0, 0, 0, 0));
 
         $mission = FleetMission::query()
             ->where('processed', 0)
