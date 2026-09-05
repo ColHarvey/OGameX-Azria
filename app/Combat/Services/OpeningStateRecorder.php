@@ -9,9 +9,12 @@ use OGame\Combat\Exceptions\MissingOpeningState;
 use OGame\Combat\Support\FrozenFact;
 use OGame\Combat\Support\ResourceBoundary;
 use OGame\Factories\PlanetServiceFactory;
+use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
+use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\CombatInstance;
 use OGame\Models\Planet;
 use OGame\Models\Resources;
+use OGame\Services\ObjectService;
 use RuntimeException;
 
 /**
@@ -32,15 +35,22 @@ use RuntimeException;
  * barrieres ; sans son recu, le reconciliateur l'ajouterait une seconde fois. `ProtectedOpeningState`
  * n'a pas de fabrique qui donne l'un sans l'autre, et ce document n'en a pas non plus.
  *
+ * ## L'effectif, capture ici aussi
+ *
+ * Les unites du corps — vaisseaux et defenses de combat, telles que la garnison les emploie — sont
+ * photographiees au meme instant. La fermeture y ajoutera ce que les effets admissibles ont produit,
+ * et le moteur se battra contre cet effectif : jamais contre ce que le corps porte au moment ou la
+ * fermeture passe, qui dependrait de ce que le monde a fait pendant le ralliement.
+ *
  * ## Ce qui n'est pas encore capture, et qui est dit
  *
- * Les unites et defenses du corps et les technologies de son proprietaire restent lus vivants a la
- * fermeture : leur photographie est la tranche suivante du raccordement. Ce document porte une
- * version pour qu'elle s'y ajoute sans casser la relecture des combats ouverts sous celle-ci.
+ * Les technologies de combat du proprietaire, son bonus de classe et le niveau du chantier spatial
+ * restent lus vivants a la fermeture. Ce document porte une version pour qu'ils s'y ajoutent sans
+ * casser la relecture des combats ouverts sous celle-ci.
  */
 final class OpeningStateRecorder
 {
-    public const int VERSION = 1;
+    public const int VERSION = 2;
 
     public function __construct(
         private CausalEventReader $reader = new CausalEventReader(),
@@ -86,6 +96,7 @@ final class OpeningStateRecorder
                 'crystal' => ResourceBoundary::wholeUnitsOfLivingStock($ressources->crystal->get(), 'crystal', 'etat_d_ouverture')->units,
                 'deuterium' => ResourceBoundary::wholeUnitsOfLivingStock($ressources->deuterium->get(), 'deuterium', 'etat_d_ouverture')->units,
             ],
+            'units' => DefenderFleet::fromPlanet($corps)->units->toArray(),
             'provenance' => $recus,
         ];
 
@@ -136,6 +147,32 @@ final class OpeningStateRecorder
             FrozenFact::int($ressources, 'deuterium'),
             0,
         );
+    }
+
+    /**
+     * L'effectif du corps a l'ouverture : la garnison avant tout effet admissible.
+     */
+    public static function openingUnitsOf(CombatInstance $combat): UnitCollection
+    {
+        $unites = new UnitCollection();
+        $document = self::documentOf($combat);
+        $photographie = $document['units'] ?? null;
+
+        // **Un combat ouvert avant que l'effectif soit photographie n'en a pas.** Il n'y en a aucun en
+        // jeu — le systeme n'est pas deploye —, mais le dire vaut mieux que rendre une garnison vide,
+        // qui ferait gagner tout attaquant sans que rien ne le signale.
+        if (!is_array($photographie)) {
+            throw new MissingOpeningState('L etat d ouverture du combat ' . $combat->id . ' ne porte pas d effectif : il a ete ouvert sous une version anterieure, et sa garnison ne peut pas etre reconstituee.');
+        }
+
+        foreach ($photographie as $nom => $quantite) {
+            $quantite = (int)$quantite;
+            if ($quantite > 0) {
+                $unites->addUnit(ObjectService::getUnitObjectByMachineName((string)$nom), $quantite);
+            }
+        }
+
+        return $unites;
     }
 
     /**

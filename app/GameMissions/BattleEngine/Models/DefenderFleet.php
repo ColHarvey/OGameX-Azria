@@ -53,6 +53,23 @@ class DefenderFleet
      * @param PlanetService $planet
      * @return self
      */
+    /**
+     * La garnison telle qu'une photographie la fixe, et non telle que le corps la porte.
+     *
+     * Un combat durable se bat contre l'effectif qu'il a photographie : celui de son ouverture,
+     * augmente des seules unites que des effets admissibles ont produites. Relire le corps a la
+     * fermeture ferait combattre des vaisseaux construits pendant le ralliement sur une decision
+     * prise apres l'ouverture — ou manquer ceux qu'une file admissible a produits mais que le monde
+     * n'a pas encore appliques.
+     */
+    public static function fromPhotographedGarrison(PlanetService $planet, UnitCollection $units): self
+    {
+        $defender = self::fromPlanet($planet);
+        $defender->units = $units;
+
+        return $defender;
+    }
+
     public static function fromPlanet(PlanetService $planet): self
     {
         $defender = new self();

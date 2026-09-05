@@ -11,6 +11,7 @@ use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
+use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatParticipant;
 use OGame\Models\FleetMission;
@@ -49,7 +50,7 @@ final class CombatRosterReader
     /**
      * L'effectif, ou un refus qui nomme ce qui manque.
      */
-    public function forCombat(CombatInstance $combat): CombatRoster
+    public function forCombat(CombatInstance $combat, UnitCollection|null $photographedGarrison = null): CombatRoster
     {
         $cible = $this->planets()->make((int)$combat->target_planet_id, true);
 
@@ -103,7 +104,9 @@ final class CombatRosterReader
         }
 
         // La garnison d'abord : elle est le camp defenseur meme quand personne n'est venu en renfort.
-        $defenseurs = [DefenderFleet::fromPlanet($cible)];
+        $defenseurs = [$photographedGarrison === null
+            ? DefenderFleet::fromPlanet($cible)
+            : DefenderFleet::fromPhotographedGarrison($cible, $photographedGarrison)];
         foreach ($defensives as $id) {
             $defenseurs[] = DefenderFleet::fromFleetMission(
                 $this->missionOf($missions, $id, $combat),

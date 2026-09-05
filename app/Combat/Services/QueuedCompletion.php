@@ -25,6 +25,8 @@ final readonly class QueuedCompletion
         public int $completedAt,
         public string $effectFingerprint,
         public bool $alreadyApplied,
+        public int $objectId = 0,
+        public int $amount = 0,
     ) {
     }
 
@@ -45,6 +47,10 @@ final readonly class QueuedCompletion
             (int)($ligne['time_end'] ?? 0),
             hash('sha256', (string)json_encode($faits, JSON_THROW_ON_ERROR)),
             (int)($ligne['processed'] ?? 0) === 1,
+            (int)($ligne['object_id'] ?? 0),
+            // Une file d'unites produit une quantite ; une file de batiments ou de recherche produit
+            // un niveau, et n'ajoute rien a l'effectif. Le champ vaut alors zero, et personne ne le lit.
+            (int)($ligne['object_amount'] ?? 0),
         );
     }
 }

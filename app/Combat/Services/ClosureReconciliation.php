@@ -18,9 +18,11 @@ use OGame\Combat\Support\CombatEventIdentity;
 use OGame\Combat\Support\EffectOrderKey;
 use OGame\Combat\Support\ResourceBoundary;
 use OGame\Combat\Support\SnapshotContributionSet;
+use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\CombatInstance;
 use OGame\Models\Resources;
 use OGame\Services\FleetMissionService;
+use OGame\Services\ObjectService;
 
 /**
  * La fermeture reconciliee : les faits relus sous verrou, le reconciliateur qui decide, les
@@ -100,6 +102,7 @@ final class ClosureReconciliation
         return new ReconciledClosure(
             $photographie,
             $this->protectedResourcesOf($combat, $photographie->inTheSnapshot()),
+            $this->photographedGarrisonOf($combat, $photographie->inTheSnapshot()),
             $appliques,
             $this->inclusionsOf($photographie->inTheSnapshot()),
         );
@@ -160,6 +163,64 @@ final class ClosureReconciliation
         }
 
         return new Resources($metal, $cristal, $deuterium, 0);
+    }
+
+    /**
+     * L'effectif contre lequel la bataille se joue : celui de l'ouverture, plus les unites que des
+     * effets admissibles ont produites.
+     *
+     * ## Compter sans appliquer
+     *
+     * Une file de vaisseaux ou de defenses achevee dans la fenetre, engagee avant l'ouverture, produit
+     * des unites qui appartiennent a ce combat. Elles sont **comptees ici** sans que la fermeture
+     * touche a la file : le gestionnaire d'une file traite toute la file echue, et l'appeler drainerait
+     * les achevements inadmissibles. Le monde appliquera la file a la page suivante de son
+     * proprietaire ; la photographie, elle, sait deja ce qu'elle vaut.
+     *
+     * Une flotte **deposee** par un deploiement admissible ajoute ses vaisseaux de la meme facon. Elle,
+     * en revanche, a bien ete appliquee : `updateMission()` ne traite qu'une mission, il ne draine rien.
+     *
+     * @param array<int, ReconciledEvent> $dansLaPhotographie
+     */
+    private function photographedGarrisonOf(CombatInstance $combat, array $dansLaPhotographie): UnitCollection
+    {
+        $effectif = OpeningStateRecorder::openingUnitsOf($combat);
+
+        foreach ($dansLaPhotographie as $reconcilie) {
+            if ($reconcilie->admission !== CausalAdmission::AppliedBeforeSnapshot) {
+                continue;
+            }
+
+            $file = $this->reader->unitQueueOf($reconcilie->event->identity);
+            if ($file !== null && $file->amount > 0) {
+                $objet = ObjectService::getUnitObjectById($file->objectId);
+                if (!self::fightsInAGarrison($objet->machine_name)) {
+                    continue;
+                }
+                $effectif->addUnit($objet, $file->amount);
+                continue;
+            }
+
+            if (!in_array(SnapshotContribution::DeliveredFleet, $reconcilie->event->contributions, true)) {
+                continue;
+            }
+            $mission = $this->reader->missionOf($reconcilie->event->identity);
+            if ($mission === null) {
+                continue;
+            }
+            $effectif->addCollection(resolve(FleetMissionService::class)->getFleetUnits($mission));
+        }
+
+        return $effectif;
+    }
+
+    /**
+     * Les missiles ne se battent pas dans une garnison : la garnison du moteur les exclut, et une file
+     * qui en produit ne doit pas les y faire entrer par la photographie.
+     */
+    private static function fightsInAGarrison(string $machineName): bool
+    {
+        return !in_array($machineName, ['interplanetary_missile', 'anti_ballistic_missile'], true);
     }
 
     /**

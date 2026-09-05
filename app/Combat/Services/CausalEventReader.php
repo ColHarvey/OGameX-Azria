@@ -58,6 +58,9 @@ final class CausalEventReader
     /** @var array<string, FleetMission> */
     private array $missions = [];
 
+    /** @var array<string, QueuedCompletion> */
+    private array $files = [];
+
     /**
      * Tous les evenements dont l'effet tombe **au plus tard** au curseur, sous verrou.
      *
@@ -79,6 +82,7 @@ final class CausalEventReader
     {
         $evenements = [];
         $this->missions = [];
+        $this->files = [];
 
         $missions = FleetMission::query()
             ->where('planet_id_to', $body)
@@ -94,7 +98,9 @@ final class CausalEventReader
         }
 
         foreach (self::completionsDue('unit_queues', [$body], $cursorAt) as $file) {
-            $evenements[] = self::queueEvent(CombatEventIdentity::forUnitQueueCompletion($file->id), self::UNIT_QUEUE_KIND, $file, $body, $order, CombatEventType::QueueCompletion, [SnapshotContribution::TargetDefences]);
+            $evenement = self::queueEvent(CombatEventIdentity::forUnitQueueCompletion($file->id), self::UNIT_QUEUE_KIND, $file, $body, $order, CombatEventType::QueueCompletion, [SnapshotContribution::TargetDefences]);
+            $this->files[$evenement->identity] = $file;
+            $evenements[] = $evenement;
         }
 
         // Un batiment n'apporte rien a la photographie du combat, mais la source est lue et classee :
@@ -176,6 +182,14 @@ final class CausalEventReader
     public function missionOf(string $identity): FleetMission|null
     {
         return $this->missions[$identity] ?? null;
+    }
+
+    /**
+     * La file d'unites qu'un evenement designe, telle qu'elle a ete lue sous verrou.
+     */
+    public function unitQueueOf(string $identity): QueuedCompletion|null
+    {
+        return $this->files[$identity] ?? null;
     }
 
     public function fleetArrivalEvent(FleetMission $mission, CausalEventOrder $order, int $openerMissionId): CausalEvent

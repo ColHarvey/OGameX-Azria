@@ -16,6 +16,7 @@ use OGame\Combat\Replay\CombatResultIdentity;
 use OGame\Combat\Support\FrozenCombatVersionSet;
 use OGame\Combat\Support\LootContextForMission;
 use OGame\GameMissions\BattleEngine\BattleEngineFactory;
+use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Jobs\SettlePersistentCombat;
 use OGame\Models\CombatInstance;
 use OGame\Models\Resources;
@@ -72,7 +73,7 @@ final class CombatEngagementService
      * @param CombatInstance $combat Sous verrou, ses participants deja inscrits.
      * @param int $startsAt L'echeance du ralliement : le combat commence la, et sa fin se compte de la.
      */
-    public function engage(CombatInstance $combat, int $startsAt, Resources|null $protectedResources = null): CombatEngagement
+    public function engage(CombatInstance $combat, int $startsAt, Resources|null $protectedResources = null, UnitCollection|null $photographedGarrison = null): CombatEngagement
     {
         // **Un combat durable ne se calcule jamais sur le stock vivant.** Le moteur retombe sur le
         // corps quand le contexte ne porte pas de reserve protegee — c'est le chemin instantane, qui
@@ -84,6 +85,12 @@ final class CombatEngagementService
             throw new MissingOpeningState('Le combat ' . $combat->id . ' s engage sans reserve protegee : sa photographie n a pas ete construite, et calculer la bataille sur le stock vivant ferait dependre le butin de ce que le monde a fait depuis l ouverture.');
         }
 
+        // Meme raison pour l'effectif : une garnison relue vivante ferait combattre ce que le monde a
+        // construit pendant le ralliement.
+        if ($photographedGarrison === null) {
+            throw new MissingOpeningState('Le combat ' . $combat->id . ' s engage sans garnison photographiee : sa photographie n a pas ete construite.');
+        }
+
         // **Un combat deja engage garde son resultat.** Une cloture rejouee — un travail relivre,
         // un combat remis en ralliement pour reprendre son travail — retrouve la bataille calculee
         // la premiere fois et ne la recalcule pas : le moteur tire au sort, et deux calculs ne
@@ -93,7 +100,7 @@ final class CombatEngagementService
             return $this->alreadyEngaged($combat);
         }
 
-        $effectif = $this->roster->forCombat($combat);
+        $effectif = $this->roster->forCombat($combat, $photographedGarrison);
 
         // **Aucune attaquante sans mission dans un combat durable.** Son effectif est fait
         // d'inscriptions, et une inscription nomme une mission ; une flotte a l'identifiant zero
