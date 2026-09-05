@@ -921,10 +921,11 @@
                 var ogameUrl = "{{ str_replace('/', '\/', URL::to('/')) }}";
                 var startpageUrl = "{{ str_replace('/', '\/', URL::to('/')) }}";
                 // Laravel Reverb / Echo configuration for real-time chat
-                var reverbAppKey = "{{ env('REVERB_APP_KEY', '') }}";
-                var reverbHost = "{{ env('REVERB_HOST', 'localhost') }}";
-                var reverbPort = "{{ env('REVERB_PORT', '8080') }}";
-                var reverbScheme = "{{ env('REVERB_SCHEME', 'http') }}";
+                {{-- Lues dans la configuration, jamais par env() : sous config:cache, env() est vide. --}}
+                var reverbAppKey = "{{ config('broadcasting.connections.reverb.key', '') }}";
+                var reverbHost = "{{ config('broadcasting.connections.reverb.client.host', 'localhost') }}";
+                var reverbPort = "{{ config('broadcasting.connections.reverb.client.port', '8080') }}";
+                var reverbScheme = "{{ config('broadcasting.connections.reverb.client.scheme', 'http') }}";
                 var chatUrl = "{{ route('chat.send') }}";
                 var chatHistoryUrl = "{{ route('chat.history') }}";
                 var chatUrlLoadMoreMessages = "{{ route('chat.more') }}";

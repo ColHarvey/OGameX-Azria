@@ -1,7 +1,6 @@
 <?php
 
 return [
-
     /*
     |--------------------------------------------------------------------------
     | Default Broadcaster
@@ -29,7 +28,6 @@ return [
     */
 
     'connections' => [
-
         'reverb' => [
             'driver' => 'reverb',
             'key' => env('REVERB_APP_KEY'),
@@ -40,6 +38,19 @@ return [
                 'port' => env('REVERB_PORT', 443),
                 'scheme' => env('REVERB_SCHEME', 'https'),
                 'useTLS' => env('REVERB_SCHEME', 'https') === 'https',
+            ],
+            // **Ce que le navigateur recoit.** Le PHP parle au serveur Reverb par `options` — en
+            // production le conteneur voisin, en HTTP — tandis que le navigateur passe par l'hote
+            // public, en TLS. Les deux adresses ne coincident que sur un poste de developpement ;
+            // ces trois valeurs retombent sur `options` quand rien ne les distingue.
+            //
+            // Le layout les lit par `config()`, jamais par `env()` : sous `config:cache`, Laravel ne
+            // charge plus `.env`, et `env()` ne rend que l'environnement du processus — vide dans le
+            // conteneur de production.
+            'client' => [
+                'host' => env('REVERB_CLIENT_HOST', env('REVERB_HOST')),
+                'port' => env('REVERB_CLIENT_PORT', env('REVERB_PORT', 443)),
+                'scheme' => env('REVERB_CLIENT_SCHEME', env('REVERB_SCHEME', 'https')),
             ],
             'client_options' => [
                 // Guzzle client options: https://docs.guzzlephp.org/en/stable/request-options.html
@@ -78,7 +89,5 @@ return [
         'null' => [
             'driver' => 'null',
         ],
-
     ],
-
 ];
