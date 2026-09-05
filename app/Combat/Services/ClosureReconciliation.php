@@ -19,7 +19,6 @@ use OGame\Combat\Support\EffectOrderKey;
 use OGame\Combat\Support\ResourceBoundary;
 use OGame\Combat\Support\SnapshotContributionSet;
 use OGame\Factories\PlanetServiceFactory;
-use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\CombatInstance;
 use OGame\Models\Resources;
@@ -75,6 +74,7 @@ final class ClosureReconciliation
         private CausalEventReader $reader = new CausalEventReader(),
         private CausalOrderReconciler $reconciler = new CausalOrderReconciler(),
         private CausalEventOrderRegistry|null $orders = null,
+        private CombatEffectLedger $ledger = new CombatEffectLedger(),
     ) {
     }
 
@@ -111,7 +111,7 @@ final class ClosureReconciliation
             $tranche
         );
 
-        $appliques = $this->apply($photographie->toApply(), $targetBodyId);
+        $appliques = $this->apply($photographie->toApply(), $combat, $targetBodyId, $openedAt);
 
         return new ReconciledClosure(
             $photographie,
@@ -130,7 +130,7 @@ final class ClosureReconciliation
      * @param array<int, ReconciledEvent> $aAppliquer
      * @return array<int, string>
      */
-    private function apply(array $aAppliquer, int $targetBodyId): array
+    private function apply(array $aAppliquer, CombatInstance $combat, int $targetBodyId, int $openedAt): array
     {
         $appliques = [];
         $this->measuredDelta = [];
@@ -150,6 +150,31 @@ final class ClosureReconciliation
                 continue;
             }
 
+            // **Un effet que le monde a deja livre ne se rejoue pas : son delta se lit au registre.**
+            // Le gestionnaire est idempotent, une mesure autour de lui donnerait zero, et la bataille
+            // se jouerait contre des defenses qu'un missile a detruites. La porte a inscrit ce que
+            // l'effet a change quand elle l'a applique sous la barriere de ce combat.
+            if ((int)$mission->processed === 1) {
+                $delta = $this->ledger->deltaOf((int)$combat->id, $reconcilie->event->identity);
+                if ($delta === null) {
+                    // Traite et arrive **avant** l'ouverture : l'etat d'ouverture le reflete deja, et
+                    // aucune barriere ne le tenait — pas de ligne, et c'est juste.
+                    if ((int)$mission->time_arrival < $openedAt) {
+                        continue;
+                    }
+
+                    // Traite apres l'ouverture sans ligne : un chemin a applique un effet gouverne
+                    // sans passer par la porte. Inventer un delta fausserait la photographie.
+                    throw new RuntimeException('Le combat ' . $combat->id . ' ne peut pas photographier l effet ' . $reconcilie->event->identity . ' : applique pendant le ralliement sans passer par la porte, son delta n a pas ete inscrit au registre.');
+                }
+
+                foreach ($delta as $nom => $quantite) {
+                    $this->measuredDelta[$nom] = ($this->measuredDelta[$nom] ?? 0) + $quantite;
+                }
+
+                continue;
+            }
+
             // **Le delta reel, mesure autour de l'effet.** Une flotte deposee ajoute des vaisseaux,
             // un missile en detruit : la photographie ne peut pas se contenter d'additionner ce
             // qu'elle croit connaitre du genre. Elle lit le corps avant et apres, et retient la
@@ -158,13 +183,8 @@ final class ClosureReconciliation
             resolve(FleetMissionService::class)->updateMission($mission);
             $apres = self::garrisonOf($targetBodyId);
 
-            foreach ($apres as $nom => $quantite) {
-                $this->measuredDelta[$nom] = ($this->measuredDelta[$nom] ?? 0) + $quantite - ($avant[$nom] ?? 0);
-            }
-            foreach ($avant as $nom => $quantite) {
-                if (!array_key_exists($nom, $apres)) {
-                    $this->measuredDelta[$nom] = ($this->measuredDelta[$nom] ?? 0) - $quantite;
-                }
+            foreach (CombatEffectLedger::deltaBetween($avant, $apres) as $nom => $quantite) {
+                $this->measuredDelta[$nom] = ($this->measuredDelta[$nom] ?? 0) + $quantite;
             }
 
             $appliques[] = $reconcilie->event->identity;
@@ -346,9 +366,7 @@ final class ClosureReconciliation
      */
     private static function garrisonOf(int $targetBodyId): array
     {
-        $corps = resolve(PlanetServiceFactory::class)->make($targetBodyId, true);
-
-        return $corps === null ? [] : DefenderFleet::fromPlanet($corps)->units->toArray();
+        return CombatEffectLedger::garrisonOf($targetBodyId);
     }
 
     /**

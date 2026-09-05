@@ -103,6 +103,53 @@ final class PhotographedDefenderTest extends FleetDispatchTestCase
     }
 
     /**
+     * Le second ordre : le monde **termine** la recherche admissible pendant le ralliement.
+     *
+     * Le joueur charge une page, sa file est traitee, son niveau monte. La fermeture trouve alors
+     * une completion deja appliquee : elle doit donner le meme niveau que si la completion attendait
+     * encore, ni plus — un niveau atteint n'est pas atteint deux fois — ni moins.
+     */
+    public function testAResearchTheWorldFinishedDuringTheRallyGivesTheSameLevelAsOneStillPending(): void
+    {
+        [$combat, $cible, $ouverture, $proprietaire] = $this->anOpenRallyAgainstAResearcher();
+        $admissible = $this->aResearchQueue($cible, 'weapon_technology', self::NIVEAU_ADMISSIBLE, $ouverture - 100, $ouverture + 5);
+
+        // Le monde passe : la recherche est appliquee au joueur, la file marquee traitee.
+        resolve(PlayerServiceFactory::class)->make($proprietaire, true)->setResearchLevel('weapon_technology', self::NIVEAU_ADMISSIBLE);
+        DB::table('research_queues')->where('id', $admissible)->update(['processed' => 1]);
+
+        $fermeture = $ouverture + self::RALLY_WINDOW_SECONDS + 1;
+        $this->travelTo(Date::createFromTimestamp($fermeture));
+        $this->assertTrue((new RallyClosureService())->close($combat->id, $fermeture)->closed, 'The rally did not close.');
+
+        $this->assertSame(self::NIVEAU_ADMISSIBLE + $this->classBonusOf($proprietaire), $this->frozenLevel($combat, 'weapon'), 'A research the world finished during the rally did not give the level a pending one gives.');
+    }
+
+    /**
+     * Une recherche achevee **avant l'ouverture** est deja dans l'etat d'ouverture : sa completion,
+     * encore lisible dans la file, ne releve pas le niveau une seconde fois. Sans recu, c'est le
+     * plafonnement — un niveau atteint, jamais additionne — qui tient cette garantie.
+     */
+    public function testAResearchFinishedBeforeTheOpeningIsNotCountedTwice(): void
+    {
+        [$combat, $cible, $ouverture, $proprietaire] = $this->anOpenRallyAgainstAResearcher();
+
+        // Achevee et appliquee avant l'ouverture : le joueur est deja au niveau, la file est traitee,
+        // et l'etat d'ouverture est capture sur ce joueur-la.
+        $anterieure = $this->aResearchQueue($cible, 'weapon_technology', self::NIVEAU_ADMISSIBLE, $ouverture - 200, $ouverture - 10);
+        DB::table('research_queues')->where('id', $anterieure)->update(['processed' => 1]);
+        resolve(PlayerServiceFactory::class)->make($proprietaire, true)->setResearchLevel('weapon_technology', self::NIVEAU_ADMISSIBLE);
+        (new OpeningStateRecorder())->capture($combat, $cible, $ouverture);
+        $this->assertSame(self::NIVEAU_ADMISSIBLE, OpeningStateRecorder::openingDefenderOf($combat)->weaponLevel, 'The opening did not capture the level already reached.');
+
+        $fermeture = $ouverture + self::RALLY_WINDOW_SECONDS + 1;
+        $this->travelTo(Date::createFromTimestamp($fermeture));
+        $this->assertTrue((new RallyClosureService())->close($combat->id, $fermeture)->closed, 'The rally did not close.');
+
+        $this->assertSame(self::NIVEAU_ADMISSIBLE + $this->classBonusOf($proprietaire), $this->frozenLevel($combat, 'weapon'), 'A research finished before the opening raised the level a second time, or was lost.');
+    }
+
+    /**
      * @return array{0: CombatInstance, 1: int, 2: int, 3: int}
      */
     private function anOpenRallyAgainstAResearcher(): array

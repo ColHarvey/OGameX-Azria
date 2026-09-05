@@ -14,6 +14,7 @@ use OGame\Combat\Enums\FlightLeg;
 use OGame\Combat\Enums\TargetScope;
 use OGame\Combat\Exceptions\MovementLocksOutdated;
 use OGame\Combat\Services\AccountCombatWithdrawal;
+use OGame\Combat\Services\CombatEffectLedger;
 use OGame\Combat\Services\FleetMovementGate;
 use OGame\Enums\AccountDeletionState;
 use OGame\GameObjects\Models\Calculations\CalculationType;
@@ -791,7 +792,12 @@ class PlayerService
                     // attend la barriere que la fermeture tient, relit la mission sous verrou, et le
                     // gestionnaire trouve `processed` deja pose.
                     resolve(FleetMovementGate::class)->decideUnderLock($mission, static function (FleetMission $tenue) use ($fleetMissionService): void {
-                        $fleetMissionService->updateMission($tenue);
+                        // **Sous une barriere ouverte, l'effet est mesure et inscrit au registre.** La
+                        // fermeture ne rejouera pas ce que le monde a deja livre — un gestionnaire
+                        // idempotent rejoue a vide — et lira ce que l'effet a reellement change.
+                        resolve(CombatEffectLedger::class)->applyUnderAnOpenBarrier($tenue, static function () use ($fleetMissionService, $tenue): void {
+                            $fleetMissionService->updateMission($tenue);
+                        });
                     });
                 }
             } catch (MovementLocksOutdated $perime) {

@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Replay\BattleResultCodec;
 use OGame\Combat\Services\RallyClosureService;
+use OGame\Factories\PlayerServiceFactory;
 use OGame\Models\CombatInstance;
 use OGame\Models\FleetMission;
 use OGame\Services\FleetMissionService;
@@ -80,6 +81,36 @@ final class PhotographedReturnsTest extends FleetDispatchTestCase
         // **Une fois, et une seule** : rien n'est perdu, rien n'est double.
         $retour->refresh();
         $this->assertSame(1, (int)$retour->processed, 'The eligible return was not applied.');
+        $this->assertSame($vaisseauxAuDepart + self::VAISSEAUX, $this->garrisonOf($cible, 'light_fighter'), 'The returning ships were lost, or landed twice.');
+        $this->assertSame(self::RALLY_STOCK_METAL + self::CARGAISON, $this->metalOf($cible), 'The returning cargo was lost, or credited twice.');
+    }
+
+    /**
+     * Le second ordre : le monde pose le retour **pendant le ralliement**, avant la fermeture.
+     *
+     * Le proprietaire de la cible charge une page a l'arrivee ; le travailleur livre le retour par
+     * la porte, qui inscrit au registre ce que le corps a gagne. La fermeture ne rejoue rien — le
+     * gestionnaire rejouerait a vide — et lit ce delta. Les deux ordres donnent la meme bataille.
+     */
+    public function testAReturnTheWorldLandedDuringTheRallyFightsLikeOneTheClosureLands(): void
+    {
+        [$combat, $cible, $ouverture] = $this->anOpenRally();
+        $vaisseauxAuDepart = $this->garrisonOf($cible, 'light_fighter');
+        $retour = $this->aPendingReturnTowards($cible, $ouverture - 50, $ouverture + 8);
+
+        $this->travelTo(Date::createFromTimestamp($ouverture + 8));
+        $proprietaire = (int)DB::table('planets')->where('id', $cible)->value('user_id');
+        resolve(PlayerServiceFactory::class)->make($proprietaire, true)->updateFleetMissions();
+        $retour->refresh();
+        $this->assertSame(1, (int)$retour->processed, 'The world did not land the return at its arrival: the scenario is not the one this test names.');
+        $this->assertSame($vaisseauxAuDepart + self::VAISSEAUX, $this->garrisonOf($cible, 'light_fighter'), 'The return did not land its ships.');
+
+        $fermeture = $ouverture + self::RALLY_WINDOW_SECONDS + 1;
+        $this->travelTo(Date::createFromTimestamp($fermeture));
+        $this->assertTrue((new RallyClosureService())->close($combat->id, $fermeture)->closed, 'The rally did not close.');
+
+        $this->assertSame($vaisseauxAuDepart + self::VAISSEAUX, $this->defenderStartOf($combat, 'light_fighter'), 'Ships the world landed before the closure did not fight: the effect was replayed empty and measured as zero.');
+        $this->assertSame(self::shareOf($combat, self::RALLY_STOCK_METAL + self::CARGAISON), self::frozenMetalOf($combat), 'The cargo the world landed stayed out of the protected reserve.');
         $this->assertSame($vaisseauxAuDepart + self::VAISSEAUX, $this->garrisonOf($cible, 'light_fighter'), 'The returning ships were lost, or landed twice.');
         $this->assertSame(self::RALLY_STOCK_METAL + self::CARGAISON, $this->metalOf($cible), 'The returning cargo was lost, or credited twice.');
     }
