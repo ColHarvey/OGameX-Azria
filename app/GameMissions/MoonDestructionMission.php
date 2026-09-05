@@ -4,6 +4,7 @@ namespace OGame\GameMissions;
 
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Allocation\FrozenLootAllocation;
+use OGame\Combat\Services\FleetMovementGate;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\LootContextForMission;
 use OGame\Combat\Support\OperationKey;
@@ -22,6 +23,7 @@ use OGame\GameMissions\Abstracts\GameMission;
 use OGame\GameMissions\BattleEngine\BattleEngineFactory;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
+use OGame\GameMissions\Concerns\EntersADurableCombat;
 use OGame\GameMissions\Models\MissionPossibleStatus;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\BattleReport;
@@ -36,6 +38,8 @@ use RuntimeException;
 
 class MoonDestructionMission extends GameMission
 {
+    use EntersADurableCombat;
+
     protected static string $name = 'Moon Destruction';
     protected static int $typeId = 9;
     protected static bool $hasReturnMission = true;
@@ -132,6 +136,21 @@ class MoonDestructionMission extends GameMission
         }
 
         // Trigger defender moon update to make sure the battle uses up-to-date info
+        // **Un combat durable s'ouvre aussi sur une lune.** La matrice le dit depuis toujours
+        // (`opensCombat()`), mais rien ne l'appliquait : une destruction se reglait a l'arrivee, moteur
+        // compris, et le plan gele n'etait jamais construit. Sous l'interrupteur, l'arrivee entre dans
+        // le combat du corps ; la tentative est gelee a la cloture et appliquee a l'echeance.
+        if ($this->settings->persistentCombatEnabled()) {
+            resolve(FleetMovementGate::class)->decideUnderLock(
+                $mission,
+                function (FleetMission $tenue) use ($targetMoon): void {
+                    $this->enterOrLeaveTheCombat($tenue, $targetMoon->getPlanetId());
+                }
+            );
+
+            return;
+        }
+
         $targetMoon->update();
 
         $attackerPlayer = $originPlanet->getPlayer();

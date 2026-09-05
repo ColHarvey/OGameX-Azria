@@ -5,6 +5,8 @@ namespace OGame\Combat\Services;
 use Closure;
 use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Application\CombatApplicationContext;
+use OGame\Combat\MoonDestruction\FrozenMoonDestructionPlan;
+use OGame\Combat\MoonDestruction\MoonDestructionOutcome;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\ResourceNormalizationDiagnostics;
 use OGame\Factories\PlanetServiceFactory;
@@ -119,6 +121,7 @@ class CombatResolutionService
         Closure $creerRetour,
         FrozenLootAllocation $allocation,
         CombatApplicationContext $context,
+        FrozenMoonDestructionPlan|null $moonPlan = null,
     ): CombatResolutionOutcome {
         // Ce que l'application du resultat rencontre lui appartient : le `BattleResult` reste tel
         // que le moteur l'a fige.
@@ -345,7 +348,7 @@ class CombatResolutionService
                     // Mark outbound mission as processed and create return mission with survivors
                     $fleetMission->processed = 1;
                     $fleetMission->save();
-                    ($creerRetour)($fleetMission, $totalResources, $fleetResult->unitsResult, 0, $attackerWreckFieldData, $naturalReturnDuration);
+                    ($creerRetour)($fleetMission, $totalResources, $this->withoutDeathstarsLostToTheMoon($fleetResult->unitsResult, (int)$fleetMission->id, $moonPlan), 0, $attackerWreckFieldData, $naturalReturnDuration);
                 }
             }
         }
@@ -636,7 +639,7 @@ class CombatResolutionService
                 $attackerWreckFieldData = $this->calculateAttackerWreckField($attackerUnitsLost, $battleResult->attackerUnitsStart, $originPlanet, $context);
             }
 
-            ($creerRetour)($mission, $totalResources, $battleResult->attackerUnitsResult, 0, $attackerWreckFieldData);
+            ($creerRetour)($mission, $totalResources, $this->withoutDeathstarsLostToTheMoon($battleResult->attackerUnitsResult, (int)$mission->id, $moonPlan), 0, $attackerWreckFieldData);
         }
         // End of single-attacker return processing
         // Note: For multi-attacker battles, each fleet is already processed above with its own return mission
@@ -1032,6 +1035,49 @@ class CombatResolutionService
         }
 
         return array_values($players);
+    }
+
+    /**
+     * Les survivants d'une flotte apres la tentative de destruction que le plan a gelee pour elle.
+     *
+     * ## Les trois issues, telles que le chemin instantane les applique
+     *
+     * - **lune detruite** : la flotte rentre, moins les etoiles de la mort qu'un tirage de perte a
+     *   emportees (`handleMoonDestructionSuccess` met leur nombre a zero avant le retour) ;
+     * - **echec catastrophique** — la lune tient et les etoiles sont perdues : **aucun retour**. Le
+     *   chemin instantane ne cree rien dans ce cas, et la flotte entiere reste sur place. C'est la
+     *   regle du fork, pas une decision nouvelle ; une collection vide dit exactement cela ;
+     * - **echec simple** : la flotte rentre entiere.
+     */
+    private function withoutDeathstarsLostToTheMoon(UnitCollection $survivors, int $fleetMissionId, FrozenMoonDestructionPlan|null $moonPlan): UnitCollection
+    {
+        if ($moonPlan === null) {
+            return $survivors;
+        }
+
+        foreach ($moonPlan->attempts as $tentative) {
+            if ($tentative->fleetMissionId !== $fleetMissionId || $tentative->extraDeathstarLosses <= 0) {
+                continue;
+            }
+
+            if ($tentative->outcome !== MoonDestructionOutcome::MoonDestroyed) {
+                return new UnitCollection();
+            }
+
+            $restants = new UnitCollection();
+            foreach ($survivors->units as $unite) {
+                $nombre = $unite->unitObject->machine_name === 'deathstar'
+                    ? max(0, $unite->amount - $tentative->extraDeathstarLosses)
+                    : $unite->amount;
+                if ($nombre > 0) {
+                    $restants->addUnit($unite->unitObject, $nombre);
+                }
+            }
+
+            return $restants;
+        }
+
+        return $survivors;
     }
 
     /**

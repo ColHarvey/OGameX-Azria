@@ -2,38 +2,30 @@
 
 namespace OGame\GameMissions;
 
-use Closure;
 use Illuminate\Support\Facades\Date;
 use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Application\LiveCombatApplicationContext;
 use OGame\Combat\Enums\CombatCancellationCause;
-use OGame\Combat\Enums\CombatReasonCode;
-use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Services\CombatCancellationOutcome;
 use OGame\Combat\Services\CombatCancellationService;
-use OGame\Combat\Services\CombatOpeningService;
 use OGame\Combat\Services\CombatResolutionService;
 use OGame\Combat\Services\CombatSettlementOutcome;
 use OGame\Combat\Services\CombatSettlementService;
 use OGame\Combat\Services\FleetMovementGate;
-use OGame\Combat\Services\RefusedFleetHomecoming;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\LootContextForMission;
 use OGame\Combat\Support\OperationKey;
-use OGame\Combat\Support\RefusedFleetVerdict;
 use OGame\Combat\Support\ResourceDiagnosticsJournal;
-use OGame\Combat\Support\ReturnOrder;
 use OGame\Combat\Support\SealedResourceDiagnostics;
 use OGame\Enums\FleetMissionStatus;
 use OGame\Enums\FleetSpeedType;
 use OGame\Factories\GameMissionFactory;
 use OGame\GameMissions\Abstracts\GameMission;
 use OGame\GameMissions\BattleEngine\BattleEngineFactory;
+use OGame\GameMissions\Concerns\EntersADurableCombat;
 use OGame\GameMissions\Models\MissionPossibleStatus;
 use OGame\GameMissions\Models\ResolvedReturnDestination;
 use OGame\GameObjects\Models\Units\UnitCollection;
-use OGame\Models\CombatInstance;
-use OGame\Models\CombatParticipant;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet\Coordinate;
@@ -46,6 +38,8 @@ use Throwable;
 
 class AttackMission extends GameMission
 {
+    use EntersADurableCombat;
+
     protected static string $name = 'Attack';
     protected static int $typeId = 1;
     protected static bool $hasReturnMission = true;
@@ -159,95 +153,6 @@ class AttackMission extends GameMission
      * C'est la photographie qui fait foi, pas l'heure a laquelle le travail passe : une candidate
      * admise dont l'evenement est traite en retard appartient au combat.
      */
-    private function belongsToCombat(FleetMission $mission, CombatInstance $combat): bool
-    {
-        return CombatParticipant::query()
-            ->where('combat_instance_id', $combat->id)
-            ->where('fleet_mission_id', $mission->id)
-            ->exists();
-    }
-
-    /**
-     * La flotte fait demi-tour parce qu'elle est arrivee apres la fermeture du ralliement.
-     *
-     * ## Pourquoi elle ne peut ni entrer, ni attendre
-     *
-     * Entrer : la photographie est prise, les budgets consommes, la bataille calculee — l'admission
-     * ne la jugera jamais, et le reglement ne la connaitrait pas. Elle serait perdue.
-     *
-     * Attendre que le corps se libere : cela lui ouvrirait un second combat, contre une cible qui
-     * vient d'en subir un. La regle arretee est le demi-tour immediat.
-     *
-     * ## Le joueur apprend pourquoi, par le canal qui existe deja
-     *
-     * La meme boite d'envoi que les refus d'admission, le meme genre, la meme raison : une flotte
-     * qui rentre sans explication ressemble a une panne.
-     */
-    private function sendItHomeAfterTheRallyClosed(FleetMission $mission, CombatInstance $combat): void
-    {
-        // **Le meme chemin que toute autre refusee.** L'attaque ecrivait son avis, marquait l'aller
-        // et creait son retour de son cote ; la disposition que la fermeture avait ecrite pour elle
-        // restait « en attente » pour toujours, et deux protocoles decidaient d'un meme mouvement.
-        //
-        // La raison lue est celle qui a ete decidee — une vague refusee pour sa limite de flottes
-        // lit « limite atteinte », pas « ralliement ferme ».
-        $this->goHome(
-            $mission,
-            fn (FleetMission $tenue): RefusedFleetVerdict => new RefusedFleetVerdict(
-                $combat,
-                CombatReasonCode::RallyClosed,
-                ReturnOrder::physicalArrivalOf($tenue)
-            )
-        );
-    }
-
-    /**
-     * Entre dans le combat qui tient le corps, ou en repart — sur la mission tenue sous verrou.
-     *
-     * Appele **uniquement** derriere `FleetMovementGate` : chacune de ces lectures decide d'une
-     * ecriture, et aucune ne vaut sur un modele charge plus tot.
-     */
-    private function enterOrLeaveTheCombat(FleetMission $mission, int $targetBodyId): void
-    {
-        // **Une flotte deja partie n'entre nulle part.** Un rappel accorde entre le chargement du
-        // modele et ce verrou l'a fait rentrer ; l'engager maintenant la ferait exister deux fois.
-        if ((int)$mission->processed === 1) {
-            return;
-        }
-
-        // **Un mouvement deja decide prime sur toute ouverture.** Sans cela, une vague refusee
-        // traitee apres le reglement ouvrirait un second combat sur un corps redevenu libre.
-        if ($this->followTheMovementAlreadyDecided($mission)) {
-            return;
-        }
-
-        // **L'heure d'ouverture est l'arrivee, pas l'horloge du travailleur.** Un traitement en
-        // retard ouvrirait sinon un combat plus tard qu'il n'a commence, et decalerait de la meme
-        // duree l'echeance du ralliement — donc les flottes admises.
-        $combat = resolve(CombatOpeningService::class)->openOrJoin($mission, $targetBodyId, (int)$mission->time_arrival);
-
-        // **Qui appartient a ce combat, et qui arrive trop tard.**
-        //
-        // La distinction est causale, pas horaire. Une candidate dont l'arrivee planifiee precede
-        // la fermeture a ete jugee par l'admission et **inscrite dans la photographie** : elle
-        // appartient au combat, meme si son evenement est traite en retard. Une flotte planifiee a
-        // la fermeture ou apres n'a jamais ete jugee : la photographie est prise, les budgets
-        // consommes, la bataille calculee — personne ne l'admettrait, et elle ne serait jamais
-        // reglee.
-        //
-        // Tant que le ralliement est ouvert, toute arrivee le rejoint : c'est l'admission, a la
-        // fermeture, qui tranchera.
-        if ($combat->status === CombatState::Rallying || $this->belongsToCombat($mission, $combat)) {
-            $mission->combat_instance_id = $combat->id;
-            $mission->save();
-
-            return;
-        }
-
-        // **Elle repart, tout de suite.** Ni file d'attente, ni second combat quand le corps se
-        // libere : la regle arretee est le demi-tour immediat, avec sa raison.
-        $this->sendItHomeAfterTheRallyClosed($mission, $combat);
-    }
 
     /**
      * Suit le mouvement que le combat a deja decide pour cette vague, s'il y en a un.
@@ -263,27 +168,6 @@ class AttackMission extends GameMission
      *
      * @return bool Vrai si la vague est repartie, et qu'il n'y a plus rien a traiter.
      */
-    private function followTheMovementAlreadyDecided(FleetMission $mission): bool
-    {
-        return $this->carryOutTheMovementAlreadyDecided($mission, (int)Date::now()->timestamp);
-    }
-
-    /**
-     * Le renvoi lui-meme, commun aux deux entrees.
-     *
-     * @param Closure(FleetMission): (RefusedFleetVerdict|null)|null $juger
-     */
-    private function goHome(FleetMission $mission, Closure|null $juger): bool
-    {
-        // **L'horloge ne sert qu'a dater l'execution** (`consumed_at`). Le depart du retour et
-        // sa destination viennent de l'ordre que le protocole derive de la decision.
-        return resolve(RefusedFleetHomecoming::class)->sendHome(
-            $mission,
-            (int)Date::now()->timestamp,
-            $this->returnOfARefusedFleet(),
-            $juger
-        );
-    }
 
     /**
      * @inheritdoc

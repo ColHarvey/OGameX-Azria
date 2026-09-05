@@ -17,11 +17,15 @@ use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Exceptions\CorruptedFrozenApplicationContext;
 use OGame\Combat\Exceptions\MismatchedCombatIdentity;
 use OGame\Combat\Exceptions\UnsettleableAtThisScale;
+use OGame\Combat\MoonDestruction\FrozenMoonDestructionPlan;
+use OGame\Combat\MoonDestruction\MoonDestructionSettlement;
 use OGame\Combat\Replay\BattleResultCodec;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\FrozenCombatVersionSet;
 use OGame\Combat\Support\ResourceBoundary;
 use OGame\Combat\Support\ResourceNormalizationDiagnostics;
+use OGame\Factories\PlanetServiceFactory;
+use OGame\Factories\PlayerServiceFactory;
 use OGame\GameMissions\Abstracts\GameMission;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleetResult;
@@ -92,6 +96,7 @@ final class CombatSettlementService
         private CombatResolutionService $resolution,
         private CombatRosterReader $roster = new CombatRosterReader(),
         private LootAllocatorRegistry|null $allocators = null,
+        private MoonDestructionSettlement|null $moonDestruction = null,
     ) {
     }
 
@@ -312,6 +317,11 @@ final class CombatSettlementService
             $combat->applied_loot_deuterium = $reglement->applied->deuterium;
             $combat->save();
 
+            // **Le plan de destruction de lune, relu, jamais retire.** Gele a la cloture avec ses
+            // tirages ; la resolution en retire les etoiles perdues avant de creer les retours, et il
+            // s'applique a la lune une fois la barriere levee.
+            $planLune = is_array($combat->moon_destruction_plan) ? FrozenMoonDestructionPlan::fromFrozenFacts($combat->moon_destruction_plan) : null;
+
             $issue = $this->resolution->resolve(
                 $effectif->initiator,
                 SettledBattleResult::of($result, $reglement->applied, $parts),
@@ -325,6 +335,7 @@ final class CombatSettlementService
                 $creerRetour,
                 $allocation,
                 $contexte,
+                $planLune,
             );
 
             $this->moveTo($combat, CombatState::Resolved);
@@ -339,6 +350,11 @@ final class CombatSettlementService
             // bataille d'hier. Rien n'est perdu : ce qui s'est passe vit dans l'instance, ses
             // participants et son rapport.
             $barriere->delete();
+
+            // La lune ne se detruit qu'une fois la barriere levee : plus rien ne tient le corps.
+            if ($planLune !== null) {
+                ($this->moonDestruction ??= new MoonDestructionSettlement(resolve(PlayerServiceFactory::class), resolve(PlanetServiceFactory::class)))->apply($planLune, $effectif->target);
+            }
 
             return CombatSettlementOutcome::settled(
                 $reglement,

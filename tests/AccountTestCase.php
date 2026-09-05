@@ -5,6 +5,7 @@ namespace Tests;
 use Carbon\Carbon;
 use Exception;
 use Illuminate\Contracts\Container\BindingResolutionException;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -125,8 +126,15 @@ abstract class AccountTestCase extends TestCase
      */
     protected function createAndLoginUser(): void
     {
-        // First go to logout page to ensure we are not logged in.
+        // **Etre invite est un fait de depart, pas une esperance.** Le montage postait `/logout` et
+        // passait a la suite : quand la session survivait — un passage sur trois, sans cause stable —
+        // `/login` redirigeait vers le jeu, et l'echec tombait sur `assertSee('subscribeForm')`, loin
+        // de sa cause. La deconnexion est donc prononcee des deux cotes (la route pour ses effets
+        // applicatifs, le garde et la session pour l'etat), puis **verifiee**.
         $this->post('/logout');
+        Auth::logout();
+        $this->flushSession();
+        $this->assertFalse(Auth::check(), 'The bench is still authenticated after logging out: /login would answer with the game instead of the register form.');
 
         $response = $this->get('/login');
 

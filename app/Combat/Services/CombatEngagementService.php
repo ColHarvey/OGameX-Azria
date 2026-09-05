@@ -9,7 +9,13 @@ use OGame\Combat\Allocation\LootAllocatorRegistry;
 use OGame\Combat\Application\CombatApplicationContext;
 use OGame\Combat\Application\FrozenCombatApplicationContext;
 use OGame\Combat\Application\LiveCombatApplicationContext;
+use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Exceptions\MissingOpeningState;
+use OGame\Combat\MoonDestruction\FrozenMoonDestructionPlan;
+use OGame\Combat\MoonDestruction\FrozenMoonIdentity;
+use OGame\Combat\MoonDestruction\MoonDestructionCandidate;
+use OGame\Combat\MoonDestruction\MoonDestructionRolls;
+use OGame\Combat\MoonDestruction\MoonDestructionRuleRegistry;
 use OGame\Combat\Presentation\CombatPresentationTimelineWriter;
 use OGame\Combat\Replay\BattleResultCodec;
 use OGame\Combat\Replay\CombatResultIdentity;
@@ -71,6 +77,7 @@ final class CombatEngagementService
         private LootAllocatorRegistry|null $allocators = null,
         private CombatApplicationContext|null $faits = null,
         private CombatPresentationTimelineWriter|null $presentation = null,
+        private MoonDestructionRolls|null $moonRolls = null,
     ) {
     }
 
@@ -154,6 +161,11 @@ final class CombatEngagementService
 
         $resultat = $moteur->simulateBattle();
         $resultat->attackerPlanetId = (int)$effectif->initiator->planet_id_from;
+
+        // **Le plan de destruction de lune se gele ici, avec ses tirages.** Il existait depuis le §27
+        // sans qu'aucun chemin ne l'appelle : une destruction de lune durable se reglait comme une
+        // attaque, sans jamais tenter la lune. Rien n'en est visible avant l'echeance.
+        $combat->moon_destruction_plan = $this->moonDestructionPlanOf($combat, $effectif, $resultat, $versions)?->toFrozenFacts();
 
         $rythme = CombatDurationEstimator::DEFAULT_RATE;
         $plancher = CombatDurationEstimator::DEFAULT_MINIMUM_SECONDS;
@@ -262,6 +274,48 @@ final class CombatEngagementService
         }
 
         return $durees;
+    }
+
+    /**
+     * Le plan des tentatives de destruction, si la cible est une lune et qu'une mission de destruction
+     * est admise ; `null` sinon.
+     */
+    private function moonDestructionPlanOf(CombatInstance $combat, CombatRoster $effectif, BattleResult $resultat, FrozenCombatVersionSet $versions): FrozenMoonDestructionPlan|null
+    {
+        if (!$effectif->target->isMoon()) {
+            return null;
+        }
+
+        $candidats = [];
+        foreach ($resultat->attackerFleetResults as $flotte) {
+            $identifiant = (int)$flotte->fleetMissionId;
+            if ($identifiant < 1) {
+                continue;
+            }
+            $mission = FleetMission::query()->whereKey($identifiant)->first();
+            if (!$mission instanceof FleetMission || CombatMissionKind::fromMissionType((int)$mission->mission_type) !== CombatMissionKind::MoonDestruction) {
+                continue;
+            }
+            $candidats[] = new MoonDestructionCandidate($identifiant, (int)$mission->time_arrival, $flotte->unitsResult->getAmountByMachineName('deathstar'));
+        }
+        if ($candidats === []) {
+            return null;
+        }
+
+        // La condition du chemin instantane (`MoonDestructionMission::didAttackerWinBattle()`) : des
+        // survivants attaquants, plus aucun defenseur.
+        $camp = $resultat->attackerUnitsResult->getAmount() > 0 && $resultat->defenderUnitsResult->getAmount() === 0;
+        $lune = $effectif->target;
+        $tirages = $this->moonRolls ??= resolve(MoonDestructionRolls::class);
+
+        return FrozenMoonDestructionPlan::freeze(
+            (int)$combat->id,
+            new FrozenMoonIdentity($lune->getPlanetId(), $lune->getPlanetCoordinates()->asString(), $lune->getPlanetName(), $lune->getPlanetDiameter()),
+            $candidats,
+            $camp,
+            MoonDestructionRuleRegistry::default()->forVersion($versions->moonDestruction),
+            static fn (): int => $tirages->roll()
+        );
     }
 
     private function settings(): SettingsService

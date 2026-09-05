@@ -109,12 +109,21 @@ class FleetDispositionHasWriterTest extends UnitTestCase
      */
     private function sourceOf(string $classe): string
     {
-        $fichier = (new ReflectionClass($classe))->getFileName();
-        $this->assertNotFalse($fichier);
+        $reflexion = new ReflectionClass($classe);
 
-        $source = file_get_contents($fichier);
-        $this->assertIsString($source);
+        // Le protocole commun peut vivre dans un trait que la classe emploie : la garde lit les deux,
+        // sinon un deplacement la ferait tomber alors que rien n'a change pour le joueur.
+        $fichiers = [$reflexion->getFileName()];
+        foreach ($reflexion->getTraits() as $trait) {
+            $fichiers[] = $trait->getFileName();
+        }
 
-        return preg_replace('/\s+/', ' ', $source) ?? '';
+        $source = '';
+        foreach ($fichiers as $fichier) {
+            $this->assertNotFalse($fichier);
+            $source .= ' ' . (string)file_get_contents($fichier);
+        }
+
+        return (string)preg_replace('/\s+/', ' ', $source);
     }
 }

@@ -492,13 +492,23 @@ class FleetMovementGateTest extends TestCase
      */
     private function sourceOf(string $classe): string
     {
-        $fichier = (new ReflectionClass($classe))->getFileName();
-        $this->assertNotFalse($fichier);
+        $reflexion = new ReflectionClass($classe);
 
-        $source = preg_replace('/\s+/', ' ', (string)file_get_contents($fichier));
-        $this->assertNotNull($source);
+        // **La garde suit le code, pas le fichier.** L'entree d'un combat durable vit dans un trait
+        // partage depuis qu'un second genre l'emprunte ; ne lire que la classe rendrait la garde
+        // aveugle a un deplacement, alors que ce qu'elle vise est une disparition.
+        $fichiers = [$reflexion->getFileName()];
+        foreach ($reflexion->getTraits() as $trait) {
+            $fichiers[] = $trait->getFileName();
+        }
 
-        return $source;
+        $source = '';
+        foreach ($fichiers as $fichier) {
+            $this->assertNotFalse($fichier);
+            $source .= ' ' . (string)file_get_contents($fichier);
+        }
+
+        return (string)preg_replace('/\s+/', ' ', $source);
     }
 
     /**
