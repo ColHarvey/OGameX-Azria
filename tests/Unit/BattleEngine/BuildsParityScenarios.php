@@ -283,6 +283,33 @@ trait BuildsParityScenarios
     }
 
     /**
+     * Un engagement a permuter des deux cotes : une initiatrice et deux autres attaquantes, deux
+     * renforts, tous d'identites distinctes.
+     *
+     * Trois attaquantes, et non une : l'initiatrice reste en tete — le moteur l'exige —, donc une
+     * permutation ne peut porter que sur ce qui la suit. Avec une seule attaquante, inverser cette
+     * sous-liste ne changeait rien, et le scenario ne revendiquait la permutation que de la defense.
+     *
+     * @return array{attaquantes: array<int, AttackerFleet>, defenseurs: array<int, DefenderFleet>, cible: PlanetService, contexte: \OGame\Combat\Support\LootContext}
+     */
+    private function anEngagementToPermuteOnBothSides(bool $permute = false): array
+    {
+        return $this->aBattle(
+            planete: ['metal' => 80_000, 'crystal' => 60_000, 'light_fighter' => 40, 'rocket_launcher' => 20],
+            attaquantes: [
+                ['units' => ['light_fighter' => 120, 'small_cargo' => 10]],
+                ['units' => ['cruiser' => 18], 'tech' => ['weapon_technology' => 6]],
+                ['units' => ['heavy_fighter' => 35], 'tech' => ['armour_technology' => 8]],
+            ],
+            renforts: [
+                ['units' => ['light_fighter' => 40], 'tech' => ['shielding_technology' => 9_000]],
+                ['units' => ['heavy_fighter' => 25]],
+            ],
+            permute: $permute,
+        );
+    }
+
+    /**
      * Un fret limitant, et un butin qui ne se divise pas.
      *
      * @return array{attaquantes: array<int, AttackerFleet>, defenseurs: array<int, DefenderFleet>, cible: PlanetService, contexte: \OGame\Combat\Support\LootContext}

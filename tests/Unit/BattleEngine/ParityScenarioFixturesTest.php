@@ -6,8 +6,12 @@ use OGame\Combat\Enums\NoLootReason;
 use OGame\Combat\Policies\CargoWeightedV1;
 use OGame\Combat\Policies\NoLootV1;
 use OGame\Enums\CharacterClass;
+use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
+use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
+use OGame\GameMissions\BattleEngine\Parity\CanonicalProjection;
 use OGame\GameMissions\BattleEngine\PhpBattleEngine;
 use OGame\Services\ObjectService;
+use PHPUnit\Framework\TestCase;
 use Tests\UnitTestCase;
 
 /**
@@ -240,19 +244,72 @@ class ParityScenarioFixturesTest extends UnitTestCase
     }
 
     /**
+     * L'ordre d'entree a-t-il vraiment change, des deux cotes, sur les memes flottes ?
+     *
+     * Partagee avec le banc de parite, qui ne s'execute qu'en integration continue : la meme
+     * precondition y garde donc son sens, et elle est eprouvee ici sans bibliotheque.
+     *
+     * @param array<string, mixed> $droit
+     * @param array<string, mixed> $permute
+     */
+    public static function assertTheOrderReallyChanged(TestCase $essai, array $droit, array $permute): void
+    {
+        $identites = static fn (array $flottes): array => array_map(
+            static fn (AttackerFleet|DefenderFleet $flotte): int => $flotte->fleetMissionId,
+            $flottes
+        );
+
+        $attaquantesDroit = $identites($droit['attaquantes']);
+        $attaquantesPermute = $identites($permute['attaquantes']);
+        $defenseursDroit = $identites($droit['defenseurs']);
+        $defenseursPermute = $identites($permute['defenseurs']);
+
+        $essai::assertGreaterThanOrEqual(3, count($attaquantesDroit), 'Fewer than three attacking fleets: the initiator plus one leaves nothing to reorder.');
+        $essai::assertGreaterThanOrEqual(2, count($defenseursDroit), 'Fewer than two defending fleets: nothing to reorder.');
+
+        // Les memes flottes, et un ordre different : les deux moities de la precondition. La
+        // comparaison d ensembles trie d abord — sans quoi elle comparerait l ordre une seconde fois.
+        $trie = static function (array $identifiants): array {
+            sort($identifiants);
+
+            return $identifiants;
+        };
+
+        $essai::assertSame($trie($attaquantesDroit), $trie($attaquantesPermute), 'The permutation changed which attacking fleets are engaged.');
+        $essai::assertSame($trie($defenseursDroit), $trie($defenseursPermute), 'The permutation changed which defending fleets are engaged.');
+        $essai::assertNotSame($attaquantesDroit, $attaquantesPermute, 'The attacking fleets are given in the same order: the permutation is empty on that side.');
+        $essai::assertNotSame($defenseursDroit, $defenseursPermute, 'The defending fleets are given in the same order.');
+
+        // L'initiatrice reste en tete : le moteur l'exige, et une permutation qui la deplacerait
+        // decrirait une autre bataille.
+        $essai::assertSame($attaquantesDroit[0], $attaquantesPermute[0], 'The initiator is no longer first.');
+        $essai::assertTrue($droit['attaquantes'][0]->isInitiator);
+        $essai::assertTrue($permute['attaquantes'][0]->isInitiator);
+    }
+
+    /**
      * La permutation des flottes ne change pas la bataille dans le moteur PHP — la moitie de la
      * preuve que le banc complete du cote Rust.
      */
     public function testAPermutationChangesNothingInThePhpEngine(): void
     {
-        $droit = $this->fight(PhpBattleEngine::class, $this->aDefenceSharingAUnitTypeWithDifferentTechnologies());
-        $permute = $this->fight(PhpBattleEngine::class, $this->aDefenceSharingAUnitTypeWithDifferentTechnologies(permute: true));
+        $droit = $this->anEngagementToPermuteOnBothSides();
+        $permute = $this->anEngagementToPermuteOnBothSides(permute: true);
 
-        $this->assertSame($droit->drawsConsumed, $permute->drawsConsumed, 'The permuted battle consumed a different band.');
+        self::assertTheOrderReallyChanged($this, $droit, $permute);
+
+        $joueeDroit = $this->fight(PhpBattleEngine::class, $droit);
+        $joueePermute = $this->fight(PhpBattleEngine::class, $permute);
+
+        $this->assertSame($joueeDroit->drawsConsumed, $joueePermute->drawsConsumed, 'The permuted battle consumed a different band.');
         $this->assertSame(
-            \OGame\GameMissions\BattleEngine\Parity\CanonicalProjection::of($droit),
-            \OGame\GameMissions\BattleEngine\Parity\CanonicalProjection::of($permute),
+            CanonicalProjection::of($joueeDroit),
+            CanonicalProjection::of($joueePermute),
             'The order the fleets were listed in changed the battle.'
         );
+
+        // **Le temoin qui discrimine** : la bataille n'est pas vide, et les deux camps perdent.
+        $this->assertGreaterThan(0, (int)$joueeDroit->attackerUnitsLost->getAmount(), 'The attackers lost nothing: the permutation would be observed on an empty battle.');
+        $this->assertGreaterThan(0, (int)$joueeDroit->defenderUnitsLost->getAmount(), 'The defenders lost nothing.');
     }
 }

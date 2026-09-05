@@ -173,22 +173,32 @@ class RustParityBenchTest extends UnitTestCase
     }
 
     /**
-     * L'ordre dans lequel les flottes sont donnees ne change pas la bataille — dans les deux moteurs.
+     * L'ordre dans lequel les flottes sont donnees ne change pas la bataille — dans les deux moteurs,
+     * des deux cotes, et jusqu'a la bande de tirages consommee.
      */
     public function testAPermutationOfTheFleetsFightsTheSameBattleInBothEngines(): void
     {
-        $droit = $this->aDefenceSharingAUnitTypeWithDifferentTechnologies();
-        $permute = $this->aDefenceSharingAUnitTypeWithDifferentTechnologies(permute: true);
+        $droit = $this->anEngagementToPermuteOnBothSides();
+        $permute = $this->anEngagementToPermuteOnBothSides(permute: true);
 
-        $phpDroit = CanonicalProjection::of($this->fight(PhpBattleEngine::class, $droit));
-        $phpPermute = CanonicalProjection::of($this->fight(PhpBattleEngine::class, $permute));
-        $this->assertProjectionsAgree('permutation-php', $phpDroit, $phpPermute);
+        // **Precondition : l'ordre a vraiment change des deux cotes**, et les memes flottes sont
+        // engagees. Sans elle, « la permutation ne change rien » serait vrai d'une permutation nulle.
+        ParityScenarioFixturesTest::assertTheOrderReallyChanged($this, $droit, $permute);
 
-        $rustDroit = CanonicalProjection::of($this->fight(RustBattleEngine::class, $droit));
-        $rustPermute = CanonicalProjection::of($this->fight(RustBattleEngine::class, $permute));
-        $this->assertProjectionsAgree('permutation-rust', $rustDroit, $rustPermute);
+        $phpDroit = $this->fight(PhpBattleEngine::class, $droit);
+        $phpPermute = $this->fight(PhpBattleEngine::class, $permute);
+        $this->assertProjectionsAgree('permutation-php', CanonicalProjection::of($phpDroit), CanonicalProjection::of($phpPermute));
+        $this->assertSame($phpDroit->drawsConsumed, $phpPermute->drawsConsumed, 'PHP consumed another band once the fleets were reordered.');
 
-        $this->assertProjectionsAgree('permutation', $phpDroit, $rustDroit);
+        $rustDroit = $this->fight(RustBattleEngine::class, $droit);
+        $rustPermute = $this->fight(RustBattleEngine::class, $permute);
+        $this->assertProjectionsAgree('permutation-rust', CanonicalProjection::of($rustDroit), CanonicalProjection::of($rustPermute));
+        $this->assertSame($rustDroit->drawsConsumed, $rustPermute->drawsConsumed, 'Rust consumed another band once the fleets were reordered.');
+
+        // Et les deux moteurs se rejoignent, projection et bande — ce que la comparaison directe de
+        // deux projections ne verifiait pas ici.
+        $this->assertBothEnginesAgree('permutation', $droit);
+        $this->assertBothEnginesAgree('permutation-inverse', $permute);
     }
 
     /**
