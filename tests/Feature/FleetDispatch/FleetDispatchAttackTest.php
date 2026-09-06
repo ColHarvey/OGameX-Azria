@@ -12,6 +12,7 @@ use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\BattleReport;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
+use OGame\Models\Highscore;
 use OGame\Models\Message;
 use OGame\Models\Planet;
 use OGame\Models\Resources;
@@ -164,6 +165,72 @@ class FleetDispatchAttackTest extends FleetDispatchTestCase
      * Assert that attacking a foreign planet works and results in a battle report for both the attacker and defender
      * players.
      */
+    /**
+     * Un combat instantane deplace l'honneur de son attaquant, comme le combat durable.
+     *
+     * ## Pourquoi ce temoin existe en plus de l'autre
+     *
+     * Les deux chemins — l'attaque resolue a l'arrivee et la bataille durable reglee a son echeance
+     * — passent par la meme methode d'application. Le savoir ne suffit pas : un jour l'un des deux
+     * cessera de l'appeler, et rien ne le dirait. `CombatSettlementServiceTest` tient le chemin
+     * durable ; celui-ci tient l'instantane.
+     *
+     * Les deux camps sont poses au meme poids militaire pour que le combat soit honorable : sans
+     * cela l'ecart deciderait a la place du raccordement, et l'essai mesurerait autre chose.
+     */
+    public function testAnInstantBattleMovesTheAttackerHonour(): void
+    {
+        $reglages = resolve(SettingsService::class);
+        $reglages->set('honor_system_enabled', '1');
+
+        try {
+            $this->basicSetup();
+
+            // **Une cible propre, armee apres avoir ete designee.** `getNearbyForeignCleanPlanet()`
+            // cree une planete neuve a chaque appel : l'armer avant l'envoi armerait une autre planete
+            // que celle que la flotte vise. Et sans garnison a detruire, la formule rend zero — le
+            // rouge accuserait alors le raccordement pour une faute de montage.
+            $this->planetAddUnit('light_fighter', 200);
+
+            $unites = new UnitCollection();
+            $unites->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 200);
+            $cible = $this->sendMissionToOtherPlayerCleanPlanet($unites, new Resources(0, 0, 0, 0));
+
+            $cible->addUnit('rocket_launcher', 200);
+            $cible->save();
+
+            $attaquant = $this->planetPlayer()->getId();
+            $defenseur = $cible->getPlayer()?->getId();
+            $this->assertNotNull($defenseur, 'The target has no owner: nothing could be measured.');
+
+            foreach ([$attaquant, $defenseur] as $joueur) {
+                Highscore::query()->updateOrCreate(
+                    ['player_id' => $joueur],
+                    ['general' => 0, 'economy' => 0, 'research' => 0, 'military' => 100_000]
+                );
+            }
+
+            $avant = (int)DB::table('users')->where('id', $attaquant)->value('honor_points');
+
+            $service = resolve(FleetMissionService::class, ['player' => $this->planetService->getPlayer()]);
+            $duree = $service->calculateFleetMissionDuration($this->planetService, $cible->getPlanetCoordinates(), $unites, resolve(AttackMission::class));
+
+            $this->travel($duree + 1)->seconds();
+            $this->reloadApplication();
+            $this->get('/overview')->assertStatus(200);
+
+            $apres = (int)DB::table('users')->where('id', $attaquant)->value('honor_points');
+
+            $this->assertNotSame(
+                $avant,
+                $apres,
+                'The instant battle was fought but the attacker honour never moved: the instant path does not credit.'
+            );
+        } finally {
+            $reglages->set('honor_system_enabled', '0');
+        }
+    }
+
     public function testDispatchFleetCombatReport(): void
     {
         $this->basicSetup();
@@ -270,6 +337,75 @@ class FleetDispatchAttackTest extends FleetDispatchTestCase
         } else {
             $this->fail('Defender has not received a battle report after combat.');
         }
+    }
+
+    /**
+     * Le butin arrive **au retour de la flotte**, pas a la fin du combat.
+     *
+     * ## Les trois instants, et pourquoi ils doivent rester distincts
+     *
+     *     fin du combat   le defenseur est debite, et la flotte repart chargee
+     *     pendant le vol  personne ne detient ces ressources : elles sont dans la soute
+     *     arrivee         l'attaquant est credite
+     *
+     * C'est la regle d'OGame, et elle a une consequence de jeu : entre les deux, le butin est
+     * **interceptable** — une flotte de retour peut etre rappelee, detruite, redirigee. Crediter a
+     * la fin du combat rendrait le vol de retour purement decoratif.
+     *
+     * L'essai mesure les trois moments. Sans le controle du milieu — le stock inchange pendant que
+     * la flotte rentre — un code qui crediterait immediatement passerait quand meme, puisque le
+     * total final serait le meme.
+     */
+    public function testTheLootArrivesWithTheFleetAndNotAtTheEndOfTheBattle(): void
+    {
+        $this->basicSetup();
+
+        $this->planetAddUnit('small_cargo', 5);
+
+        $unites = new UnitCollection();
+        $unites->addUnit(ObjectService::getUnitObjectByMachineName('small_cargo'), 5);
+        $cible = $this->sendMissionToOtherPlayerCleanPlanet($unites, new Resources(0, 0, 0, 0));
+
+        // Une cible riche et sans defense : la flotte gagne, et rapporte.
+        DB::table('planets')
+            ->where('id', $cible->getPlanetId())
+            ->update(['metal' => 20000, 'crystal' => 0, 'deuterium' => 0]);
+
+        $service = resolve(FleetMissionService::class, ['player' => $this->planetService->getPlayer()]);
+        $aller = $service->getActiveFleetMissionsForCurrentPlayer()->first();
+        $this->assertNotNull($aller, 'The attack mission does not exist.');
+
+        $avant = (int)DB::table('planets')->where('id', $this->planetService->getPlanetId())->value('metal');
+
+        // 1. La bataille se joue.
+        $this->travelTo(Date::createFromTimestamp($aller->time_arrival + 10));
+        $this->reloadApplication();
+        $this->get('/overview')->assertStatus(200);
+
+        $retour = FleetMission::where('parent_id', $aller->id)->where('canceled', 0)->first();
+        $this->assertNotNull($retour, 'No return mission was created.');
+        $this->assertGreaterThan(0, (int)$retour->metal, 'The battle took no loot: the test would prove nothing.');
+
+        // 2. **Pendant le vol, rien n'est arrive.** C'est la moitie qui compte : sans elle, un code
+        // qui crediterait des la fin du combat passerait, le total final etant le meme.
+        $pendant = (int)DB::table('planets')->where('id', $this->planetService->getPlanetId())->value('metal');
+        $this->assertLessThanOrEqual(
+            $avant + (int)$retour->metal - 1,
+            $pendant,
+            'The loot was credited at the end of the battle instead of travelling home with the fleet.'
+        );
+
+        // 3. La flotte rentre.
+        $this->travelTo(Date::createFromTimestamp($retour->time_arrival + 10));
+        $this->reloadApplication();
+        $this->get('/overview')->assertStatus(200);
+
+        $apres = (int)DB::table('planets')->where('id', $this->planetService->getPlanetId())->value('metal');
+        $this->assertGreaterThanOrEqual(
+            $pendant + (int)$retour->metal,
+            $apres,
+            'The fleet came home but its cargo was never delivered.'
+        );
     }
 
     /**

@@ -36,6 +36,7 @@ use OGame\Models\CombatParticipant;
 use OGame\Models\DebrisField;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
+use OGame\Models\Highscore;
 use OGame\Models\Planet;
 use OGame\Models\Resources;
 use OGame\Models\WreckField;
@@ -1316,6 +1317,58 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
             $this->debrisFieldAt($cible) - $champAvant,
             'The debris field lost more than the frozen reaper cap.'
         );
+    }
+
+    /**
+     * Une bataille reglee deplace l'honneur de son attaquant.
+     *
+     * ## Ce que ce temoin ferme, et que les autres ne ferment pas
+     *
+     * La formule, la fourchette et les seuils sont eprouves a part, sur des nombres. Ce qui manquait
+     * etait plus bete et plus grave : **le geste est-il appele ?** Ce chantier a deja rencontre
+     * quatre pieces justes que personne n'invoquait — un plan de destruction de lune, une matrice de
+     * missiles, un rembourseur non planifie, une commande sans appelant. Un service d'honneur
+     * parfait qui ne serait branche nulle part ferait le cinquieme.
+     *
+     * L'essai pose donc les deux camps a poids militaire egal — le combat est alors honorable — et
+     * exige que le total de l'attaquant ait **monte** apres le reglement.
+     */
+    public function testASettledBattleMovesTheAttackerHonour(): void
+    {
+        $reglages = resolve(SettingsService::class);
+        $reglages->set('honor_system_enabled', '1');
+
+        try {
+            [$combat, $missions, $cible] = $this->anEngagedCombat();
+
+            $attaquant = (int)$missions[0]->user_id;
+            $defenseur = (int)$cible->getPlayer()?->getId();
+            $this->assertNotSame(0, $defenseur, 'The target has no owner: the battle could not credit anyone.');
+
+            // **Deux camps de meme poids** : sans cela l'ecart deciderait a la place de la regle, et
+            // l'essai mesurerait la fourchette au lieu du raccordement.
+            foreach ([$attaquant, $defenseur] as $joueur) {
+                Highscore::query()->updateOrCreate(
+                    ['player_id' => $joueur],
+                    ['general' => 0, 'economy' => 0, 'research' => 0, 'military' => 100_000]
+                );
+            }
+
+            $avant = (int)DB::table('users')->where('id', $attaquant)->value('honor_points');
+
+            $issue = $this->settleIt($combat, (int)$combat->ends_at);
+            $this->assertTrue($issue->settled, 'The settlement did nothing: ' . $issue->reason);
+
+            $apres = (int)DB::table('users')->where('id', $attaquant)->value('honor_points');
+
+            $this->assertGreaterThan(
+                $avant,
+                $apres,
+                'The battle was settled but the attacker honour did not move: the honour settlement is never called.'
+            );
+        } finally {
+            $reglages->set('honor_system_enabled', '0');
+        }
     }
 
     /**

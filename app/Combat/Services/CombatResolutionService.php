@@ -5,8 +5,10 @@ namespace OGame\Combat\Services;
 use Closure;
 use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Application\CombatApplicationContext;
+use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\MoonDestruction\FrozenMoonDestructionPlan;
 use OGame\Combat\MoonDestruction\MoonDestructionOutcome;
+use OGame\Combat\Support\ActorKindResolver;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\ResourceNormalizationDiagnostics;
 use OGame\Factories\PlanetServiceFactory;
@@ -25,6 +27,7 @@ use OGame\Models\Resources;
 use OGame\Models\User;
 use OGame\Services\DebrisFieldService;
 use OGame\Services\FleetMissionService;
+use OGame\Services\HonorService;
 use OGame\Services\MessageService;
 use OGame\Services\Npc\NpcDestructionService;
 use OGame\Services\Npc\NpcThreatService;
@@ -599,6 +602,9 @@ class CombatResolutionService
         // attaquants viennent de s'attirer, et la chute eventuelle de la base.
         $this->applyNpcAftermath($mission, $defenderPlanet, $defenderPlayer, $attackerFleets, $battleResult);
 
+        // Ce que cette bataille change a la reputation de ceux qui l'ont lancee.
+        $this->applyHonor($defenderPlayer, $attackerFleets, $battleResult);
+
         // Mark the arrival mission as processed and create return mission
         // Single-attacker battles: use original return processing
         // Multi-attacker battles (ACS): each fleet is handled individually above
@@ -951,6 +957,94 @@ class CombatResolutionService
      *
      * @param array<int, AttackerFleet> $attackerFleets
      */
+    /**
+     * L'honneur que cette bataille rapporte ou coute a ses attaquants.
+     *
+     * ## Les regles, et d'ou chacune vient
+     *
+     * Le montant suit la formule d'OGame — `(valeur detruite) ^ 0,9 / 1000` — et son signe depend de
+     * l'ecart des forces : un combat equilibre rapporte, ecraser un plus faible coute. Contre une
+     * base pilotee par le serveur on peut gagner mais jamais perdre (decision de Keven).
+     *
+     * **L'ecart se mesure sur les sommes, pas sur les individus.** C'est la regle d'OGame, et le jeu
+     * la dit deja au joueur dans ses propres textes : « la somme des points militaires totaux de
+     * l'attaquant par rapport a la somme des points militaires totaux du defenseur est ici le
+     * facteur decisif ». Sans elle, trois gros joueurs pourraient ecraser un petit en Defense ACS en
+     * restant chacun « equilibre » face a lui.
+     *
+     * **Le montant se partage entre les attaquants**, il ne se duplique pas. C'est une decision
+     * d'implementation et non une valeur officielle : la source ne dit pas comment repartir. Le
+     * partage garde le total constant, sinon une union serait un multiplicateur d'honneur — on
+     * gagnerait plus a trois qu'a un pour la meme bataille.
+     *
+     * ## Ce que cette methode ne fait pas
+     *
+     * Elle ne touche pas au defenseur. L'honneur mesure ce qu'un joueur **choisit** d'attaquer ;
+     * celui qui subit n'a rien decide, et le faire varier punirait la victime.
+     *
+     * Elle ne leve jamais : un compte disparu, un classement pas encore passe, un camp vide se
+     * traduisent par zero. Une bataille reglee ne doit pas echouer pour une question de reputation.
+     *
+     * @param PlayerService|null $defenderPlayer
+     * @param array<AttackerFleet> $attackerFleets
+     * @param BattleResult $battleResult
+     * @return void
+     */
+    private function applyHonor(PlayerService|null $defenderPlayer, array $attackerFleets, BattleResult $battleResult): void
+    {
+        if ($defenderPlayer === null) {
+            return;
+        }
+
+        $honneur = resolve(HonorService::class);
+
+        // Les attaquants humains, chacun une fois : un joueur qui engage deux flottes ne compte pas
+        // double, et un pirate ne gagne aucune reputation.
+        $attaquants = [];
+
+        foreach ($attackerFleets as $flotte) {
+            $utilisateur = $flotte->player->getUser();
+
+            if (ActorKindResolver::of($utilisateur) === ActorKind::Player) {
+                $attaquants[$flotte->ownerId] = true;
+            }
+        }
+
+        if ($attaquants === []) {
+            return;
+        }
+
+        $identifiants = array_keys($attaquants);
+        $militaireAttaquant = 0;
+
+        foreach ($identifiants as $identifiant) {
+            $militaireAttaquant += $honneur->militaryPointsOf((int)$identifiant);
+        }
+
+        $verdict = $honneur->attackerOutcome(
+            $honneur->destroyedValueOf($battleResult->defenderUnitsLost, $battleResult->repairedDefenses),
+            $militaireAttaquant,
+            $honneur->militaryPointsOf($defenderPlayer->getId()),
+            ActorKindResolver::of($defenderPlayer->getUser()) !== ActorKind::Player,
+        );
+
+        if ($verdict === 0) {
+            return;
+        }
+
+        // La troncature vers zero fait disparaitre le reste : un point perdu sur trois attaquants
+        // vaut mieux qu'un point invente pour l'un d'eux.
+        $part = (int)($verdict / count($identifiants));
+
+        if ($part === 0) {
+            return;
+        }
+
+        foreach ($identifiants as $identifiant) {
+            $honneur->credit((int)$identifiant, $part);
+        }
+    }
+
     private function applyNpcAftermath(
         FleetMission $mission,
         PlanetService $defenderPlanet,
