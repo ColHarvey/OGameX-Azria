@@ -189,8 +189,13 @@ final class MissileArrivalGate
     private function siloThatTakesThemBack(FleetMission $tenue, int $combatInstanceId): PlanetService|null
     {
         $planetes = resolve(PlanetServiceFactory::class);
+
+        // **Le corps de depart ne suffit pas : il doit encore appartenir au lanceur.** Une planete
+        // abandonnee puis recolonisee garde son identifiant et change de proprietaire ; la crediter
+        // remettrait les missiles a un inconnu, sans que rien ne le dise. Le protocole canonique
+        // verifie deja cette concordance ; le raccourci doit la verifier aussi.
         $origine = $tenue->planet_id_from === null ? null : $planetes->make((int)$tenue->planet_id_from, true);
-        if ($origine !== null) {
+        if ($origine !== null && $this->stillBelongsToTheLauncher($origine, (int)$tenue->user_id)) {
             return $origine;
         }
 
@@ -201,5 +206,18 @@ final class MissileArrivalGate
         }
 
         return $planetes->make($destination->bodyId, true);
+    }
+
+    /**
+     * Ce corps appartient-il encore au lanceur ?
+     *
+     * Lu sur la ligne, dans la transaction de l'annulation : un service charge plus tot repondrait
+     * sur un etat perime, et c'est justement le changement de proprietaire qu'on cherche a voir.
+     */
+    private function stillBelongsToTheLauncher(PlanetService $corps, int $launcherId): bool
+    {
+        $proprietaire = DB::table('planets')->where('id', $corps->getPlanetId())->value('user_id');
+
+        return $proprietaire !== null && (int)$proprietaire === $launcherId;
     }
 }

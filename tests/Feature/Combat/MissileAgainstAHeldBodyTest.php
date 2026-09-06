@@ -268,6 +268,173 @@ final class MissileAgainstAHeldBodyTest extends FleetDispatchTestCase
         $this->assertSame($silo + 2, (int)DB::table('planets')->where('id', $origine)->value('interplanetary_missile'), 'The missiles were credited a second time.');
     }
 
+    /**
+     * Le reglement credite **dans une transaction**, et il credite **avant** d'acquitter.
+     *
+     * ## Le defaut que cet essai ferme
+     *
+     * L'acquittement precedait le credit, hors de toute enveloppe : une panne entre les deux — ou un
+     * corps disparu — laissait la creance close et les missiles jamais rendus. C'est la destruction
+     * d'actifs que la creance existe precisement pour empecher.
+     *
+     * ## Pourquoi observer les requetes plutot que simuler la panne
+     *
+     * Ce qui doit tenir, c'est une propriete de l'ecriture : les deux ecritures sont dans la meme
+     * transaction, et le credit vient en premier. Un essai qui se contenterait de compter les
+     * missiles apres un reglement reussi passerait avec ou sans transaction — juste et faux
+     * coincideraient. On lit donc l'ordre reel des requetes et le niveau de transaction **au moment
+     * du credit** : c'est ce que `lockForUpdate()` ne peut pas prouver sous SQLite, et c'est
+     * observable partout.
+     */
+    public function testTheSettlementCreditsInsideATransactionAndBeforeAcknowledging(): void
+    {
+        $creance = $this->anOwedClaim();
+
+        $requetes = [];
+        $niveaux = [];
+
+        DB::listen(function ($evenement) use (&$requetes, &$niveaux): void {
+            $sql = strtolower($evenement->sql);
+
+            if (str_starts_with($sql, 'update') && str_contains($sql, 'planets') && str_contains($sql, 'interplanetary_missile')) {
+                $requetes[] = 'credit';
+                $niveaux[] = DB::transactionLevel();
+
+                return;
+            }
+
+            if (str_starts_with($sql, 'update') && str_contains($sql, 'combat_missile_refunds') && str_contains($sql, 'credited_at')) {
+                $requetes[] = 'acquittement';
+                $niveaux[] = DB::transactionLevel();
+            }
+        });
+
+        $issue = resolve(MissileRefundClaims::class)->settlePending((int)Date::now()->timestamp);
+
+        $this->assertSame(1, $issue['credited'], 'The claim was not settled: the observation would say nothing.');
+
+        // Les deux ecritures ont bien eu lieu, et dans cet ordre.
+        $this->assertSame(['credit', 'acquittement'], $requetes, 'The claim was acknowledged before the silo was credited, or one of the two writes never happened.');
+
+        // Et toutes deux sous une transaction : un niveau nul dit une ecriture en autocommit.
+        foreach ($niveaux as $rang => $niveau) {
+            $this->assertGreaterThanOrEqual(1, $niveau, 'The write "' . $requetes[$rang] . '" ran outside any transaction.');
+        }
+
+        $this->assertSame(
+            $creance['silo'] + 2,
+            (int)DB::table('planets')->where('id', $creance['origine'])->value('interplanetary_missile'),
+            'The owed missiles were not returned.'
+        );
+    }
+
+    /**
+     * Un corps qui a change de mains ne recoit rien : la creance reste due.
+     *
+     * Une planete abandonnee puis recolonisee garde son identifiant et change de proprietaire. Le
+     * raccourci « le corps de depart existe encore » creditait alors les missiles a un inconnu — un
+     * transfert d'actifs entre joueurs, silencieux. Le protocole canonique verifie la concordance du
+     * proprietaire ; le raccourci devait la verifier aussi.
+     */
+    public function testABodyThatChangedHandsIsNeverCredited(): void
+    {
+        $creance = $this->anOwedClaim(returnTheStartBody: false);
+
+        $etranger = (int)DB::table('planets')->where('id', $creance['origine'])->value('user_id');
+        $this->assertNotSame($this->currentUserId, $etranger, 'The start body still belongs to the claimant: the wrong case is not observable.');
+
+        $avant = (int)DB::table('planets')->where('id', $creance['origine'])->value('interplanetary_missile');
+
+        $issue = resolve(MissileRefundClaims::class)->settlePending((int)Date::now()->timestamp);
+
+        $this->assertSame(0, $issue['credited'], 'The missiles were credited to a body its owner no longer holds.');
+        $this->assertSame(1, $issue['waiting'], 'The claim stopped being due although nothing was returned.');
+        $this->assertSame($avant, (int)DB::table('planets')->where('id', $creance['origine'])->value('interplanetary_missile'), 'A stranger received the owed missiles.');
+        $this->assertNull(
+            DB::table('combat_missile_refunds')->where('fleet_mission_id', $creance['missionId'])->value('credited_at'),
+            'The claim was acknowledged although nothing was credited.'
+        );
+    }
+
+    /**
+     * L'annulation immediate ne remet rien a un corps qui a change de mains.
+     *
+     * C'est le chemin nominal, et il portait le meme raccourci que le reglement differe : « le corps
+     * de depart existe encore » ne dit pas « il est encore a lui ». Une planete abandonnee puis
+     * recolonisee garde son identifiant. Ici le lanceur a tout perdu et son ancien corps appartient a
+     * un autre joueur : rien ne doit lui etre credite, et ce qui est du doit devenir une creance.
+     */
+    public function testTheImmediateCancellationNeverCreditsABodyThatChangedHands(): void
+    {
+        [$combat, $cible, $ouverture] = $this->anOpenRally(self::GARRISON);
+        $origine = $this->planetService->getPlanetId();
+        $missile = $this->aPendingMissileTowards($cible, $ouverture + 1, $ouverture + 8, missiles: 2);
+
+        // Ses corps passent a un autre joueur, mais la mission continue de nommer son corps de depart.
+        $autre = (int)DB::table('planets')->where('id', $cible)->value('user_id');
+        DB::table('planets')->where('user_id', $this->currentUserId)->update(['user_id' => $autre]);
+        $avant = (int)DB::table('planets')->where('id', $origine)->value('interplanetary_missile');
+        $this->travelTo(Date::createFromTimestamp($ouverture + 8));
+
+        resolve(FleetMissionService::class)->updateMission(FleetMission::query()->findOrFail($missile->id));
+
+        $this->assertSame(
+            $avant,
+            (int)DB::table('planets')->where('id', $origine)->value('interplanetary_missile'),
+            'The missiles were handed to the player who now holds the launcher old body.'
+        );
+
+        $creance = DB::table('combat_missile_refunds')->where('fleet_mission_id', $missile->id)->first();
+        $this->assertNotNull($creance, 'Nothing was credited and nothing was owed: the missiles simply vanished.');
+        $this->assertSame(2, (int)$creance->missiles);
+        $this->assertSame($this->currentUserId, (int)$creance->owner_id);
+    }
+
+    /**
+     * Une creance due, prete a etre reglee : missile annule sans destination, combat termine.
+     *
+     * L'annulation se fait toujours **sans corps de depart** — c'est ainsi que la creance nait. Ce
+     * que `returnTheStartBody` decide, c'est l'etat au moment du **reglement** : le corps revient a
+     * son proprietaire et le reglement doit aboutir, ou il reste a un autre joueur alors que la
+     * mission le nomme encore, et rien ne doit lui etre credite.
+     *
+     * @return array{origine: int, silo: int, missionId: int}
+     */
+    private function anOwedClaim(bool $returnTheStartBody = true): array
+    {
+        [$combat, $cible, $ouverture] = $this->anOpenRally(self::GARRISON);
+        $origine = $this->planetService->getPlanetId();
+        $silo = $this->planetService->getObjectAmount('interplanetary_missile');
+        $missile = $this->aPendingMissileTowards($cible, $ouverture + 1, $ouverture + 8, missiles: 2);
+
+        // Le lanceur n'a plus aucun corps au moment de l'annulation : ni silo de depart, ni
+        // destination canonique. Ses planetes passent a un autre joueur, la colonne etant NOT NULL.
+        $autre = (int)DB::table('planets')->where('id', $cible)->value('user_id');
+        DB::table('fleet_missions')->where('id', $missile->id)->update(['planet_id_from' => null]);
+        DB::table('planets')->where('user_id', $this->currentUserId)->update(['user_id' => $autre]);
+        $this->travelTo(Date::createFromTimestamp($ouverture + 8));
+
+        resolve(FleetMissionService::class)->updateMission(FleetMission::query()->findOrFail($missile->id));
+
+        $this->assertNotNull(
+            DB::table('combat_missile_refunds')->where('fleet_mission_id', $missile->id)->first(),
+            'No claim was written: the settlement would have nothing to prove.'
+        );
+
+        // Le combat se termine, et la mission nomme de nouveau son corps de depart — que son
+        // proprietaire ait recupere ou non.
+        DB::table('celestial_body_combat_barriers')->where('target_body_id', $cible)->delete();
+        DB::table('fleet_missions')->where('id', $missile->id)->update(['planet_id_from' => $origine]);
+
+        if ($returnTheStartBody) {
+            DB::table('planets')->where('id', $origine)->update(['user_id' => $this->currentUserId]);
+        }
+
+        $this->travelTo(Date::createFromTimestamp($ouverture + 600));
+
+        return ['origine' => $origine, 'silo' => $silo, 'missionId' => (int)$missile->id];
+    }
+
     private function missileMission(): MissileMission
     {
         $mission = resolve(GameMissionFactory::class)->getMissionById(10, [
