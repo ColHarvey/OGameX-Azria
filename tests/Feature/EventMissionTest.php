@@ -211,6 +211,66 @@ class EventMissionTest extends AccountTestCase
      * l analyse statique ni au lint, seulement a l execution. En tirant les quinze missions,
      * on execute les quinze requetes.
      */
+    /**
+     * Une mission de flotte compte son aller, jamais son retour.
+     *
+     * ## Le defaut, tel qu'un joueur l'a vu
+     *
+     * « Grandes oreilles » demande d'espionner trois planetes. Keven en envoyait une, le compteur
+     * montait de un — puis remontait de un quand la sonde rentrait. Deux sondes suffisaient donc,
+     * et la troisieme quete se validait toute seule.
+     *
+     * La cause est structurelle : **une mission de flotte s'ecrit sur deux lignes**, l'aller et le
+     * retour, qui portent le meme `mission_type` et le meme proprietaire. Seul `parent_id` les
+     * distingue — nul pour l'aller. Le compteur ne le regardait pas.
+     *
+     * ## Ce que cet essai etablit lui-meme
+     *
+     * Il ecrit les deux lignes plutot que d'esperer en trouver : c'est la seule facon de rendre le
+     * faux observable, puisqu'un aller seul donne le meme compte avant et apres la correction.
+     */
+    public function testAFleetMissionCountsItsOutboundLegAndNotItsReturn(): void
+    {
+        $this->openEvent();
+
+        $service = resolve(EventMissionService::class);
+        $compter = new ReflectionMethod(EventMissionService::class, 'countMissions');
+        $compter->setAccessible(true);
+
+        $debut = (int)Date::now()->subDay()->timestamp;
+        $fin = (int)Date::now()->addDay()->timestamp;
+
+        $avant = (int)$compter->invoke($service, $this->currentUserId, 6, $debut, $fin);
+
+        $aller = $this->aSpyMissionRow(null);
+        $this->aSpyMissionRow($aller);
+
+        $apres = (int)$compter->invoke($service, $this->currentUserId, 6, $debut, $fin);
+
+        // **Un espionnage, pas deux.** L'ecart se lit, il ne se compare pas a zero : la base d'un
+        // processus garde les missions des essais voisins.
+        $this->assertSame($avant + 1, $apres, 'The returning probe was counted as a second espionage.');
+    }
+
+    /**
+     * Ecrit une ligne de mission d'espionnage, aller ou retour selon son parent.
+     */
+    private function aSpyMissionRow(int|null $parentId): int
+    {
+        return (int)DB::table('fleet_missions')->insertGetId([
+            'user_id' => $this->currentUserId,
+            'parent_id' => $parentId,
+            'planet_id_from' => $this->planetService->getPlanetId(),
+            'mission_type' => 6,
+            'canceled' => 0,
+            'processed' => 0,
+            'time_departure' => (int)Date::now()->timestamp,
+            'time_arrival' => (int)Date::now()->addHour()->timestamp,
+            'created_at' => Date::now(),
+            'updated_at' => Date::now(),
+        ]);
+    }
+
     public function testEveryMissionMeasureRunsAgainstTheSchema(): void
     {
         $this->openEvent();

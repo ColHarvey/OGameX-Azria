@@ -1009,10 +1009,15 @@ class EventMissionService
     {
         $planetIds = $this->planetIds($userId);
 
+        // **Seul l'aller est un transport.** Le retour porte le meme genre, et sa destination est le
+        // corps d'origine — donc une planete du joueur. Sans ce filtre, livrer chez un autre joueur
+        // comptait aussi pour « transporter vers ses propres planetes », une quete a laquelle ce
+        // mouvement n'appartient pas : une action nourrissait deux compteurs.
         $requete = DB::table('fleet_missions')
             ->where('user_id', $userId)
             ->where('mission_type', 3)
             ->where('canceled', 0)
+            ->whereNull('parent_id')
             ->whereBetween('time_departure', [$debut, $fin]);
 
         if ($versSoi) {
@@ -1098,6 +1103,10 @@ class EventMissionService
             ->where('user_id', $userId)
             ->where('mission_type', $missionType)
             ->where('canceled', 0)
+            // **Une mission, c'est l'aller.** Le retour est une seconde ligne qui porte le meme
+            // genre et le meme proprietaire : sans ce filtre, « espionner trois planetes » etait
+            // atteint avec deux sondes, la seconde comptant double des son retour.
+            ->whereNull('parent_id')
             ->whereBetween('time_departure', [$debut, $fin])
             ->count();
     }
