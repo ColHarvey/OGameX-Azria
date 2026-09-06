@@ -13,6 +13,7 @@ use OGame\Models\Planet\Coordinate;
 use OGame\Models\User;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
+use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
 
 /**
@@ -68,6 +69,68 @@ class MissileProtectionTest extends AccountTestCase
             'The scenario is not conclusive: the shot was refused before the holiday even began — ' . $avant->error
         );
         $this->assertFalse($apres->possible, 'A missile attack was allowed against a player in vacation mode.');
+    }
+
+    /**
+     * Le temps de vol d'un missile suit la formule officielle, et la vitesse de guerre la divise.
+     *
+     * ## Ce que ce temoin ferme
+     *
+     *     temps = (30 + 60 x distance) / vitesse
+     *
+     * Le fichier portait cette formule **deux fois** — la fenetre de tir et le lancement reel — avec
+     * la vitesse ecrite `1` en dur et un TODO a chaque copie. Sur un univers rapide, les missiles
+     * volaient donc au rythme d'un univers lent, et l'heure annoncee au joueur etait la vraie : les
+     * deux copies mentaient de concert, ce qui rendait le defaut invisible.
+     *
+     * L'essai lit la duree que le serveur annonce, a deux vitesses differentes. Sans la seconde
+     * moitie, un code qui ignorerait le reglage passerait.
+     */
+    public function testTheMissileFlightTimeFollowsTheWarSpeed(): void
+    {
+        $reglages = resolve(SettingsService::class);
+        $cible = $this->uneCibleEtrangere();
+        $this->armerLeTireur($cible->getPlanetCoordinates());
+
+        $depuis = $this->planetService->getPlanetCoordinates();
+        $distance = abs($cible->getPlanetCoordinates()->system - $depuis->system);
+        $base = 30 + 60 * $distance;
+
+        $reglages->set('fleet_speed_war', '1');
+        $this->assertSame($base, $this->flightDurationAnnouncedFor($cible), 'The announced flight time does not follow the official formula.');
+
+        $reglages->set('fleet_speed_war', '4');
+        $this->assertSame(
+            (int)($base / 4),
+            $this->flightDurationAnnouncedFor($cible),
+            'A four times faster universe did not shorten the missile flight: the setting is ignored.'
+        );
+
+        // **Une vitesse absurde ne divise pas par zero.** Un reglage mal saisi ne doit pas casser un
+        // tir au moment ou un joueur le lance.
+        $reglages->set('fleet_speed_war', '0');
+        $this->assertSame($base, $this->flightDurationAnnouncedFor($cible), 'A zero speed did not fall back to one.');
+
+        $reglages->set('fleet_speed_war', '1');
+    }
+
+    /**
+     * La duree que la fenetre de tir annonce pour cette cible.
+     */
+    private function flightDurationAnnouncedFor(PlanetService $cible): int
+    {
+        $coordonnees = $cible->getPlanetCoordinates();
+
+        $reponse = $this->get(route('galaxy.missile-attack.overlay', [
+            'galaxy' => $coordonnees->galaxy,
+            'system' => $coordonnees->system,
+            'position' => $coordonnees->position,
+            'type' => $cible->getPlanetType()->value,
+        ]));
+
+        $reponse->assertStatus(200);
+
+        return (int)$reponse->viewData('flight_duration');
     }
 
     /**

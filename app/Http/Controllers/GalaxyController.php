@@ -296,6 +296,35 @@ class GalaxyController extends OGameController
     }
 
     /**
+     * Le temps de vol d'un missile interplanetaire, en secondes.
+     *
+     * ## La formule, et d'ou elle vient
+     *
+     *     temps = (30 + 60 x distance en systemes) / vitesse
+     *
+     * C'est celle d'OGame : trente secondes dans le systeme de depart, une minute par systeme
+     * franchi. Elle etait ecrite **deux fois** dans ce fichier — pour la fenetre de tir et pour le
+     * lancement reel — avec `1` en dur et un TODO a chaque copie. Deux copies d'une meme formule
+     * finissent par diverger, et celle qui compte est celle du lancement.
+     *
+     * ## Quelle vitesse
+     *
+     * OGame divisait par la « vitesse de l'univers », un nombre unique. Le jeu moderne l'a
+     * remplacee par des vitesses separees, et ce fork suit : economie, recherche, et trois vitesses
+     * de flotte. Un missile est un vol hostile, donc c'est `fleet_speed_war` — celle que
+     * l'administration regle pour les mouvements de guerre.
+     *
+     * **Une vitesse nulle ou negative retombe a un.** Un reglage mal saisi ne doit pas diviser par
+     * zero au moment ou un joueur tire.
+     */
+    private function missileFlightTime(int $distance): int
+    {
+        $vitesse = max(1, resolve(SettingsService::class)->fleetSpeedWar());
+
+        return (int)((30 + 60 * $distance) / $vitesse);
+    }
+
+    /**
      * Le service d'honneur, resolu une fois par requete.
      *
      * La Galaxie interroge quinze positions : resoudre le service a chaque ligne le reconstruirait
@@ -991,8 +1020,7 @@ class GalaxyController extends OGameController
         $data['target_abm_count'] = $targetAbmCount;
 
         // Calculate flight time: (30 + 60 × distance) / universe_speed seconds
-        $universeSpeed = 1; // TODO: Get from settings
-        $flightTime = (int)((30 + 60 * $distance) / $universeSpeed);
+        $flightTime = $this->missileFlightTime($distance);
         $arrivalTime = time() + $flightTime;
 
         $data['flight_duration'] = $flightTime;
@@ -1091,8 +1119,7 @@ class GalaxyController extends OGameController
         }
 
         // Calculate flight time: (30 + 60 × distance) / universe_speed seconds
-        $universeSpeed = 1; // TODO: Get from settings
-        $flightTime = (int)((30 + 60 * $distance) / $universeSpeed);
+        $flightTime = $this->missileFlightTime($distance);
 
         // Create fleet mission
         $mission = new FleetMission();
