@@ -2,6 +2,7 @@
 
 use OGame\Console\Commands\Combat\AdvancePersistentCombats;
 use OGame\Console\Commands\Combat\BroadcastCombatLosses;
+use OGame\Console\Commands\Combat\RefundCancelledMissiles;
 use OGame\Console\Commands\Npc\NpcTick;
 use OGame\Console\Commands\Scheduler\CleanupDestroyedPlanets;
 use OGame\Console\Commands\Scheduler\CleanupWreckFields;
@@ -62,6 +63,12 @@ Schedule::command(AdvancePersistentCombats::class)->everyMinute()->withoutOverla
 // si le bail bat encore — et prend la releve s'il est mort. `runInBackground()` : `schedule:run` ne
 // l'attend pas, et l'avanceur garde sa minute.
 Schedule::command(BroadcastCombatLosses::class, ['--continu'])->everyMinute()->runInBackground();
+
+// Les missiles qu'une annulation n'a pas pu rendre restent dus jusqu'a ce qu'une destination
+// existe : le proprietaire doit d'abord retrouver un corps. Sans ce passage, la creance attendrait
+// une main humaine — et des actifs de joueur resteraient bloques sans que personne le sache. Une
+// heure suffit : rien ne presse un remboursement, et un passage sans creance ne fait qu'une requete.
+Schedule::command(RefundCancelledMissiles::class)->hourly()->withoutOverlapping();
 
 // Factions hostiles : croissance des bases, releve des bases detruites, decision de raid.
 // Sans effet tant que npc_enabled est a non, et n envoie aucune flotte tant que
