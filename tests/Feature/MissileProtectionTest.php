@@ -10,7 +10,9 @@ use OGame\GameMissions\Models\MissionPossibleStatus;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\Planet\Coordinate;
+use OGame\Models\User;
 use OGame\Services\ObjectService;
+use OGame\Services\PlanetService;
 use Tests\AccountTestCase;
 
 /**
@@ -135,7 +137,22 @@ class MissileProtectionTest extends AccountTestCase
     /**
      * Find any planet in this universe that belongs to somebody else.
      */
-    private function uneCibleEtrangere(): \OGame\Services\PlanetService
+    /**
+     * Une planete etrangere a portee, **fabriquee si l'univers n'en offre aucune**.
+     *
+     * ## Ce que la recherche seule laissait passer
+     *
+     * Cette methode se contentait de chercher la plus proche, et echouait sur « This universe holds
+     * no foreign planet to shell » quand il n'y en avait pas. C'est arrive en integration continue :
+     * l'essai tombait pour une raison etrangere a ce qu'il verifie, et le rouge ne disait rien du
+     * code. **Un essai etablit ce qu'il exige, il ne l'espere pas.**
+     *
+     * La classe de base sait deja chercher puis creer, avec sa postcondition sur le proprietaire ;
+     * on s'appuie dessus. Reste ce qui est propre a cet essai : la cible ne doit etre ni le compte
+     * systeme — il porte sa propre immunite, et le refus ne prouverait alors pas le conge — ni deja
+     * en conge, puisque c'est precisement l'etat que l'essai va poser lui-meme.
+     */
+    private function uneCibleEtrangere(): PlanetService
     {
         $depuis = $this->planetService->getPlanetCoordinates();
 
@@ -144,7 +161,7 @@ class MissileProtectionTest extends AccountTestCase
         $ligne = DB::table('planets')
             ->join('users', 'users.id', '=', 'planets.user_id')
             ->where('planets.user_id', '!=', $this->currentUserId)
-            ->where('users.username', '!=', 'Legor')
+            ->where('users.username', '!=', User::SYSTEM_ACCOUNT_USERNAME)
             ->where('users.vacation_mode', false)
             ->where('planets.destroyed', 0)
             ->where('planets.galaxy', $depuis->galaxy)
@@ -152,10 +169,23 @@ class MissileProtectionTest extends AccountTestCase
             ->select('planets.id')
             ->first();
 
-        $this->assertNotNull($ligne, 'This universe holds no foreign planet to shell.');
+        $planet = $ligne === null
+            ? $this->getNearbyForeignPlanet()
+            : resolve(PlanetServiceFactory::class)->make((int)$ligne->id, true);
 
-        $planet = resolve(PlanetServiceFactory::class)->make((int)$ligne->id, true);
         $this->assertNotNull($planet);
+
+        $proprietaire = $planet->getPlayer();
+        $this->assertNotNull($proprietaire, 'The target planet has no owner to send on holiday.');
+        $this->assertNotSame($this->currentUserId, $proprietaire->getId(), 'The « foreign » target belongs to the shooter.');
+
+        // Le repli peut rendre un compte en conge : l'essai pose cet etat lui-meme, et partir de la
+        // rendrait son « avant » indistinguable de son « apres ».
+        DB::table('users')->where('id', $proprietaire->getId())->update([
+            'vacation_mode' => false,
+            'vacation_mode_activated_at' => null,
+        ]);
+        resolve(PlayerServiceFactory::class)->make($proprietaire->getId(), true);
 
         return $planet;
     }
