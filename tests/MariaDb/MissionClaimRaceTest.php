@@ -73,6 +73,16 @@ final class MissionClaimRaceTest extends FleetDispatchTestCase
      */
     public function testTwoWorkersProcessingTheSameArrivalDeliverItOnce(): void
     {
+        // **`basicSetup()` n'est appelee par personne** : le socle la declare abstraite, et chaque
+        // essai l'invoque lui-meme — les essais de ralliement le font depuis leur trait. Sans cet
+        // appel, la planete n'a ni cargo ni metal, et l'envoi echoue avant toute course.
+        $this->basicSetup();
+
+        // L'essai etablit ce qu'il exige au lieu de le supposer : sans fret ni cargaison, la course
+        // ne pourrait rien livrer, et son silence ressemblerait a une reussite.
+        $this->assertGreaterThan(0, $this->planetService->getObjectAmount('small_cargo'), 'The planet has no cargo ship: nothing could be sent.');
+        $this->assertGreaterThanOrEqual(self::CARGO_METAL, (int)$this->planetService->metal()->get(), 'The planet cannot afford the cargo the race is supposed to deliver.');
+
         $cible = $this->getNearbyForeignPlanet();
         $cibleId = $cible->getPlanetId();
 
