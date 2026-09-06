@@ -415,7 +415,9 @@ class RefusedFleetHomecomingTest extends TestCase
         $ordre = new ReturnOrder($this->theOriginAsDestinationOf($mission), 1_700_000_600);
 
         $projection = ExpectedReturn::of($mission, $ordre);
-        $sansEffet = ['id', 'created_at', 'updated_at', 'target_priority', 'retreat_after_defender_retreat'];
+        // La liste est **redite ici volontairement** : l'essai enonce le classement attendu au lieu
+        // de relire celui du code, qu'il aurait alors valide par construction.
+        $sansEffet = ['id', 'created_at', 'updated_at', 'target_priority', 'retreat_after_defender_retreat', 'processing_claimed_at'];
 
         foreach (Schema::getColumnListing('fleet_missions') as $colonne) {
             $this->assertTrue(

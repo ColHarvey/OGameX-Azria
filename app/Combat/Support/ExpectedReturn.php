@@ -43,6 +43,10 @@ final readonly class ExpectedReturn
         'updated_at',
         'target_priority',
         'retreat_after_defender_retreat',
+        // Le jeton qui reserve une mission pendant qu'un passage la traite. Il ne dit rien du
+        // mouvement : il vit le temps d'un traitement et personne ne le lit apres. Un retour naissant
+        // le porte a nul, comme toute mission neuve.
+        'processing_claimed_at',
     ];
 
     /**

@@ -616,6 +616,24 @@ class FleetMissionService
     }
 
     /**
+     * Delai au-dela duquel un jeton de traitement est tenu pour abandonne, en secondes.
+     *
+     * Cinq minutes : tres au-dela du traitement le plus long observe, et assez court pour qu'une
+     * flotte ne reste pas en l'air apres un arret brutal du serveur.
+     */
+    private const int PROCESSING_CLAIM_SECONDS = 300;
+
+    /**
+     * Les missions que **ce processus** tient, et combien de trames imbriquees les tiennent.
+     *
+     * Statique, donc de la portee du processus — exactement la portee voulue : le jeton en base
+     * arbitre entre processus, ce compteur arbitre a l'interieur d'un seul.
+     *
+     * @var array<int, int>
+     */
+    private static array $missionsClaimedInThisProcess = [];
+
+    /**
      * Process a fleet mission.
      *
      * @param FleetMission $mission
@@ -696,26 +714,135 @@ class FleetMissionService
             return;
         }
 
-        // **Un missile face a un corps tenu suit la matrice** : il frappe pendant le ralliement s'il
-        // est parti avant l'ouverture, il est annule sans impact s'il est parti apres, et il attend
-        // le reglement si la bataille est engagee — pour frapper ce qui reste, une seule fois.
-        if (resolve(MissileArrivalGate::class)->decide($mission) !== MissileArrivalGate::APPLY) {
+        // **Lire `processed` ne suffit pas : c'est un « je lis, puis j'agis ».** Entre la lecture
+        // ci-dessus et l'ecriture que fera le gestionnaire, un autre appelant peut lire le meme
+        // zero. Le planificateur et le chargement de page d'un joueur tournent en parallele : les
+        // deux passaient, et la meme arrivee — ou le meme retour — etait livree deux fois. Vaisseaux
+        // rendus deux fois, cargaison creditee deux fois, et depuis l'arrivee du systeme d'honneur,
+        // points d'honneur credites deux fois. **Le defaut s'est vu en production** : un joueur a
+        // recu deux fois le message « Retour d'une flotte ».
+        //
+        // La reservation, elle, est une **ecriture conditionnelle unique** : c'est la base qui
+        // arbitre, le perdant compte zero ligne et repart sans rien faire.
+        if (!$this->claimForProcessing($mission)) {
             return;
         }
 
-        $missionObject = $this->gameMissionFactory->getMissionById($mission->mission_type, [
-            'fleetMissionService' => $this,
-            'messageService' => $this->messageService,
-        ]);
+        try {
+            // **Un missile face a un corps tenu suit la matrice** : il frappe pendant le ralliement
+            // s'il est parti avant l'ouverture, il est annule sans impact s'il est parti apres, et il
+            // attend le reglement si la bataille est engagee — pour frapper ce qui reste, une seule
+            // fois.
+            if (resolve(MissileArrivalGate::class)->decide($mission) !== MissileArrivalGate::APPLY) {
+                return;
+            }
 
-        // **Sous une barriere ouverte, l'effet est mesure et inscrit au registre du combat.** Cette
-        // methode est la porte unique de toute arrivee — travailleur des pages, mise a jour d'un
-        // corps, administration, fermeture — et c'est ici, et nulle part en amont, que l'ecriture
-        // tient : la fermeture ne rejoue pas ce que le monde a deja livre, elle lit ce que l'effet a
-        // reellement change (`CombatEffectLedger`).
-        resolve(CombatEffectLedger::class)->applyUnderAnOpenBarrier($mission, function () use ($missionObject, $mission): void {
-            $missionObject->process($mission);
-        });
+            $missionObject = $this->gameMissionFactory->getMissionById($mission->mission_type, [
+                'fleetMissionService' => $this,
+                'messageService' => $this->messageService,
+            ]);
+
+            // **Sous une barriere ouverte, l'effet est mesure et inscrit au registre du combat.**
+            // Cette methode est la porte unique de toute arrivee — travailleur des pages, mise a jour
+            // d'un corps, administration, fermeture — et c'est ici, et nulle part en amont, que
+            // l'ecriture tient : la fermeture ne rejoue pas ce que le monde a deja livre, elle lit ce
+            // que l'effet a reellement change (`CombatEffectLedger`).
+            resolve(CombatEffectLedger::class)->applyUnderAnOpenBarrier($mission, function () use ($missionObject, $mission): void {
+                $missionObject->process($mission);
+            });
+        } finally {
+            $this->releaseTheProcessingClaim($mission);
+        }
+    }
+
+    /**
+     * Reserve une mission pour ce passage, ou rend faux si un autre la traite deja.
+     *
+     * ## Ce que la base arbitre, et pourquoi elle seule le peut
+     *
+     * Une seule instruction pose le jeton **et** verifie qu'il etait libre. Deux appelants
+     * simultanes executent la meme instruction ; l'un touche une ligne, l'autre zero. Aucun ordre
+     * de lecture ne peut les faire passer tous les deux, ce qu'un `if` precedant une ecriture ne
+     * peut pas garantir.
+     *
+     * Ici les deux moteurs s'accordent : la valeur ecrite differe toujours de celle relue — un
+     * horodatage remplace un nul ou un jeton perime —, donc « lignes changees » (MariaDB) et
+     * « lignes trouvees » (SQLite) valent la meme chose. Le compte reste une decision prise sur un
+     * nombre de lignes ecrites : elle appartient au bac MariaDB, et `MissionClaimRaceTest` l'y porte.
+     *
+     * ## Pourquoi le jeton est date
+     *
+     * Un processus tue ne libere rien. Un jeton eternel bloquerait la mission pour toujours : une
+     * flotte ne rentrerait jamais. Passe le delai de reprise, la mission se reprend — c'est le
+     * meme raisonnement que le bail du diffuseur de combat, et la meme tolerance assumee : deux
+     * traitements restent possibles si un passage depasse ce delai sans etre mort.
+     *
+     * ## La reentrance du meme processus est permise
+     *
+     * La fermeture d'un ralliement fait livrer ses arrivees en attente par cette meme porte, puis
+     * **exige** que le registre en garde le delta. Si un appel imbrique du meme processus se voyait
+     * refuser le jeton qu'il detient deja, la fermeture echouerait sur un combat parfaitement sain.
+     * Le compte par identifiant laisse donc passer la reentrance, et seule la trame la plus
+     * exterieure rend le jeton.
+     *
+     * @param FleetMission $mission
+     * @return bool Vrai si cette trame a le droit de traiter la mission.
+     */
+    private function claimForProcessing(FleetMission $mission): bool
+    {
+        $id = (int)$mission->id;
+
+        if (isset(self::$missionsClaimedInThisProcess[$id])) {
+            self::$missionsClaimedInThisProcess[$id]++;
+
+            return true;
+        }
+
+        $maintenant = Date::now();
+
+        $tenue = FleetMission::query()
+            ->whereKey($id)
+            ->where('processed', 0)
+            ->where(function ($requete) use ($maintenant): void {
+                $requete->whereNull('processing_claimed_at')
+                    ->orWhere('processing_claimed_at', '<=', $maintenant->copy()->subSeconds(self::PROCESSING_CLAIM_SECONDS));
+            })
+            ->update(['processing_claimed_at' => $maintenant]) === 1;
+
+        if ($tenue) {
+            self::$missionsClaimedInThisProcess[$id] = 1;
+        }
+
+        return $tenue;
+    }
+
+    /**
+     * Rend le jeton, quoi qu'il soit arrive.
+     *
+     * **Le jeton ne survit jamais au passage.** Si la mission a ete traitee, `processed` la protege
+     * desormais ; si elle ne l'a pas ete — un missile differe, une flotte qui rejoint un ralliement,
+     * une exception — un passage suivant doit pouvoir la reprendre sans attendre l'echeance.
+     *
+     * @param FleetMission $mission
+     * @return void
+     */
+    private function releaseTheProcessingClaim(FleetMission $mission): void
+    {
+        $id = (int)$mission->id;
+
+        if (!isset(self::$missionsClaimedInThisProcess[$id])) {
+            return;
+        }
+
+        self::$missionsClaimedInThisProcess[$id]--;
+
+        if (self::$missionsClaimedInThisProcess[$id] > 0) {
+            return;
+        }
+
+        unset(self::$missionsClaimedInThisProcess[$id]);
+
+        FleetMission::query()->whereKey($id)->update(['processing_claimed_at' => null]);
     }
 
     /**
