@@ -6,6 +6,7 @@ use InvalidArgumentException;
 use OGame\Combat\Allocation\ExactLootAllocationV1;
 use OGame\Combat\Allocation\LootAllocatorRegistry;
 use OGame\Combat\Enums\ActorKind;
+use OGame\Combat\Enums\HonorPolicy;
 use OGame\Combat\Enums\NoLootReason;
 use OGame\Combat\Exceptions\FalsifiedLootContext;
 use OGame\Combat\Exceptions\UnknownFingerprintSchema;
@@ -214,6 +215,38 @@ class LootContextTest extends UnitTestCase
     }
 
     /**
+     * Un fait d'honneur absent veut dire « le systeme etait eteint », et rien d'autre.
+     *
+     * C'est le contrat de compatibilite : les combats geles avant l'arrivee du systeme se relisent
+     * sans erreur, et leur taux reste celui qui avait ete calcule pour eux.
+     */
+    public function testAnAbsentHonorFactMeansTheSystemWasOff(): void
+    {
+        $faits = $this->contextFor(new LootPolicy(false, new AttackerCargoShare(0, 10)))->toFrozenFacts();
+        unset($faits['honor_policy']);
+
+        $contexte = LootContext::fromFrozenFacts($faits);
+
+        $this->assertSame(HonorPolicy::Disabled, $contexte->policy->honor, 'An absent honour fact was read as something other than a disabled system.');
+    }
+
+    /**
+     * Un fait d'honneur present mais inconnu est refuse.
+     *
+     * Present et illisible n'est pas la meme chose qu'absent : cela signalerait un etat retire du
+     * code alors que des combats s'en reclament encore.
+     */
+    public function testAnUnknownHonorFactIsRefused(): void
+    {
+        $faits = $this->contextFor(new LootPolicy(false, new AttackerCargoShare(0, 10)))->toFrozenFacts();
+        $faits['honor_policy'] = 'seigneur_de_guerre';
+
+        $this->expectException(FalsifiedLootContext::class);
+
+        LootContext::fromFrozenFacts($faits);
+    }
+
+    /**
      * Une empreinte qui ne correspond plus a ses faits est refusee.
      */
     public function testAFingerprintThatNoLongerMatchesItsFactsIsRefused(): void
@@ -228,12 +261,27 @@ class LootContextTest extends UnitTestCase
 
     /**
      * Un champ manquant arrete la relecture au lieu d'etre comble.
+     *
+     * ## L'unique exception, et pourquoi elle en est une
+     *
+     * `honor_policy` est arrive apres que des combats etaient deja geles et en vol. Pour eux,
+     * l'absence de ce fait **est** un fait : le systeme d'honneur n'existait pas, et `Disabled`
+     * etait la verite. Exiger sa presence les rendrait illisibles au reglement, et cinq echecs
+     * plus tard le combat serait mis de cote — chez de vrais joueurs, pour un champ ajoute apres
+     * coup.
+     *
+     * L'exception est donc **nommee ici** plutot que subie, et
+     * `testAnAbsentHonorFactMeansTheSystemWasOff` etablit ce qu'elle vaut.
      */
     public function testAMissingFieldIsRefusedRatherThanFilledIn(): void
     {
         $complets = $this->contextFor(new LootPolicy(false, new AttackerCargoShare(0, 10)))->toFrozenFacts();
 
         foreach (array_keys($complets) as $champ) {
+            if ($champ === 'honor_policy') {
+                continue;
+            }
+
             $ampute = $complets;
             unset($ampute[$champ]);
 

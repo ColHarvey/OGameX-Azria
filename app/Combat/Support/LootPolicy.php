@@ -38,7 +38,7 @@ final readonly class LootPolicy
      *                               pendant le combat ne doit rien modifier
      *                               retroactivement.
      * @param AttackerCargoShare $cargo Le fret offensif engage et la part des Decouvreurs.
-     * @param HonorPolicy $honor L'etat du systeme d'honneur. Desactive aujourd'hui.
+     * @param HonorPolicy $honor Le statut d'honneur du defenseur, fige avec le reste.
      * @param NoLootReason|null $noLootBecause La raison du refus, quand ce combat ne pille pas.
      * @param string $version La regle applicable, persistee avec le combat.
      */
@@ -80,11 +80,12 @@ final readonly class LootPolicy
      *
      * @param bool $targetIsInactive
      * @param AttackerCargoShare|null $cargo
+     * @param HonorPolicy $honor Le statut du defenseur : il vaut pour un pirate comme pour un joueur.
      * @return self
      */
-    public static function forNpcAttacker(bool $targetIsInactive, AttackerCargoShare|null $cargo = null): self
+    public static function forNpcAttacker(bool $targetIsInactive, AttackerCargoShare|null $cargo = null, HonorPolicy $honor = HonorPolicy::Disabled): self
     {
-        return new self($targetIsInactive, $cargo ?? AttackerCargoShare::none(), HonorPolicy::Disabled, null, NpcBaseV1::VERSION);
+        return new self($targetIsInactive, $cargo ?? AttackerCargoShare::none(), $honor, null, NpcBaseV1::VERSION);
     }
 
     /**

@@ -5,11 +5,13 @@ namespace OGame\Combat\Support;
 use Illuminate\Support\Facades\Date;
 use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Enums\ActorKind;
+use OGame\Combat\Enums\HonorPolicy;
 use OGame\Combat\Enums\NoLootReason;
 use OGame\Combat\Policies\LootPolicySelector;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\Models\Resources;
 use OGame\Services\CharacterClassService;
+use OGame\Services\HonorService;
 use OGame\Services\PlanetService;
 
 /**
@@ -110,7 +112,15 @@ final class LiveLootContextFactory
             $flottes[] = AttackerFleetSnapshot::of($attacker, $genre, $estDecouvreur, $libre);
         }
 
-        $politique = LootPolicySelector::select($refusal, $genres, $inactive, $fret);
+        // **Le statut d'honneur se lit sur le defenseur, ici et pas plus tard.** Une bataille dure ;
+        // s'il devenait bandit pendant qu'elle se joue, le taux deja fige ne doit pas bouger. Le
+        // proprietaire absent — un corps sans joueur — ne vaut aucun statut.
+        $proprietaire = $target->getPlayer();
+        $honneur = $proprietaire === null
+            ? HonorPolicy::Disabled
+            : resolve(HonorService::class)->lootPolicyAgainst($proprietaire->getUser());
+
+        $politique = LootPolicySelector::select($refusal, $genres, $inactive, $fret, $honneur);
 
         return LootContext::fromObservedFacts(
             $politique,

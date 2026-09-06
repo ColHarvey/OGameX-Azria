@@ -74,6 +74,37 @@ final readonly class LootContext
     }
 
     /**
+     * Le statut d'honneur que ces faits portent, ou celui qui avait cours quand ils n'en portaient pas.
+     *
+     * **Absent ne veut pas dire inconnu.** Avant que le systeme d'honneur existe, aucun combat n'en
+     * gelait : `Disabled` etait la verite de ces combats-la, et la restituer n'invente rien. C'est
+     * ce qui permet de ne pas toucher au schema de l'empreinte, donc de ne casser aucune bataille
+     * en vol au moment du deploiement.
+     *
+     * Une valeur **presente mais inconnue** est en revanche refusee : elle signalerait un etat
+     * retire du code alors que des combats s'en reclamaient encore, exactement comme pour les
+     * versions de regle.
+     *
+     * @param array<string, mixed> $facts
+     * @return HonorPolicy
+     */
+    private static function honorFact(array $facts): HonorPolicy
+    {
+        if (!array_key_exists('honor_policy', $facts) || $facts['honor_policy'] === null) {
+            return HonorPolicy::Disabled;
+        }
+
+        $valeur = $facts['honor_policy'];
+
+        if (!is_string($valeur)) {
+            throw FalsifiedLootContext::becauseTheFieldIsMissingOrMalformed('honor_policy');
+        }
+
+        return HonorPolicy::tryFrom($valeur)
+            ?? throw FalsifiedLootContext::becauseTheFieldIsMissingOrMalformed('honor_policy');
+    }
+
+    /**
      * Un contexte bati sur des faits qui viennent d'etre observes.
      *
      * @param LootPolicy $policy La regle choisie par le selecteur, avec ses faits.
@@ -152,10 +183,11 @@ final readonly class LootContext
         $politique = new LootPolicy(
             self::boolFact($facts, 'target_is_inactive'),
             new AttackerCargoShare(self::intFact($facts, 'discoverer_cargo'), self::intFact($facts, 'total_cargo')),
-            // L honneur n a qu un seul etat aujourd hui, et il n est donc pas persiste. Le jour ou
-            // ce systeme existera, il devra entrer dans les faits geles comme les autres : le
-            // reconstruire par defaut reviendrait alors a inventer un fait.
-            HonorPolicy::Disabled,
+            // **L'absence de cette clef est un fait, pas un trou.** Les combats geles avant que le
+            // systeme d'honneur existe n'en portaient aucun, et `Disabled` etait alors la verite :
+            // la lire ainsi ne reconstruit rien, elle restitue ce qui avait cours. Le schema de
+            // l'empreinte ne bouge donc pas, et aucun combat en vol ne devient illisible.
+            self::honorFact($facts),
             $refus,
             $versionRegle,
         );
@@ -205,6 +237,10 @@ final readonly class LootContext
             'observed_at' => $this->observedAt,
             'snapshot_fingerprint' => $this->snapshotFingerprint,
             'no_loot_because' => $this->noLootBecause?->value,
+            // **Le statut d'honneur du defenseur, tel qu'il etait a la photographie.** Une bataille
+            // dure ; le defenseur peut devenir bandit entre-temps, et le taux deja fige ne doit pas
+            // bouger pour autant.
+            'honor_policy' => $this->policy->honor->value,
             'snapshot' => $this->snapshot,
         ];
     }

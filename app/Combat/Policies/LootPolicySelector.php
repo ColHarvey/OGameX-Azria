@@ -3,6 +3,7 @@
 namespace OGame\Combat\Policies;
 
 use OGame\Combat\Enums\ActorKind;
+use OGame\Combat\Enums\HonorPolicy;
 use OGame\Combat\Enums\NoLootReason;
 use OGame\Combat\Enums\UnsupportedSideReason;
 use OGame\Combat\Exceptions\UnsupportedActorSide;
@@ -40,6 +41,7 @@ final class LootPolicySelector
      * @param array<int, ActorKind> $actorKinds Le genre de chaque attaquant, par identifiant de mission.
      * @param bool $targetIsInactive
      * @param AttackerCargoShare $cargo
+     * @param HonorPolicy $honor Le statut d'honneur du **defenseur**, fige a cet instant.
      * @return LootPolicy
      */
     public static function select(
@@ -47,6 +49,7 @@ final class LootPolicySelector
         array $actorKinds,
         bool $targetIsInactive,
         AttackerCargoShare $cargo,
+        HonorPolicy $honor = HonorPolicy::Disabled,
     ): LootPolicy {
         // 1. La permission de la mission prime sur tout le reste.
         if ($missionRefusal !== null) {
@@ -60,11 +63,14 @@ final class LootPolicySelector
             $genre = reset($genres);
 
             if ($genre === ActorKind::Player->value) {
-                return new LootPolicy($targetIsInactive, $cargo);
+                return new LootPolicy($targetIsInactive, $cargo, $honor);
             }
 
             if ($genre === ActorKind::Npc->value) {
-                return LootPolicy::forNpcAttacker($targetIsInactive, $cargo);
+                // **Un pirate profite du statut de sa cible comme un joueur.** Le bandit est une
+                // propriete du defenseur, pas une faveur faite a l'attaquant : la lui refuser
+                // rendrait une base hostile plus clemente qu'un joueur, ce qui n'a aucun sens.
+                return LootPolicy::forNpcAttacker($targetIsInactive, $cargo, $honor);
             }
         }
 
