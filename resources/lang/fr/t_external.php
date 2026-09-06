@@ -91,7 +91,7 @@ return [
         'dark_matter_gift' => 'Vous recevrez Dark Matter en récompense pour avoir confirmé votre adresse e-mail.',
         'aks_on' => 'Système de combat de l\'Alliance activé',
         'planet_fields' => 'Le nombre maximum d\'emplacements de construction a été augmenté.',
-        'wreckfield' => 'Space Dock activé : certains vaisseaux détruits peuvent être restaurés à l\'aide du Space Dock.',
+        'wreckfield' => 'Dock spatial activé : certains vaisseaux détruits peuvent être restaurés à l\'aide du Dock spatial.',
         'universe_big' => 'Nombre de galaxies dans l\'univers',
     ],
 ];

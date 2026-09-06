@@ -3,17 +3,17 @@
 return [
     'space_dock' => [
         'name' => 'Quai spatial',
-        'description' => 'Les épaves peuvent être réparées dans le Space Dock.',
-        'description_long' => 'Le Space Dock offre la possibilité de réparer les vaisseaux détruits au combat et qui ont laissé des épaves. Le temps de réparation dure au maximum 12 heures, mais il faut au moins 30 minutes jusqu\'à ce que les vaisseaux puissent être remis en service.
+        'description' => 'Les épaves peuvent être réparées dans le Dock spatial.',
+        'description_long' => 'Le Dock spatial offre la possibilité de réparer les vaisseaux détruits au combat et qui ont laissé des épaves. Le temps de réparation dure au maximum 12 heures, mais il faut au moins 30 minutes jusqu\'à ce que les vaisseaux puissent être remis en service.
 
-Puisque le Space Dock flotte en orbite, il ne nécessite pas de champ planétaire.',
+Puisque le Dock spatial flotte en orbite, il ne nécessite pas de champ planétaire.',
         'requirements' => 'Nécessite le niveau 2 du chantier spatial',
         'field_consumption' => 'Ne consomme pas les champs planétaires (flotte en orbite)',
         'wreck_field_section' => 'Champ d\'épaves',
         'no_wreck_field' => 'Aucun champ d\'épave disponible à cet endroit.',
         'wreck_field_info' => 'Un champ d\'épaves est disponible contenant des vaisseaux réparables.',
         'ships_available' => 'Vaisseaux disponibles pour réparation : {count}',
-        'repair_capacity' => 'Capacité de réparation basée sur le niveau du Space Dock {level}',
+        'repair_capacity' => 'Capacité de réparation basée sur le niveau du Dock spatial {level}',
         'start_repair' => 'Commencer à réparer le champ d\'épave',
         'repair_in_progress' => 'Réparations en cours',
         'repair_completed' => 'Réparations terminées',
@@ -28,8 +28,8 @@ Puisque le Space Dock flotte en orbite, il ne nécessite pas de champ planétair
             'capacity_increase' => 'Le nombre maximum de vaisseaux réparables a augmenté',
         ],
         'status' => [
-            'no_dock' => 'Space Dock requis pour réparer les champs d\'épaves',
-            'level_too_low' => 'Space Dock niveau 1 requis pour réparer les champs d\'épaves',
+            'no_dock' => 'Dock spatial requis pour réparer les champs d\'épaves',
+            'level_too_low' => 'Dock spatial niveau 1 requis pour réparer les champs d\'épaves',
             'no_wreck_field' => 'Aucun champ d\'épave disponible',
             'repairing' => 'Actuellement en réparation du champ d\'épave',
             'ready_to_deploy' => 'Réparations terminées, vaisseaux prêts à être déployés',

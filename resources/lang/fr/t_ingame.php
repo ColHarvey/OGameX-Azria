@@ -533,7 +533,7 @@ return [
         'battle_delete' => 'supprimer',
         'battle_favourite' => 'marquer comme favori',
         'battle_hamill' => 'Un chasseur léger a détruit une étoile de la mort avant le début de la bataille !',
-        'battle_retreat_tooltip' => 'Veuillez noter que les Deathstars, les sondes d\'espionnage, les satellites solaires et toute flotte en mission de défense ACS ne peuvent pas fuir. Les retraites tactiques sont également désactivées dans les batailles honorables. Une retraite peut également avoir été désactivée manuellement ou empêchée par un manque de deutérium. Les bandits et les joueurs avec plus de 500 000 points ne reculent jamais.',
+        'battle_retreat_tooltip' => 'Veuillez noter que les Étoiles de la mort, les sondes d\'espionnage, les satellites solaires et toute flotte en mission de défense ACS ne peuvent pas fuir. Les retraites tactiques sont également désactivées dans les batailles honorables. Une retraite peut également avoir été désactivée manuellement ou empêchée par un manque de deutérium. Les bandits et les joueurs avec plus de 500 000 points ne reculent jamais.',
         'battle_no_flee' => 'La flotte en défense n\'a pas fui.',
         'battle_fled' => 'La flotte en défense a fui le combat.',
         'battle_flee_deuterium' => 'Coût en deutérium : :amount',
