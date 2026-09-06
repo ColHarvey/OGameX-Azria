@@ -115,9 +115,17 @@
                                     </a>
                                     @endif
                                 </div>
-                                <div class="honorScore">
-                                    (<span class="undermark tooltip js_hideTipOnMobile" title="{{ __('t_ingame.highscore.honour_points') }}">0</span>)
-                                </div>
+                                @if (($highscorePlayer['honor_points'] ?? null) !== null)
+                                    @php
+                                        // **La couleur suit le signe**, comme partout ailleurs dans le jeu : un
+                                        // total negatif se lit en rouge, un positif en vert, et zero reste neutre.
+                                        $honneur = (int)$highscorePlayer['honor_points'];
+                                        $classeHonneur = $honneur < 0 ? 'undermark' : ($honneur > 0 ? 'middlemark' : '');
+                                    @endphp
+                                    <div class="honorScore">
+                                        (<span class="{{ $classeHonneur }} tooltip js_hideTipOnMobile" title="{{ __('t_ingame.highscore.honour_points') }}">{{ \OGame\Facades\AppUtil::formatNumber($honneur) }}</span>)
+                                    </div>
+                                @endif
                             </div>
                         </div>
                     </td>

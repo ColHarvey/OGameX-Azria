@@ -21,7 +21,7 @@
         textContent[6] = "{{ __('t_ingame.overview.points') }}:";
         textContent[7] = "<a href='{{ route('highscore.index')  }}'>{{ $user_points }} ({{ __('t_ingame.overview.score_place') }} {!! $user_rank !!} {{ __('t_ingame.overview.score_of') }} {!! $max_rank !!})<\/a>";
         textContent[8] = "{{ __('t_ingame.overview.honour_points') }}:";
-        textContent[9] = "0";
+        textContent[9] = "{{ \OGame\Facades\AppUtil::formatNumber($user_honor_points) }}";
 
         var textDestination = [];
         textDestination[0] = "diameterField";

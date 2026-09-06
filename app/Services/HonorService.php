@@ -2,6 +2,7 @@
 
 namespace OGame\Services;
 
+use Illuminate\Support\Facades\DB;
 use OGame\Combat\Enums\HonorPolicy;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Highscore;
@@ -163,6 +164,103 @@ class HonorService
         }
 
         return $total;
+    }
+
+    /**
+     * La valeur des unites que l'attaquant a reellement detruites.
+     *
+     * **Deux exclusions, et chacune a sa raison.** Les vaisseaux civils ne comptent pas : detruire
+     * des transporteurs et des sondes n'est pas un fait d'armes, et les compter ferait de la chasse
+     * aux cargos la meilleure source d'honneur du jeu. Les defenses reconstruites non plus : le
+     * defenseur les a retrouvees, elles n'ont pas ete perdues.
+     *
+     * @param UnitCollection $lost Ce que le defenseur a perdu.
+     * @param UnitCollection $rebuilt Ce qu'il a reconstruit apres la bataille.
+     * @return int
+     */
+    public function destroyedValueOf(UnitCollection $lost, UnitCollection $rebuilt): int
+    {
+        $civils = [];
+
+        foreach (ObjectService::getCivilShipObjects() as $objet) {
+            $civils[$objet->machine_name] = true;
+        }
+
+        $total = 0;
+
+        foreach ($lost->units as $unit) {
+            $nom = $unit->unitObject->machine_name;
+
+            if (isset($civils[$nom])) {
+                continue;
+            }
+
+            $detruites = $unit->amount - $rebuilt->getAmountByMachineName($nom);
+
+            if ($detruites <= 0) {
+                continue;
+            }
+
+            $total += (int)floor(ObjectService::getObjectRawPrice($nom)->sum()) * $detruites;
+        }
+
+        return $total;
+    }
+
+    /**
+     * Ce que cette bataille change a l'honneur de l'attaquant.
+     *
+     * **Seul l'attaquant bouge.** L'honneur mesure ce qu'un joueur choisit d'attaquer ; celui qui
+     * subit une attaque n'a rien decide, et le faire varier punirait la victime. Un joueur qui
+     * n'attaque jamais reste donc a zero, et c'est le comportement d'OGame.
+     *
+     * Contre une base pilotee par le serveur, il peut gagner mais **jamais perdre** (decision de
+     * Keven) : recompenser la chasse aux pirates sans transformer les petites bases en piege.
+     *
+     * @param int $destroyedValue
+     * @param int $attackerMilitary
+     * @param int $defenderMilitary
+     * @param bool $defenderIsServerDriven Le defenseur est-il un PNJ ou le compte systeme ?
+     * @return int Positif, negatif ou nul.
+     */
+    public function attackerOutcome(
+        int $destroyedValue,
+        int $attackerMilitary,
+        int $defenderMilitary,
+        bool $defenderIsServerDriven = false,
+    ): int {
+        if (!$this->settings->honorSystemEnabled()) {
+            return 0;
+        }
+
+        $ampleur = $this->magnitudeOf($destroyedValue);
+
+        if ($ampleur === 0) {
+            return 0;
+        }
+
+        if ($this->isHonorableFight($attackerMilitary, $defenderMilitary)) {
+            return $ampleur;
+        }
+
+        return $defenderIsServerDriven ? 0 : -$ampleur;
+    }
+
+    /**
+     * Ecrit le changement sur la ligne du joueur, sans jamais relire ce qu'il vient d'ecrire.
+     *
+     * **Une addition faite en base**, comme le credit de ressources : deux batailles qui se reglent
+     * dans la meme seconde ne doivent pas s'effacer l'une l'autre. Un zero n'ecrit rien.
+     */
+    public function credit(int $userId, int $change): void
+    {
+        if ($change === 0) {
+            return;
+        }
+
+        User::query()->whereKey($userId)->update([
+            'honor_points' => DB::raw('honor_points + ' . $change),
+        ]);
     }
 
     /**

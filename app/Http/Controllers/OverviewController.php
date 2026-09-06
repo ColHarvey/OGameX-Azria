@@ -11,6 +11,7 @@ use OGame\Models\Highscore;
 use OGame\Services\BuildingQueueService;
 use OGame\Services\FleetMissionService;
 use OGame\Services\HighscoreService;
+use OGame\Services\HonorService;
 use OGame\Services\Npc\NpcThreatPanelService;
 use OGame\Services\PlanetMoveService;
 use OGame\Services\PlayerService;
@@ -124,7 +125,7 @@ class OverviewController extends OGameController
             'user_points' => $user_score,
             'user_rank' => $user_rank,
             'max_rank' => $max_ranks,
-            'user_honor_points' => 0, // @TODO
+            'user_honor_points' => resolve(HonorService::class)->pointsOf($player->getUser()),
             'build_active' => $build_active,
             'building_count' => $player->planets->current()->getBuildingCount(),
             'max_building_count' => $player->planets->current()->getPlanetFieldMax(),

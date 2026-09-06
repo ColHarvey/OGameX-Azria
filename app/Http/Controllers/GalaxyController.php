@@ -20,6 +20,7 @@ use OGame\Models\User;
 use OGame\Services\BuddyService;
 use OGame\Services\CharacterClassService;
 use OGame\Services\DebrisFieldService;
+use OGame\Services\HonorService;
 use OGame\Services\PhalanxService;
 use OGame\Services\PlanetMoveService;
 use OGame\Services\PlanetService;
@@ -32,6 +33,11 @@ class GalaxyController extends OGameController
      * @var PlayerService
      */
     private PlayerService $playerService;
+
+    /**
+     * Le service d honneur, garde pour la duree de la requete.
+     */
+    private HonorService|null $honorService = null;
 
     /**
      * @var PlanetServiceFactory
@@ -287,6 +293,17 @@ class GalaxyController extends OGameController
                 'name' => $moon->getPlanetName(),
             ],
         ];
+    }
+
+    /**
+     * Le service d'honneur, resolu une fois par requete.
+     *
+     * La Galaxie interroge quinze positions : resoudre le service a chaque ligne le reconstruirait
+     * quinze fois pour rien.
+     */
+    private function honorService(): HonorService
+    {
+        return $this->honorService ??= resolve(HonorService::class);
     }
 
     /**
@@ -613,9 +630,11 @@ class GalaxyController extends OGameController
             'isAllianceMember' => $alliance !== null && $player->getUser()->alliance_id === $this->playerService->getUser()->alliance_id,
 
             'isBanned' => $player->isBanned(),
-            // Not implemented yet:
-            //'isHonorableTarget' => $player->isHonorableTarget(),
-            //'isOutlaw' => $player->isOutlaw(),
+            // **Le statut d'honneur de ce joueur-la**, tel que la Galaxie doit le montrer. Les deux
+            // lignes etaient ecrites et commentees depuis l'origine : il manquait un service pour
+            // les rendre. Quand le systeme est eteint, les deux valent faux et rien ne change.
+            'isHonorableTarget' => $this->honorService()->isHonorableTarget($player->getUser()),
+            'isOutlaw' => $this->honorService()->isOutlaw($player->getUser()),
         ];
     }
 
@@ -799,7 +818,9 @@ class GalaxyController extends OGameController
                 'galaxyContent' => $galaxyContent,
                 'hasAdmiral' => $player->hasAdmiral(),
                 'hasBirthdayPlanet' => false,
-                'isOutlaw' => false,
+                // **Celui-ci designe le joueur qui regarde**, pas ceux qu'il voit : le navigateur
+                // s'en sert pour l'avertir qu'il est lui-meme hors-la-loi.
+                'isOutlaw' => $this->honorService()->isOutlaw($player->getUser()),
                 'maximumFleetSlots' => $maximumFleetSlots,
                 'playerId' => $player->getId(),
                 'settingsProbeCount' => 3,

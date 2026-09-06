@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use Illuminate\Support\Facades\DB;
 use OGame\Combat\Enums\HonorPolicy;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Highscore;
@@ -219,6 +220,119 @@ class HonorSystemTest extends AccountTestCase
 
         $this->assertSame(4_242, $this->honneur->militaryPointsOf($this->currentUserId));
         $this->assertSame(0, $this->honneur->militaryPointsOf(9_999_999), 'A player the highscore has never seen was given points.');
+    }
+
+    /**
+     * Un combat equilibre rapporte, un combat desequilibre coute.
+     *
+     * C'est la regle entiere en un essai : la meme destruction change de signe selon l'ecart des
+     * forces. Un temoin qui ne verifierait que le gain laisserait passer un systeme incapable de
+     * punir, donc incapable de produire un seul bandit.
+     */
+    public function testTheSameDestructionGainsOrCostsDependingOnTheGap(): void
+    {
+        // Un million de ressources detruites : 251 points, quel que soit le sens.
+        $this->assertSame(251, $this->honneur->attackerOutcome(1_000_000, 1_000, 1_000), 'A balanced fight paid nothing.');
+        $this->assertSame(-251, $this->honneur->attackerOutcome(1_000_000, 1_000, 100), 'Crushing a far weaker player cost nothing.');
+    }
+
+    /**
+     * Contre une base pilotee par le serveur, on gagne mais on ne perd jamais.
+     *
+     * Decision de Keven : recompenser la chasse aux pirates sans faire des petites bases un piege.
+     * L'asymetrie est volontaire, et c'est pourquoi les deux sens sont epingles ici.
+     */
+    public function testAgainstAServerDrivenBaseOneGainsButNeverLoses(): void
+    {
+        $this->assertSame(
+            251,
+            $this->honneur->attackerOutcome(1_000_000, 1_000, 1_000, defenderIsServerDriven: true),
+            'A balanced fight against a pirate base paid nothing.'
+        );
+
+        $this->assertSame(
+            0,
+            $this->honneur->attackerOutcome(1_000_000, 1_000, 100, defenderIsServerDriven: true),
+            'Crushing a small pirate base cost honour, which was explicitly ruled out.'
+        );
+
+        // **Le meme combat contre un joueur, lui, coute.** Sans cette moitie, l'essai passerait
+        // meme si le drapeau ne servait a rien.
+        $this->assertSame(-251, $this->honneur->attackerOutcome(1_000_000, 1_000, 100), 'The exemption leaked to human defenders.');
+    }
+
+    /**
+     * Rien de detruit, rien de change — et l'interrupteur eteint neutralise tout.
+     */
+    public function testNothingDestroyedAndASleepingSystemChangeNothing(): void
+    {
+        $this->assertSame(0, $this->honneur->attackerOutcome(0, 1_000, 1_000));
+        $this->assertSame(0, $this->honneur->attackerOutcome(500, 1_000, 1_000), 'A skirmish below one point still moved the total.');
+
+        $this->reglages->set('honor_system_enabled', '0');
+        $this->assertSame(0, $this->honneur->attackerOutcome(1_000_000, 1_000, 1_000), 'A disabled system still handed out points.');
+    }
+
+    /**
+     * Les civils et les defenses reconstruites ne comptent pas.
+     *
+     * ## Pourquoi ces deux exclusions comptent
+     *
+     * Sans la premiere, la chasse aux transporteurs serait la meilleure source d'honneur du jeu.
+     * Sans la seconde, un defenseur qui retrouve ses tourelles serait compte comme les ayant
+     * perdues. Les deux se verifient ensemble, sur une meme perte melangee.
+     */
+    public function testCivilShipsAndRebuiltDefencesDoNotCount(): void
+    {
+        $chasseur = ObjectService::getUnitObjectByMachineName('light_fighter');
+        $cargo = ObjectService::getUnitObjectByMachineName('small_cargo');
+        $lanceur = ObjectService::getUnitObjectByMachineName('rocket_launcher');
+
+        $perdues = new UnitCollection();
+        $perdues->addUnit($chasseur, 10);
+        $perdues->addUnit($cargo, 10);
+        $perdues->addUnit($lanceur, 10);
+
+        $reconstruites = new UnitCollection();
+        $reconstruites->addUnit($lanceur, 7);
+
+        $attendu = (int)floor(ObjectService::getObjectRawPrice('light_fighter')->sum()) * 10
+            + (int)floor(ObjectService::getObjectRawPrice('rocket_launcher')->sum()) * 3;
+
+        $this->assertSame(
+            $attendu,
+            $this->honneur->destroyedValueOf($perdues, $reconstruites),
+            'The valuation counted civil ships, or defences the defender got back.'
+        );
+    }
+
+    /**
+     * Le credit s'ajoute en base, il ne remplace pas ce qu'il a lu.
+     *
+     * Deux batailles reglees dans la meme seconde ne doivent pas s'effacer l'une l'autre : c'est la
+     * meme lecon que le credit de ressources et celui des missiles.
+     */
+    public function testTheCreditAddsInTheDatabaseInsteadOfOverwriting(): void
+    {
+        $this->honneur->credit($this->currentUserId, 100);
+        $this->honneur->credit($this->currentUserId, -30);
+
+        $this->assertSame(
+            70,
+            (int)DB::table('users')->where('id', $this->currentUserId)->value('honor_points'),
+            'The two credits did not add up: one overwrote the other.'
+        );
+
+        // Un changement nul n'ecrit rien du tout.
+        $ecritures = 0;
+        DB::listen(function ($requete) use (&$ecritures): void {
+            if (str_contains(strtolower($requete->sql), 'update') && str_contains($requete->sql, 'honor_points')) {
+                $ecritures++;
+            }
+        });
+
+        $this->honneur->credit($this->currentUserId, 0);
+        $this->assertSame(0, $ecritures, 'A zero change still wrote to the row.');
     }
 
     private function aUserWithHonor(int $points): User

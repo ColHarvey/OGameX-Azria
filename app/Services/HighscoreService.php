@@ -373,6 +373,7 @@ class HighscoreService
                     'planet_coords' => $mainPlanet->getPlanetCoordinates(),
                     'rank' => $playerScore->{$this->highscoreType->name.'_rank'},
                     'is_admin' => $playerService->isAdmin(),
+                    'honor_points' => resolve(HonorService::class)->pointsOf($playerScore->player),
                     'alliance_tag' => $allianceTag,
                     'alliance_id' => $allianceId,
                     'total_ships' => $totalShips,
@@ -442,6 +443,9 @@ class HighscoreService
                 // inchanges. La faction montre ou elle se situe sans occuper une place.
                 'rank' => null,
                 'is_admin' => false,
+                // Une faction n'est pas un joueur : elle n'a pas d'honneur, et en montrer un
+                // laisserait croire que la ligne designe quelqu'un.
+                'honor_points' => null,
                 'is_faction' => true,
                 'faction_type' => $type,
                 'faction_bases' => $bases,
