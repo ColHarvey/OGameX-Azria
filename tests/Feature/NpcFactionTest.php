@@ -5,8 +5,11 @@ namespace Tests\Feature;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use OGame\GameConstants\UniverseConstants;
 use OGame\Models\NpcThreat;
+use OGame\Models\Planet;
 use OGame\Models\Planet\Coordinate;
+use OGame\Models\User;
 use OGame\Services\Npc\NpcBaseService;
 use OGame\Services\Npc\NpcDestructionService;
 use OGame\Services\Npc\NpcPopulationService;
@@ -265,40 +268,183 @@ class NpcFactionTest extends AccountTestCase
      * qu'aucun humain n'habitait pres du systeme 470 — un ordre d'execution suffisait a le faire
      * mentir, dans un sens comme dans l'autre.
      */
-    public function testANewBaseKeepsItsDistanceFromHumanPlanets(): void
+    /**
+     * Les systemes d'une galaxie ou vit au moins une planete humaine.
+     *
+     * @return array<int, int>
+     */
+    private function humanSystemsIn(int $galaxy): array
     {
-        // Trois systemes et non quinze : cet univers de test compte pres de deux mille
-        // planetes reparties sur la quasi-totalite des systemes, et aucune position n y
-        // serait a quinze systemes de tout humain. C est la regle qui est verifiee ici,
-        // pas le chiffre de production.
-        $this->settings->set('npc_seed_min_distance', '3');
-        $this->settings->set('npc_seed_max_distance', '400');
-
-        $coordonnee = resolve(NpcBaseService::class)->findSpawnCoordinate(2000);
-
-        $this->assertNotNull($coordonnee, 'The universe offered no position at all: the rule could not be observed.');
-
-        // Les corps detruits ne comptent pas : le placement les ignore a bon droit, et un ordre de
-        // passage qui en laisse dans la galaxie ne doit pas faire mentir l'essai.
-        $humans = DB::table('planets')
+        return DB::table('planets')
             ->join('users', 'users.id', '=', 'planets.user_id')
             ->where('users.is_npc', false)
             ->where('planets.destroyed', 0)
-            ->where('planets.galaxy', $coordonnee->galaxy)
-            ->select('planets.system')
-            ->get();
+            ->where('planets.galaxy', $galaxy)
+            ->distinct()
+            ->pluck('planets.system')
+            ->map(fn ($systeme): int => (int)$systeme)
+            ->all();
+    }
 
-        // **Une precondition, sinon l'essai passerait sur une galaxie vide.** La regle ne dit rien
-        // la ou il n'y a personne a tenir a distance.
-        $this->assertNotSame(0, $humans->count(), 'No human planet shares the chosen galaxy: the minimum distance would hold trivially.');
+    /**
+     * L'ecart au systeme humain le plus proche, ou `null` si la galaxie n'en compte aucun.
+     *
+     * Un pliage explicite plutot que `min()` : sur une liste vide, `min()` n'a pas de reponse, et
+     * l'absence d'humain est justement le cas que l'essai doit distinguer d'un ecart nul.
+     *
+     * @param array<int, int> $humanSystems
+     */
+    private function closestHumanTo(array $humanSystems, int $system): int|null
+    {
+        $closest = null;
 
-        foreach ($humans as $human) {
-            $this->assertGreaterThanOrEqual(
-                3,
-                abs((int)$human->system - $coordonnee->system),
-                'A base was placed closer to a human planet than the configured minimum distance.'
-            );
+        foreach ($humanSystems as $humain) {
+            $ecart = abs($humain - $system);
+
+            if ($closest === null || $ecart < $closest) {
+                $closest = $ecart;
+            }
         }
+
+        return $closest;
+    }
+
+    /**
+     * Les systemes libres de cette galaxie qu'un placement pourrait retenir.
+     *
+     * C'est une precondition, pas une seconde implantation de la regle : elle etablit qu'une
+     * position existe, et l'essai verifie ensuite celle que le service a effectivement choisie. Un
+     * systeme deja occupe est ecarte sans regarder ses cases libres — plus severe qu'il ne faut,
+     * donc sur du bon cote.
+     *
+     * @param array<int, int> $humanSystems
+     * @return array<int, int>
+     */
+    private function systemsThatSatisfyTheRule(int $galaxy, array $humanSystems, int $minDistance, int $maxDistance): array
+    {
+        $occupied = DB::table('planets')
+            ->where('galaxy', $galaxy)
+            ->distinct()
+            ->pluck('system')
+            ->map(fn ($systeme): int => (int)$systeme)
+            ->all();
+
+        $possible = [];
+
+        foreach (range(UniverseConstants::MIN_SYSTEM, UniverseConstants::MAX_SYSTEM_COUNT) as $systeme) {
+            if (in_array($systeme, $occupied, true)) {
+                continue;
+            }
+
+            $closest = $this->closestHumanTo($humanSystems, $systeme);
+
+            if ($closest !== null && $closest >= $minDistance && $closest <= $maxDistance) {
+                $possible[] = $systeme;
+            }
+        }
+
+        return $possible;
+    }
+
+    public function testANewBaseKeepsItsDistanceFromHumanPlanets(): void
+    {
+        // Trois systemes et non quinze : cet univers de test compte pres de deux mille planetes
+        // reparties sur la quasi-totalite des systemes, et aucune position n'y serait a quinze
+        // systemes de tout humain. C'est la regle qui est verifiee ici, pas le chiffre de
+        // production.
+        $this->settings->set('npc_seed_min_distance', '3');
+        $this->settings->set('npc_seed_max_distance', '400');
+
+        // **L'essai fabrique le monde dont la regle a besoin, il ne l'espere pas.**
+        //
+        // La recherche tire une coordonnee au hasard et refuse deux mondes : une galaxie sans aucun
+        // humain — la base y serait injoignable — et une galaxie ou chaque case libre tient a moins
+        // de trois systemes d'un joueur. Or l'univers de banc se remplit systeme par systeme depuis
+        // la galaxie 1, et son front avance avec le nombre d'essais : selon les classes voisines,
+        // toutes les galaxies pouvaient se trouver soit pleines soit vides, et la recherche ne rien
+        // rendre du tout sans que la regle y soit pour rien. C'est ce qui a fait rougir la CI.
+        //
+        // Un peigne d'humains sur la moitie basse de la derniere galaxie repond aux deux besoins :
+        //   - il **garantit une position** : au-dessus de la derniere dent, deux cents systemes
+        //     libres tiennent l'ecart minimal sans depasser l'ecart maximal ;
+        //   - il **rend le faux observable** : sous cette dent, presque chaque case libre touche un
+        //     humain, donc une distance minimale qui ne refuserait plus rien ramenerait une case
+        //     interdite. Sans lui la mutation survit — un univers clairseme place loin de tous par
+        //     accident, et le juste et le faux coincident.
+        //
+        // Il est retire a la fin : la base d'un processus sert aux classes suivantes, et c'est
+        // exactement ce genre de residu qui a produit l'echec qu'on ferme ici.
+        $galaxie = $this->settings->numberOfGalaxies();
+        $peigne = $this->plantACombOfHumanPlanets($galaxie, range(1, 299, 2));
+
+        try {
+            $this->assertNotSame(
+                [],
+                $this->systemsThatSatisfyTheRule($galaxie, $this->humanSystemsIn($galaxie), 3, 400),
+                'The prepared galaxy offers no position at the required distance: a null coordinate would say nothing about the rule.'
+            );
+
+            // Cinq tirages : la recherche est aleatoire, et une seule reponse juste peut l'etre par
+            // chance. Chacun est verifie contre la galaxie qu'il a choisie.
+            for ($tirage = 0; $tirage < 5; $tirage++) {
+                $coordonnee = resolve(NpcBaseService::class)->findSpawnCoordinate(2000);
+
+                $this->assertNotNull($coordonnee, 'The universe offered no position at all: the rule could not be observed.');
+
+                // Les corps detruits ne comptent pas : le placement les ignore a bon droit, et un
+                // ordre de passage qui en laisse dans la galaxie ne doit pas faire mentir l'essai.
+                $ecart = $this->closestHumanTo($this->humanSystemsIn($coordonnee->galaxy), $coordonnee->system);
+
+                // **Une precondition, sinon l'essai passerait sur une galaxie vide.** La regle ne
+                // dit rien la ou il n'y a personne a tenir a distance.
+                $this->assertNotNull($ecart, 'No human planet shares the chosen galaxy: the minimum distance would hold trivially.');
+
+                $this->assertGreaterThanOrEqual(
+                    3,
+                    $ecart,
+                    'A base was placed closer to a human planet than the configured minimum distance, at ' . $coordonnee->asString() . '.'
+                );
+            }
+        } finally {
+            DB::table('planets')->whereIn('id', $peigne)->delete();
+        }
+    }
+
+    /**
+     * Pose une planete humaine sur chacun de ces systemes, et rend les identifiants poses.
+     *
+     * Le proprietaire est un compte neuf : il ne reste apres coup qu'un joueur sans planete, que
+     * `humanPlanetCoordinates()` ne voit pas. Une case deja occupee est laissee telle quelle — elle
+     * appartient a un voisin, et la dent suivante suffit au peigne.
+     *
+     * @param array<int, int> $systems
+     * @return array<int, int>
+     */
+    private function plantACombOfHumanPlanets(int $galaxy, array $systems): array
+    {
+        $owner = User::factory()->create();
+        $planted = [];
+
+        foreach ($systems as $system) {
+            $taken = DB::table('planets')
+                ->where('galaxy', $galaxy)
+                ->where('system', $system)
+                ->where('planet', 5)
+                ->exists();
+
+            if ($taken) {
+                continue;
+            }
+
+            $planted[] = (int)Planet::factory()->create([
+                'user_id' => $owner->id,
+                'galaxy' => $galaxy,
+                'system' => $system,
+                'planet' => 5,
+            ])->id;
+        }
+
+        return $planted;
     }
 
     /**
