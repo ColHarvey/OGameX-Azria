@@ -212,6 +212,62 @@ class EventMissionTest extends AccountTestCase
      * on execute les quinze requetes.
      */
     /**
+     * Chaque mission du catalogue a sa branche de mesure — aucune ne tombe dans le defaut.
+     *
+     * ## Ce que l'essai voisin ne peut pas voir
+     *
+     * `testEveryMissionMeasureRunsAgainstTheSchema` verifie que chaque mission rend un entier
+     * positif ou nul. Mais `measure()` se termine par `default => 0`, et **zero passe ce
+     * controle** : une mission ajoutee au catalogue sans sa branche s'afficherait a zero comme une
+     * mission pas encore faite, ne depasserait jamais sa cible, ne serait jamais creditee — et rien
+     * ne le dirait. Le joueur verrait une quete impossible sans savoir pourquoi.
+     *
+     * ## Pourquoi une garde de source
+     *
+     * Depuis l'exterieur, un zero « pas de branche » et un zero « rien fait aujourd'hui » sont
+     * indistinguables. Seule la lecture du code les separe. C'est le meme raisonnement que les
+     * gardes de source du socle de combat : ce qui ne s'observe pas se lit.
+     */
+    public function testEveryMissionHasItsOwnMeasureBranch(): void
+    {
+        $chemin = (new ReflectionClass(EventMissionService::class))->getFileName();
+        $this->assertIsString($chemin, 'The service has no file on disk: nothing could be read.');
+
+        $source = (string)file_get_contents($chemin);
+        $catalogue = [];
+        $mesure = [];
+
+        $this->assertSame(1, preg_match('/MISSIONS = \[(.*?)\n    \];/s', $source, $catalogue), 'The mission catalogue could not be read.');
+        $this->assertSame(1, preg_match('/private function measure\(.*?default => 0,/s', $source, $mesure), 'The measure method could not be read.');
+
+        // **Ce qui est lu est etabli avant d'etre compare.** Une capture vide donnerait une garde
+        // qui passe en ne comparant rien — le pire des essais.
+        $corpsDuCatalogue = $catalogue[1] ?? '';
+        $corpsDeLaMesure = $mesure[0] ?? '';
+        $this->assertNotSame('', $corpsDuCatalogue, 'The catalogue body came back empty.');
+        $this->assertNotSame('', $corpsDeLaMesure, 'The measure body came back empty.');
+
+        $clefs = [];
+        preg_match_all("/'([a-z_]+)' => \['tritium'/", $corpsDuCatalogue, $clefs);
+        $trouvees = $clefs[1];
+        $this->assertNotEmpty($trouvees, 'The catalogue looks empty: the guard would prove nothing.');
+
+        $manquantes = [];
+
+        foreach ($trouvees as $clef) {
+            if (preg_match("/\n            '" . preg_quote($clef, '/') . "' =>/", $corpsDeLaMesure) !== 1) {
+                $manquantes[] = $clef;
+            }
+        }
+
+        $this->assertSame(
+            [],
+            $manquantes,
+            'These missions have no measure branch, so they can never be completed nor pay their tritium: ' . implode(', ', $manquantes)
+        );
+    }
+
+    /**
      * Une mission de flotte compte son aller, jamais son retour.
      *
      * ## Le defaut, tel qu'un joueur l'a vu
