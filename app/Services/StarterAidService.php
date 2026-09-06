@@ -30,34 +30,46 @@ class StarterAidService
      * officiel, nettement plus genereux : le jour 1 d'origine couvrirait a lui seul le cout
      * des deux mines montees au niveau 10.
      *
-     * Le jour 7 offre l'etat-major pendant trois jours dans le jeu d'origine. Les officiers
-     * n'etant pas implementes, il est desactive : 'available' repassera a true le jour ou ils
-     * existeront, sans autre changement que le contenu de la recompense.
+     * **Le jour 7 donne un officier, choisi par le joueur, pour sept jours** (decision de Keven,
+     * 6 septembre 2026). Le jeu d'origine offre l'etat-major entier pendant trois jours ; ici, un
+     * seul officier mais plus longtemps, et c'est le joueur qui decide lequel. La recompense est
+     * restee fermee tant que le recrutement n'existait pas sur cet univers.
      *
-     * @var array<int, array{metal: int, crystal: int, deuterium: int, dark_matter: int, units: array<string, int>, available: bool}>
+     * Un officier deja en poste voit son terme **repousse et non remplace** : la regle vit dans
+     * `OfficerService`, partagee avec l'embauche, pour qu'offrir sept jours a qui vient d'en acheter
+     * quatre-vingt-dix ne lui en coute pas quatre-vingt-trois.
+     *
+     * Le drapeau `available` a disparu avec le dernier jour ferme : un drapeau qu'aucune valeur ne
+     * met a faux est un chemin que rien n'eprouve. Le jour ou une recompense devra etre retenue, il
+     * se reintroduira avec l'essai qui le justifie.
+     *
+     * @var array<int, array{metal: int, crystal: int, deuterium: int, dark_matter: int, units: array<string, int>, officer_days: int}>
      */
     private const REWARDS = [
-        1 => ['metal' => 3000, 'crystal' => 2000, 'deuterium' => 0, 'dark_matter' => 0, 'units' => [], 'available' => true],
-        2 => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 500, 'units' => [], 'available' => true],
-        3 => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 600, 'units' => [], 'available' => true],
-        4 => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 0, 'units' => ['rocket_launcher' => 5], 'available' => true],
-        5 => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 700, 'units' => [], 'available' => true],
-        6 => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 800, 'units' => [], 'available' => true],
-        7 => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 0, 'units' => [], 'available' => false],
+        1 => ['metal' => 3000, 'crystal' => 2000, 'deuterium' => 0, 'dark_matter' => 0, 'units' => [], 'officer_days' => 0],
+        2 => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 500, 'units' => [], 'officer_days' => 0],
+        3 => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 600, 'units' => [], 'officer_days' => 0],
+        4 => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 0, 'units' => ['rocket_launcher' => 5], 'officer_days' => 0],
+        5 => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 700, 'units' => [], 'officer_days' => 0],
+        6 => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 800, 'units' => [], 'officer_days' => 0],
+        7 => ['metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'dark_matter' => 0, 'units' => [], 'officer_days' => 7],
     ];
 
     /**
      * @param DarkMatterService $darkMatterService
+     * @param OfficerService $officerService
      */
-    public function __construct(private DarkMatterService $darkMatterService)
-    {
+    public function __construct(
+        private DarkMatterService $darkMatterService,
+        private OfficerService $officerService,
+    ) {
     }
 
     /**
      * Retourne l'etat des sept recompenses pour un joueur.
      *
      * @param PlayerService $player
-     * @return array<int, array{day: int, state: string, unlocks_in_days: int, reward: array<string, mixed>}>
+     * @return array<int, array{day: int, state: string, unlocks_in_days: int, reward: array<string, mixed>, summary: string, officer_choices: array<int, string>}>
      */
     public function getOverview(PlayerService $player): array
     {
@@ -69,8 +81,6 @@ class StarterAidService
 
             if (in_array($day, $claimed, true)) {
                 $state = 'claimed';
-            } elseif (!$reward['available']) {
-                $state = 'unavailable';
             } elseif ($this->isUnlocked($player, $day)) {
                 $state = 'claimable';
             } else {
@@ -83,6 +93,10 @@ class StarterAidService
                 'unlocks_in_days' => $this->daysUntilUnlock($player, $day),
                 'reward' => $reward,
                 'summary' => $this->describe($reward),
+                // **La liste des choix vient du service, pas de la vue.** Elle doit etre exactement
+                // celle que `claim()` acceptera : deux listes finiraient par diverger, et le joueur
+                // verrait un portrait que le serveur refuse.
+                'officer_choices' => $reward['officer_days'] > 0 ? OfficerService::OFFICERS : [],
             ];
         }
 
@@ -94,10 +108,11 @@ class StarterAidService
      *
      * @param PlayerService $player
      * @param int $day
+     * @param string|null $officer L'officier choisi, exige par les recompenses qui en donnent un.
      * @return void
-     * @throws RuntimeException Si la recompense n'est pas reclamable.
+     * @throws RuntimeException Si la recompense n'est pas reclamable, ou si le choix ne convient pas.
      */
-    public function claim(PlayerService $player, int $day): void
+    public function claim(PlayerService $player, int $day, string|null $officer = null): void
     {
         if (!isset(self::REWARDS[$day])) {
             throw new RuntimeException(__('t_ingame.rewards.error_unknown'));
@@ -105,15 +120,18 @@ class StarterAidService
 
         $reward = self::REWARDS[$day];
 
-        if (!$reward['available']) {
-            throw new RuntimeException(__('t_ingame.rewards.error_unavailable'));
-        }
-
         if (!$this->isUnlocked($player, $day)) {
             throw new RuntimeException(__('t_ingame.rewards.error_locked'));
         }
 
-        DB::transaction(function () use ($player, $day, $reward) {
+        // **Le choix se valide avant d'ecrire quoi que ce soit.** L'enregistrement de la creance est
+        // pose des l'entree dans la transaction et sa contrainte d'unicite est definitive : un choix
+        // refuse plus tard laisserait la recompense marquee prise et l'officier jamais nomme.
+        if ($reward['officer_days'] > 0 && !in_array($officer, OfficerService::OFFICERS, true)) {
+            throw new RuntimeException(__('t_ingame.rewards.error_officer_required'));
+        }
+
+        DB::transaction(function () use ($player, $day, $reward, $officer) {
             // L'enregistrement est cree AVANT de crediter : si la contrainte d'unicite rejette
             // l'insertion, la transaction est abandonnee et rien n'est distribue.
             try {
@@ -150,18 +168,29 @@ class StarterAidService
                     __('t_ingame.rewards.transaction_description', ['day' => $day])
                 );
             }
+
+            // **Un seul officier, celui que le joueur a nomme**, octroye sans contrepartie : aucune
+            // ecriture de matiere noire ne doit apparaitre dans son historique pour un cadeau.
+            // `$officer` est deja valide — la garde est au-dessus, hors transaction.
+            if ($reward['officer_days'] > 0 && $officer !== null) {
+                $this->officerService->grant($player, $officer, $reward['officer_days']);
+            }
         });
     }
 
     /**
      * Resume lisible du contenu d'une recompense, par exemple "3 000 metal, 2 000 cristal".
      *
-     * @param array{metal: int, crystal: int, deuterium: int, dark_matter: int, units: array<string, int>, available: bool} $reward
+     * @param array{metal: int, crystal: int, deuterium: int, dark_matter: int, units: array<string, int>, officer_days: int} $reward
      * @return string
      */
     public function describe(array $reward): string
     {
         $parts = [];
+
+        if ($reward['officer_days'] > 0) {
+            $parts[] = trans_choice('t_ingame.rewards.gain_officers', $reward['officer_days'], ['days' => $reward['officer_days']]);
+        }
 
         foreach (['metal', 'crystal', 'deuterium', 'dark_matter'] as $key) {
             if ($reward[$key] > 0) {

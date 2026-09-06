@@ -127,3 +127,109 @@
         animation: none;
     }
 }
+
+/*
+ * Le choix d'officier du septieme jour du pack de bienvenue.
+ *
+ * Les portraits sont **ceux de la page de recrutement**, pas un nouveau jeu d'images : la meme
+ * planche, reduite par `background-size`. Cinq tuiles de 100 px n'entrent pas dans les 330 px de la
+ * colonne de texte d'une carte ; a 48 px elles tiennent, et le joueur reconnait les visages qu'il
+ * verra ensuite dans la boutique.
+ */
+.rewardOfficerChoice {
+    margin: 8px 0 30px 0;
+}
+
+.rewardOfficerChoice-hint {
+    display: block;
+    margin-bottom: 6px;
+    color: #8fa0bd;
+}
+
+.rewardOfficerChoice-list {
+    display: flex;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.rewardOfficerChoice-option {
+    display: block;
+    cursor: pointer;
+    text-align: center;
+    padding: 2px;
+    border: 1px solid transparent;
+    border-radius: 3px;
+}
+
+/* Le bouton radio reste dans le document — il porte le nom accessible et le clavier — mais il ne
+   se dessine pas : c'est le portrait qui montre l'etat. */
+.rewardOfficerChoice-option input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.rewardOfficerChoice-portrait {
+    display: block;
+    width: 48px;
+    height: 48px;
+    background: url("/img/icons/a22e8a59e7cfd08f0997cf491c2ca1.png") no-repeat;
+    background-size: 288px 48px;
+    filter: grayscale(0.6) brightness(0.75);
+    transition: filter 0.15s ease-out;
+}
+
+.rewardOfficerChoice-portrait.commander { background-position: -48px 0; }
+.rewardOfficerChoice-portrait.admiral { background-position: -96px 0; }
+.rewardOfficerChoice-portrait.engineer { background-position: -144px 0; }
+.rewardOfficerChoice-portrait.geologist { background-position: -192px 0; }
+.rewardOfficerChoice-portrait.technocrat { background-position: -240px 0; }
+
+.rewardOfficerChoice-name {
+    display: block;
+    margin-top: 2px;
+    font-size: 10px;
+    line-height: 12px;
+    color: #8fa0bd;
+}
+
+.rewardOfficerChoice-option:hover .rewardOfficerChoice-portrait {
+    filter: grayscale(0.2) brightness(0.95);
+}
+
+/* **L'etat choisi ne tient pas a la seule couleur** : le portrait reprend ses couleurs, le cadre
+   apparait, et le nom passe en clair. Trois signaux pour un seul etat. */
+.rewardOfficerChoice-option:has(input:checked) {
+    border-color: #4fd1e0;
+    background: rgba(79, 209, 224, 0.08);
+}
+
+.rewardOfficerChoice-option:has(input:checked) .rewardOfficerChoice-portrait {
+    filter: none;
+}
+
+.rewardOfficerChoice-option:has(input:checked) .rewardOfficerChoice-name {
+    color: #d4dced;
+    font-weight: 600;
+}
+
+.rewardOfficerChoice-option:has(input:focus-visible) {
+    outline: 2px solid #4fd1e0;
+    outline-offset: 1px;
+}
+
+/* La carte qui porte un choix cesse d'etre une bande de 90 px : elle prend la hauteur qu'il faut,
+   sans toucher aux six autres. */
+.rewardlistimg.rewardWithChoice {
+    height: auto;
+    min-height: 200px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .rewardOfficerChoice-portrait {
+        transition: none;
+    }
+}

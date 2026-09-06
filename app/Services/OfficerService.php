@@ -189,15 +189,58 @@ class OfficerService
                 ])
             );
 
-            $current = $this->getExpiry($user, $officer);
-            $base = $current ?? Date::now();
-
-            $user->setAttribute($officer . '_until', $base->copy()->addDays($days));
-            $user->save();
-
-            // Le PlayerService garde l'utilisateur en memoire : sans rechargement, les
-            // bonus ne s'appliqueraient qu'au chargement de page suivant.
-            $player->load($player->getId());
+            $this->extend($player, $officer, $days);
         });
+    }
+
+    /**
+     * Met un officier au service du joueur **sans contrepartie**, pour une duree donnee.
+     *
+     * ## Pourquoi une methode distincte de `hire()`
+     *
+     * Le pack de bienvenue offre l'etat-major au septieme jour : il n'y a ni prix, ni solde a
+     * verifier, ni ecriture de matiere noire a passer. Simuler un achat — crediter puis debiter le
+     * meme montant — laisserait dans l'historique du joueur deux lignes pour une transaction qui
+     * n'a pas eu lieu.
+     *
+     * Ce qui est partage avec l'embauche, c'est la **regle de prolongement**, et elle seule.
+     *
+     * @param PlayerService $player
+     * @param string $officer
+     * @param int $days
+     * @return void
+     * @throws RuntimeException Si l'officier est inconnu ou la duree nulle.
+     */
+    public function grant(PlayerService $player, string $officer, int $days): void
+    {
+        if (!in_array($officer, self::OFFICERS, true)) {
+            throw new RuntimeException(__('t_ingame.premium.error_unknown_officer'));
+        }
+
+        if ($days < 1) {
+            throw new RuntimeException('Un octroi porte au moins un jour ; ' . $days . ' demande.');
+        }
+
+        $this->extend($player, $officer, $days);
+    }
+
+    /**
+     * Repousse le terme d'un officier : depuis son terme actuel s'il en a un, sinon depuis maintenant.
+     *
+     * **Un officier en poste n'est jamais remplace, sa duree s'ajoute.** Sans cette regle, offrir
+     * trois jours a un joueur qui vient d'en acheter quatre-vingt-dix lui en couterait
+     * quatre-vingt-sept.
+     */
+    private function extend(PlayerService $player, string $officer, int $days): void
+    {
+        $user = $player->getUser();
+        $base = $this->getExpiry($user, $officer) ?? Date::now();
+
+        $user->setAttribute($officer . '_until', $base->copy()->addDays($days));
+        $user->save();
+
+        // Le PlayerService garde l'utilisateur en memoire : sans rechargement, les
+        // bonus ne s'appliqueraient qu'au chargement de page suivant.
+        $player->load($player->getId());
     }
 }
