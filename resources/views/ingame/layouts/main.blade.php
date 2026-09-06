@@ -849,6 +849,10 @@
                     'COMBAT_LOSS_ZERO'             => trans_choice('t_ingame.combat.loss_line', 0, ['amount' => ':amount', 'unit' => ':unit']),
                     'COMBAT_LOSS_ONE'              => trans_choice('t_ingame.combat.loss_line', 1, ['amount' => ':amount', 'unit' => ':unit']),
                     'COMBAT_LOSS_MANY'             => trans_choice('t_ingame.combat.loss_line', 2, ['amount' => ':amount', 'unit' => ':unit']),
+                    // Les noms d'unites, pour la meme raison : le diffuseur les resolvait dans la
+                    // langue de l'application, et un lecteur francais voyait un nom anglais en
+                    // direct puis le bon apres rechargement.
+                    'COMBAT_UNIT_LABELS'           => \OGame\Combat\Presentation\PresentedLoss::unitLabels(),
                     'LOCA_ALL_NO'                  => __('t_ingame.shared.no'),
                     'LOCA_NOTIFY_ERROR'            => __('t_ingame.shared.error'),
                     'LOCA_NOTIFY_INFO'             => __('t_ingame.layout.js_notify_info'),

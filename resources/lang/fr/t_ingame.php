@@ -1711,7 +1711,9 @@ Taux d\'évasion de la flotte amélioré',
         'status_resolving' => 'Bilan en cours',
         'status_resolved' => 'Rapport disponible',
         'status_cancelled' => 'Combat annulé',
-        'report_link' => 'Consulter le rapport de combat',
+        // Le lien ouvre la liste des rapports de combat, pas ce rapport-ci : la messagerie ne
+        // sait pas encore ouvrir un message nomme, et un libelle ne promet que ce que la page tient.
+        'report_link' => 'Ouvrir mes rapports de combat',
         'losses_title' => 'Vos pertes',
         'no_losses_yet' => 'Aucune perte constatée pour le moment.',
         // Le nom du vaisseau reste celui du jeu, au singulier : seul le verbe s'accorde.

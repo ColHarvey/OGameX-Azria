@@ -336,12 +336,31 @@
 
         if (!forme) {
             // Sans les formes traduites, un libelle brut vaut mieux qu'une ligne vide.
-            return nombre + ' ' + (perte.unit_label || '');
+            return nombre + ' ' + nomDUnite(perte);
         }
 
         return forme
             .replace(':amount', nombreFormate(nombre))
-            .replace(':unit', perte.unit_label || '');
+            .replace(':unit', nomDUnite(perte));
+    }
+
+    /**
+     * Le nom de l'unite **dans la langue du lecteur**.
+     *
+     * La perte voyage avec son nom machine (`unit`) et un libelle de repli. Ce libelle est
+     * resolu par celui qui l'a compose : la page parle la langue du lecteur, le diffuseur celle
+     * de l'application — il tourne en boucle, hors de toute requete. Un joueur francais recevait
+     * donc un nom anglais en direct, qui changeait au rechargement. La page publie la table des
+     * noms ; on y lit le sien, et le libelle transporte ne sert que si l'unite en est absente.
+     */
+    function nomDUnite(perte) {
+        var noms = (typeof jsloca !== 'undefined' && jsloca && jsloca.COMBAT_UNIT_LABELS) ? jsloca.COMBAT_UNIT_LABELS : null;
+
+        if (noms && perte.unit && noms[perte.unit]) {
+            return noms[perte.unit];
+        }
+
+        return perte.unit_label || perte.unit || '';
     }
 
     /**

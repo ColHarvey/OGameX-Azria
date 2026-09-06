@@ -23,6 +23,14 @@ use Throwable;
  * langue du lecteur, que le diffuseur ne connait pas — il tourne en boucle, hors de toute requete.
  * C'est donc la page qui porte les formes traduites (`jsloca`), et le navigateur qui compose la
  * ligne avec le meme nombre et le meme nom d'unite que le serveur emploierait.
+ *
+ * **Le nom d'unite obeit a la meme regle, et il l'a appris tard.** `unit_label` est resolu par
+ * `__()` au moment ou l'objet du jeu est construit : dans une requete c'est la langue du lecteur,
+ * dans le diffuseur celle de l'application. Un joueur francais recevait donc un nom anglais en
+ * direct, qui changeait au rechargement. L'identifiant transporte est `unit` ; la page publie la
+ * table des noms (`unitLabels()`) et le navigateur y lit le sien. `unit_label` reste dans la charge
+ * utile comme **repli** — une unite absente de la table vaut mieux qu'une ligne trouee — et le
+ * rendu serveur, lui, s'en sert directement puisque sa langue est la bonne.
  */
 final class PresentedLoss
 {
@@ -57,5 +65,25 @@ final class PresentedLoss
         } catch (Throwable) {
             return $machineName;
         }
+    }
+
+    /**
+     * Tous les noms d'unites, par nom machine, **dans la langue de la requete courante**.
+     *
+     * La page la publie une fois ; le navigateur y prend le nom de chaque perte recue en direct.
+     * C'est le seul endroit ou la langue du lecteur est connue avec certitude : le diffuseur, lui,
+     * ne parle que celle de l'application.
+     *
+     * @return array<string, string>
+     */
+    public static function unitLabels(): array
+    {
+        $labels = [];
+
+        foreach (ObjectService::getUnitObjects() as $object) {
+            $labels[$object->machine_name] = $object->title;
+        }
+
+        return $labels;
     }
 }
