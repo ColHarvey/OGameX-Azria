@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 112 112" role="img" aria-label="Orbite locale de lune">
+  <defs><filter id="g" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="1.2"/></filter></defs>
+  <ellipse cx="56" cy="56" rx="48" ry="17" transform="rotate(-16 56 56)" fill="none" stroke="#43c9e8" stroke-opacity=".22" stroke-width="3" filter="url(#g)"/>
+  <ellipse cx="56" cy="56" rx="48" ry="17" transform="rotate(-16 56 56)" fill="none" stroke="#9eeeff" stroke-opacity=".55" stroke-width="1" stroke-dasharray="4 4"/>
+</svg>

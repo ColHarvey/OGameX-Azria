@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-label="Combat orbital en cours">
+  <defs>
+    <radialGradient id="fire"><stop stop-color="#fff7c2"/><stop offset=".22" stop-color="#ffbe45"/><stop offset=".58" stop-color="#ff4d2d" stop-opacity=".9"/><stop offset="1" stop-color="#ff301f" stop-opacity="0"/></radialGradient>
+    <radialGradient id="shield"><stop stop-color="#c9faff" stop-opacity=".75"/><stop offset=".4" stop-color="#43c9e8" stop-opacity=".2"/><stop offset="1" stop-color="#43c9e8" stop-opacity="0"/></radialGradient>
+    <filter id="g" x="-120%" y="-120%" width="340%" height="340%"><feGaussianBlur stdDeviation="2.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <style>
+    .orbit{transform-origin:80px 80px;animation:orbit-spin 7s linear infinite}
+    .counter{transform-origin:80px 80px;animation:orbit-counter 11s linear infinite}
+    .f1{animation:impact 3.4s ease-in-out infinite}
+    .f2{animation:impact 4.1s 1.15s ease-in-out infinite}
+    .f3{animation:impact 3.7s 2.2s ease-in-out infinite}
+    .shield{transform-origin:80px 80px;animation:shield-hit 2.8s .6s ease-out infinite}
+    .streak{stroke-dasharray:7 26;animation:streak 1.7s linear infinite}
+    @keyframes orbit-spin{to{transform:rotate(360deg)}}@keyframes orbit-counter{to{transform:rotate(-360deg)}}
+    @keyframes impact{0%,72%,100%{opacity:0;transform:scale(.3)}78%{opacity:1;transform:scale(1.25)}88%{opacity:.45;transform:scale(.8)}}
+    @keyframes shield-hit{0%,70%,100%{opacity:0;transform:scale(.8)}78%{opacity:.75;transform:scale(1.04)}92%{opacity:0;transform:scale(1.13)}}
+    @keyframes streak{to{stroke-dashoffset:-33}}
+    @media (prefers-reduced-motion:reduce){.orbit,.counter,.f1,.f2,.f3,.shield,.streak{animation:none}.f1,.f2,.f3{opacity:.42}.shield{opacity:.25}}
+  </style>
+  <ellipse class="shield" cx="80" cy="80" rx="57" ry="43" fill="url(#shield)" stroke="#80e9ff" stroke-opacity=".65" stroke-width="1.5"/>
+  <g class="orbit" fill="none" stroke="#ff693f" stroke-opacity=".64" stroke-width="2" filter="url(#g)">
+    <ellipse cx="80" cy="80" rx="68" ry="25" transform="rotate(-18 80 80)" stroke-dasharray="13 12"/>
+    <path class="streak" d="M15 92c38-38 90-46 131-13"/>
+  </g>
+  <g class="counter" fill="#ffc15d">
+    <circle cx="35" cy="41" r="2.2"/><circle cx="128" cy="112" r="1.7"/><circle cx="26" cy="103" r="1.3"/>
+    <path d="m126 35 8 2-7 3Z"/><path d="m40 126 7-4-3 8Z"/>
+  </g>
+  <g class="f1" transform="translate(42 57)" filter="url(#g)"><circle r="16" fill="url(#fire)"/><path d="M-11 0h22M0-11v22M-8-8 8 8M8-8-8 8" stroke="#ffd985" stroke-width="1.6"/></g>
+  <g class="f2" transform="translate(119 70)" filter="url(#g)"><circle r="13" fill="url(#fire)"/><path d="M-9 0h18M0-9v18M-6-6 6 6M6-6-6 6" stroke="#ffd985" stroke-width="1.4"/></g>
+  <g class="f3" transform="translate(91 127)" filter="url(#g)"><circle r="11" fill="url(#fire)"/><path d="M-8 0h16M0-8v16M-5-5 5 5M5-5-5 5" stroke="#ffd985" stroke-width="1.2"/></g>
+</svg>

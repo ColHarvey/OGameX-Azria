@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 64" role="img" aria-label="Piste de transit interstellaire">
+  <defs>
+    <linearGradient id="p"><stop stop-color="#07131d"/><stop offset=".5" stop-color="#102b3b"/><stop offset="1" stop-color="#07131d"/></linearGradient>
+    <filter id="g" x="-10%" y="-120%" width="120%" height="340%"><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <path d="M12 7h336l8 8v34l-8 8H12l-8-8V15Z" fill="url(#p)" stroke="#24546a"/>
+  <path d="M31 32H329" stroke="#43c9e8" stroke-opacity=".24" stroke-width="8"/>
+  <path d="M31 32H329" stroke="#8cecff" stroke-opacity=".68" stroke-width="1.5" stroke-dasharray="4 6" filter="url(#g)"/>
+  <circle cx="31" cy="32" r="8" fill="#091923" stroke="#46dff8" stroke-width="2"/>
+  <circle cx="329" cy="32" r="8" fill="#091923" stroke="#ffb347" stroke-width="2"/>
+</svg>

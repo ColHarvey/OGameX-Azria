@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-label="Impact de missile sur la planete">
+  <defs>
+    <radialGradient id="x"><stop stop-color="#ffffff"/><stop offset=".16" stop-color="#fff09b"/><stop offset=".42" stop-color="#ff9f35"/><stop offset=".72" stop-color="#ff3b24" stop-opacity=".72"/><stop offset="1" stop-color="#ff3b24" stop-opacity="0"/></radialGradient>
+    <filter id="g" x="-120%" y="-120%" width="340%" height="340%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <style>
+    .impact{transform-origin:80px 80px;animation:impact-once 1.25s ease-out forwards}
+    .wave{transform-origin:80px 80px;animation:wave-once 1.25s ease-out forwards}
+    .trail{animation:trail-once .58s ease-in forwards}
+    @keyframes impact-once{0%{opacity:0;transform:scale(.1)}18%{opacity:1;transform:scale(1.15)}55%{opacity:.65;transform:scale(.8)}100%{opacity:0;transform:scale(1.45)}}
+    @keyframes wave-once{0%,14%{opacity:0;transform:scale(.25)}28%{opacity:.9}100%{opacity:0;transform:scale(1.45)}}
+    @keyframes trail-once{0%{opacity:1;stroke-dashoffset:55}100%{opacity:.1;stroke-dashoffset:0}}
+    @media (prefers-reduced-motion:reduce){.impact,.wave,.trail{animation:none}.impact{opacity:.55}.wave{opacity:.35}}
+  </style>
+  <path class="trail" d="M150 12C124 32 107 48 91 67" fill="none" stroke="#ffb347" stroke-width="4" stroke-linecap="round" stroke-dasharray="55" filter="url(#g)"/>
+  <g class="impact" transform="translate(88 71)" filter="url(#g)">
+    <circle r="36" fill="url(#x)"/><path d="M-29 0h58M0-29v58M-21-21l42 42M21-21l-42 42" stroke="#fff0b5" stroke-width="2"/>
+  </g>
+  <circle class="wave" cx="88" cy="71" r="24" fill="none" stroke="#ffb347" stroke-width="3" filter="url(#g)"/>
+</svg>

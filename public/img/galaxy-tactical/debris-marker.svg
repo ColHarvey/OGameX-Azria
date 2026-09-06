@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="Champ de débris">
+  <defs>
+    <radialGradient id="rock" cx="35%" cy="30%" r="75%">
+      <stop offset="0" stop-color="#9daab2"/>
+      <stop offset=".45" stop-color="#56636d"/>
+      <stop offset="1" stop-color="#19232d"/>
+    </radialGradient>
+    <filter id="shadow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="#4bc9e8" flood-opacity=".3"/>
+    </filter>
+  </defs>
+  <g fill="url(#rock)" stroke="#a9b8c2" stroke-opacity=".38" filter="url(#shadow)">
+    <path d="m23 37 9-11 13 3 6 12-8 11-14-2Z"/>
+    <path d="m53 51 12-9 11 6 1 13-12 8-12-6Z"/>
+    <path d="m35 65 7-6 9 3 2 8-8 7-9-4Z"/>
+    <path d="m61 24 5-5 7 3 1 7-6 4-6-3Z"/>
+    <path d="m18 61 4-4 6 2 1 6-5 4-5-2Z"/>
+  </g>
+</svg>

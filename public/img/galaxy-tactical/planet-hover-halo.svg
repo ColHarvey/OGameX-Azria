@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 112 112" role="img" aria-label="Survol de planete">
+  <defs><filter id="g" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+  <circle cx="56" cy="56" r="43" fill="#43c9e8" fill-opacity=".035" stroke="#43c9e8" stroke-width="2" stroke-dasharray="5 5" filter="url(#g)"/>
+  <path d="M22 38V22h16M74 22h16v16M90 74v16H74M38 90H22V74" fill="none" stroke="#b8f6ff" stroke-width="2"/>
+</svg>

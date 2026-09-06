@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 32" role="img" aria-label="Missile hostile entrant">
+  <defs>
+    <filter id="glow" x="-80%" y="-120%" width="280%" height="340%">
+      <feGaussianBlur stdDeviation="1.8" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <linearGradient id="trail" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff4a35" stop-opacity="0"/>
+      <stop offset="1" stop-color="#ff9b46" stop-opacity=".9"/>
+    </linearGradient>
+  </defs>
+  <path d="M2 16h31" stroke="url(#trail)" stroke-width="3" stroke-linecap="round" filter="url(#glow)"/>
+  <path d="m31 12 9-5 15 9-15 9-9-5 7-4Z" fill="#ff8b3d" stroke="#ffe0a8" stroke-width="1" filter="url(#glow)"/>
+  <path d="m33 12-7-6 13 2M33 20l-7 6 13-2" fill="none" stroke="#e65b38" stroke-width="2" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 104" role="img" aria-label="Fiche de trajet interstellaire">
+  <defs><linearGradient id="p" x2="0" y2="1"><stop stop-color="#142e3e" stop-opacity=".96"/><stop offset="1" stop-color="#06111a" stop-opacity=".98"/></linearGradient></defs>
+  <path d="M12 2h336l10 10v80l-10 10H12L2 92V12Z" fill="url(#p)" stroke="#2c6178"/>
+  <path d="M15 7h330" stroke="#8cecff" stroke-opacity=".32"/>
+  <path d="M18 76h324" stroke="#2c6178" stroke-opacity=".6"/>
+  <path d="M8 24V12l8-8M352 24V12l-8-8M8 80v12l8 8M352 80v12l-8 8" fill="none" stroke="#43c9e8" stroke-opacity=".42" stroke-width="2"/>
+</svg>

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Lancer un missile">
+  <defs>
+    <radialGradient id="bg" cx="38%" cy="28%" r="76%">
+      <stop offset="0" stop-color="#ff8b45" stop-opacity=".2"/>
+      <stop offset="1" stop-color="#07141e" stop-opacity=".86"/>
+    </radialGradient>
+    <filter id="glow" x="-70%" y="-70%" width="240%" height="240%">
+      <feGaussianBlur stdDeviation=".8" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <circle cx="16" cy="16" r="14.5" fill="url(#bg)" stroke="#ff8b45" stroke-opacity=".48"/>
+  <g fill="none" stroke="#ff8b45" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)">
+    <path d="M9 23c2-6 6-11 13-14l1 1c-3 7-8 11-14 13Z"/>
+    <path d="m14 18-6 1-2 4 6-1M18 14l1-6 4-2-1 6M10 24l-3 2"/>
+  </g>
+</svg>

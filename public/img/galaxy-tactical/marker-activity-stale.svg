@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" role="img" aria-label="Activite ancienne">
+  <defs>
+    <radialGradient id="b" cx="38%" cy="30%" r="76%"><stop stop-color="#7fa9b7" stop-opacity=".22"/><stop offset="1" stop-color="#06111a" stop-opacity=".9"/></radialGradient>
+    <filter id="g" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="1" result="x"/><feMerge><feMergeNode in="x"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <path d="M7 3h26l4 4v26l-4 4H7l-4-4V7Z" fill="url(#b)" stroke="#7fa9b7" stroke-opacity=".55"/>
+  <g fill="none" stroke="#7fa9b7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" filter="url(#g)">
+    <circle cx="20" cy="20" r="4" fill="#7fa9b7" stroke="none"/><path d="M13 25a9 9 0 0 1 0-10M27 15a9 9 0 0 1 0 10"/>
+  </g>
+</svg>

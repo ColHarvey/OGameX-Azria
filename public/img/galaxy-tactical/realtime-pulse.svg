@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="Actualisation temps reel">
+  <defs><radialGradient id="p"><stop offset="0" stop-color="#43c9e8" stop-opacity=".55"/><stop offset="1" stop-color="#43c9e8" stop-opacity="0"/></radialGradient></defs>
+  <circle cx="48" cy="48" r="42" fill="url(#p)" opacity=".35"/><circle cx="48" cy="48" r="5" fill="#c5f8ff"/>
+  <g fill="none" stroke="#43c9e8" stroke-width="2"><circle cx="48" cy="48" r="18" opacity=".8"/><circle cx="48" cy="48" r="31" opacity=".42"/></g>
+</svg>
