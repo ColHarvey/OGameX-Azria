@@ -370,21 +370,21 @@ ATTENTION : L\'heure d\'arrivée peut changer en raison de l\'adhésion aux flo
 REMARQUE : La force totale de tous les participants par rapport à la force totale des défenseurs détermine si ce sera une bataille honorable ou non.',
     ],
     'Shipyard is being upgraded.' => 'Le chantier spatial est en cours de modernisation.',
-    'Nanite Factory is being upgraded.' => 'Nanite Factory est en cours de modernisation.',
+    'Nanite Factory is being upgraded.' => 'L\'usine de nanites est en cours de modernisation.',
     'moon_destruction_success' => [
         'from' => 'Commandement de la flotte',
         'subject' => 'La Lune :moon_name [:moon_coords] a été détruite !',
-        'body' => 'Avec une probabilité de destruction de :destruction_chance et une probabilité de perte de Deathstar de :loss_chance, votre flotte a réussi à détruire la lune :moon_name à :moon_coords.',
+        'body' => 'Avec une probabilité de destruction de :destruction_chance et une probabilité de perdre une Étoile de la mort de :loss_chance, votre flotte a réussi à détruire la lune :moon_name à :moon_coords.',
     ],
     'moon_destruction_failure' => [
         'from' => 'Commandement de la flotte',
         'subject' => 'La destruction de la lune à :moon_coords a échoué',
-        'body' => 'Avec une probabilité de destruction de :destruction_chance et une probabilité de perte de Deathstar de :loss_chance, votre flotte n\'a pas réussi à détruire la lune :moon_name à :moon_coords. La flotte revient.',
+        'body' => 'Avec une probabilité de destruction de :destruction_chance et une probabilité de perdre une Étoile de la mort de :loss_chance, votre flotte n\'a pas réussi à détruire la lune :moon_name à :moon_coords. La flotte revient.',
     ],
     'moon_destruction_catastrophic' => [
         'from' => 'Commandement de la flotte',
         'subject' => 'Perte catastrophique lors de la destruction de la lune à :moon_coords',
-        'body' => 'Avec une probabilité de destruction de :destruction_chance et une probabilité de perte de Deathstar de :loss_chance, votre flotte n\'a pas réussi à détruire la lune :moon_name à :moon_coords. De plus, tous les Deathstars ont été perdus dans la tentative. Il n\'y a aucune épave.',
+        'body' => 'Avec une probabilité de destruction de :destruction_chance et une probabilité de perdre une Étoile de la mort de :loss_chance, votre flotte n\'a pas réussi à détruire la lune :moon_name à :moon_coords. De plus, toutes les Étoiles de la mort ont été perdues dans la tentative. Il n\'y a aucune épave.',
     ],
     'moon_destruction_mission_failed' => [
         'from' => 'Commandement de la flotte',
@@ -394,12 +394,12 @@ REMARQUE : La force totale de tous les participants par rapport à la force tot
     'moon_destruction_repelled' => [
         'from' => 'Surveillance de l\'espace',
         'subject' => 'Tentative de destruction sur la lune :moon_name [:moon_coords] repoussée',
-        'body' => ':attacker_name a attaqué votre lune :moon_name à :moon_coords avec une probabilité de destruction de :destruction_chance et une probabilité de perte de Deathstar de :loss_chance. Votre lune a survécu à l\'attaque !',
+        'body' => ':attacker_name a attaqué votre lune :moon_name à :moon_coords avec une probabilité de destruction de :destruction_chance et une probabilité de perdre une Étoile de la mort de :loss_chance. Votre lune a survécu à l\'attaque !',
     ],
     'moon_destroyed' => [
         'from' => 'Surveillance de l\'espace',
         'subject' => 'La Lune :moon_name [:moon_coords] a été détruite !',
-        'body' => 'Votre lune :moon_name à :moon_coords a été détruite par une flotte Deathstar appartenant à :attacker_name !',
+        'body' => 'Votre lune :moon_name à :moon_coords a été détruite par une flotte d\'Étoiles de la mort appartenant à :attacker_name !',
     ],
     'wreck_field_repair_completed' => [
         'from' => 'Message système',

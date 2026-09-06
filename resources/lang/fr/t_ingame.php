@@ -53,7 +53,7 @@ return [
         'research_in_progress' => 'Des recherches sont actuellement en cours !',
         'research_lab_expanding' => 'Le laboratoire de recherche est en cours d\'agrandissement.',
         'shipyard_upgrading' => 'Le chantier spatial est en cours d\'agrandissement.',
-        'nanite_upgrading' => 'Nanite Factory est en cours de modernisation.',
+        'nanite_upgrading' => 'L\'usine de nanites est en cours de modernisation.',
         'max_amount_reached' => 'Nombre maximum atteint !',
         'expand_button' => 'Développez :title au niveau :level',
         'loca_notice' => 'Référence',
