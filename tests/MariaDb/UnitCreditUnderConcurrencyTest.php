@@ -47,11 +47,6 @@ final class UnitCreditUnderConcurrencyTest extends TestCase
      */
     private array $corpsCrees = [];
 
-    /**
-     * @var array<int, int>
-     */
-    private array $joueursCrees = [];
-
     protected function setUp(): void
     {
         parent::setUp();
@@ -67,12 +62,12 @@ final class UnitCreditUnderConcurrencyTest extends TestCase
 
         DB::purge('mysql_temoin');
 
+        // **Les corps partent, les comptes restent.** Supprimer un compte se heurte aux clefs
+        // etrangeres qui le nomment — `users_tech` la premiere — et le refus de MariaDB fait
+        // echouer le job entier. Ce sont les coordonnees qui doivent etre liberees, et elles
+        // vivent sur les corps ; l epreuve cherche de toute facon un systeme libre.
         if ($this->corpsCrees !== []) {
             DB::table('planets')->whereIn('id', $this->corpsCrees)->delete();
-        }
-
-        if ($this->joueursCrees !== []) {
-            DB::table('users')->whereIn('id', $this->joueursCrees)->delete();
         }
 
         parent::tearDown();
@@ -185,10 +180,7 @@ final class UnitCreditUnderConcurrencyTest extends TestCase
 
     private function aPlayer(): int
     {
-        $joueur = (int)User::factory()->create()->id;
-        $this->joueursCrees[] = $joueur;
-
-        return $joueur;
+        return (int)User::factory()->create()->id;
     }
 
     /**
