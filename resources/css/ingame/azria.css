@@ -250,9 +250,21 @@
  * `inherit` plutot qu'une couleur ecrite : la teinte du bloc n'est definie nulle part ici, elle
  * descend du theme. La recopier serait la figer, et elle divergerait au premier changement.
  * L'infobulle, elle, n'y perd rien : `.tooltip` sert au comportement, pas a cette couleur.
+ *
+ * ## Pourquoi le selecteur est aussi long
+ *
+ * La regle a battre est `#fleet2 #buttonz ul li span.tooltip`, et elle porte **deux identifiants** :
+ * aucune combinaison de classes ne peut la depasser. Une premiere version accrochee a
+ * `ul.fleetBriefing` perdait donc en silence, et le libelle restait blanc alors que la regle etait
+ * bien servie. On reprend son chemin exact et on ajoute l identifiant de la ligne — le minimum qui
+ * suffise, sans `!important` qui rendrait la suite impossible a corriger.
+ *
+ * Elle imposait aussi `font-weight: 600` : le libelle etait en gras quand ses voisins ne l etaient
+ * pas. On le rend a son poids normal par la meme occasion.
  */
-ul.fleetBriefing #fightAfterRetreat .tooltip {
+#fleet2 #buttonz ul li#fightAfterRetreat span.tooltip {
     color: inherit;
+    font-weight: normal;
 }
 
 /*
