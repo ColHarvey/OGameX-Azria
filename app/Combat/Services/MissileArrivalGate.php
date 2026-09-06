@@ -154,8 +154,31 @@ final class MissileArrivalGate
                 return self::CANCELLED;
             }
 
-            if ($missiles > 0) {
-                $silo->addUnit('interplanetary_missile', $missiles);
+            // **Le credit porte le controle du proprietaire.** `siloThatTakesThemBack()` a designe
+            // un candidat par une lecture d'instantane, qui ne verrouille rien : le corps peut
+            // avoir change de mains depuis. La condition vit donc dans l'ecriture.
+            if ($missiles > 0 && !$silo->addUnitAtomicIfStillOwnedBy('interplanetary_missile', $missiles, (int)$tenue->user_id)) {
+                // `processed` est deja pose : l'annulation reste definitive, et c'est voulu. Mais
+                // rien ne doit disparaitre — ce qui est du devient une creance recuperable, comme
+                // lorsqu'il n'y a nulle part ou rendre. Aucun avis de restitution n'est envoye :
+                // rien n'a ete rendu.
+                Log::warning('Le corps designe pour reprendre les missiles a change de mains sous le credit : creance inscrite.', [
+                    'fleet_mission_id' => $tenue->id,
+                    'expected_owner_id' => (int)$tenue->user_id,
+                    'designated_body_id' => $silo->getPlanetId(),
+                    'missiles' => $missiles,
+                ]);
+
+                resolve(MissileRefundClaims::class)->record(
+                    $tenue,
+                    $combatInstanceId,
+                    (int)$tenue->user_id,
+                    $missiles,
+                    InvariantCode::EffectCreatedAfterTheLock->value,
+                    (int)Date::now()->timestamp
+                );
+
+                return self::CANCELLED;
             }
 
             Log::warning('Missile lance apres l ouverture d un combat sur sa cible : annule sans impact, missiles rendus.', [

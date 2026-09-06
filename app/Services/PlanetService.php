@@ -1889,6 +1889,73 @@ class PlanetService
     }
 
     /**
+     * Credite des unites a ce corps, **et seulement s'il appartient encore a ce joueur**.
+     *
+     * ## Pourquoi cette methode existe a cote de `addUnit()`
+     *
+     * `addUnit()` lit la valeur en memoire, y ajoute, et sauvegarde le modele. Deux crediteurs
+     * concurrents lisent donc la meme valeur et le second efface le premier : c'est la perte de mise
+     * a jour classique, et `removeUnit()` juste en dessous l'evite deja par une operation faite en
+     * base. L'addition etait la seule des deux a ne pas le faire.
+     *
+     * ## Ce que la condition sur le proprietaire ferme
+     *
+     * Verifier le proprietaire par une lecture separee ne suffit pas : sous `REPEATABLE READ` c'est
+     * une lecture d'instantane, elle ne pose aucun verrou, et le corps peut changer de mains entre
+     * ce controle et l'ecriture. Ici la condition **est** l'ecriture : une seule instruction, qui
+     * verrouille la ligne, lit son etat courant et n'ajoute que si le proprietaire concorde. Une
+     * planete abandonnee puis recolonisee garde son identifiant ; sans cette condition, un credit
+     * differe irait a un inconnu.
+     *
+     * ## Pourquoi un montant nul est refuse plutot qu'ignore
+     *
+     * **MariaDB compte les lignes changees, pas les lignes trouvees.** Ajouter zero ne changerait
+     * rien, l'instruction rendrait zero, et cette methode conclurait « le corps a change de mains »
+     * alors que rien n'a bouge. Le meme piege a fait sortir le diffuseur de son bail a chaque minute
+     * en production. Le refus explicite garde le retour lisible : `false` veut dire une seule chose.
+     *
+     * @param string $machine_name
+     * @param int $amount
+     * @param int $ownerId
+     * @return bool Vrai si le credit a eu lieu ; faux si le corps a disparu ou change de proprietaire.
+     */
+    public function addUnitAtomicIfStillOwnedBy(string $machine_name, int $amount, int $ownerId): bool
+    {
+        if ($amount < 1) {
+            throw new RuntimeException('Un credit d unites porte au moins une unite ; ' . $amount . ' demande.');
+        }
+
+        $object = ObjectService::getUnitObjectByMachineName($machine_name);
+        $colonne = $object->machine_name;
+
+        $touchees = Planet::where('id', $this->getPlanetId())
+            ->where('user_id', $ownerId)
+            ->update([$colonne => DB::raw("{$colonne} + {$amount}")]);
+
+        if ($touchees < 1) {
+            return false;
+        }
+
+        // **Le modele se relit sur la ligne, il ne se recalcule pas.** Ajouter le credit a la valeur
+        // **chargee** rendrait la synchronisation fausse des qu il y a eu de la concurrence : la base
+        // porterait « valeur courante + credit » et l objet « ancienne valeur + credit ». Une
+        // sauvegarde ulterieure de cet objet reintroduirait la perte que l atomicite vient
+        // d empecher — c est la lecon de `addResourcesAtomic()`, payee une fois.
+        $ligne = Planet::where("id", $this->getPlanetId())->first([$colonne]);
+
+        if (!$ligne instanceof Planet) {
+            throw new RuntimeException(
+                "Le corps " . $this->getPlanetId() . " a disparu entre le credit et sa relecture : le modele en "
+                . "memoire ne peut plus suivre la ligne, et le sauver plus tard reecrirait un etat invente."
+            );
+        }
+
+        $this->planet->{$colonne} = $ligne->{$colonne};
+
+        return true;
+    }
+
+    /**
      * Add a unit to this planet.
      *
      * @param string $machine_name

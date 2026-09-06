@@ -181,7 +181,16 @@ final class MissileRefundClaims
                 return self::WAITING;
             }
 
-            $silo->addUnit('interplanetary_missile', $creance->missiles);
+            // **Le credit porte lui-meme le controle du proprietaire.** Le verrou pris plus haut
+            // tient la creance, pas le corps : il empeche deux reglements de la meme creance, mais
+            // ni deux creances distinctes vers le meme silo, ni un changement de mains concurrent.
+            // Une seule instruction conditionnelle ferme les deux — elle verrouille la ligne, lit
+            // son etat courant, et n'ajoute que si le proprietaire concorde encore.
+            if (!$silo->addUnitAtomicIfStillOwnedBy('interplanetary_missile', $creance->missiles, $creance->ownerId)) {
+                // Le corps a change de mains entre sa designation et le credit. Rien n'est ecrit,
+                // rien n'est acquitte : la creance reste due et le prochain reglement redesignera.
+                return self::WAITING;
+            }
 
             $prise = DB::table('combat_missile_refunds')
                 ->where('id', $creance->id)
@@ -214,6 +223,10 @@ final class MissileRefundClaims
      *
      * Lu sur la ligne, dans la transaction du reglement : un service charge plus tot repondrait sur
      * un etat perime.
+     *
+     * **Ce controle designe un candidat, il ne garantit rien.** C'est une lecture d'instantane :
+     * elle ne verrouille aucune ligne, et le corps peut changer de mains entre elle et le credit.
+     * La garantie est portee par le credit lui-meme, qui refait la condition dans son ecriture.
      */
     private function belongsTo(int $bodyId, int $ownerId): bool
     {
