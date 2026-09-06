@@ -5,6 +5,8 @@ namespace Tests\Feature\Combat;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Enums\CombatState;
+use OGame\GameMissions\BattleEngine\Draws\BattleDraws;
+use OGame\GameMissions\BattleEngine\Draws\SeededDraws;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\CombatInstance;
 use OGame\Models\Resources;
@@ -52,6 +54,13 @@ trait EngagesAPersistentCombat
     }
 
     /**
+     * La graine de la bataille du banc. Choisie pour que les deux camps perdent quelque chose —
+     * la condition que les essais du fil de presentation exigent — et epinglee ici pour que le
+     * choix se lise au lieu de se deviner.
+     */
+    private const int BATTLE_SEED = 20260906;
+
+    /**
      * Un combat clos, bataille figee, dont le fil est ecrit. Le joueur courant est l'attaquant.
      */
     protected function anEngagedCombat(): CombatInstance
@@ -92,6 +101,22 @@ trait EngagesAPersistentCombat
         $mission = DB::table('fleet_missions')->where('user_id', $this->currentUserId)->where('processed', 0)->orderByDesc('id')->first();
         $this->assertNotNull($mission, 'No fleet was dispatched.');
 
+        // **La bataille de ce banc est rejouable.** Sans graine, elle est tiree au sort : les
+        // essais qui exigent une perte de chaque camp echouaient au hasard — mesure faite, run
+        // `34018471017` sur `885d2ad3`, avec le meme message que celui de la galaxie. Un rouge
+        // aleatoire est pire qu un rouge franc : on prend l habitude de relancer, et le jour ou
+        // la CI attrape une vraie regression elle passe pour du bruit.
+        //
+        // **Le mecanisme est mesure, pas suppose** : douze graines essayees, onze donnent des
+        // pertes aux deux camps, la graine 99 n en donne qu au defenseur — l attaquant ecrase
+        // la garnison sans perdre un vaisseau. Un echec sur douze, ce qui correspond a ce que
+        // la CI montrait. Changer la graine change l issue : c est la preuve que la source
+        // injectee gouverne bien cette bataille.
+        // La graine ne dispense d aucune verification. Elle rend le resultat **stable**, pas
+        // juste : `firstInstantWhereBothSidesLost()` continue d exiger les deux camps, et si un
+        // changement du moteur rendait cette bataille unilaterale, l echec serait franc et
+        // reproductible au lieu d apparaitre une fois sur trente.
+        $this->app->bind(BattleDraws::class, static fn (): SeededDraws => new SeededDraws(self::BATTLE_SEED));
         resolve(SettingsService::class)->set('persistent_combat_enabled', '1');
         $this->travelTo(Date::createFromTimestamp((int)$mission->time_arrival));
         $this->get('/overview')->assertStatus(200);

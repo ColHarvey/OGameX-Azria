@@ -14,7 +14,6 @@ use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\LootContext;
 use OGame\Combat\Support\ResourceNormalizationDiagnostics;
 use OGame\GameMissions\BattleEngine\Draws\BattleDraws;
-use OGame\GameMissions\BattleEngine\Draws\SystemDraws;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleetResult;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
@@ -120,8 +119,11 @@ abstract class BattleEngine
         $this->lootRateInBasisPoints = $this->lootContext->rateInBasisPoints;
         $this->lootPercentage = intdiv($this->lootRateInBasisPoints, 100);
 
-        // En jeu, le hasard du systeme. Un banc remplace la source par une graine (`withDraws()`).
-        $this->draws = new SystemDraws();
+        // **La source se resout au conteneur**, liee a `SystemDraws` en jeu : une instance neuve
+        // par bataille, comme avant. Le detour par le conteneur est ce qui permet a un banc de
+        // rendre reproductible une bataille qu il ne construit pas lui-meme — celle qu une
+        // fermeture cree au fond du chemin, hors de portee de `withDraws()`.
+        $this->draws = resolve(BattleDraws::class);
     }
 
     /**
