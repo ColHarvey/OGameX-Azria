@@ -11,6 +11,7 @@
 @import "ingame/modules/highscore.css";
 @import "ingame/modules/messages.css";
 @import "ingame/azria.css";
+@import "ingame/galaxy-tactical.css";
 
 
 /* New style overrides that conflict with some existing styles, implement later */

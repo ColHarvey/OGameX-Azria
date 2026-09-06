@@ -281,7 +281,7 @@
                 <img src="/img/icons/6e0f46d7504242302bc8055ad9c8c2.gif" alt="">
             </div>
             <div id="galaxyContent">
-                <div class="galaxyTable">
+                <div class="galaxyTable gtReplaced">
                     <div class="galaxyRow ctGalaxyHead">
                         <div class="galaxyCell span11">
                             <div id="probes">
@@ -309,6 +309,11 @@
                             <div id="filter_vacation" class="filter" onclick="filterToggle(event);">V</div>
                         </div>
                     </div>
+                    {{-- La carte tactique remplace le tableau. Les lignes qui suivent restent dans le
+                         document mais ne sont plus affichees : le rendu herite continue d y ecrire sans
+                         effet, et un retour en arriere ne demande que de retirer la classe gtReplaced. --}}
+                    <div id="galaxyTactical" role="application"
+                         aria-label="{{ __('t_ingame.galaxy.tactical_map') }}"></div>
                     <div class="galaxyRow ctGalaxyHead headBold">
                         <div class="galaxyCell span1-2">{{ __('t_ingame.galaxy.planet_col') }}</div>
                         <div class="galaxyCell cellPlanetName">{{ __('t_ingame.galaxy.name_col') }}</div>

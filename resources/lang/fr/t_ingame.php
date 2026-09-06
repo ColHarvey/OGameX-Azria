@@ -311,6 +311,7 @@ return [
         'recycler_short' => 'Récy.',
         'ipm_short' => 'IPM.',
         'used_slots' => 'Emplacements utilisés',
+        'tactical_map' => 'Carte tactique du système',
         'planet_col' => 'Planète',
         'name_col' => 'Nom',
         'moon_col' => 'Lune',
