@@ -9,6 +9,8 @@ use Illuminate\Support\ServiceProvider;
 use OGame\Exceptions\Handler;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
+use OGame\GameMissions\BattleEngine\Draws\BattleDraws;
+use OGame\GameMissions\BattleEngine\Draws\SystemDraws;
 use OGame\Models\User;
 use OGame\Observers\UserObserver;
 use OGame\Services\SettingsService;
@@ -58,6 +60,12 @@ class AppServiceProvider extends ServiceProvider
                 $app->make(PlayerServiceFactory::class)
             );
         });
+
+        // **La source des tirages d une bataille se resout, elle ne se construit plus sur place.**
+        // En jeu, c est le hasard du systeme, une instance neuve par bataille — le comportement
+        // n a pas change. Ce qui change, c est qu un banc peut desormais lui substituer une graine
+        // sans atteindre le moteur, qui nait au fond du chemin de fermeture et hors de sa portee.
+        $this->app->bind(BattleDraws::class, SystemDraws::class);
 
         $this->app->singleton(ExceptionHandler::class, Handler::class);
     }
