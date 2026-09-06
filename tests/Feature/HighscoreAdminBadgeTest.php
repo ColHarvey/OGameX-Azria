@@ -2,7 +2,9 @@
 
 namespace Tests\Feature;
 
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
+use OGame\Models\Highscore;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
 
@@ -71,16 +73,33 @@ class HighscoreAdminBadgeTest extends AccountTestCase
     }
 
     /**
-     * Le classement rendu, cache vide.
+     * Le classement rendu, cache vide, sur la page qui porte reellement le joueur.
      *
-     * Ses pages sont gardees cinq minutes : sans cette remise a zero, le second rendu servirait le
+     * ## Deux conditions que cet essai doit poser lui-meme
+     *
+     * **Les rangs n'existent pas tant qu'on ne les calcule pas.** Ils sont ecrits par une tache
+     * planifiee ; sans elle, `validRanks()` ecarte le joueur du classement et
+     * `getHighscorePlayerRank()` rend zero. Le controleur sert alors la premiere page. Avec moins de
+     * cent comptes dans la base d'un processus, cette page contient tout le monde et l'essai passe —
+     * **par accident**. En integration continue, ou un processus en accumule bien davantage, elle ne
+     * contient plus que les cent premiers : l'essai a rougi la ou le code etait juste.
+     *
+     * **La page se deduit du rang, elle ne se suppose pas.** Le controleur calcule
+     * `floor($rang / 100) + 1`, qui envoie le rang 100 sur la page 2 alors que la page 2 commence au
+     * rang 101 ; l'essai vise donc la page lui-meme et ne depend d'aucun choix de pagination.
+     *
+     * Ses pages sont gardees cinq minutes : sans la remise a zero, le second rendu servirait le
      * premier et l'essai passerait en ne mesurant rien.
      */
     private function rowOf(int $userId): string
     {
         Cache::flush();
+        Artisan::call('ogamex:scheduler:generate-highscore-ranks');
 
-        $reponse = $this->get('/highscore');
+        $rang = (int)(Highscore::where('player_id', $userId)->value('general_rank') ?? 0);
+        $this->assertGreaterThan(0, $rang, 'The player has no valid rank, so the highscore lists them nowhere.');
+
+        $reponse = $this->get('/highscore?page=' . (intdiv($rang - 1, 100) + 1));
         $reponse->assertStatus(200);
 
         // **On lit la ligne, jamais la page.** Le classement montre tous les joueurs, et la base d un
