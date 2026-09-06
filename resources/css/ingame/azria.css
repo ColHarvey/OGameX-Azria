@@ -235,3 +235,22 @@
         transition: none;
     }
 }
+
+/*
+ * Le briefing d'envoi de flotte : un libelle a infobulle garde la couleur de ses voisins.
+ *
+ * `.tooltip` impose `color: #fff` a tout element qui la porte — c'est une regle globale, faite pour
+ * les infobulles posees sur des fonds varies. Le libelle de l'option de retraite la porte, et sortait
+ * donc en blanc au milieu de lignes qui, elles, heritent leur couleur du bloc.
+ *
+ * **La valeur de la cible porte la meme classe**, donc probablement le meme ecart. Elle n'est pas
+ * corrigee ici : le defaut signale portait sur cette ligne-la, et je n'ai pas pu juger l'autre sans
+ * la voir. A elargir si Keven la trouve fausse aussi.
+ *
+ * `inherit` plutot qu'une couleur ecrite : la teinte du bloc n'est definie nulle part ici, elle
+ * descend du theme. La recopier serait la figer, et elle divergerait au premier changement.
+ * L'infobulle, elle, n'y perd rien : `.tooltip` sert au comportement, pas a cette couleur.
+ */
+ul.fleetBriefing #fightAfterRetreat .tooltip {
+    color: inherit;
+}
