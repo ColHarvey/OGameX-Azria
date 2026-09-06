@@ -47,7 +47,7 @@
                  et les lecteurs d'ecran. `aria-expanded` dit deja l'etat. --}}
             <a class="icon_link" href="javascript:void(0);" aria-expanded="false"
                aria-controls="combatDetails-{{ $combat['id'] }}" aria-label="{{ __('t_ingame.combat.losses_title') }}">
-                <img src="/img/icons/89624964d4b06356842188dba05b1b.gif" height="16" width="16" alt=""/>
+                <img src="/img/icons/combat-losses.svg" height="16" width="16" alt=""/>
             </a>
         </span>
     </td>

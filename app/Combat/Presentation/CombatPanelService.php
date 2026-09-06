@@ -33,11 +33,6 @@ use OGame\Services\PlayerService;
  */
 final class CombatPanelService
 {
-    /**
-     * Combien de temps une bataille finie reste sur la carte, en secondes.
-     */
-    public const FINISHED_STAYS_FOR = 1800;
-
     public const string ROLE_ATTACKER = 'attacker';
 
     public const string ROLE_TARGET = 'target';
@@ -63,13 +58,10 @@ final class CombatPanelService
             $lignes[] = $this->describe($combat, $player->getId(), $corps, $now);
         }
 
-        // **Une bataille finie reste sur la carte une demi-heure** : c'est la que le joueur apprend
-        // que son rapport est disponible, sans attendre d'ouvrir sa messagerie. Passe ce delai, la
-        // messagerie seule en garde la trace — le deroulant n'est pas une archive.
-        foreach (CombatsInvolvingPlayer::recentlyFinished($player->getId(), $corps, $now - self::FINISHED_STAYS_FOR) as $combat) {
-            $lignes[] = $this->describe($combat, $player->getId(), $corps, $now);
-        }
-
+        // **Une bataille finie quitte la carte tout de suite** (decision de Keven, 6 septembre 2026).
+        // Elle y restait une demi-heure pour annoncer le rapport. Mais la flotte, elle, est deja
+        // repartie : le joueur lisait « bataille » a cote d'un retour en vol, et comprenait que le
+        // combat durait encore. Le rapport se trouve dans la messagerie, ou il a toujours ete.
         return ['visible' => $lignes !== [], 'server_now' => $now, 'combats' => $lignes];
     }
 

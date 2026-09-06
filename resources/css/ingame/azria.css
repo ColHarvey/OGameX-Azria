@@ -35,10 +35,6 @@
  * `partnerInfo` comme celle d'une union, et les couleurs sont les trois niveaux de gravite du jeu.
  * Le halo est volontairement tres doux — il signale une activite, il ne simule pas des degats.
  */
-#eventContent tr.combatEvent td {
-    background-color: #2b1a12;
-}
-
 #eventContent tr.combatEvent .combatEvent_state {
     display: inline-block;
     padding: 1px 0;
@@ -59,8 +55,12 @@
     white-space: nowrap;
 }
 
+/*
+ * Le detail garde son espacement, pas de fond propre : la ligne de combat prend exactement
+ * l aspect des lignes voisines (decision de Keven, 6 septembre 2026). Ce qui signale la bataille
+ * est la couleur de son etat et son halo, pas un aplat de couleur qui debordait sur l en-tete.
+ */
 #eventContent tr.combatEvent_details td {
-    background-color: #1b120d;
     padding: 4px 8px;
 }
 

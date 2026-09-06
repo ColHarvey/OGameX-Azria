@@ -79,6 +79,38 @@ class CombatPanelTest extends FleetDispatchTestCase
     }
 
     /**
+     * Le bouton « Vos pertes » porte son icone dediee, jamais celle du rappel.
+     *
+     * ## Pourquoi cela merite un temoin
+     *
+     * La carte empruntait l image du rappel — le meme fichier que la fleche de retour des lignes
+     * de mouvement, du courrier et des unions. Deux actions tres differentes portaient donc le
+     * meme dessin, et un joueur pouvait croire que ce bouton ramenait sa flotte. L icone est
+     * desormais dediee ; ce temoin empeche qu un copier-coller la fasse revenir, et il tient dans
+     * les deux sens : l icone propre presente, celle du rappel absente.
+     */
+    public function testTheLossesButtonCarriesItsOwnIconAndNotTheRecallOne(): void
+    {
+        $combat = $this->anEngagedCombat();
+
+        $deroulant = $this->get("/ajax/fleet/eventlist/fetch");
+        $deroulant->assertStatus(200);
+
+        $carte = $this->cardOf($deroulant, $combat);
+
+        $this->assertStringContainsString("/img/icons/combat-losses.svg", $carte, "The losses button lost its dedicated icon.");
+        $this->assertStringNotContainsString(
+            "89624964d4b06356842188dba05b1b.gif",
+            $carte,
+            "The losses button went back to the shared recall icon."
+        );
+
+        // Le nom accessible et l etat d ouverture ne dependent pas de l image.
+        $this->assertStringContainsString("aria-label=\"" . __("t_ingame.combat.losses_title") . "\"", $carte);
+        $this->assertStringContainsString("aria-expanded=\"false\"", $carte);
+    }
+
+    /**
      * Le proprietaire de la cible voit ses pertes de garnison — a la fin de leur periode, pas avant.
      */
     /**

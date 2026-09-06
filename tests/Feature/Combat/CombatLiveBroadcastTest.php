@@ -10,7 +10,6 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Presentation\CombatBroadcasterLease;
-use OGame\Combat\Presentation\CombatPanelService;
 use OGame\Combat\Presentation\CombatPresentationBroadcaster;
 use OGame\Combat\Services\CombatsInvolvingPlayer;
 use OGame\Combat\Services\PersistentCombatAdvancer;
@@ -450,12 +449,13 @@ class CombatLiveBroadcastTest extends FleetDispatchTestCase
             && $annonce->status === CombatState::Resolved->value
             && $annonce->reportAvailable === true);
 
-        // **La carte reste, et propose le rapport** — parce qu'il existe.
+        // **La carte disparait des que la bataille est finie** (decision de Keven, 6 septembre 2026).
+        // Elle restait une demi-heure pour annoncer le rapport ; mais la flotte est deja sur le
+        // chemin du retour, et une ligne qui parle de bataille a cote d'un retour en vol se lit
+        // comme un combat qui dure encore. Le rapport vit dans la messagerie, ou il a toujours ete.
         $deroulant = $this->get('/ajax/fleet/eventlist/fetch');
         $deroulant->assertStatus(200);
-        $deroulant->assertSee('id="combatRow-' . $combat->id . '"', false);
-        $deroulant->assertSee(__('t_ingame.combat.status_resolved'));
-        $deroulant->assertSee(__('t_ingame.combat.report_link'));
+        $deroulant->assertDontSee('id="combatRow-' . $combat->id . '"', false);
 
         // Mais le bandeau ne la compte plus parmi les batailles en cours : une de moins qu'avant.
         // **Cette bataille-la n est plus comptee.** Le bandeau rend un total, et la base d un processus
@@ -465,10 +465,6 @@ class CombatLiveBroadcastTest extends FleetDispatchTestCase
         $enCours = CombatsInvolvingPlayer::stillRunning($proprietaire, [(int)$combat->target_planet_id]);
         $this->assertNotContains($combat->id, $enCours->pluck('id')->map(static fn (mixed $id): int => (int)$id)->all(), 'The settled battle is still counted as running in the banner.');
         $this->assertLessThanOrEqual($avant, (int)$this->get('/ajax/fleet/eventbox/fetch')->json('combats'), 'The banner counts more running battles after a settlement than before it.');
-
-        // Et une demi-heure plus tard, la carte a disparu : le deroulant n'est pas une archive.
-        $this->travelTo(Date::createFromTimestamp($echeance + CombatPanelService::FINISHED_STAYS_FOR + 1));
-        $this->get('/ajax/fleet/eventlist/fetch')->assertDontSee('combatRow-' . $combat->id, false);
     }
 
     /**
