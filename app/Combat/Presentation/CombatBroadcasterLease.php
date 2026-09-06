@@ -75,10 +75,24 @@ final class CombatBroadcasterLease
      */
     public function heartbeat(int $now): bool
     {
+        // **Le nombre de lignes ecrites ne dit pas la possession.** MariaDB compte les lignes
+        // *changees*, pas les lignes *trouvees* : un battement qui reecrit la meme seconde n'en
+        // change aucune, et `=== 1` concluait « un autre a pris la releve » des le premier tour.
+        // Le diffuseur rendait alors son bail et sortait — chaque minute, en production, sans une
+        // ligne de journal. SQLite, lui, compte les lignes trouvees : la suite passait.
+        //
+        // On ecrit, puis on demande qui tient. Deux allers-retours par seconde, et une reponse qui
+        // ne depend plus du moteur. Si un autre a vraiment pris la releve entre les deux, la
+        // seconde lecture le voit et rend faux — c'est exactement le verdict voulu.
+        DB::table('combat_broadcaster_leases')
+            ->where('name', self::NAME)
+            ->where('holder', $this->holder)
+            ->update(['heartbeat_at' => $now]);
+
         return DB::table('combat_broadcaster_leases')
             ->where('name', self::NAME)
             ->where('holder', $this->holder)
-            ->update(['heartbeat_at' => $now]) === 1;
+            ->exists();
     }
 
     /**
