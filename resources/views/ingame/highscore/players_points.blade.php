@@ -113,6 +113,15 @@
                                             {{ $highscorePlayer['name'] }}
                                         </span>
                                     </a>
+                                    @if ($highscorePlayer['is_admin'] ?? false)
+                                        {{-- Le badge vit **hors du lien** : cliquer une decoration ne doit pas
+                                             emmener le joueur sur des coordonnees qu'il n'a pas demandees. Les
+                                             dimensions sont ecrites dans la balise pour que la ligne ne saute pas
+                                             pendant le chargement de l'image. --}}
+                                        <img src="/img/icons/badge-admin.png" width="55" height="14" class="badgeAdmin"
+                                             alt="{{ __('t_ingame.highscore.badge_admin') }}"
+                                             title="{{ __('t_ingame.highscore.badge_admin') }}">
+                                    @endif
                                     @endif
                                 </div>
                                 @if (($highscorePlayer['honor_points'] ?? null) !== null)

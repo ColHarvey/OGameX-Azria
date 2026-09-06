@@ -254,3 +254,21 @@
 ul.fleetBriefing #fightAfterRetreat .tooltip {
     color: inherit;
 }
+
+/*
+ * Le badge d'administrateur du classement.
+ *
+ * Sa hauteur — 14 px — accompagne les 12 px du jeu sans les ecraser : plus grand, il ferait respirer
+ * la ligne autrement que ses voisines ; plus petit, le mot deviendrait illisible. L'image est
+ * stockee en double definition (110 x 28) et affichee de moitie, pour rester nette sur un ecran
+ * dense.
+ *
+ * `vertical-align: middle` plutot que la ligne de base : un badge pose sur la base flotterait au-
+ * dessus du nom.
+ */
+.badgeAdmin {
+    vertical-align: middle;
+    margin-left: 4px;
+    /* Le badge decore, il ne se clique pas : il ne doit pas capter le curseur du lien voisin. */
+    pointer-events: none;
+}

@@ -1078,6 +1078,7 @@ return [
         'honour_points' => 'Points d\'honneur',
         'position' => 'Position',
         'player_name_honour' => 'Nom du joueur (points d\'honneur)',
+        'badge_admin' => 'Administrateur',
         'action' => 'Action',
         'alliance' => 'Alliance',
         'member' => 'Membre',

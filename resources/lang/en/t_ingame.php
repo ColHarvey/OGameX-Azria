@@ -1370,6 +1370,7 @@ return [
         'honour_points'         => 'Honour points',
         'position'              => 'Position',
         'player_name_honour'    => "Player's Name (Honour points)",
+        'badge_admin'           => 'Administrator',
         'action'                => 'Action',
         'alliance'              => 'Alliance',
         'member'                => 'Member',
