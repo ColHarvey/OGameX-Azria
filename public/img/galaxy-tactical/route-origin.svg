@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="Systeme d origine">
+  <defs><filter id="g"><feGaussianBlur stdDeviation="1.3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+  <circle cx="24" cy="24" r="8" fill="#46dff8" fill-opacity=".2" stroke="#46dff8" stroke-width="2"/>
+  <circle cx="24" cy="24" r="17" fill="none" stroke="#46dff8" stroke-opacity=".45" stroke-dasharray="3 4"/>
+  <path d="M24 6v8M24 34v8M6 24h8M34 24h8" stroke="#bff8ff" stroke-width="2" stroke-linecap="round" filter="url(#g)"/>
+</svg>

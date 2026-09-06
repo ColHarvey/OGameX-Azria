@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 24" role="img" aria-label="Direction du trajet">
+  <defs><filter id="g" x="-20%" y="-100%" width="140%" height="300%"><feGaussianBlur stdDeviation="1.4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+  <path d="M3 12h68M61 4l10 8-10 8" fill="none" stroke="#43c9e8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" filter="url(#g)"/>
+</svg>

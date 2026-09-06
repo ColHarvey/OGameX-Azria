@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" role="img" aria-label="Combat imminent autour de la planete">
+  <defs>
+    <filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <style>
+    .warning-ring{transform-origin:80px 80px;animation:warning-pulse 2.4s ease-in-out infinite}
+    .scan{transform-origin:80px 80px;animation:warning-spin 9s linear infinite}
+    @keyframes warning-pulse{0%,100%{opacity:.28;transform:scale(.96)}50%{opacity:.8;transform:scale(1.03)}}
+    @keyframes warning-spin{to{transform:rotate(360deg)}}
+    @media (prefers-reduced-motion:reduce){.warning-ring,.scan{animation:none}.warning-ring{opacity:.55}}
+  </style>
+  <circle class="warning-ring" cx="80" cy="80" r="55" fill="#ff693f" fill-opacity=".025" stroke="#ff693f" stroke-width="2" stroke-dasharray="5 7" filter="url(#g)"/>
+  <g class="scan" fill="none" stroke="#ffb347" stroke-width="2.5" stroke-linecap="round">
+    <path d="M80 14a66 66 0 0 1 36 11"/><path d="M146 80a66 66 0 0 1-11 36"/>
+    <path d="M80 146a66 66 0 0 1-36-11"/><path d="M14 80a66 66 0 0 1 11-36"/>
+  </g>
+</svg>

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="Position libre colonisable">
+  <defs>
+    <radialGradient id="ghost" cx="36%" cy="30%" r="72%">
+      <stop offset="0" stop-color="#c8e5ec" stop-opacity=".28"/>
+      <stop offset=".55" stop-color="#708b95" stop-opacity=".14"/>
+      <stop offset="1" stop-color="#263d47" stop-opacity=".04"/>
+    </radialGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="1.7" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <circle cx="48" cy="48" r="26" fill="url(#ghost)" stroke="#8fb8c4" stroke-opacity=".5" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <ellipse cx="48" cy="48" rx="39" ry="13" fill="none" stroke="#5ebed5" stroke-opacity=".38" stroke-width="1.5" transform="rotate(-13 48 48)"/>
+  <path d="M48 38v20M38 48h20" stroke="#8cecff" stroke-width="2.5" stroke-linecap="round" filter="url(#glow)"/>
+  <circle cx="48" cy="48" r="42" fill="none" stroke="#74dff4" stroke-opacity=".22"/>
+</svg>

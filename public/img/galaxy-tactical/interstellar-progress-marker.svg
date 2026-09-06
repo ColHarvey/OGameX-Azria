@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="Position de la flotte en transit">
+  <defs><filter id="g" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+  <circle cx="24" cy="24" r="17" fill="#43c9e8" fill-opacity=".07" stroke="#43c9e8" stroke-opacity=".52" stroke-dasharray="3 3"/>
+  <path d="m8 25 15-9 18 8-18 8 3-6H15Z" fill="#46dff8" fill-opacity=".5" stroke="#d6faff" stroke-width="1.5" filter="url(#g)"/>
+</svg>
