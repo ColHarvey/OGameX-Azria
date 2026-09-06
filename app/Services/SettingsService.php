@@ -1181,4 +1181,40 @@ class SettingsService
     {
         return (int)$this->get('combat_duration_minimum_seconds', 5);
     }
+
+    /**
+     * Le systeme d'honneur est-il actif sur cet univers ?
+     *
+     * **Non par defaut**, comme le combat durable l'a ete. Le systeme se deploie inerte : rien n'est
+     * credite, rien n'est debite, et les statuts restent neutres tant que l'interrupteur n'est pas
+     * arme. Un univers deja en cours peut ainsi recevoir le code sans que les comptes de ses joueurs
+     * bougent d'un point.
+     */
+    public function honorSystemEnabled(): bool
+    {
+        return $this->get('honor_system_enabled', '0') === '1';
+    }
+
+    /**
+     * En dessous de ce total, un joueur est un bandit : on le pille entierement.
+     *
+     * Valeur d'OGame officiel, retenue par Keven. Elle est **negative** : il faut plusieurs attaques
+     * deloyales pour y tomber, le statut punit une habitude et non un ecart isole.
+     */
+    public function honorOutlawThreshold(): int
+    {
+        return (int)$this->get('honor_outlaw_threshold', -500);
+    }
+
+    /**
+     * Le poids militaire minimal d'un camp face a l'autre, en pour-cent, pour que le combat compte.
+     *
+     * A 50, chaque camp doit peser au moins la moitie de l'autre. En dehors de cette fourchette,
+     * l'attaquant **perd** de l'honneur au lieu d'en gagner : c'est ce qui rend le systeme
+     * dissuasif, et c'est la regle d'OGame officiel.
+     */
+    public function honorFightRatioPercent(): int
+    {
+        return (int)$this->get('honor_fight_ratio_percent', 50);
+    }
 }
