@@ -153,11 +153,20 @@ class StarterAidService
             // Somme plutot que trois comparaisons : aucune recompense ne donne actuellement
             // de deuterium, ce qui rendrait le test correspondant mort.
             if ($reward['metal'] + $reward['crystal'] + $reward['deuterium'] > 0) {
-                $planet->addResources(new Resources($reward['metal'], $reward['crystal'], $reward['deuterium'], 0));
+                // **L'addition est faite par la base, jamais sur le modele.** `addResources()`
+                // repart du stock charge avant la transaction et reecrit la colonne avec une valeur
+                // absolue : une depense validee entre-temps serait effacee, et le joueur garderait
+                // sa construction *et* les ressources qu'elle a coutees.
+                $planet->addResourcesAtomic(new Resources($reward['metal'], $reward['crystal'], $reward['deuterium'], 0));
             }
 
             foreach ($reward['units'] as $machineName => $amount) {
-                $planet->addUnit($machineName, $amount);
+                // Meme raison pour les unites — et la propriete est verifiee dans l'ecriture, ce qui
+                // interdit de crediter un corps qui a change de mains. Un refus annule la
+                // transaction, donc la creance : la recompense reste reclamable.
+                if (!$planet->addUnitAtomicIfStillOwnedBy($machineName, $amount, $player->getId())) {
+                    throw new RuntimeException(__('t_ingame.rewards.error_body_changed'));
+                }
             }
 
             if ($reward['dark_matter'] > 0) {

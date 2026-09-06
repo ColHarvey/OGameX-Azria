@@ -1322,7 +1322,9 @@ class EventMissionService
     private function grantReward(PlayerService $player, array $reward, int $rank): void
     {
         if ($reward['metal'] + $reward['crystal'] + $reward['deuterium'] > 0) {
-            $player->planets->current()->addResources(
+            // Addition faite en base : le modele charge avant la transaction ne dit plus le stock,
+            // et le reecrire effacerait toute depense validee entre-temps.
+            $player->planets->current()->addResourcesAtomic(
                 new Resources($reward['metal'], $reward['crystal'], $reward['deuterium'], 0)
             );
         }
