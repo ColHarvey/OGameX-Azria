@@ -1,0 +1,215 @@
+/*
+ * La Galaxie tactique — carte du systeme, en remplacement du tableau.
+ *
+ * ## Le gabarit n'est pas negociable
+ *
+ * Le panneau Galaxie mesure **670 x 720** dans la page, et sa table interieure **656 x 678**
+ * (mesure au navigateur, viewport 1365 x 951, le 6 septembre 2026). Le README du pack graphique
+ * annoncait 654 x 610 : la hauteur y etait fausse de 68 px. La carte reprend donc la boite exacte,
+ * sans quoi elle deformerait les bandeaux et la colonne de planetes autour d'elle.
+ *
+ *     678 = 29 (en-tete galaxie/systeme) + 610 (carte) + 39 (pied)
+ *
+ * ## Les couleurs viennent du pack, pas de mon gout
+ *
+ * `asset-manifest.json` fixe la palette ; la reprendre telle quelle evite que la carte jure avec
+ * les icones qu'elle affiche.
+ */
+
+#galaxyTactical {
+    --gt-fond: #020b15;
+    --gt-panneau: #12384a;
+    --gt-interactif: #43c9e8;
+    --gt-personnel: #46dff8;
+    --gt-allie: #70ff72;
+    --gt-hostile: #ff693f;
+    --gt-alerte: #ffb347;
+    --gt-texte: #d6f5fb;
+    --gt-doux: #7fa9b7;
+
+    position: relative;
+    width: 656px;
+    height: 610px;
+    overflow: hidden;
+    background: var(--gt-fond) url("/img/galaxy-tactical/galaxy-tactical-background-v1.jpg") center / cover no-repeat;
+    border: 1px solid #1b2f42;
+    box-sizing: border-box;
+    color: var(--gt-texte);
+    font-size: 11px;
+}
+
+/*
+ * L'etoile du systeme. Elle n'est pas un objet du jeu : aucune action, aucun rang de tabulation.
+ * `pointer-events: none` l'empeche de voler le curseur d'une planete proche.
+ */
+#galaxyTactical .gtStar {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 46px;
+    height: 46px;
+    margin: -23px 0 0 -23px;
+    border-radius: 50%;
+    background: radial-gradient(circle, #fff4d6 0%, #ffb347 38%, #e0651f 62%, rgba(224, 101, 31, 0) 78%);
+    pointer-events: none;
+}
+
+/* Les orbites : un trait, et rien de plus. Elles situent, elles ne se cliquent pas. */
+#galaxyTactical .gtOrbit {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    border: 1px solid rgba(67, 201, 232, 0.13);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+}
+
+/*
+ * Un corps du systeme. Le bloc est ancre par son centre, ce qui laisse le calcul de position
+ * exprimer une coordonnee d'orbite et non un coin de boite.
+ */
+#galaxyTactical .gtBody {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 4px 2px 2px;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+#galaxyTactical .gtBody:hover,
+#galaxyTactical .gtBody:focus-visible {
+    background: rgba(2, 11, 21, 0.72);
+    border-color: rgba(67, 201, 232, 0.55);
+    outline: none;
+}
+
+#galaxyTactical .gtBody:focus-visible {
+    border-color: var(--gt-interactif);
+    box-shadow: 0 0 0 1px var(--gt-interactif);
+}
+
+#galaxyTactical .gtBody.gtSelected {
+    background: rgba(2, 11, 21, 0.85);
+    border-color: var(--gt-interactif);
+}
+
+/*
+ * Les vignettes viennent du jeu, pas du pack graphique.
+ *
+ * ## Ce que la mesure a montre, et qui contredit le cahier des charges
+ *
+ * Le cahier annonce des fichiers individuels sous `public/img/planets/medium/{type}_{variante}.png`.
+ * Ce dossier existe — mais **la Galaxie ne s'en sert pas** : elle rend chaque corps par une planche
+ * de sprites, `.microplanet` portant l'image et la taille 38 x 33, et une classe de variante
+ * (`desert_1`, `npc_pirate`…) portant seulement une position de fond. Soixante-et-onze variantes.
+ *
+ * La carte reutilise donc **exactement** ce mecanisme : meme classe, meme planche, meme decoupe.
+ * C'est la seule facon de tenir la regle « aucun tirage graphique qui change leur identite » — une
+ * planete ne doit pas changer d'apparence parce qu'on a refait la vue. Ces regles ne touchent donc
+ * ni la taille ni le fond des vignettes ; elles ne font que les poser sur la carte.
+ */
+#galaxyTactical .microplanet,
+#galaxyTactical .micromoon,
+#galaxyTactical .microdebris {
+    flex: 0 0 auto;
+}
+
+/* La lune est accolee a SA planete, et se selectionne separement. */
+#galaxyTactical .gtMoonSlot {
+    display: flex;
+    align-items: center;
+    margin-left: -6px;
+}
+
+/* Une position libre : une silhouette, pas une planete. Elle ne devient reelle qu'apres le serveur. */
+#galaxyTactical .gtEmpty {
+    width: 22px;
+    height: 22px;
+    background: url("/img/galaxy-tactical/slot-colonizable.svg") center / contain no-repeat;
+    opacity: 0.42;
+    flex: 0 0 auto;
+}
+
+#galaxyTactical .gtBody:hover .gtEmpty {
+    opacity: 0.9;
+}
+
+/*
+ * Le numero de position. **C'est lui qui rend les quinze positions identifiables** : une carte
+ * ou l'on ne peut pas trouver la position 7 serait plus jolie que l'ancien tableau, et moins
+ * utilisable.
+ */
+#galaxyTactical .gtIndex {
+    color: var(--gt-doux);
+    font-size: 9px;
+    min-width: 12px;
+    text-align: right;
+}
+
+#galaxyTactical .gtName {
+    max-width: 108px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 11px;
+}
+
+#galaxyTactical .gtBody.gtOwn .gtName {
+    color: var(--gt-personnel);
+}
+
+/* Le bandeau du bas : ce que la vue liste montrait sous sa table. */
+#galaxyTactical .gtFooter {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 22px;
+    line-height: 22px;
+    padding: 0 8px;
+    background: rgba(2, 11, 21, 0.78);
+    border-top: 1px solid rgba(67, 201, 232, 0.18);
+    color: var(--gt-doux);
+}
+
+/*
+ * Petite largeur : le panneau du jeu passe en pleine largeur sous 1000 px, et la carte doit suivre
+ * sans deborder horizontalement. La hauteur reste fixe — c'est une carte, pas un texte qui coule.
+ */
+@media (max-width: 1000px) {
+    #galaxyTactical {
+        width: 100%;
+    }
+}
+
+/* Une animation qui ne demande rien a personne : celui qui a dit non ne la voit pas. */
+@media (prefers-reduced-motion: reduce) {
+    #galaxyTactical * {
+        animation: none !important;
+        transition: none !important;
+    }
+}
+
+/*
+ * Le tableau que la carte remplace.
+ *
+ * Les lignes restent dans le document au lieu d'etre supprimees, et c'est un choix mesure : le
+ * rendu herite continue d'y ecrire — sans effet visible — pendant que la carte se verifie a
+ * l'ecran. Retirer `gtReplaced` restitue l'ancienne vue en une ligne, ce qu'aucune suppression ne
+ * permettrait. La suppression seche viendra quand la carte aura fait ses preuves dans le
+ * navigateur, seul endroit ou elle peut les faire.
+ *
+ * Aucune donnee n'est cachee au passage : la charge utile est exactement celle que le tableau
+ * recevait deja.
+ */
+.galaxyTable.gtReplaced > .ctContentRow,
+.galaxyTable.gtReplaced > .headBold,
+.galaxyTable.gtReplaced > .expeditionDebrisSlotBoxRow {
+    display: none;
+}
