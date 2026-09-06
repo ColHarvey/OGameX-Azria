@@ -94,7 +94,7 @@ class MissileMission extends GameMission
         // message : l'interface n'est jamais le controle.
         $tenue = resolve(HeldTargetCheck::class);
         if ($tenue->isHeld($targetPlanet->getPlanetId())) {
-            return new MissionPossibleStatus(false, $tenue->refusal());
+            return new MissionPossibleStatus(false, $tenue->refusal($targetPlanet->getPlanetId()));
         }
 
         // Check if target is within missile range

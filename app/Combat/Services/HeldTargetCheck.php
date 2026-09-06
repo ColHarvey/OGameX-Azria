@@ -2,6 +2,7 @@
 
 namespace OGame\Combat\Services;
 
+use OGame\Factories\PlanetServiceFactory;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Services\SettingsService;
 
@@ -35,10 +36,16 @@ final class HeldTargetCheck
     }
 
     /**
-     * Le message que le joueur lit, dans sa langue.
+     * Le message que le joueur lit, dans sa langue — et qui nomme le bon corps.
+     *
+     * Une lune et sa planete portent la meme adresse : dire « cette planete » quand la cible est une
+     * lune laisserait le joueur croire qu il s est trompe de cible.
      */
-    public function refusal(): string
+    public function refusal(int $bodyId): string
     {
-        return __('t_ingame.galaxy.missile_target_combat_locked');
+        $corps = resolve(PlanetServiceFactory::class)->make($bodyId, true);
+        $lune = $corps !== null && $corps->isMoon();
+
+        return __($lune ? 't_ingame.galaxy.missile_target_moon_combat_locked' : 't_ingame.galaxy.missile_target_combat_locked');
     }
 }

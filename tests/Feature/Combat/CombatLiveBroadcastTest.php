@@ -135,7 +135,7 @@ class CombatLiveBroadcastTest extends FleetDispatchTestCase
             $this->assertSame(['combatId', 'losses'], array_keys($charge));
 
             foreach ($charge['losses'] as $perte) {
-                $this->assertSame(['key', 'sequence', 'at', 'side', 'unit', 'unit_label', 'amount'], array_keys($perte));
+                $this->assertSame(['key', 'sequence', 'at', 'at_label', 'side', 'unit', 'unit_label', 'amount'], array_keys($perte));
                 $this->assertLessThanOrEqual($premiere, $perte['at'], 'A loss from the future was broadcast.');
                 $this->assertNotSame($echeance, $perte['at']);
             }

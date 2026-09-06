@@ -25,7 +25,9 @@
     </td>
     <td class="originFleet combatEvent_body">
         @if ($combat['target']['name'] !== '')
-            <figure class="planetIcon planet js_hideTipOnMobile" title="{{ $combat['target']['name'] }}"></figure>{{ $combat['target']['name'] }}
+            {{-- Lune ou planete : deux corps a la meme adresse, et le joueur doit savoir lequel. --}}
+            <figure class="planetIcon {{ $combat['target']['is_moon'] ? 'moon' : 'planet' }} js_hideTipOnMobile"
+                    title="{{ $combat['target']['name'] }} — {{ $combat['target']['is_moon'] ? __('t_ingame.combat.target_moon') : __('t_ingame.combat.target_planet') }}"></figure>{{ $combat['target']['name'] }}
         @endif
     </td>
     <td class="coordsOrigin">
@@ -41,7 +43,10 @@
         {{-- Le bouton de details, dans la forme du jeu : il ouvre la ligne qui suit. --}}
         <span class="tooltip toggleCombat" rel="combat{{ $combat['id'] }}"
               title="{{ __('t_ingame.combat.losses_title') }}">
-            <a class="icon_link" href="javascript:void(0);" aria-expanded="false" aria-controls="combatDetails-{{ $combat['id'] }}">
+            {{-- L'image est decorative ; c'est le lien qui porte le nom, traduit, pour le clavier
+                 et les lecteurs d'ecran. `aria-expanded` dit deja l'etat. --}}
+            <a class="icon_link" href="javascript:void(0);" aria-expanded="false"
+               aria-controls="combatDetails-{{ $combat['id'] }}" aria-label="{{ __('t_ingame.combat.losses_title') }}">
                 <img src="/img/icons/89624964d4b06356842188dba05b1b.gif" height="16" width="16" alt=""/>
             </a>
         </span>
@@ -57,7 +62,11 @@
         <div class="combatEvent_panel">
             @if ($combat['report_available'])
                 {{-- Le rapport n'est propose que lorsqu'il est reellement accessible. --}}
-                <p class="combatEvent_report"><a href="{{ route('messages.index') }}" class="combatEvent_report_link">{{ __('t_ingame.combat.report_link') }}</a></p>
+                {{-- La messagerie ouvre la categorie des rapports de combat, pas la boite generale.
+                     Elle ne sait pas encore selectionner un rapport precis : le lien mene donc a la
+                     bonne liste, et pas plus — mieux vaut cela qu'une promesse que la page ne tient
+                     pas. --}}
+                <p class="combatEvent_report"><a href="{{ route('messages.index', ['tab' => 'fleets', 'subtab' => 'combat_reports']) }}" class="combatEvent_report_link">{{ __('t_ingame.combat.report_link') }}</a></p>
             @endif
             <div class="combatEvent_losses_title">{{ __('t_ingame.combat.losses_title') }}</div>
             @if ($combat['events'] === [])
@@ -66,7 +75,9 @@
                 <ul class="combatEvent_losses">
                     @foreach ($combat['events'] as $perte)
                         <li data-key="{{ $perte['key'] }}" data-sequence="{{ $perte['sequence'] }}">
-                            <span class="combatEvent_at">{{ date('H:i:s', $perte['at']) }}</span>
+                            {{-- L'heure vient du serveur, comme celle de la diffusion : le fuseau du
+                                 navigateur donnerait deux heures pour un meme fait. --}}
+                            <span class="combatEvent_at">{{ $perte['at_label'] }}</span>
                             <span class="overmark">{{ trans_choice('t_ingame.combat.loss_line', $perte['amount'], ['amount' => number_format($perte['amount'], 0, ',', ' '), 'unit' => $perte['unit_label']]) }}</span>
                         </li>
                     @endforeach

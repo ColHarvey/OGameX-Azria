@@ -12,7 +12,6 @@ use OGame\Models\CombatParticipant;
 use OGame\Models\CombatPresentationEvent;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet;
-use OGame\Services\ObjectService;
 use Throwable;
 
 /**
@@ -269,25 +268,15 @@ final class CombatPresentationBroadcaster
      */
     private function row(CombatPresentationEvent $evenement): array
     {
-        return [
-            // **L'identite stable d'une perte** : la bataille et le rang. Le rang seul ne suffit pas —
-            // deux batailles simultanees portent chacune un rang 1, et le navigateur confondrait.
-            'key' => (int)$evenement->combat_instance_id . ':' . (int)$evenement->sequence,
-            'sequence' => (int)$evenement->sequence,
-            'at' => (int)$evenement->visible_at,
-            'side' => (string)$evenement->side,
-            'unit' => (string)$evenement->unit,
-            'unit_label' => $this->unitLabel((string)$evenement->unit),
-            'amount' => (int)$evenement->amount,
-        ];
-    }
-
-    private function unitLabel(string $machineName): string
-    {
-        try {
-            return ObjectService::getUnitObjectByMachineName($machineName)->title;
-        } catch (Throwable) {
-            return $machineName;
-        }
+        // **Un seul composeur pour les deux chemins** : la carte du serveur et la perte diffusee
+        // decrivent le meme fait, et ne peuvent plus diverger.
+        return PresentedLoss::describe(
+            (int)$evenement->combat_instance_id,
+            (int)$evenement->sequence,
+            (int)$evenement->visible_at,
+            (string)$evenement->side,
+            (string)$evenement->unit,
+            (int)$evenement->amount
+        );
     }
 }

@@ -7,11 +7,10 @@ use OGame\Combat\Services\CombatsInvolvingPlayer;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatParticipant;
+use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet;
-use OGame\Services\ObjectService;
 use OGame\Services\PlayerService;
-use Throwable;
 
 /**
  * Ce que la vue generale montre d'un combat durable a un joueur qui y est partie.
@@ -101,6 +100,10 @@ final class CombatPanelService
             'target' => [
                 'body_id' => $combat->target_planet_id === null ? null : (int)$combat->target_planet_id,
                 'name' => $this->targetNameOf($combat),
+                // Une lune et une planete portent la meme adresse : sans ce fait, la carte montrait
+                // toujours une planete, et le joueur ne savait pas lequel de ses deux corps est
+                // attaque.
+                'is_moon' => $this->targetIsMoon($combat),
                 'galaxy' => (int)$combat->galaxy,
                 'system' => (int)$combat->system,
                 'position' => (int)$combat->position,
@@ -118,25 +121,23 @@ final class CombatPanelService
     /**
      * Les pertes du joueur deja visibles, apres un rang, pretes pour la vue.
      *
-     * @return array<int, array{sequence: int, at: int, side: string, unit: string, unit_label: string, amount: int}>
+     * @return array<int, array{key: string, sequence: int, at: int, at_label: string, side: string, unit: string, unit_label: string, amount: int}>
      */
     public function visibleLosses(CombatInstance $combat, int $playerId, int $now, int $afterSequence): array
     {
         $lignes = [];
 
         foreach ($this->reader->visibleTo($combat, $playerId, $now, $afterSequence) as $evenement) {
-            $lignes[] = [
-                // **L'identite stable d'une perte** : la bataille et le rang. Deux batailles
-                // simultanees portent chacune un rang 1 ; le navigateur deduplique sur cette clef,
-                // et sur elle seule, que la perte vienne du fil ou de la diffusion.
-                'key' => (int)$combat->id . ':' . $evenement->sequence,
-                'sequence' => $evenement->sequence,
-                'at' => $evenement->visibleAt,
-                'side' => $evenement->side,
-                'unit' => $evenement->unit,
-                'unit_label' => $this->unitLabel($evenement->unit),
-                'amount' => $evenement->amount,
-            ];
+            // **Un seul composeur pour les deux chemins.** La carte et la diffusion decrivaient la
+            // meme perte a deux endroits, et les deux formes avaient diverge — libelle et heure.
+            $lignes[] = PresentedLoss::describe(
+                (int)$combat->id,
+                (int)$evenement->sequence,
+                (int)$evenement->visibleAt,
+                (string)$evenement->side,
+                (string)$evenement->unit,
+                (int)$evenement->amount
+            );
         }
 
         return $lignes;
@@ -181,6 +182,19 @@ final class CombatPanelService
         return in_array((int)$genre, [1, 2], true) ? self::ROLE_ATTACKER : self::ROLE_REINFORCEMENT;
     }
 
+    /**
+     * Le corps vise est-il une lune ? Un corps disparu n'en est plus une : la carte le montre alors
+     * comme une planete, ce qui est aussi ce que ses coordonnees designent.
+     */
+    private function targetIsMoon(CombatInstance $combat): bool
+    {
+        if ($combat->target_planet_id === null) {
+            return false;
+        }
+
+        return PlanetType::tryFrom((int)(Planet::query()->whereKey((int)$combat->target_planet_id)->value('planet_type') ?? 0)) === PlanetType::Moon;
+    }
+
     private function targetNameOf(CombatInstance $combat): string
     {
         if ($combat->target_planet_id === null) {
@@ -188,15 +202,6 @@ final class CombatPanelService
         }
 
         return (string)(Planet::query()->whereKey((int)$combat->target_planet_id)->value('name') ?? '');
-    }
-
-    private function unitLabel(string $machineName): string
-    {
-        try {
-            return ObjectService::getUnitObjectByMachineName($machineName)->title;
-        } catch (Throwable) {
-            return $machineName;
-        }
     }
 
     /**

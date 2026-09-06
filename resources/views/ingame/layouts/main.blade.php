@@ -843,6 +843,12 @@
                 var jsloca = {!! json_encode([
                     'INTERNAL_ERROR'               => __('t_ingame.layout.js_internal_error'),
                     'LOCA_ALL_YES'                 => __('t_ingame.shared.yes'),
+                    // Les trois formes de la ligne de pertes, dans la langue du lecteur : le
+                    // diffuseur tourne hors de toute requete et ne peut pas les composer. Le
+                    // navigateur ecrit donc les memes mots que la page.
+                    'COMBAT_LOSS_ZERO'             => trans_choice('t_ingame.combat.loss_line', 0, ['amount' => ':amount', 'unit' => ':unit']),
+                    'COMBAT_LOSS_ONE'              => trans_choice('t_ingame.combat.loss_line', 1, ['amount' => ':amount', 'unit' => ':unit']),
+                    'COMBAT_LOSS_MANY'             => trans_choice('t_ingame.combat.loss_line', 2, ['amount' => ':amount', 'unit' => ':unit']),
                     'LOCA_ALL_NO'                  => __('t_ingame.shared.no'),
                     'LOCA_NOTIFY_ERROR'            => __('t_ingame.shared.error'),
                     'LOCA_NOTIFY_INFO'             => __('t_ingame.layout.js_notify_info'),

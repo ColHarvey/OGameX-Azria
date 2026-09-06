@@ -5,6 +5,7 @@ namespace Tests\Feature\Combat;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
+use OGame\Combat\Presentation\CombatPanelService;
 use OGame\Combat\Presentation\CombatPresentationTimelineReader;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\CombatInstance;
@@ -80,6 +81,48 @@ class CombatPanelTest extends FleetDispatchTestCase
     /**
      * Le proprietaire de la cible voit ses pertes de garnison — a la fin de leur periode, pas avant.
      */
+    /**
+     * Le cumul ferme compte des **unites**, et l'heure vient du serveur.
+     *
+     * ## Ce que cet essai tient pour le direct
+     *
+     * `combat.js` recoit une perte et ajoute son apport au cumul de la carte. Il comptait des lignes
+     * — un evenement de trente chasseurs ajoutait 1 — et le serveur, lui, somme les quantites : le
+     * chiffre derivait jusqu'au rechargement suivant, qui le corrigeait en silence. L'invariant que
+     * le navigateur doit refleter se verifie ici : **`losses_total` est la somme des quantites**, et
+     * chaque perte porte l'heure du jeu, pas celle d'un fuseau.
+     */
+    public function testTheClosedCountSumsQuantitiesAndEachLossCarriesTheGameClock(): void
+    {
+        $combat = $this->anEngagedCombat();
+        $proprietaire = $this->ownerOf($combat);
+        $fin = (int)$combat->started_at + $this->secondsPerRoundOf($combat)[0];
+        $this->travelTo(Date::createFromTimestamp($fin));
+
+        $panneau = resolve(CombatPanelService::class)->describe($combat, $proprietaire->id, [(int)$combat->target_planet_id], $fin);
+        $pertes = $panneau['events'];
+        $this->assertNotSame([], $pertes, 'The garrison lost nothing: the scenario would prove nothing.');
+
+        // **Une perte d'au moins deux unites**, sinon compter des lignes et compter des unites
+        // donnerait le meme chiffre, et l'essai ne distinguerait rien.
+        $plusGrande = 0;
+        foreach ($pertes as $perte) {
+            $plusGrande = max($plusGrande, (int)$perte['amount']);
+        }
+        $this->assertGreaterThan(1, $plusGrande, 'Every loss is a single unit here: counting lines and counting units would agree.');
+
+        $this->assertSame(array_sum(array_column($pertes, 'amount')), $panneau['losses_total'], 'The closed count is not the sum of the quantities.');
+        $this->assertNotSame(count($pertes), $panneau['losses_total'], 'The count equals the number of events: this scenario cannot tell the two rules apart.');
+
+        foreach ($pertes as $perte) {
+            $this->assertSame(date('H:i:s', $perte['at']), $perte['at_label'], 'A loss carries a time that is not the game clock.');
+        }
+
+        // La cible dit son genre de corps : deux corps portent la meme adresse.
+        $this->assertArrayHasKey('is_moon', $panneau['target']);
+        $this->assertFalse($panneau['target']['is_moon'], 'A planet is described as a moon.');
+    }
+
     public function testTheTargetOwnerSeesItsGarrisonLossesOnlyOnceTheyAreVisible(): void
     {
         $combat = $this->anEngagedCombat();
@@ -175,7 +218,7 @@ class CombatPanelTest extends FleetDispatchTestCase
         foreach ($corps['events'] as $evenement) {
             $this->assertLessThanOrEqual($fin, $evenement['at'], 'A loss from the future was sent to the browser.');
             $this->assertArrayNotHasKey('round', $evenement, 'A round number leaked into the feed.');
-            $this->assertSame(['key', 'sequence', 'at', 'side', 'unit', 'unit_label', 'amount'], array_keys($evenement));
+            $this->assertSame(['key', 'sequence', 'at', 'at_label', 'side', 'unit', 'unit_label', 'amount'], array_keys($evenement));
         }
 
         $this->assertSame((int)$corps['next_after'], (int)end($corps['events'])['sequence']);

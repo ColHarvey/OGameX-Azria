@@ -1055,7 +1055,7 @@ class GalaxyController extends OGameController
         if ($tenue->isHeld($targetPlanet->getPlanetId())) {
             return response()->json([
                 'success' => false,
-                'error' => $tenue->refusal(),
+                'error' => $tenue->refusal($targetPlanet->getPlanetId()),
             ], 409);
         }
 
