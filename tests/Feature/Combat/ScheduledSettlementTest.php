@@ -92,7 +92,22 @@ class ScheduledSettlementTest extends FleetDispatchTestCase
 
         // **La ligne est lue en base, pas sur un faux.** C est aussi ce qui prouve que le travail
         // vit dans la transaction de cloture : une cloture annulee l emporterait avec elle.
-        $travaux = DB::table('jobs')->get()->all();
+        //
+        // **On compte les reglements, pas les lignes de la file.** Compter les lignes revenait a
+        // exiger que rien d autre n ecrive dans `jobs` — vrai par accident, jusqu au jour ou une
+        // diffusion legitime s y met (l annonce du courrier non lu, une par rapport de bataille).
+        // L essai annoncait alors « pas exactement un reglement » alors qu il y en avait un.
+        // Un second reglement reste attrape, ce qui est ce que cette assertion protege.
+        $travaux = [];
+
+        foreach (DB::table('jobs')->get() as $ligne) {
+            $charge = json_decode((string)$ligne->payload, true);
+
+            if (is_array($charge) && ($charge['displayName'] ?? null) === SettlePersistentCombat::class) {
+                $travaux[] = $ligne;
+            }
+        }
+
         $this->assertCount(1, $travaux, 'The closure did not schedule exactly one settlement.');
 
         $charge = json_decode((string)$travaux[0]->payload, true);

@@ -9,7 +9,9 @@ use Illuminate\Support\ServiceProvider;
 use OGame\Exceptions\Handler;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
+use OGame\Models\Message;
 use OGame\Models\User;
+use OGame\Observers\MessageObserver;
 use OGame\Observers\UserObserver;
 use OGame\Services\SettingsService;
 
@@ -35,6 +37,7 @@ class AppServiceProvider extends ServiceProvider
 
         // Register model observers
         User::observe(UserObserver::class);
+        Message::observe(MessageObserver::class);
     }
 
     /**

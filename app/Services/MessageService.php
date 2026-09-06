@@ -3,7 +3,9 @@
 namespace OGame\Services;
 
 use Exception;
+use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
+use OGame\Events\UnreadMessageCountChanged;
 use OGame\Factories\GameMessageFactory;
 use OGame\GameMessages\Abstracts\GameMessage;
 use OGame\GameMessages\BattleReport;
@@ -206,9 +208,24 @@ class MessageService
         }
 
         // When the messages are loaded, mark them as viewed.
+        //
+        // **L'annonce ne part que si quelque chose a change.** Un onglet deja lu se recharge
+        // sans rien modifier ; annoncer alors ferait partir une diffusion a chaque ouverture,
+        // pour redire le meme nombre.
+        $marques = 0;
+
         foreach ($paginator->items() as $message) {
+            if ((int)$message->viewed === 1) {
+                continue;
+            }
+
             $message->viewed = 1;
             $message->save();
+            $marques++;
+        }
+
+        if ($marques > 0) {
+            $this->announceTheUnreadCount();
         }
 
         return [
@@ -239,6 +256,25 @@ class MessageService
         }
 
         return GameMessageFactory::createGameMessage($message);
+    }
+
+    /**
+     * Annonce au joueur son nouveau total de courriers non lus.
+     *
+     * La pastille doit **redescendre** aussi. Sans cela elle monterait en direct a chaque
+     * arrivee et ne retomberait qu'au rechargement — un compteur qui ne ment que dans un sens
+     * reste un compteur qui ment.
+     *
+     * L'evenement ne porte pas le nombre : il est lu a la diffusion, donc apres la validation
+     * qui a marque les messages.
+     */
+    private function announceTheUnreadCount(): void
+    {
+        $joueur = $this->player->getId();
+
+        DB::afterCommit(static function () use ($joueur): void {
+            broadcast(new UnreadMessageCountChanged($joueur));
+        });
     }
 
     /**
@@ -354,8 +390,13 @@ class MessageService
         $nextId = ($currentIndex < ($totalCount - 1)) ? $allMessageIds[$currentIndex + 1] : null;
 
         // Mark the current message as viewed
+        $etaitDejaLu = (int)$currentMessage->viewed === 1;
         $currentMessage->viewed = 1;
         $currentMessage->save();
+
+        if (!$etaitDejaLu) {
+            $this->announceTheUnreadCount();
+        }
 
         return [
             'message' => $gameMessage,

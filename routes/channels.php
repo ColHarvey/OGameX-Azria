@@ -17,6 +17,17 @@ Broadcast::channel('App.User.{id}', function ($user, $id) {
     return (int) $user->id === (int) $id;
 });
 
+/*
+ * Le nombre de courriers non lus d un joueur.
+ *
+ * Un canal par joueur, et lui seul : combien de messages il n a pas lus ne regarde personne
+ * d autre. Le canal ne porte qu un nombre — jamais le contenu ni l expediteur —, de sorte qu une
+ * autorisation qui ne serait plus valable ne divulguerait rien de sensible.
+ */
+Broadcast::channel('messages.player.{playerId}', function ($user, $playerId) {
+    return (int) $user->id === (int) $playerId;
+});
+
 // Private channel for direct messages - user can only listen to their own channel
 Broadcast::channel('chat.user.{userId}', function ($user, $userId) {
     return (int) $user->id === (int) $userId;
