@@ -114,6 +114,33 @@
         return e;
     }
 
+    /*
+     * Le verdict du serveur sur la colonisation d'une position libre, lu dans la charge utile.
+     *
+     * `GalaxyController::createEmptySpaceRow()` place la mission 7 avec un lien reel quand elle est
+     * permise, et le seul caractere `#` quand elle ne l'est pas. C'est ce verdict qu'on lit — la
+     * carte ne connait ni le niveau d'astrophysique, ni les positions reservees, et n'a pas a les
+     * connaitre.
+     */
+    function colonisationPermise(ligne) {
+        var missions = (ligne && ligne.availableMissions) || [];
+
+        for (var i = 0; i < missions.length; i++) {
+            if (Number(missions[i].missionType) === 7) {
+                return typeof missions[i].link === 'string' && missions[i].link !== '#';
+            }
+        }
+
+        return false;
+    }
+
+    /* Le libelle traduit d'une position libre, publie par la page. */
+    function libelleDePositionLibre() {
+        var loca = window.jsloca || {};
+
+        return loca.LOCA_GALAXY_EMPTY_SLOT || 'position libre';
+    }
+
     function libelle(texte) {
         var e = element('span', 'gtName');
         e.textContent = texte;
@@ -201,9 +228,17 @@
             var planete = corpsDeGenre(ligne, PLANETE);
 
             if (!planete) {
-                poser(carte, position, [element('div', 'gtEmpty'), numero(position)], {
+                /*
+                 * **Le droit de coloniser se lit, il ne se recalcule pas.** Le serveur a deja
+                 * tranche : il envoie un vrai lien quand la colonisation est permise, et `#` sinon
+                 * (astrophysique, vaisseau disponible, position reservee, portee). Rederiver la
+                 * regle ici en ferait une seconde source de verite, qui divergerait un jour.
+                 */
+                var silhouette = element('div', 'gtEmpty' + (colonisationPermise(ligne) ? '' : ' gtUnavailable'));
+
+                poser(carte, position, [silhouette, numero(position)], {
                     classe: 'gtFree',
-                    intitule: position + ' — ' + (window.galaxyTacticalLoca ? window.galaxyTacticalLoca.freeSlot : 'position libre')
+                    intitule: position + ' — ' + libelleDePositionLibre()
                 });
 
                 continue;
@@ -213,14 +248,19 @@
             var lune = corpsDeGenre(ligne, LUNE);
             var debris = corpsDeGenre(ligne, DEBRIS);
 
+            /*
+             * La lune et les debris prennent les visuels du pack tactique, la ou les planetes
+             * gardent la planche du jeu : une lune n'a que deux etats et un champ de debris une
+             * seule variante, donc aucune identite par corps ne se perd.
+             */
             if (lune) {
                 var creneau = element('span', 'gtMoonSlot');
-                creneau.appendChild(vignette('micromoon', lune));
+                creneau.appendChild(element('span', 'gtMoon' + (lune.isDestroyed ? ' gtDestroyed' : '')));
                 contenu.push(creneau);
             }
 
             if (debris) {
-                contenu.push(vignette('microdebris', debris));
+                contenu.push(element('span', 'gtDebris'));
             }
 
             contenu.push(libelle(planete.planetName || ''));

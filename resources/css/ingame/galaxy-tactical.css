@@ -115,17 +115,80 @@
  * planete ne doit pas changer d'apparence parce qu'on a refait la vue. Ces regles ne touchent donc
  * ni la taille ni le fond des vignettes ; elles ne font que les poser sur la carte.
  */
-#galaxyTactical .microplanet,
-#galaxyTactical .micromoon,
-#galaxyTactical .microdebris {
+#galaxyTactical .microplanet {
     flex: 0 0 auto;
 }
 
-/* La lune est accolee a SA planete, et se selectionne separement. */
+/*
+ * ## Ou s'arrete cette regle, et pourquoi
+ *
+ * Elle vaut pour les **planetes**, dont la texture est attribuee par le serveur. La lune, elle,
+ * n'a que deux etats — `moon_a` vivante, `moon_c` detruite — et le champ de debris une seule
+ * variante : aucune identite par corps a preserver. Le pack tactique s'y applique donc pleinement,
+ * comme le cahier des charges le prevoit.
+ */
 #galaxyTactical .gtMoonSlot {
+    position: relative;
     display: flex;
     align-items: center;
-    margin-left: -6px;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    margin-left: -4px;
+    background: url("/img/galaxy-tactical/moon-orbit-ring.svg") center / contain no-repeat;
+    flex: 0 0 auto;
+}
+
+#galaxyTactical .gtMoon {
+    width: 13px;
+    height: 13px;
+    background: url("/img/galaxy-tactical/moon-tactical-v1.png") center / contain no-repeat;
+}
+
+/* Une lune detruite garde sa place et perd son eclat : l'etat se lit, il ne disparait pas. */
+#galaxyTactical .gtMoon.gtDestroyed {
+    filter: grayscale(1) brightness(0.55);
+}
+
+#galaxyTactical .gtDebris {
+    width: 17px;
+    height: 17px;
+    background: url("/img/galaxy-tactical/debris-marker.svg") center / contain no-repeat;
+    flex: 0 0 auto;
+}
+
+/*
+ * Le halo de survol et l'anneau de selection viennent du pack : ils tiennent la coherence
+ * graphique avec les icones d'action qui arriveront a l'etape suivante. Poses derriere la
+ * vignette, ils ne captent pas le curseur.
+ */
+#galaxyTactical .gtBody::before {
+    content: "";
+    position: absolute;
+    left: 2px;
+    top: 50%;
+    width: 42px;
+    height: 42px;
+    margin-top: -21px;
+    background: url("/img/galaxy-tactical/planet-hover-halo.svg") center / contain no-repeat;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease-out;
+}
+
+#galaxyTactical .gtBody:hover::before,
+#galaxyTactical .gtBody:focus-visible::before {
+    opacity: 0.85;
+}
+
+#galaxyTactical .gtBody.gtSelected::before {
+    background-image: url("/img/galaxy-tactical/planet-selection-ring.svg");
+    opacity: 1;
+}
+
+/* Une position que le joueur ne peut pas coloniser : silhouette barree, pas absente. */
+#galaxyTactical .gtEmpty.gtUnavailable {
+    background-image: url("/img/galaxy-tactical/slot-unavailable.svg");
 }
 
 /* Une position libre : une silhouette, pas une planete. Elle ne devient reelle qu'apres le serveur. */
