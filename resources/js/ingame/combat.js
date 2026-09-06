@@ -36,6 +36,10 @@
     // remplacement du contenu effacerait leur affichage, on les repose apres lui.
     var recuesPendantLaRequete = [];
 
+    // Un tour demande pendant qu une requete est en vol : la reponse qui arrive decrit un etat
+    // anterieur a la demande, donc elle ne peut pas y repondre. Il part des qu elle est posee.
+    var rafraichissementDu = false;
+
     function url() {
         return typeof combatRowsUrl === 'undefined' ? null : combatRowsUrl;
     }
@@ -150,7 +154,17 @@
         var adresse = url();
         var corps = corpsDesCombats();
 
-        if (requeteEnCours || !adresse || !corps) {
+        // **Une demande pendant le vol n'est pas perdue, elle est due.** Le debut et la fin d'une
+        // bataille arrivent en direct et demandent la carte au serveur ; abandonner ici laissait la
+        // reponse en vol — rendue avant l'annonce — effacer le changement d'etat, qui ne revenait
+        // qu'au rafraichissement suivant. Meme defaut que pour les pertes, meme remede.
+        if (requeteEnCours) {
+            rafraichissementDu = true;
+
+            return;
+        }
+
+        if (!adresse || !corps) {
             planifier();
 
             return;
@@ -177,6 +191,14 @@
             complete: function () {
                 requeteEnCours = false;
                 recuesPendantLaRequete = [];
+
+                if (rafraichissementDu) {
+                    rafraichissementDu = false;
+                    rafraichir();
+
+                    return;
+                }
+
                 planifier();
             }
         });
