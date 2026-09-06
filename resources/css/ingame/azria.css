@@ -177,7 +177,9 @@
     width: 48px;
     height: 48px;
     background: url("/img/icons/a22e8a59e7cfd08f0997cf491c2ca1.png") no-repeat;
-    background-size: 288px 48px;
+    /* La planche compte **sept** tuiles de 100 px, pas six : 7 x 48 = 336. Mesuree, pas
+       supposee — la premiere version en comptait six et ecrasait tous les portraits. */
+    background-size: 336px 48px;
     filter: grayscale(0.6) brightness(0.75);
     transition: filter 0.15s ease-out;
 }
