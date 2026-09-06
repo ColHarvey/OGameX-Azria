@@ -447,7 +447,7 @@ return [
         'status_noob_abbr'             => 'n',
         'legend_noob'                  => 'weaker player (newbie)',
         'status_outlaw_abbr'           => 'o',
-        'legend_outlaw'                => 'Outlaw (temporary)',
+        'legend_outlaw'                => 'Outlaw',
         'status_vacation_abbr'         => 'v',
         'vacation_mode'                => 'Vacation Mode',
         'status_banned_abbr'           => 'b',
@@ -485,7 +485,7 @@ return [
         'espionage'                    => 'Espionage',
         'hire_admiral'                 => 'Hire admiral',
         'dark_matter'                  => 'Dark Matter',
-        'outlaw_explanation'           => 'If you are an outlaw, you no longer have any attack protection and can be attacked by all players.',
+        'outlaw_explanation'           => 'An outlaw has attacked far weaker players too often. While their honour stays below the threshold, an attacker takes all of their resources instead of half. The status lifts as soon as their honour recovers.',
         'honorable_target_explanation' => 'In battle against this target you can receive honour points and plunder 50% more loot.',
 
         // galaxyLoca JS object
