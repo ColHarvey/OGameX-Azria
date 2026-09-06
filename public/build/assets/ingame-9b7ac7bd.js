@@ -75211,6 +75211,10 @@ ogame.chat = {
     var minuterie = null;
     var requeteEnCours = false;
 
+    // Les pertes recues en direct pendant qu une requete de rafraichissement est en vol : le
+    // remplacement du contenu effacerait leur affichage, on les repose apres lui.
+    var recuesPendantLaRequete = [];
+
     function url() {
         return typeof combatRowsUrl === 'undefined' ? null : combatRowsUrl;
     }
@@ -75332,6 +75336,7 @@ ogame.chat = {
         }
 
         requeteEnCours = true;
+        recuesPendantLaRequete = [];
 
         $.ajax({
             url: adresse,
@@ -75346,12 +75351,44 @@ ogame.chat = {
                 var ouverts = detailsOuverts();
                 courant.innerHTML = html;
                 rouvrir(ouverts);
+                rejouerCeQuiEstArriveEntreTemps();
             },
             complete: function () {
                 requeteEnCours = false;
+                recuesPendantLaRequete = [];
                 planifier();
             }
         });
+    }
+
+    /**
+     * Les pertes arrivees **pendant** la requete, reposees apres le remplacement.
+     *
+     * Le rafraichissement remplace le contenu des cartes par un HTML que le serveur a rendu avant de
+     * repondre. Une perte recue en direct dans cet intervalle etait ecrite dans l'ancien contenu, que
+     * le remplacement effacait : elle disparaissait jusqu'au rafraichissement suivant. On les rejoue
+     * donc sur le contenu neuf — `ajouterUnePerte` deduplique par clef, donc une perte que le serveur
+     * a deja rendue n'est pas ajoutee deux fois, et seule celle qui manquait compte dans le cumul.
+     */
+    function rejouerCeQuiEstArriveEntreTemps() {
+        var cumuls = {};
+
+        for (var i = 0; i < recuesPendantLaRequete.length; i++) {
+            var attendue = recuesPendantLaRequete[i];
+            var ajoutee = ajouterUnePerte(attendue.combatId, attendue.perte);
+
+            if (ajoutee) {
+                cumuls[attendue.combatId] = (cumuls[attendue.combatId] || 0) + ajoutee;
+            }
+        }
+
+        for (var identifiant in cumuls) {
+            if (Object.prototype.hasOwnProperty.call(cumuls, identifiant)) {
+                mettreAJourLeCumul(identifiant, cumuls[identifiant]);
+            }
+        }
+
+        recuesPendantLaRequete = [];
     }
 
     // Le bouton de details, delegue : les cartes sont remplacees, un abonnement direct mourrait
@@ -75391,11 +75428,16 @@ ogame.chat = {
      * Rend vrai quand la perte a ete ajoutee : un rang deja present n'ajoute rien, et ne rejoue
      * donc aucune animation — c'est ce qui rend une reconnexion silencieuse.
      */
+    /**
+     * Ajoute une perte a sa carte. Rend **le nombre d'unites ajoutees**, pas un booleen : le cumul
+     * de la carte compte des unites, et le compter en lignes affichait 1 la ou le serveur ecrivait
+     * 30. Une perte deja affichee rend zero.
+     */
     function ajouterUnePerte(identifiantCombat, perte) {
         var details = document.getElementById('combatDetails-' + identifiantCombat);
 
         if (!details) {
-            return false;
+            return 0;
         }
 
         // **La deduplication porte sur (bataille, rang)**, jamais sur le rang seul : deux
@@ -75404,7 +75446,7 @@ ogame.chat = {
         var clef = perte.key || (identifiantCombat + ':' + perte.sequence);
 
         if (details.querySelector('li[data-key="' + clef + '"]')) {
-            return false;
+            return 0;
         }
 
         var liste = details.querySelector('ul.combatEvent_losses');
@@ -75421,7 +75463,7 @@ ogame.chat = {
             var panneau = details.querySelector('.combatEvent_panel');
 
             if (!panneau) {
-                return false;
+                return 0;
             }
 
             panneau.appendChild(liste);
@@ -75434,11 +75476,13 @@ ogame.chat = {
 
         var heure = document.createElement('span');
         heure.className = 'combatEvent_at';
-        heure.textContent = new Date(perte.at * 1000).toLocaleTimeString();
+        // **L'heure vient du serveur**, comme celle de la page : le fuseau du navigateur donnerait
+        // deux heures differentes pour un meme fait, selon qu'on recharge ou qu'on recoit.
+        heure.textContent = perte.at_label || '';
 
         var texte = document.createElement('span');
         texte.className = 'overmark';
-        texte.textContent = perte.amount + ' × ' + perte.unit_label;
+        texte.textContent = ligneDePerte(perte);
 
         ligne.appendChild(heure);
         ligne.appendChild(texte);
@@ -75449,9 +75493,48 @@ ogame.chat = {
             ligne.classList.remove('combatEvent_new');
         }, 4000);
 
-        return true;
+        return perte.amount || 0;
     }
 
+    /**
+     * Le libelle d'une perte, **dans les memes mots que la page**.
+     *
+     * Le direct ecrivait « 30 × Chasseur leger » quand le serveur ecrivait « 30 Chasseur leger
+     * perdus » : deux libelles pour un meme fait, selon qu'on rechargeait ou non. La page porte donc
+     * les formes traduites — le diffuseur, lui, tourne hors de toute requete et ne connait pas la
+     * langue du lecteur — et le navigateur compose avec le meme nombre et le meme nom d'unite.
+     *
+     * Rien n'est injecte en HTML : le texte est pose par `textContent`.
+     */
+    function ligneDePerte(perte) {
+        var nombre = perte.amount || 0;
+        var formes = (typeof jsloca !== 'undefined' && jsloca) ? jsloca : {};
+        var forme = nombre === 0
+            ? formes.COMBAT_LOSS_ZERO
+            : (nombre === 1 ? formes.COMBAT_LOSS_ONE : formes.COMBAT_LOSS_MANY);
+
+        if (!forme) {
+            // Sans les formes traduites, un libelle brut vaut mieux qu'une ligne vide.
+            return nombre + ' ' + (perte.unit_label || '');
+        }
+
+        return forme
+            .replace(':amount', nombreFormate(nombre))
+            .replace(':unit', perte.unit_label || '');
+    }
+
+    /**
+     * Le meme groupement de milliers que la page : un espace tous les trois chiffres.
+     */
+    function nombreFormate(nombre) {
+        return String(nombre).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    }
+
+    /**
+     * Le cumul de la carte fermee compte des **unites**, comme le serveur : `losses_total` somme les
+     * quantites. Y ajouter le nombre de lignes recues le faisait deriver des la premiere perte de
+     * plus d'une unite, et seul un rechargement corrigeait l'ecart, en silence.
+     */
     function mettreAJourLeCumul(identifiantCombat, ajoutees) {
         var ligne = document.getElementById('combatRow-' + identifiantCombat);
 
@@ -75485,11 +75568,17 @@ ogame.chat = {
                         return;
                     }
 
+                    // **On somme les quantites reellement inserees**, jamais le nombre d'evenements :
+                    // un doublon ajoute zero, et une perte de trente chasseurs ajoute trente.
                     var ajoutees = 0;
 
                     for (var i = 0; i < recu.losses.length; i++) {
-                        if (ajouterUnePerte(recu.combatId, recu.losses[i])) {
-                            ajoutees++;
+                        ajoutees += ajouterUnePerte(recu.combatId, recu.losses[i]);
+
+                        // Une requete est en vol : sa reponse remplacera le contenu par un HTML qui
+                        // ignore cette perte. On la garde pour la reposer apres.
+                        if (requeteEnCours) {
+                            recuesPendantLaRequete.push({ combatId: recu.combatId, perte: recu.losses[i] });
                         }
                     }
 
