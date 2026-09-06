@@ -310,7 +310,7 @@ abstract class GameMessage
             if ($playerService !== null && $playerService->getId() > 0) {
                 $playerName = $playerService->getUsername();
             } else {
-                $playerName = 'Unknown Player';
+                $playerName = __('t_messages.unknown_player');
             }
 
             return $playerName;

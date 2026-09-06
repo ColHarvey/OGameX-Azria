@@ -62,11 +62,15 @@ class BattleReport extends GameMessage
         // Load the planet name from the references table and return the subject filled with the planet name.
         $coordinate = new Coordinate($battleReportModel->planet_galaxy, $battleReportModel->planet_system, $battleReportModel->planet_position);
         $planet = $this->planetServiceFactory->makeForCoordinate($coordinate, true, PlanetType::from($battleReportModel->planet_type));
-        if ($planet) {
-            $subject = __('Combat report :planet', ['planet' => '[planet]' . $planet->getPlanetId() . '[/planet]']);
-        } else {
-            $subject = __('Combat report  :planet', ['planet' => '[coordinates]' . $coordinate->asString() . '[/coordinates]']);
-        }
+        // **Le sujet vit dans `t_messages`, comme celui de tous les autres messages.** Les deux
+        // appels precedents passaient par une clef anglaise absente du francais, et Laravel rendait
+        // alors la clef : le joueur lisait « Combat report ». La branche de repli portait en outre
+        // une seconde clef, distincte par une double espace — donc jamais traduite non plus.
+        $subject = __('t_messages.battle_report.subject', [
+            'planet' => $planet
+                ? '[planet]' . $planet->getPlanetId() . '[/planet]'
+                : '[coordinates]' . $coordinate->asString() . '[/coordinates]',
+        ]);
 
         return $this->replacePlaceholders($subject);
     }
@@ -101,8 +105,8 @@ class BattleReport extends GameMessage
         // Show more details link in the footer of the battle report.
         return ' <a class="fright txt_link msg_action_link overlay"
                    href="' . $this->getFullMessageUrl() . '"
-                   data-overlay-title="More details">
-                    More details
+                   data-overlay-title="' . __('t_messages.more_details') . '">
+                    ' . __('t_messages.more_details') . '
                 </a>';
     }
 
@@ -134,7 +138,7 @@ class BattleReport extends GameMessage
 
         // Handle defender
         if ($battleReportModel->planet_user_id === null) {
-            $defender_name = __('Unknown');
+            $defender_name = __('t_ingame.messages.battle_unknown_player');
             $defender = null;
         } else {
             $defender = $this->playerServiceFactory->make($battleReportModel->planet_user_id);
@@ -152,9 +156,9 @@ class BattleReport extends GameMessage
         if ($attackerPlayerId < 0) {
             $attacker = null;
             $attacker_name = match($attackerPlayerId) {
-                -1 => __('Pirates'),
-                -2 => __('Aliens'),
-                default => __('Unknown'),
+                -1 => __('t_ingame.messages.battle_pirates'),
+                -2 => __('t_ingame.messages.battle_aliens'),
+                default => __('t_ingame.messages.battle_unknown_player'),
             };
         } else {
             // Real player - try to load from database

@@ -160,9 +160,12 @@ Your fleets are returning to base. Incident reference: :reference',
     ],
 
     // ------------------------
+    'more_details' => 'More details',
+    'unknown_player' => 'Unknown Player',
     'espionage_report' => [
         'from' => 'Fleet Command',
         'subject' => 'Espionage report from :planet',
+        'planet_deleted' => 'Planet has been deleted and espionage report is no longer available.',
     ],
 
     // ------------------------

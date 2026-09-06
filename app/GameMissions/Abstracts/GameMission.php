@@ -724,6 +724,29 @@ abstract class GameMission
     }
 
     /**
+     * Le mot qui annonce un corps devant son lien : « Planète » ou « Lune ».
+     *
+     * ## Deux defauts fermes ici
+     *
+     * L appel precedent, `__('planet')`, visait le fichier de traduction **par chaine**
+     * (`resources/lang/fr.json`), ou la clef n existait pas. Laravel rend alors la clef elle-meme :
+     * le joueur francais lisait « Votre flotte revient de planet … vers planet … ». Rien n echouait,
+     * et c est bien pour cela que le defaut a survecu.
+     *
+     * Le mot etait par ailleurs **toujours « planete »**, meme quand le corps etait une lune. Il suit
+     * desormais le type reel, comme le fait deja le reste du jeu.
+     *
+     * @param int $type Valeur de `PlanetType` telle que la porte la mission.
+     * @return string
+     */
+    private static function wordForBody(int $type): string
+    {
+        return $type === PlanetType::Moon->value
+            ? __('t_ingame.fleet.moon')
+            : __('t_ingame.fleet.planet');
+    }
+
+    /**
      * Send a message to the player that a fleet has returned.
      *
      * @param FleetMission $mission
@@ -740,7 +763,7 @@ abstract class GameMission
             case PlanetType::Planet->value:
             case PlanetType::Moon->value:
                 if ($mission->planet_id_from !== null) {
-                    $from = __('planet') . " [planet]{$mission->planet_id_from}[/planet]";
+                    $from = self::wordForBody((int)$mission->type_from) . " [planet]{$mission->planet_id_from}[/planet]";
                 }
                 break;
             case PlanetType::DebrisField->value:
@@ -748,7 +771,7 @@ abstract class GameMission
                 break;
         }
 
-        $to = __('planet') . " [planet]{$mission->planet_id_to}[/planet]";
+        $to = self::wordForBody((int)$mission->type_to) . " [planet]{$mission->planet_id_to}[/planet]";
 
         if ($return_resources->any()) {
             $params = [

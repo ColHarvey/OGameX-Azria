@@ -130,9 +130,14 @@ Vos flottes rentrent à leur base. Référence de l\'incident : :reference',
         'subject' => 'Rapport de colonisation',
         'body' => 'La flotte est arrivée aux coordonnées assignées :coordinates et vérifie que la planète est viable pour la colonisation. Peu de temps après avoir commencé à développer la planète, les colons se rendent compte que leurs connaissances en astrophysique ne sont pas suffisantes pour achever la colonisation d\'une nouvelle planète.',
     ],
+    // Le lien qui ouvre le rapport complet, au pied d'un rapport de combat comme d'espionnage.
+    'more_details' => 'Plus de détails',
+    // Le nom qui remplace un joueur dont le compte n'existe plus, dans le corps d'un message.
+    'unknown_player' => 'Joueur inconnu',
     'espionage_report' => [
         'from' => 'Commandement de la flotte',
         'subject' => 'Rapport d\'espionnage de :planet',
+        'planet_deleted' => 'La planète a été supprimée : ce rapport d\'espionnage n\'est plus disponible.',
     ],
     'espionage_detected' => [
         'from' => 'Commandement de la flotte',
@@ -216,7 +221,7 @@ Chance de contre-espionnage : :chance%',
         'subject' => 'Résultat de l\'expédition',
         'body' => [
             '1' => 'Notre expédition a découvert une planète qui a été presque détruite au cours d\'une certaine chaîne de guerres. Différents vaisseaux flottent en orbite. Les techniciens tentent d\'en réparer certains. Peut-être obtiendrons-nous également des informations sur ce qui s’est passé ici.',
-            '2' => 'Nous avons trouvé une station de pirates déserte. Il y a quelques vieux bateaux qui traînent dans le hangar. Nos techniciens sont en train de déterminer si certains d\'entre eux sont encore utiles ou non.',
+            '2' => 'Nous avons trouvé une station de pirates déserte. Il y a quelques vieux vaisseaux qui traînent dans le hangar. Nos techniciens sont en train de déterminer si certains d\'entre eux sont encore utiles ou non.',
             '3' => 'Votre expédition s\'est heurtée aux chantiers spatiaux d\'une colonie désertée depuis des lustres. Dans le hangar du chantier spatial, ils découvrent des vaisseaux qui pourraient être récupérés. Les techniciens tentent de faire voler à nouveau certains d\'entre eux.',
             '4' => 'Nous sommes tombés sur les restes d\'une précédente expédition ! Nos techniciens vont essayer de remettre certains vaisseaux en état de marche.',
             '5' => 'Notre expédition s\'est heurtée à un ancien chantier spatial automatique. Certains vaisseaux sont encore en phase de production et nos techniciens tentent actuellement de réactiver les générateurs d\'énergie du chantier.',
@@ -254,7 +259,7 @@ Chance de contre-espionnage : :chance%',
         'from' => 'Commandement de la flotte',
         'subject' => 'Résultat de l\'expédition',
         'body' => [
-            '1' => 'Certains barbares primitifs nous attaquent avec des vaisseaux spatiaux qui ne peuvent même pas être nommés ainsi. Si l’incendie s’aggrave, nous serons obligés de riposter.',
+            '1' => 'Certains barbares primitifs nous attaquent avec des vaisseaux spatiaux qui ne peuvent même pas être nommés ainsi. Si les tirs s’intensifient, nous serons obligés de riposter.',
             '2' => 'Nous avons dû combattre quelques pirates qui, heureusement, n\'étaient que quelques-uns.',
             '3' => 'Nous avons capté des transmissions radio de pirates ivres. On dirait que nous serons bientôt attaqués.',
             '4' => 'Notre expédition a été attaquée par un petit groupe de vaisseaux inconnus !',
@@ -267,7 +272,7 @@ Chance de contre-espionnage : :chance%',
         'from' => 'Commandement de la flotte',
         'subject' => 'Résultat de l\'expédition',
         'body' => [
-            '1' => 'Certains barbares primitifs nous attaquent avec des vaisseaux spatiaux qui ne peuvent même pas être nommés ainsi. Si l’incendie s’aggrave, nous serons obligés de riposter.',
+            '1' => 'Certains barbares primitifs nous attaquent avec des vaisseaux spatiaux qui ne peuvent même pas être nommés ainsi. Si les tirs s’intensifient, nous serons obligés de riposter.',
             '2' => 'Nous avons dû combattre quelques pirates qui, heureusement, n\'étaient que quelques-uns.',
             '3' => 'Nous avons capté des transmissions radio de pirates ivres. On dirait que nous serons bientôt attaqués.',
             '4' => 'Notre expédition a été attaquée par un petit groupe de pirates de l\'espace !',
@@ -327,7 +332,7 @@ Chance de contre-espionnage : :chance%',
 
 Missiles lancés : :missiles_sent
 Missiles interceptés : :missiles_intercepted
-Missiles touchés : :missiles_hit
+Missiles ayant atteint leur cible : :missiles_hit
 
 Défenses détruites : :defenses_destroyed',
     ],
@@ -338,7 +343,7 @@ Défenses détruites : :defenses_destroyed',
 
 Missiles entrants : :missiles_incoming
 Missiles interceptés : :missiles_intercepted
-Missiles touchés : :missiles_hit
+Missiles ayant atteint leur cible : :missiles_hit
 
 Défenses détruites : :defenses_destroyed',
     ],
@@ -356,21 +361,19 @@ Message de candidature :
 :application_message',
     ],
     'planet_relocation_success' => [
-        'from' => 'Gérer les colonies',
+        'from' => 'Gestion des colonies',
         'subject' => 'Le déménagement de :planet_name a été réussi',
-        'body' => 'La planète :planet_name a été déplacée avec succès des coordonnées [coordonnées]:old_coordinates[/coordonnées] vers [coordonnées]:new_coordinates[/coordonnées].',
+        'body' => 'La planète :planet_name a été déplacée avec succès des coordonnées [coordinates]:old_coordinates[/coordinates] vers [coordinates]:new_coordinates[/coordinates].',
     ],
     'fleet_union_invite' => [
         'from' => 'Commandement de la flotte',
         'subject' => 'Invitation au combat d\'alliance',
-        'body' => ':sender_name vous a invité à la mission :union_name contre :target_player le [:target_coords], la flotte a été chronométrée pour :arrival_time.
+        'body' => ':sender_name vous a invité à la mission :union_name contre :target_player le [:target_coords], l’arrivée est prévue pour :arrival_time.
 
 ATTENTION : L\'heure d\'arrivée peut changer en raison de l\'adhésion aux flottes. Chaque nouvelle flotte peut prolonger ce délai d\'un maximum de 30 %, sinon elle ne sera pas autorisée à adhérer.
 
 REMARQUE : La force totale de tous les participants par rapport à la force totale des défenseurs détermine si ce sera une bataille honorable ou non.',
     ],
-    'Shipyard is being upgraded.' => 'Le chantier spatial est en cours de modernisation.',
-    'Nanite Factory is being upgraded.' => 'L\'usine de nanites est en cours de modernisation.',
     'moon_destruction_success' => [
         'from' => 'Commandement de la flotte',
         'subject' => 'La Lune :moon_name [:moon_coords] a été détruite !',
@@ -404,7 +407,7 @@ REMARQUE : La force totale de tous les participants par rapport à la force tot
     'wreck_field_repair_completed' => [
         'from' => 'Message système',
         'subject' => 'Réparation terminée',
-        'body' => 'Votre demande de réparation sur la planète :planet a été complétée.
+        'body' => 'Votre demande de réparation sur la planète :planet est terminée.
 :ship_count vaisseau(x) remis en service.',
     ],
 

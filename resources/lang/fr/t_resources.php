@@ -261,8 +261,8 @@ Grâce à leur bon rapport coût/performance, les satellites solaires peuvent r�
     ],
     'pathfinder' => [
         'title' => 'Éclaireur',
-        'description' => 'Le Éclaireur est un vaisseau rapide et agile, spécialement conçu pour les expéditions dans des secteurs inconnus de l\'espace.',
-        'description_long' => 'Le Éclaireur est le dernier développement en matière de technologie d\'exploration. Ce vaisseau a été spécialement conçu pour les membres de la classe Discoverer afin de maximiser leur potentiel. Équipé de systèmes de numérisation avancés et d\'une grande soute pour récupérer les ressources, le Éclaireur excelle lors des expéditions. Ses capteurs sophistiqués peuvent détecter des ressources précieuses et des anomalies qui passeraient inaperçues aux yeux des autres vaisseaux. Le vaisseau combine une vitesse élevée avec une bonne capacité de chargement, ce qui le rend parfait pour les missions d\'exploration rapides et la collecte de ressources dans des secteurs éloignés.',
+        'description' => 'L’Éclaireur est un vaisseau rapide et agile, spécialement conçu pour les expéditions dans des secteurs inconnus de l\'espace.',
+        'description_long' => 'L’Éclaireur est le dernier développement en matière de technologie d\'exploration. Ce vaisseau a été spécialement conçu pour les membres de la classe Discoverer afin de maximiser leur potentiel. Équipé de systèmes de numérisation avancés et d\'une grande soute pour récupérer les ressources, l’Éclaireur excelle lors des expéditions. Ses capteurs sophistiqués peuvent détecter des ressources précieuses et des anomalies qui passeraient inaperçues aux yeux des autres vaisseaux. Le vaisseau combine une vitesse élevée avec une bonne capacité de chargement, ce qui le rend parfait pour les missions d\'exploration rapides et la collecte de ressources dans des secteurs éloignés.',
     ],
     'light_fighter' => [
         'title' => 'Chasseur léger',
@@ -310,7 +310,7 @@ Parce que le destroyer est très grand, sa manœuvrabilité est sévèrement lim
     'deathstar' => [
         'title' => 'Étoile de la mort',
         'description' => 'Le pouvoir destructeur de l’Étoile de la Mort est inégalé.',
-        'description_long' => 'Le Étoile de la mort est le vaisseau le plus puissant jamais créé. Ce vaisseau de la taille d’une lune est le seul vaisseau visible à l’œil nu au sol. Au moment où vous le repérez, il est malheureusement trop tard pour faire quoi que ce soit.
+        'description_long' => 'L’Étoile de la mort est le vaisseau le plus puissant jamais créé. Ce vaisseau de la taille d’une lune est le seul vaisseau visible à l’œil nu au sol. Au moment où vous le repérez, il est malheureusement trop tard pour faire quoi que ce soit.
 
 Armé d\'un gigantesque canon à gravitons, le système d\'armes le plus avancé jamais créé dans l\'Univers, cet énorme vaisseau a non seulement la capacité de détruire des flottes et des défenses entières, mais également la capacité de détruire des lunes entières. Seuls les empires les plus avancés ont la capacité de construire un vaisseau de cette taille gigantesque.',
     ],

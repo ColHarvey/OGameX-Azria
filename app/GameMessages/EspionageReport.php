@@ -58,11 +58,13 @@ class EspionageReport extends GameMessage
         // Load the planet name from the references table and return the subject filled with the planet name.
         $coordinate = new Coordinate($espionageReportModel->planet_galaxy, $espionageReportModel->planet_system, $espionageReportModel->planet_position);
         $planet = $this->planetServiceFactory->makeForCoordinate($coordinate, true, PlanetType::from($espionageReportModel->planet_type));
-        if ($planet) {
-            $subject = __('Espionage report from :planet', ['planet' => '[planet]' . $planet->getPlanetId() . '[/planet]']);
-        } else {
-            $subject = __('Espionage report from :planet', ['planet' => '[coordinates]' . $coordinate->asString() . '[/coordinates]']);
-        }
+        // Meme correction que pour le rapport de combat : la traduction existait, l appel ne la
+        // demandait pas.
+        $subject = __('t_messages.espionage_report.subject', [
+            'planet' => $planet
+                ? '[planet]' . $planet->getPlanetId() . '[/planet]'
+                : '[coordinates]' . $coordinate->asString() . '[/coordinates]',
+        ]);
 
         return $this->replacePlaceholders($subject);
     }
@@ -79,7 +81,7 @@ class EspionageReport extends GameMessage
         $planet = $this->planetServiceFactory->makeForCoordinate($coordinate, true, PlanetType::from($espionageReportModel->planet_type));
 
         if ($planet === null) {
-            return __('Planet has been deleted and espionage report is no longer available.');
+            return __('t_messages.espionage_report.planet_deleted');
         }
 
         $params = $this->getEspionageReportParams();
@@ -98,7 +100,7 @@ class EspionageReport extends GameMessage
         $planet = $this->planetServiceFactory->makeForCoordinate($coordinate, true, PlanetType::from($espionageReportModel->planet_type));
 
         if ($planet === null) {
-            return __('Planet has been deleted and espionage report is no longer available.');
+            return __('t_messages.espionage_report.planet_deleted');
         }
 
         $params = $this->getEspionageReportParams();
@@ -113,8 +115,8 @@ class EspionageReport extends GameMessage
         // Show more details link in the footer of the espionage report.
         return ' <a class="fright txt_link msg_action_link overlay"
                    href="' . $this->getFullMessageUrl() . '"
-                   data-overlay-title="More details">
-                    More details
+                   data-overlay-title="' . __('t_messages.more_details') . '">
+                    ' . __('t_messages.more_details') . '
                 </a>';
     }
 
