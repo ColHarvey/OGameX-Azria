@@ -76287,7 +76287,7 @@ ogame.chat = {
 })();
 ;
 /*
- * La Galaxie tactique — carte du systeme solaire, en remplacement du tableau.
+ * La Galaxie tactique — carte du systeme solaire.
  *
  * ## Ou ce module se branche, et pourquoi la
  *
@@ -76299,23 +76299,31 @@ ogame.chat = {
  *     missiles, emplacements, colonies) — ils vivent hors de la carte et restent justes ;
  *   - ses ecritures de lignes visent `#galaxyRow{N} .cellX`. **Ces lignes existent toujours** —
  *     seize identifiants dans le Blade — et le rendu herite les remplit entierement, liens
- *     d'action compris. Ce n'est pas le document qui les retire, c'est une regle CSS qui les
- *     masque (`.galaxyTable.gtReplaced > .ctContentRow`). C'est ce qui permet de neutraliser
- *     l'ancien rendu **sans toucher au bloc herite de 1,4 Mo**, et de revenir en arriere en
- *     retirant une seule classe ;
+ *     d'action compris. C'est une regle CSS qui les masque en vue tactique, pas le document ;
  *   - la carte se dessine ensuite depuis exactement le meme JSON.
  *
- * ## Ce que ce module ne fait pas, et ne doit pas faire
+ * ## Les textures sont celles du serveur
  *
- * Il ne decide **aucune autorisation**, et il n'en presente encore aucune : cliquer un corps ne
- * fait rien. Les actions permises sont calculees par le serveur
- * (`GalaxyController::getPlanetActions()`), voyagent dans la charge utile et sont deja rendues
- * dans les lignes masquees ; les presenter sur la carte est l'etape suivante, et **la carte
- * n'est pas utilisable avant**. Une carte qui recalculerait un droit cote client serait une
- * regression de securite, pas une refonte d'interface.
+ * La premiere version posait `<div class="microplanet desert_7">`. **Mesure faite dans la feuille du
+ * jeu** : la variante n'existe que sous `#galaxyContent .ctContentRow .cellPlanet .desert_7` ou
+ * `#galaxyContent td.microplanet.desert_7`. La carte n'est ni l'un ni l'autre, donc le bloc n'avait
+ * aucune image de fond — les planetes etaient invisibles.
  *
- * Il n'affiche **aucune flotte** : la Galaxie n'en a jamais envoye au client (`'fleet' => []` sans
- * exception), et les montrer est une fonction neuve qui exigera son autorisation serveur.
+ * On emploie donc la source que le README du pack designe comme autoritative :
+ * `public/img/planets/medium/{biome}_{variante}.png`. Couverture verifiee — sept biomes, dix
+ * variantes, soixante-dix fichiers, exactement ce que `getPlanetBiomeType()` peut rendre. Aucun
+ * tirage graphique cote client : l'identite d'une planete reste celle que le serveur a attribuee.
+ *
+ * ## Ce que ce module ne decide pas
+ *
+ * **Aucune autorisation.** Les actions permises sont calculees par le serveur
+ * (`GalaxyController::getPlanetActions()` et `getAvailableMissions()`) et rendues dans la ligne du
+ * tableau. La fiche **deplace** cette ligne, elle ne la reconstruit pas : le meme noeud garde les
+ * gestionnaires du jeu — infobulles, overlay de missile, ami, ignore — et une carte qui recalculerait
+ * un droit cote client serait une regression de securite, pas une refonte d'interface.
+ *
+ * Il n'affiche **aucune flotte** : la Galaxie n'en envoie encore aucune au client (`'fleet' => []`
+ * sans exception). Les trajectoires, les portes de bord et le temps reel sont la passe suivante.
  */
 (function () {
     'use strict';
@@ -76345,6 +76353,10 @@ ogame.chat = {
     var PLANETE = 1;
     var DEBRIS = 2;
     var LUNE = 3;
+
+    /* La fiche, et la largeur qu'elle occupe : elle doit rester entierement dans la carte. */
+    var FICHE_LARGEUR = 232;
+    var FICHE_MARGE = 8;
 
     function centre() {
         return { x: LARGEUR / 2, y: (HAUTEUR - PIED) / 2 };
@@ -76391,19 +76403,27 @@ ogame.chat = {
     }
 
     /*
-     * La vignette d'un corps, rendue **par le mecanisme du jeu** : la classe `microplanet` porte la
-     * planche de sprites et sa decoupe 38 x 33, la classe de variante porte seulement la position
-     * de fond. Reprendre ce couple garantit qu'une planete garde exactement l'apparence que le
-     * serveur lui a attribuee.
+     * La texture reelle d'un corps.
+     *
+     * `imageInformation` vaut `{biome}_{variante}` — ou `npc_pirate` pour une base hostile, qui a sa
+     * propre image dans le jeu. Une image absente ne doit pas laisser un cadre casse : `onerror`
+     * efface l'element plutot que d'afficher l'icone de lien brise du navigateur.
      */
-    function vignette(classeDeBase, corps) {
-        var e = element('div', classeDeBase);
+    function texture(corps) {
+        var nom = (corps && corps.imageInformation) || '';
+        var img = element('img', 'gtTexture');
 
-        if (corps && corps.imageInformation) {
-            e.className += ' ' + corps.imageInformation;
-        }
+        img.src = nom === 'npc_pirate'
+            ? '/img/planets/npc/pirate_base.png'
+            : '/img/planets/medium/' + nom + '.png';
 
-        return e;
+        img.alt = '';
+        img.setAttribute('aria-hidden', 'true');
+        img.addEventListener('error', function () {
+            img.remove();
+        });
+
+        return img;
     }
 
     /*
@@ -76426,11 +76446,39 @@ ogame.chat = {
         return false;
     }
 
-    /* Le libelle traduit d'une position libre, publie par la page. */
-    function libelleDePositionLibre() {
-        var loca = window.jsloca || {};
+    /*
+     * Les coordonnees d'une position, telles que la charge utile les porte.
+     *
+     * Une ligne vide n'en porte pas : la position, elle, est toujours connue, et c'est elle qui
+     * fait le troisieme nombre. Rien n'est devine — la galaxie et le systeme affiches sont ceux
+     * que le serveur vient de rendre.
+     */
+    function coordonneesDe(ligne, position) {
+        if (!ligne || ligne.galaxy === undefined || ligne.system === undefined) {
+            return '';
+        }
 
-        return loca.LOCA_GALAXY_EMPTY_SLOT || 'position libre';
+        return '[' + ligne.galaxy + ':' + ligne.system + ':' + position + ']';
+    }
+
+    /*
+     * Les libelles viennent de la page, traduits par le serveur.
+     *
+     * Deux sources, et elles ne se valent pas. `jsloca` est la table du jeu : elle sert pour une
+     * clef dont on sait qu'elle y est. Pour les textes de la carte, l'attribut de la vue est
+     * preferable — une clef absente de `jsloca` rendrait `undefined` sans erreur, et le repli
+     * anglais s'afficherait a un joueur francais sans que personne ne le remarque.
+     */
+    function loca(clef, defaut) {
+        var table = window.jsloca || {};
+
+        return table[clef] || defaut;
+    }
+
+    function locaDeLaCarte(carte, nom, defaut) {
+        var valeur = carte.getAttribute('data-loca-' + nom);
+
+        return valeur !== null && valeur !== '' ? valeur : defaut;
     }
 
     function libelle(texte) {
@@ -76492,22 +76540,55 @@ ogame.chat = {
     }
 
     /*
-     * ## La position choisie, et la ligne qu'elle montre
+     * ## La fiche contextuelle
      *
-     * **La ligne du tableau est deplacee, jamais recopiee.** `renderContentGalaxy` accroche ses
-     * gestionnaires sur ces noeuds a chaque rendu — infobulles, overlay de missile, demande d'ami,
-     * mise a l'ignore. Un `cloneNode` les perdrait tous, et il les perdrait *en silence* : la ligne
-     * s'afficherait, les liens seraient la, et rien ne se passerait au clic. Le meme noeud garde
-     * tout ce que le jeu lui a attache.
+     * **La ligne du tableau est deplacee dedans, jamais recopiee.** `renderContentGalaxy` accroche
+     * ses gestionnaires sur ces noeuds a chaque rendu — infobulles, overlay de missile, demande
+     * d'ami, mise a l'ignore. Un clone les perdrait tous, et *en silence* : la fiche s'afficherait,
+     * les liens seraient la, et rien ne repondrait au clic. Le meme noeud garde tout.
      *
-     * **Aucun droit n'est recalcule ici.** Ce que la ligne contient, c'est ce que le serveur a
-     * decide dans `GalaxyController::getPlanetActions()` et `getAvailableMissions()`. La carte
-     * choisit *quelle* ligne montrer, jamais *ce qu'elle a le droit* de contenir.
+     * La feuille se charge de la presentation : dans la fiche, la ligne devient une colonne et sa
+     * cellule d'actions une grille d'icones. Les regles, les droits et les textes restent
+     * exactement ceux du serveur.
      */
     var deplacee = null;
 
-    function bandeau() {
-        return document.getElementById('galaxyTacticalDetail');
+    function fiche(carte) {
+        var f = carte.querySelector('.gtCard');
+
+        if (f) {
+            return f;
+        }
+
+        f = element('div', 'gtCard');
+        f.setAttribute('role', 'dialog');
+        f.setAttribute('aria-label', locaDeLaCarte(carte, 'card', 'Fiche'));
+        f.hidden = true;
+
+        var tete = element('div', 'gtCardHead');
+        var identite = element('span', 'gtCardIdentity');
+        var titre = element('span', 'gtCardTitle');
+        var coords = element('span', 'gtCardCoords');
+
+        identite.appendChild(titre);
+        identite.appendChild(coords);
+
+        var fermer = element('button', 'gtCardClose');
+        fermer.type = 'button';
+        fermer.setAttribute('aria-label', locaDeLaCarte(carte, 'close', 'Fermer'));
+        fermer.textContent = '×';
+        fermer.addEventListener('click', function () {
+            deselectionner(carte);
+        });
+
+        tete.appendChild(identite);
+        tete.appendChild(fermer);
+
+        f.appendChild(tete);
+        f.appendChild(element('div', 'gtCardBody'));
+        carte.appendChild(f);
+
+        return f;
     }
 
     /* La ligne retourne exactement d'ou elle venait — meme parent, meme rang. */
@@ -76520,19 +76601,13 @@ ogame.chat = {
         deplacee = null;
     }
 
-    function deselectionner() {
+    function deselectionner(carte) {
         rendreLaLigne();
 
-        var b = bandeau();
+        var f = carte.querySelector('.gtCard');
 
-        if (b) {
-            b.hidden = true;
-        }
-
-        var carte = document.getElementById('galaxyTactical');
-
-        if (!carte) {
-            return;
+        if (f) {
+            f.hidden = true;
         }
 
         var choisis = carte.querySelectorAll('.gtBody.gtSelected');
@@ -76542,28 +76617,62 @@ ogame.chat = {
         }
     }
 
-    function choisir(bloc) {
+    /*
+     * La fiche se colle au corps choisi, sans jamais sortir de la carte : a droite si la place y
+     * est, a gauche sinon. Une fiche coupee par le bord serait illisible, et le cahier des charges
+     * l'interdit explicitement.
+     */
+    function placer(f, bloc) {
+        var x = bloc.offsetLeft + 26;
+
+        if (x + FICHE_LARGEUR + FICHE_MARGE > LARGEUR) {
+            x = bloc.offsetLeft - FICHE_LARGEUR - 26;
+        }
+
+        f.style.left = Math.max(FICHE_MARGE, Math.min(x, LARGEUR - FICHE_LARGEUR - FICHE_MARGE)) + 'px';
+
+        var y = bloc.offsetTop - 20;
+        var hauteurUtile = HAUTEUR - PIED - FICHE_MARGE;
+
+        f.style.top = Math.max(FICHE_MARGE, Math.min(y, hauteurUtile - f.offsetHeight)) + 'px';
+    }
+
+    function choisir(carte, bloc) {
         var position = Number(bloc.getAttribute('data-position'));
         var ligne = document.getElementById('galaxyRow' + position);
-        var b = bandeau();
+        var f = fiche(carte);
 
-        if (!ligne || !b) {
+        if (!ligne) {
             return;
         }
 
         /* Recliquer la position deja ouverte la referme : le meme geste dans les deux sens. */
         if (deplacee && deplacee.noeud === ligne) {
-            deselectionner();
+            deselectionner(carte);
 
             return;
         }
 
-        deselectionner();
+        deselectionner(carte);
 
+        var titre = f.querySelector('.gtCardTitle');
+        var coords = f.querySelector('.gtCardCoords');
+
+        if (titre) {
+            titre.textContent = bloc.getAttribute('data-titre') || String(position);
+        }
+
+        if (coords) {
+            coords.textContent = bloc.getAttribute('data-coords') || '';
+        }
+
+        var corps = f.querySelector('.gtCardBody');
         deplacee = { noeud: ligne, parent: ligne.parentNode, suivant: ligne.nextSibling };
-        b.appendChild(ligne);
-        b.hidden = false;
+        corps.appendChild(ligne);
+
+        f.hidden = false;
         bloc.classList.add('gtSelected');
+        placer(f, bloc);
     }
 
     /*
@@ -76579,14 +76688,25 @@ ogame.chat = {
         carte.gtArmee = true;
 
         carte.addEventListener('click', function (evenement) {
+            /* Un clic dans la fiche appartient a la fiche : il ne rechoisit pas un corps. */
+            if (evenement.target.closest && evenement.target.closest('.gtCard')) {
+                return;
+            }
+
             var bloc = evenement.target.closest ? evenement.target.closest('.gtBody') : null;
 
             if (bloc) {
-                choisir(bloc);
+                choisir(carte, bloc);
             }
         });
 
         carte.addEventListener('keydown', function (evenement) {
+            if (evenement.key === 'Escape' || evenement.key === 'Esc') {
+                deselectionner(carte);
+
+                return;
+            }
+
             var bloc = evenement.target.closest ? evenement.target.closest('.gtBody') : null;
 
             if (!bloc) {
@@ -76596,16 +76716,70 @@ ogame.chat = {
             /* Un element qui annonce `role="button"` doit repondre a Entree et a Espace. */
             if (evenement.key === 'Enter' || evenement.key === ' ' || evenement.key === 'Spacebar') {
                 evenement.preventDefault();
-                choisir(bloc);
-
-                return;
-            }
-
-            if (evenement.key === 'Escape' || evenement.key === 'Esc') {
-                deselectionner();
-                bloc.focus();
+                choisir(carte, bloc);
             }
         });
+    }
+
+    /*
+     * ## La bascule tactique / liste
+     *
+     * Un seul interrupteur porte les deux vues : la classe `gtReplaced` sur `.galaxyTable`. Presente,
+     * les lignes sont masquees et la carte s'affiche ; absente, le tableau revient tel qu'il a
+     * toujours ete. Le README du pack demande de garder cette vue liste comme reference de parite
+     * tant que chaque fonction n'a pas ete verifiee sur la carte.
+     */
+    function armerLaBascule(carte) {
+        var tactique = document.getElementById('gtViewTactical');
+        var liste = document.getElementById('gtViewList');
+        var table = carte.closest ? carte.closest('.galaxyTable') : null;
+
+        if (!tactique || !liste || !table || tactique.gtArmee) {
+            return;
+        }
+
+        tactique.gtArmee = true;
+
+        var appliquer = function (versLaCarte) {
+            /* La ligne rentre avant tout changement de vue : sinon elle resterait dans la fiche. */
+            deselectionner(carte);
+
+            table.classList.toggle('gtReplaced', versLaCarte);
+            tactique.classList.toggle('gtViewActive', versLaCarte);
+            liste.classList.toggle('gtViewActive', !versLaCarte);
+            tactique.setAttribute('aria-pressed', versLaCarte ? 'true' : 'false');
+            liste.setAttribute('aria-pressed', versLaCarte ? 'false' : 'true');
+        };
+
+        tactique.addEventListener('click', function () {
+            appliquer(true);
+        });
+
+        liste.addEventListener('click', function () {
+            appliquer(false);
+        });
+    }
+
+    /*
+     * L'etat des filtres survit au redessin.
+     *
+     * `filterToggle()` pose `filtered_filter_empty` au moment du clic, sur les elements presents
+     * a cet instant. La carte etant reconstruite a chaque changement de systeme, ses corps
+     * naissent apres le clic et n'auraient rien : le filtre paraitrait s'eteindre tout seul.
+     * On relit donc l'etat du bouton, seule source de verite, et on l'applique.
+     */
+    function appliquerLesFiltres(carte) {
+        var bouton = document.getElementById('filter_empty');
+
+        if (!bouton || !bouton.classList.contains('filter_active')) {
+            return;
+        }
+
+        var libres = carte.querySelectorAll('.empty_filter');
+
+        for (var i = 0; i < libres.length; i++) {
+            libres[i].classList.add('filtered_filter_empty');
+        }
     }
 
     /*
@@ -76624,13 +76798,14 @@ ogame.chat = {
 
         /*
          * La ligne rentre **avant** que la carte soit videe. Le systeme a change : la position
-         * choisie n'a plus de sens, et une ligne laissee dans le bandeau y afficherait les
-         * donnees du nouveau systeme sous l'ancienne selection.
+         * choisie n'a plus de sens, et une ligne laissee dans la fiche y afficherait les donnees
+         * du nouveau systeme sous l'ancienne selection.
          */
-        deselectionner();
-        armerLaSelection(carte);
+        deselectionner(carte);
 
         carte.innerHTML = '';
+        armerLaSelection(carte);
+        armerLaBascule(carte);
         dessinerOrbites(carte);
         carte.appendChild(element('div', 'gtStar'));
 
@@ -76651,23 +76826,31 @@ ogame.chat = {
                  * (astrophysique, vaisseau disponible, position reservee, portee). Rederiver la
                  * regle ici en ferait une seconde source de verite, qui divergerait un jour.
                  */
+                var libre = loca('LOCA_GALAXY_EMPTY_SLOT', 'position libre');
                 var silhouette = element('div', 'gtEmpty' + (colonisationPermise(ligne) ? '' : ' gtUnavailable'));
-
-                poser(carte, position, [silhouette, numero(position)], {
-                    classe: 'gtFree',
-                    intitule: position + ' — ' + libelleDePositionLibre()
+                /*
+                 * `empty_filter` est la classe que le filtre « E » du bandeau vise. En la portant,
+                 * une position libre de la carte s'attenue comme la ligne du tableau le faisait.
+                 * Mesure faite : c'est le seul des cinq filtres que ce fork alimente reellement.
+                 */
+                var bloc = poser(carte, position, [silhouette, numero(position)], {
+                    classe: 'gtFree empty_filter',
+                    intitule: position + ' — ' + libre
                 });
+
+                bloc.setAttribute('data-titre', libre);
+                bloc.setAttribute('data-coords', coordonneesDe(ligne, position));
 
                 continue;
             }
 
-            var contenu = [vignette('microplanet', planete)];
+            var contenu = [texture(planete)];
             var lune = corpsDeGenre(ligne, LUNE);
             var debris = corpsDeGenre(ligne, DEBRIS);
 
             /*
              * La lune et les debris prennent les visuels du pack tactique, la ou les planetes
-             * gardent la planche du jeu : une lune n'a que deux etats et un champ de debris une
+             * gardent la texture du serveur : une lune n'a que deux etats et un champ de debris une
              * seule variante, donc aucune identite par corps ne se perd.
              */
             if (lune) {
@@ -76680,14 +76863,21 @@ ogame.chat = {
                 contenu.push(element('span', 'gtDebris'));
             }
 
-            contenu.push(libelle(planete.planetName || ''));
+            var nom = planete.planetName || '';
+            contenu.push(libelle(nom));
             contenu.push(numero(position));
 
-            poser(carte, position, contenu, {
+            var intitule = position + ' — ' + nom + (ligne.playerName ? ' (' + ligne.playerName + ')' : '');
+            var corpsBloc = poser(carte, position, contenu, {
                 classe: ligne.playerId && window.playerId && Number(ligne.playerId) === Number(window.playerId) ? 'gtOwn' : '',
-                intitule: position + ' — ' + (planete.planetName || '') + (ligne.playerName ? ' (' + ligne.playerName + ')' : '')
+                intitule: intitule
             });
+
+            corpsBloc.setAttribute('data-titre', nom || String(position));
+            corpsBloc.setAttribute('data-coords', coordonneesDe(ligne, position));
         }
+
+        appliquerLesFiltres(carte);
 
         var pied = element('div', 'gtFooter');
         pied.id = 'galaxyTacticalFooter';

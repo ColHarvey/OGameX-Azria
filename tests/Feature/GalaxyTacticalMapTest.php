@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use OGame\Services\PlanetService;
 use Tests\UnitTestCase;
 
 /**
@@ -10,13 +11,16 @@ use Tests\UnitTestCase;
  * ## Pourquoi ces temoins lisent des fichiers
  *
  * La carte est du JavaScript et une feuille de style : aucun essai PHP ne la fera cliquer. Ce
- * fichier ne pretend donc pas eprouver le rendu — il epingle les **quatre faits porteurs** dont
- * depend le raccordement des actions, et dont la rupture ne se verrait nulle part ailleurs qu'en
- * jeu, tardivement.
+ * fichier ne pretend donc pas eprouver le rendu — il epingle les faits porteurs dont depend le
+ * raccordement, et dont la rupture ne se verrait nulle part ailleurs qu'en jeu, tardivement.
  *
- * Chacun a ete choisi en se demandant : « si quelqu'un ecrivait ceci autrement, un joueur
- * perdrait-il une fonction sans qu'aucun outil ne le dise ? » Quand la reponse est oui, il y a un
- * temoin.
+ * ## Ce que la premiere version de ce fichier a rate, et la lecon
+ *
+ * Elle verifiait que la regle de masquage employait bien `>`. Elle passait. **Et le tableau n'a
+ * jamais ete masque** : la regle etait battue en specificite par `#galaxyContent .galaxyRow` du
+ * jeu. Le temoin lisait la **forme** du selecteur, jamais son **effet**. Les temoins ci-dessous
+ * comparent donc des specificites et verifient l'existence reelle des fichiers, au lieu de se
+ * contenter de reconnaitre un motif.
  */
 class GalaxyTacticalMapTest extends UnitTestCase
 {
@@ -54,95 +58,198 @@ class GalaxyTacticalMapTest extends UnitTestCase
     }
 
     /**
-     * Le bandeau de detail existe, et la carte sait ou le trouver.
+     * **Toutes les textures que le serveur peut attribuer existent sur le disque.**
      *
-     * Sans lui, choisir une position deplace la ligne vers `null` : le module sort sans rien faire,
-     * et le joueur clique dans le vide sans le moindre message.
+     * La carte construit `/img/planets/medium/{biome}_{variante}.png` depuis `imageInformation`,
+     * qui vaut `getPlanetBiomeType() . '_' . getPlanetImageType()`. Si un seul couple manquait, la
+     * planete correspondante disparaitrait de la carte pour les seuls joueurs concernes — un defaut
+     * que personne ne verrait avant qu'un joueur ne le signale.
+     *
+     * Ce temoin ne reconnait pas un motif : il ouvre les fichiers.
      */
-    public function testTheDetailStripExistsInTheViewAndTheModuleLooksForIt(): void
+    public function testEveryTextureTheServerCanAssignExistsOnDisk(): void
     {
-        $this->assertStringContainsString(
-            'id="galaxyTacticalDetail"',
-            $this->vue(),
-            'The galaxy view no longer carries the detail strip: selecting a body has nowhere to move its row.'
+        $biomes = ['desert', 'dry', 'gas', 'ice', 'jungle', 'normal', 'water'];
+        $manquants = [];
+
+        foreach ($biomes as $biome) {
+            for ($variante = 1; $variante <= 10; $variante++) {
+                $chemin = public_path('img/planets/medium/' . $biome . '_' . $variante . '.png');
+
+                if (!is_file($chemin)) {
+                    $manquants[] = $biome . '_' . $variante;
+                }
+            }
+        }
+
+        $this->assertSame(
+            [],
+            $manquants,
+            'The tactical map asks for planet textures that do not exist: ' . implode(', ', $manquants)
         );
 
-        $this->assertStringContainsString(
-            "getElementById('galaxyTacticalDetail')",
-            $this->module(),
-            'The module no longer looks for the detail strip.'
+        $this->assertFileExists(
+            public_path('img/planets/npc/pirate_base.png'),
+            'The hostile faction texture is missing: NPC bases would vanish from the map.'
         );
     }
 
     /**
-     * **La regle de masquage vise un enfant direct, et tout le raccordement en depend.**
+     * Les biomes que le temoin ci-dessus enumere sont bien ceux que le serveur produit.
      *
-     * La ligne choisie redevient visible pour une seule raison : deplacee dans le bandeau, elle
-     * n'est plus un enfant **direct** de `.galaxyTable`. Ecrite en descendant
-     * (`.galaxyTable.gtReplaced .ctContentRow`), la meme regle continuerait de l'atteindre partout,
-     * et le bandeau s'ouvrirait vide.
-     *
-     * C'est exactement le genre de reecriture qu'un nettoyage de feuille fait sans y penser. Aucun
-     * outil ne la signalerait ; ce temoin, si.
+     * Sans ce controle, ajouter un biome au jeu laisserait le temoin precedent vert tout en
+     * laissant la nouvelle texture absente : il verifierait une liste perimee, ce qui est pire
+     * qu'aucune verification.
      */
-    public function testTheHidingRuleTargetsADirectChildOnly(): void
+    public function testTheBiomeListMatchesWhatTheServerProduces(): void
     {
-        $feuille = $this->feuille();
+        $source = file_get_contents(app_path('Services/PlanetService.php'));
+        $this->assertIsString($source);
 
-        $this->assertStringContainsString(
-            '.galaxyTable.gtReplaced > .ctContentRow',
-            $feuille,
-            'The hiding rule no longer uses the direct-child combinator: a row moved into the detail strip would stay invisible, and the strip would open empty.'
+        $debut = strpos($source, 'public function getPlanetBiomeType');
+        $this->assertNotFalse($debut, 'getPlanetBiomeType() no longer exists.');
+
+        $bloc = substr($source, $debut, 2000);
+        $trouves = [];
+
+        if (preg_match_all("/'(odd|even)' => '([a-z]+)'/", $bloc, $correspondances) > 0) {
+            $trouves = array_values(array_unique($correspondances[2]));
+        }
+
+        sort($trouves);
+
+        $this->assertSame(
+            ['desert', 'dry', 'gas', 'ice', 'jungle', 'normal', 'water'],
+            $trouves,
+            'The server can now produce biomes the texture witness does not check.'
         );
 
-        $this->assertDoesNotMatchRegularExpression(
-            '/\.galaxyTable\.gtReplaced\s+\.ctContentRow/',
-            $feuille,
-            'A descendant-form hiding rule was added: it reaches the moved row wherever it goes, and the detail strip opens empty.'
+        $this->assertTrue(
+            class_exists(PlanetService::class),
+            'PlanetService moved: the biome witness reads a path that no longer names the server.'
         );
     }
 
     /**
-     * Le creneau d'espace profond n'est plus masque.
+     * La carte demande la texture du serveur, pas la planche de sprites.
      *
-     * Il portait la regle de masquage des lignes du tableau, et la carte ne le dessine pas : les
-     * debris d'expedition et le modele de flotte d'expedition avaient purement disparu du jeu. Ce
-     * n'est pas une question de style, c'est deux fonctions rendues.
+     * La premiere version posait `class="microplanet desert_7"`, dont la variante n'est definie que
+     * sous `#galaxyContent .ctContentRow .cellPlanet` : hors du tableau, la vignette n'avait aucune
+     * image de fond et les planetes etaient invisibles.
      */
-    public function testTheDeepSpaceSlotIsNoLongerHidden(): void
-    {
-        $this->assertStringNotContainsString(
-            '.galaxyTable.gtReplaced > .expeditionDebrisSlotBoxRow',
-            $this->feuille(),
-            'The deep space slot is hidden again: expedition debris and the expedition fleet template are unreachable, and the tactical map does not draw them either.'
-        );
-    }
-
-    /**
-     * **La ligne est deplacee, jamais recopiee.**
-     *
-     * Le rendu herite accroche ses gestionnaires sur ces noeuds a chaque passage — infobulles,
-     * overlay de missile, demande d'ami, mise a l'ignore. Un `cloneNode` les perdrait **tous**, et
-     * en silence : la ligne s'afficherait, les liens seraient la, et rien ne repondrait au clic.
-     *
-     * C'est le defaut le plus couteux possible ici, parce qu'il ressemble a une reussite.
-     */
-    public function testTheRowIsMovedAndNeverCloned(): void
+    public function testTheMapAsksForTheServerTexture(): void
     {
         $module = $this->module();
 
         $this->assertStringContainsString(
-            'b.appendChild(ligne)',
+            "'/img/planets/medium/'",
             $module,
-            'The module no longer moves the table row into the strip.'
+            'The map no longer builds its planet images from the authoritative texture folder.'
         );
 
-        /*
-         * Le motif vise l'**appel**, `cloneNode(`, et non le mot. La premiere version cherchait
-         * `cloneNode` tout court et rougissait sur le commentaire du module, qui nomme le piege
-         * pour l'expliquer. Un temoin qui lit la prose au lieu du code se declenche sur une phrase
-         * juste et se tairait sur un appel ecrit autrement.
-         */
+        $this->assertStringNotContainsString(
+            "element('div', 'microplanet')",
+            $module,
+            'The map builds a sprite tile again: its variant class is only defined inside the table, so the planets render with no image at all.'
+        );
+    }
+
+    /**
+     * **La regle de masquage doit battre celle du jeu, pas seulement exister.**
+     *
+     * C'est le defaut que la premiere version de ce fichier a laisse passer. `#galaxyContent
+     * .galaxyRow { display: flex }` pese (1,1,0) ; une regle de masquage en classes seules pese
+     * (0,3,0) et perd. Ce temoin exige le prefixe d'identifiant **et** etablit que la regle
+     * concurrente existe toujours — sans quoi il exigerait un prefixe devenu inutile sans le dire.
+     */
+    public function testTheHidingRuleOutweighsTheGameRule(): void
+    {
+        $feuille = $this->feuille();
+
+        $this->assertStringContainsString(
+            '#galaxyContent .galaxyTable.gtReplaced > .ctContentRow',
+            $feuille,
+            'The hiding rule lost its id prefix: #galaxyContent .galaxyRow beats it and the whole table stays visible under the map.'
+        );
+
+        $jeu = file_get_contents(resource_path('css/ingame/469500b3cd5158332fb20a56b14b2c.css'));
+        $this->assertIsString($jeu);
+
+        $this->assertMatchesRegularExpression(
+            '/#galaxyContent \.galaxyRow \{[^}]*display:\s*flex/',
+            $jeu,
+            'The competing game rule is gone: this witness now demands a prefix nothing requires.'
+        );
+    }
+
+    /**
+     * La bascule existe des deux cotes : le bouton dans la vue, le raccordement dans le module.
+     *
+     * Decision de Keven : on garde la vue liste pendant la mise au point, comme reference de
+     * parite, et on la retire quand la carte aura fait ses preuves.
+     */
+    public function testTheViewSwitchIsWiredOnBothSides(): void
+    {
+        $this->assertStringContainsString(
+            'id="gtViewTactical"',
+            $this->vue(),
+            'The tactical view button is missing from the galaxy view.'
+        );
+
+        $this->assertStringContainsString(
+            'id="gtViewList"',
+            $this->vue(),
+            'The list view button is missing from the galaxy view.'
+        );
+
+        $this->assertStringContainsString(
+            "classList.toggle('gtReplaced'",
+            $this->module(),
+            'Nothing switches the gtReplaced class: the buttons are decoration and the list view is unreachable.'
+        );
+
+        $this->assertMatchesRegularExpression(
+            '/#galaxyContent \.galaxyTable:not\(\.gtReplaced\) > #galaxyTactical \{[^}]*display:\s*none/',
+            $this->feuille(),
+            'The map stays visible in list view: both views would show at once.'
+        );
+    }
+
+    /**
+     * Le creneau d'espace profond n'est pas masque.
+     *
+     * Il portait la regle de masquage des lignes du tableau, et la carte ne le dessine pas : les
+     * debris d'expedition et le modele de flotte d'expedition avaient purement disparu du jeu.
+     */
+    public function testTheDeepSpaceSlotIsNeverHidden(): void
+    {
+        $this->assertStringNotContainsString(
+            'gtReplaced > .expeditionDebrisSlotBoxRow',
+            $this->feuille(),
+            'The deep space slot is hidden again: expedition debris and the expedition fleet template are unreachable, and the map does not draw them either.'
+        );
+    }
+
+    /**
+     * **La ligne est deplacee dans la fiche, jamais recopiee.**
+     *
+     * Le rendu herite accroche ses gestionnaires sur ces noeuds a chaque passage — infobulles,
+     * overlay de missile, demande d'ami, mise a l'ignore. Un `cloneNode` les perdrait **tous**, et
+     * en silence : la fiche s'afficherait, les liens seraient la, et rien ne repondrait au clic.
+     *
+     * Le motif vise l'**appel**, `cloneNode(`, et non le mot : une premiere version cherchait
+     * `cloneNode` tout court et rougissait sur le commentaire qui nomme le piege pour l'expliquer.
+     */
+    public function testTheRowIsMovedIntoTheCardAndNeverCloned(): void
+    {
+        $module = $this->module();
+
+        $this->assertStringContainsString(
+            'corps.appendChild(ligne)',
+            $module,
+            'The module no longer moves the table row into the card.'
+        );
+
         $this->assertStringNotContainsString(
             'cloneNode(',
             $module,
@@ -154,31 +261,31 @@ class GalaxyTacticalMapTest extends UnitTestCase
      * La ligne retourne d'ou elle vient, au meme rang.
      *
      * Un simple retour a la fin du tableau reordonnerait les positions a chaque selection : la
-     * position 3, choisie puis quittee, se retrouverait apres la 15. Le tableau reste masque, donc
-     * personne ne le verrait — jusqu'au jour ou la classe `gtReplaced` est retiree.
+     * position 3, choisie puis quittee, se retrouverait apres la 15. Le tableau etant masque en vue
+     * tactique, personne ne le verrait — jusqu'a ce qu'on repasse en vue liste.
      */
     public function testTheRowGoesBackWhereItCameFrom(): void
     {
         $this->assertStringContainsString(
             'deplacee.parent.insertBefore(deplacee.noeud, deplacee.suivant)',
             $this->module(),
-            'The row is not put back at its original rank: the hidden table silently reorders itself with every selection.'
+            'The row is not put back at its original rank: the list view silently reorders itself with every selection.'
         );
     }
 
     /**
-     * L'attribut `hidden` du bandeau est retabli par une regle d'identite.
+     * La fiche peut se refermer.
      *
      * `hidden` n'agit que par `[hidden] { display: none }` de la feuille du navigateur, de
      * specificite minuscule. Le panneau d'emoji du chat general a coute exactement cette lecon :
-     * une regle d'identite qui pose un `display` gagne, et le bandeau ne se referme plus jamais.
+     * une regle d'identite qui pose un `display` gagne, et la fiche ne se referme plus jamais.
      */
-    public function testTheStripCanActuallyClose(): void
+    public function testTheCardCanActuallyClose(): void
     {
         $this->assertMatchesRegularExpression(
-            '/#galaxyContent \.gtDetail\[hidden\]\s*\{[^}]*display:\s*none/',
+            '/#galaxyTactical \.gtCard\[hidden\]\s*\{[^}]*display:\s*none/',
             $this->feuille(),
-            'Nothing re-establishes [hidden] for the detail strip: any id-level display rule beats the browser default and the strip never closes.'
+            'Nothing re-establishes [hidden] for the card: the id-level display rule beats the browser default and the card never closes.'
         );
     }
 
@@ -206,22 +313,136 @@ class GalaxyTacticalMapTest extends UnitTestCase
     }
 
     /**
-     * Le libelle du bandeau existe dans les deux langues qui portent celui de la carte.
+     * Les libelles de la carte existent dans les deux langues, et la vue les publie.
      *
-     * `__('t_ingame.galaxy.tactical_detail')` rendrait la clef elle-meme si elle manquait — une
-     * chaine lisible, sans erreur, dans un `aria-label`. Le genre de defaut qu'on ne voit jamais.
+     * `__()` rendrait la clef elle-meme si elle manquait — une chaine lisible, sans erreur, dans un
+     * `aria-label` ou sur un bouton. Le genre de defaut qu'on ne voit jamais.
      */
-    public function testTheStripLabelExistsWhereTheMapLabelDoes(): void
+    public function testTheMapLabelsExistInBothLanguages(): void
     {
         foreach (['fr', 'en'] as $langue) {
             $lignes = require resource_path('lang/' . $langue . '/t_ingame.php');
 
-            $this->assertArrayHasKey(
-                'tactical_detail',
-                $lignes['galaxy'],
-                'The detail strip label is missing in ' . $langue . ': the aria-label would read the translation key itself.'
+            foreach (['tactical_map', 'tactical_switch', 'tactical_view', 'list_view', 'tactical_close'] as $clef) {
+                $this->assertArrayHasKey(
+                    $clef,
+                    $lignes['galaxy'],
+                    'The label ' . $clef . ' is missing in ' . $langue . ': the page would print the translation key itself.'
+                );
+            }
+        }
+
+        /*
+         * Les deux textes de la fiche passent par des attributs de la vue, pas par `jsloca` : une
+         * clef absente de cette table rendrait `undefined` sans erreur, et le repli anglais
+         * s'afficherait a un joueur francais.
+         */
+        $this->assertStringContainsString(
+            'data-loca-close=',
+            $this->vue(),
+            'The card close label is no longer published by the view: the module would fall back to its hard-coded French.'
+        );
+    }
+
+    /**
+     * **Aucune cellule porteuse d'action n'est masquee dans la fiche.**
+     *
+     * C'est le temoin de parite, et il ferme un defaut reel : la feuille masquait `.cellPlanet` et
+     * `.cellPlanetName` au motif que la carte porte deja la vignette et le nom. Or `.cellPlanet`
+     * porte le lien d'espionnage rapide, l'etoile d'activite et l'infobulle de planete, et
+     * `.cellPlanetName` porte le lien de phalange. Deux fonctions disparaissaient de la fiche sans
+     * qu'aucun essai ne s'en plaigne.
+     *
+     * Seule `.cellPosition` peut etre masquee : elle ne porte qu'un numero, que les coordonnees de
+     * la fiche redisent.
+     */
+    public function testNoCellThatCarriesAnActionIsHiddenInTheCard(): void
+    {
+        $feuille = $this->feuille();
+
+        foreach (['cellPlanet', 'cellPlanetName', 'cellMoon', 'cellDebris', 'cellPlayerName', 'cellAlliance', 'cellAction'] as $cellule) {
+            $this->assertDoesNotMatchRegularExpression(
+                '/\.gtCardBody[^{}]*\.' . $cellule . '\b[^{}]*\{[^}]*display:\s*none/',
+                $feuille,
+                'The card hides .' . $cellule . ', which carries actions rendered by the server: they vanish from the map with no error anywhere.'
             );
         }
+    }
+
+    /**
+     * L'inventaire sur lequel le temoin precedent repose est verifie sur le rendu herite.
+     *
+     * Sans cela, il interdirait de masquer des cellules pour une raison qui aurait pu disparaitre —
+     * une regle qu'on ne peut plus justifier est une regle qu'on finit par retirer.
+     */
+    public function testTheLegacyRenderStillPutsThoseActionsInThoseCells(): void
+    {
+        $herite = file_get_contents(resource_path('js/ingame/e7c74974620fa35b197315ebdbb8c2.js'));
+        $this->assertIsString($herite);
+
+        $this->assertStringContainsString(
+            '.cellPlanet").html(`<a href="javascript: void(0);" onclick="${getEspionageMission(',
+            $herite,
+            'Quick espionage is no longer rendered into .cellPlanet: the parity witness now protects a cell for a reason that no longer holds.'
+        );
+
+        $this->assertStringContainsString(
+            '.cellPlanetName").append(\'<a class="phalanxlink"',
+            $herite,
+            'The phalanx link is no longer rendered into .cellPlanetName: the parity witness now protects a cell for a reason that no longer holds.'
+        );
+    }
+
+    /**
+     * Le filtre des positions libres agit aussi sur la carte.
+     *
+     * `filterToggle()` pose `filtered_filter_empty` sur les elements presents **au moment du clic**.
+     * La carte etant reconstruite a chaque changement de systeme, ses corps naissent apres : sans
+     * rappel de l'etat, le filtre paraitrait s'eteindre tout seul.
+     */
+    public function testTheEmptySlotFilterReachesTheMap(): void
+    {
+        $module = $this->module();
+
+        $this->assertStringContainsString(
+            "'gtFree empty_filter'",
+            $module,
+            'Free positions no longer carry empty_filter: the E filter of the header does nothing on the map.'
+        );
+
+        $this->assertStringContainsString(
+            "classList.add('filtered_filter_empty')",
+            $module,
+            'The filter state is not re-applied after a redraw: changing system would silently switch the filter off.'
+        );
+    }
+
+    /**
+     * Les quatre autres filtres restent sans emetteur cote serveur.
+     *
+     * **Mesure faite plutot que supposee** : seuls `empty_filter` et `expedition_debris` sont emis
+     * par `GalaxyController`. Les reproduire sur la carte n'aurait rien restaure — ca aurait ajoute
+     * une fonction que le jeu n'a pas. Si l'un des quatre apparaissait un jour, ce temoin le dirait,
+     * et la carte devrait alors le porter comme elle porte le premier.
+     */
+    public function testTheOtherFiltersStillHaveNoServerSideEmitter(): void
+    {
+        $controleur = file_get_contents(app_path('Http/Controllers/GalaxyController.php'));
+        $this->assertIsString($controleur);
+
+        foreach (['inactive_filter', 'vacation_filter', 'strong_filter', 'newbie_filter'] as $filtre) {
+            $this->assertStringNotContainsString(
+                $filtre,
+                $controleur,
+                'The server now emits ' . $filtre . ': the tactical map must dim those bodies too, as it already does for empty slots.'
+            );
+        }
+
+        $this->assertStringContainsString(
+            "'positionFilters' => 'empty_filter'",
+            $controleur,
+            'The empty-slot filter class is no longer emitted: the map carries a class nothing targets.'
+        );
     }
 
     /**

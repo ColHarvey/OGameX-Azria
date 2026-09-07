@@ -427,6 +427,10 @@ return [
         // Table header columns
         'tactical_map'          => 'Tactical system map',
         'tactical_detail'       => 'Details of the selected slot',
+        'tactical_switch'       => 'Galaxy view selection',
+        'tactical_view'         => 'Tactical view',
+        'list_view'             => 'List view',
+        'tactical_close'        => 'Close the card',
         'planet_col'                   => 'Planet',
         'name_col'                     => 'Name',
         'moon_col'                     => 'Moon',

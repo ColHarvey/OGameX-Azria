@@ -309,19 +309,23 @@
                             <div id="filter_vacation" class="filter" onclick="filterToggle(event);">V</div>
                         </div>
                     </div>
-                    {{-- La carte tactique remplace le tableau. Les lignes qui suivent restent dans le
-                         document mais ne sont plus affichees : le rendu herite continue d y ecrire sans
-                         effet, et un retour en arriere ne demande que de retirer la classe gtReplaced. --}}
+                    {{-- La bascule entre la carte et le tableau. Le README du pack la demande
+                         explicitement, et la Vue liste reste la reference de parite tant que chaque
+                         fonction n'a pas ete verifiee sur la carte. Elle porte la classe gtReplaced
+                         de .galaxyTable : un seul interrupteur pour les deux vues. --}}
+                    <div class="gtViewSwitch" role="group"
+                         aria-label="{{ __('t_ingame.galaxy.tactical_switch') }}">
+                        <button type="button" id="gtViewTactical" class="gtViewButton gtViewActive"
+                                aria-pressed="true">{{ __('t_ingame.galaxy.tactical_view') }}</button>
+                        <button type="button" id="gtViewList" class="gtViewButton"
+                                aria-pressed="false">{{ __('t_ingame.galaxy.list_view') }}</button>
+                    </div>
+                    {{-- La carte. La fiche contextuelle est creee dedans par le module : elle vit sur
+                         la carte, comme la maquette le montre, et non sous elle. --}}
                     <div id="galaxyTactical" role="application"
+                         data-loca-card="{{ __('t_ingame.galaxy.tactical_detail') }}"
+                         data-loca-close="{{ __('t_ingame.galaxy.tactical_close') }}"
                          aria-label="{{ __('t_ingame.galaxy.tactical_map') }}"></div>
-                    {{-- Le detail de la position choisie. La ligne du tableau y est **deplacee**,
-                         jamais recopiee : le meme noeud garde les gestionnaires que le rendu
-                         herite lui a attaches, donc infobulles, overlay de missile, ami et ignore
-                         continuent de fonctionner tels quels. La regle qui masque les lignes vise
-                         un enfant direct de .galaxyTable : deplacee ici, la ligne redevient
-                         visible sans qu'aucune regle ne la force. --}}
-                    <div id="galaxyTacticalDetail" class="gtDetail" hidden aria-live="polite"
-                         aria-label="{{ __('t_ingame.galaxy.tactical_detail') }}"></div>
                     <div class="galaxyRow ctGalaxyHead headBold">
                         <div class="galaxyCell span1-2">{{ __('t_ingame.galaxy.planet_col') }}</div>
                         <div class="galaxyCell cellPlanetName">{{ __('t_ingame.galaxy.name_col') }}</div>

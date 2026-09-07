@@ -101,22 +101,33 @@
 }
 
 /*
- * Les vignettes viennent du jeu, pas du pack graphique.
+ * Les textures des planetes : celles du serveur, en taille lisible.
  *
- * ## Ce que la mesure a montre, et qui contredit le cahier des charges
+ * ## Ce que la premiere version affirmait, et qui etait faux
  *
- * Le cahier annonce des fichiers individuels sous `public/img/planets/medium/{type}_{variante}.png`.
- * Ce dossier existe — mais **la Galaxie ne s'en sert pas** : elle rend chaque corps par une planche
- * de sprites, `.microplanet` portant l'image et la taille 38 x 33, et une classe de variante
- * (`desert_1`, `npc_pirate`…) portant seulement une position de fond. Soixante-et-onze variantes.
+ * Elle disait reutiliser « exactement » le mecanisme du jeu — `.microplanet` plus une classe de
+ * variante — et concluait que c'etait la seule facon de preserver l'identite d'une planete.
+ * **Mesure faite dans la feuille du jeu** : la variante n'est definie que sous un parent precis,
+ * `#galaxyContent .ctContentRow .cellPlanet .desert_7` ou `#galaxyContent td.microplanet.desert_7`.
+ * La carte n'est ni l'un ni l'autre. Le bloc n'avait donc aucune image de fond : les planetes
+ * etaient invisibles, et le commentaire decrivait l'inverse du resultat.
  *
- * La carte reutilise donc **exactement** ce mecanisme : meme classe, meme planche, meme decoupe.
- * C'est la seule facon de tenir la regle « aucun tirage graphique qui change leur identite » — une
- * planete ne doit pas changer d'apparence parce qu'on a refait la vue. Ces regles ne touchent donc
- * ni la taille ni le fond des vignettes ; elles ne font que les poser sur la carte.
+ * La carte emploie desormais la source que le README du pack designe comme autoritative :
+ * `public/img/planets/medium/{biome}_{variante}.png`. L'identite reste celle que le serveur a
+ * attribuee — c'est le meme couple biome/variante, simplement servi comme image plutot que comme
+ * position dans une planche.
  */
-#galaxyTactical .microplanet {
+#galaxyTactical .gtTexture {
     flex: 0 0 auto;
+    width: 44px;
+    height: 44px;
+    display: block;
+    border-radius: 50%;
+    image-rendering: auto;
+}
+
+#galaxyTactical .gtBody.gtOwn .gtTexture {
+    box-shadow: 0 0 0 1px rgba(67, 201, 232, 0.55), 0 0 10px rgba(67, 201, 232, 0.35);
 }
 
 /*
@@ -271,8 +282,21 @@
  * Aucune donnee n'est cachee au passage : la charge utile est exactement celle que le tableau
  * recevait deja.
  */
-.galaxyTable.gtReplaced > .ctContentRow,
-.galaxyTable.gtReplaced > .headBold {
+/*
+ * **Le prefixe d'identifiant n'est pas decoratif : sans lui, cette regle perdait.**
+ *
+ * Ecrite `.galaxyTable.gtReplaced > .ctContentRow`, elle pese (0,3,0). Le jeu porte
+ * `#galaxyContent .galaxyRow { display: flex }`, qui pese (1,1,0) et gagne : le tableau restait
+ * entierement visible sous la carte, et personne ne s'en apercevait tant que la page n'etait pas
+ * deployee. C'est la troisieme fois dans ce depot qu'une regle d'identite bat une regle de classe.
+ */
+#galaxyContent .galaxyTable.gtReplaced > .ctContentRow,
+#galaxyContent .galaxyTable.gtReplaced > .headBold {
+    display: none;
+}
+
+/* En vue liste, c'est la carte qui s'efface : un seul interrupteur porte les deux vues. */
+#galaxyContent .galaxyTable:not(.gtReplaced) > #galaxyTactical {
     display: none;
 }
 
@@ -284,16 +308,60 @@
  */
 
 /*
- * Le bandeau de detail : la ligne choisie, sous la carte.
+ * ## La bascule Vue tactique / Vue liste
  *
- * Il ne met en forme **que le contenant**. La ligne deplacee garde l'apparence que le jeu lui
- * donne — toutes ses regles sont en descendant de `#galaxyContent`, pas de `.galaxyTable` —
- * et c'est voulu : le joueur retrouve exactement les icones et les infobulles qu'il connait.
+ * Le README du pack la demande, et la vue liste reste la reference de parite tant que chaque
+ * fonction de l'inventaire n'a pas ete verifiee sur la carte. Decision de Keven : on la garde le
+ * temps de la mise au point, on la retire ensuite.
  */
-#galaxyContent .gtDetail {
-    margin-top: 2px;
-    border-top: 1px solid #1b2b3a;
-    background: rgba(10, 18, 26, 0.55);
+#galaxyContent .gtViewSwitch {
+    display: flex;
+    justify-content: flex-end;
+    gap: 4px;
+    padding: 3px 6px 0 0;
+}
+
+#galaxyContent .gtViewButton {
+    background: rgba(2, 11, 21, 0.85);
+    border: 1px solid #12384a;
+    border-radius: 3px;
+    color: #7fa9b7;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 11px;
+    line-height: 16px;
+    padding: 1px 9px;
+}
+
+#galaxyContent .gtViewButton:hover {
+    border-color: #43c9e8;
+    color: #d6f5fb;
+}
+
+#galaxyContent .gtViewButton.gtViewActive {
+    background: rgba(18, 56, 74, 0.9);
+    border-color: #43c9e8;
+    color: #d6f5fb;
+}
+
+/*
+ * ## La fiche contextuelle
+ *
+ * Elle vit **sur** la carte, comme la maquette le montre, et non sous elle. La ligne du tableau y
+ * est deplacee : la feuille ne fait que la presenter en colonne. Les icones, les infobulles, les
+ * liens et les etats desactives restent exactement ceux que le serveur a rendus — on ne redessine
+ * pas des droits.
+ */
+#galaxyTactical .gtCard {
+    position: absolute;
+    z-index: 20;
+    width: 232px;
+    box-sizing: border-box;
+    background: rgba(2, 11, 21, 0.96);
+    border: 1px solid #12384a;
+    border-radius: 4px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
+    color: #d6f5fb;
 }
 
 /*
@@ -301,6 +369,120 @@
  * minuscule : n'importe quelle regle d'identite la battrait. Celle-ci la retablit — le panneau
  * d'emoji du chat general a coute exactement cette lecon.
  */
-#galaxyContent .gtDetail[hidden] {
+#galaxyTactical .gtCard[hidden] {
     display: none;
+}
+
+#galaxyTactical .gtCardHead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 4px 6px;
+    border-bottom: 1px solid #12384a;
+}
+
+/* Le nom et les coordonnees, empiles : la revue 112 demande les deux dans la fiche. */
+#galaxyTactical .gtCardIdentity {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+#galaxyTactical .gtCardCoords {
+    font-size: 10px;
+    color: #7fa9b7;
+    font-variant-numeric: tabular-nums;
+}
+
+#galaxyTactical .gtCardTitle {
+    font-size: 12px;
+    font-weight: bold;
+    color: #d6f5fb;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#galaxyTactical .gtCardClose {
+    background: none;
+    border: 0;
+    color: #7fa9b7;
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 15px;
+    padding: 0 2px;
+}
+
+#galaxyTactical .gtCardClose:hover {
+    color: #43c9e8;
+}
+
+#galaxyTactical .gtCardBody {
+    padding: 4px;
+}
+
+/*
+ * La ligne deplacee devient une colonne. Elle garde ses classes, donc ses couleurs de statut, ses
+ * infobulles et ses liens ; seule la disposition change.
+ */
+#galaxyContent #galaxyTactical .gtCardBody .galaxyRow {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-height: 0;
+}
+
+#galaxyContent #galaxyTactical .gtCardBody .galaxyCell {
+    width: auto;
+    min-height: 0;
+    padding: 1px 3px;
+    background-color: transparent;
+    text-align: left;
+}
+
+/*
+ * **Seule la cellule du numero est masquee, et c'est deliberement etroit.**
+ *
+ * Une premiere version masquait aussi `.cellPlanet` et `.cellPlanetName` au motif que la
+ * carte porte deja la vignette et le nom. L'inventaire du rendu herite a montre ce que cela
+ * coutait : `.cellPlanet` porte le lien d'**espionnage rapide**, l'etoile d'activite, le
+ * conteneur de flotte et l'infobulle de planete ; `.cellPlanetName` porte le lien de
+ * **phalange**. Deux fonctions disparaissaient de la fiche, en silence.
+ *
+ * `.cellPosition` ne porte qu'un numero, que les coordonnees de la fiche redisent.
+ */
+#galaxyContent #galaxyTactical .gtCardBody .cellPosition {
+    display: none;
+}
+
+/* Le nom repete par la ligne reste utile : il porte le statut d'ami et le lien de phalange. */
+#galaxyContent #galaxyTactical .gtCardBody .cellPlanet,
+#galaxyContent #galaxyTactical .gtCardBody .cellPlanetName {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* Une cellule vide ne merite pas une ligne : lune et debris n'apparaissent que s'ils existent. */
+#galaxyContent #galaxyTactical .gtCardBody .galaxyCell:empty {
+    display: none;
+}
+
+/*
+ * Les actions : une grille d'icones, pas une rangee comprimee. Les elements sont ceux du jeu ;
+ * on ne fait que leur donner de la place et une cible cliquable honnete.
+ */
+#galaxyContent #galaxyTactical .gtCardBody .cellAction {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    padding-top: 3px;
+    border-top: 1px solid #12384a;
+}
+
+#galaxyContent #galaxyTactical .gtCardBody .cellAction > * {
+    flex: 0 0 auto;
+    min-width: 22px;
+    min-height: 22px;
 }
