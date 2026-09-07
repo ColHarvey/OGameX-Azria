@@ -182,10 +182,17 @@ class ChatRealtimeDeliveryTest extends AccountTestCase
     {
         $service = (string)file_get_contents(base_path('app/Services/ChatService.php'));
 
+        // **Un nombre litteral etait le mauvais invariant** : il a rougi le jour ou un troisieme
+        // genre de message est apparu, alors que rien n'etait casse. Ce qui doit tenir, c'est que
+        // *chaque* diffusion du chat exclut son auteur — quel que soit le nombre de genres.
+        $diffusions = substr_count($service, 'broadcast(new ChatMessageSent($chatMessage))');
+        $exclusions = substr_count($service, 'broadcast(new ChatMessageSent($chatMessage))->toOthers();');
+
+        $this->assertGreaterThan(0, $diffusions, 'The chat no longer broadcasts anything: this guard measures nothing.');
         $this->assertSame(
-            2,
-            substr_count($service, 'broadcast(new ChatMessageSent($chatMessage))->toOthers();'),
-            'The two chat sends no longer exclude their author, so the header below would be pointless.'
+            $diffusions,
+            $exclusions,
+            'A chat send broadcasts without excluding its author: that author receives its own message back.'
         );
 
         $echo = (string)file_get_contents(base_path('resources/js/ingame/echo.js'));

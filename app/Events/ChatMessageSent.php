@@ -40,6 +40,12 @@ class ChatMessageSent implements ShouldBroadcast
             $channels[] = new PrivateChannel('chat.alliance.' . $this->message->alliance_id);
         }
 
+        // **Ne viser personne, c'est viser tout le monde.** Un message sans destinataire et sans
+        // alliance est un message general ; il part sur le canal unique du serveur.
+        if ($channels === []) {
+            $channels[] = new PrivateChannel('chat.general');
+        }
+
         return $channels;
     }
 
@@ -76,6 +82,13 @@ class ChatMessageSent implements ShouldBroadcast
 
         if ($this->message->alliance_id) {
             $data['associationId'] = $this->message->alliance_id;
+        }
+
+        // **Sans ce marqueur, un message general se lit comme un message prive.** Le navigateur
+        // distingue les deux genres par la presence d'`associationId` ; un general n'en a pas, et
+        // tomberait donc dans la branche qui ouvre une conversation privee avec son auteur.
+        if (!$this->message->recipient_id && !$this->message->alliance_id) {
+            $data['general'] = true;
         }
 
         if ($this->message->replyTo) {

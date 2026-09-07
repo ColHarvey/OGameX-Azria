@@ -4,6 +4,7 @@ namespace OGame\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\View\View;
 use OGame\Models\Alliance;
 use OGame\Models\ChatMessage;
@@ -16,6 +17,15 @@ use OGame\Services\ChatService;
 
 class ChatController extends OGameController
 {
+    /**
+     * Combien de messages generaux un joueur peut ecrire par minute.
+     *
+     * **Le general est le seul des trois genres qu'un joueur seul peut rendre illisible pour tout
+     * le monde.** Un message prive n'atteint qu'une personne, un message d'alliance quelques-unes ;
+     * celui-ci atteint le serveur entier. La valeur est un choix d'Azria, pas une regle d'OGame.
+     */
+    private const int GENERAL_MESSAGES_PER_MINUTE = 20;
+
     /**
      * Show the dedicated chat page.
      */
@@ -240,13 +250,46 @@ class ChatController extends OGameController
             return response()->json($response);
         }
 
+        if ($mode === 5) {
+            // General chat - reaches the whole server
+            $cle = 'chat-general:' . $userId;
+
+            if (RateLimiter::tooManyAttempts($cle, self::GENERAL_MESSAGES_PER_MINUTE)) {
+                return response()->json([
+                    'status' => 'TOO_MANY_MESSAGES',
+                    'retryAfter' => RateLimiter::availableIn($cle),
+                ]);
+            }
+
+            RateLimiter::hit($cle, 60);
+
+            $message = $chatService->sendGeneralMessage($userId, $text, $replyToId);
+
+            $createdAt = $message->created_at;
+
+            $response = [
+                'status' => 'OK',
+                'id' => $message->id,
+                'targetGeneral' => true,
+                'text' => e($message->message),
+                'date' => $createdAt !== null ? (int) $createdAt->timestamp : 0,
+            ];
+
+            if ($message->replyTo) {
+                $response['refAuthor'] = $message->replyTo->sender->username ?? 'Unknown';
+                $response['refContent'] = e($message->replyTo->message);
+            }
+
+            return response()->json($response);
+        }
+
         return response()->json(['status' => 'INVALID_PARAMETERS']);
     }
 
     /**
-     * Get chat history with a player or alliance.
+     * Get chat history with a player, an alliance, or the whole server.
      *
-     * Handles mode 2 (player chat history) and mode 4 (alliance chat history).
+     * Handles mode 2 (player chat history), mode 4 (alliance chat history) and mode 6 (general).
      */
     public function getHistory(Request $request, ChatService $chatService, BuddyService $buddyService): JsonResponse
     {
@@ -307,6 +350,19 @@ class ChatController extends OGameController
             ]);
         }
 
+        if ($mode === 6) {
+            // General chat history
+            $messages = $chatService->getGeneralMessages($userId);
+            $formatted = $chatService->formatMessagesForFrontend($messages, $userId);
+
+            return response()->json([
+                'general' => true,
+                'playerstatus' => 'online',
+                'chatItems' => $formatted['chatItems'],
+                'chatItemsByDateAsc' => $formatted['chatItemsByDateAsc'],
+            ]);
+        }
+
         return response()->json(['status' => 'INVALID_PARAMETERS']);
     }
 
@@ -324,6 +380,8 @@ class ChatController extends OGameController
             $messages = $chatService->getConversation($userId, $playerId, 50, $beforeId);
         } elseif ($allianceId) {
             $messages = $chatService->getAllianceMessages($allianceId, 50, $beforeId);
+        } elseif ($request->boolean('general')) {
+            $messages = $chatService->getGeneralMessages($userId, 50, $beforeId);
         } else {
             return response()->json(['status' => 'INVALID_PARAMETERS']);
         }

@@ -33,6 +33,17 @@ Broadcast::channel('chat.user.{userId}', function ($user, $userId) {
     return (int) $user->id === (int) $userId;
 });
 
+/*
+ * Le chat general du serveur.
+ *
+ * Prive et non public : le canal n'est ouvert qu'a un joueur authentifie. Il ne porte aucune
+ * appartenance, donc la regle n'a rien a comparer — mais elle existe, et c'est elle qui exige
+ * la session. Un visiteur sans compte ne s'y abonne pas.
+ */
+Broadcast::channel('chat.general', function ($user) {
+    return $user !== null;
+});
+
 // Private channel for alliance messages - user must be a member of the alliance
 Broadcast::channel('chat.alliance.{allianceId}', function ($user, $allianceId) {
     return $user->alliance_id === (int) $allianceId;

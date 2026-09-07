@@ -79,6 +79,63 @@ class ChatService
     }
 
     /**
+     * Send a message to the whole server.
+     *
+     * **Ni destinataire, ni alliance** : c'est ce qui distingue un message general des deux autres
+     * genres, et cela suffit — les deux colonnes sont nullables depuis l'origine.
+     */
+    public function sendGeneralMessage(int $senderId, string $message, int|null $replyToId = null): ChatMessage
+    {
+        $chatMessage = ChatMessage::create([
+            'sender_id' => $senderId,
+            'message' => $message,
+            'reply_to_id' => $replyToId,
+        ]);
+
+        $chatMessage->load(['sender', 'replyTo.sender']);
+
+        broadcast(new ChatMessageSent($chatMessage))->toOthers();
+
+        return $chatMessage;
+    }
+
+    /**
+     * Get general chat history, as this viewer may see it.
+     *
+     * **Les auteurs que le lecteur ignore sont retires ici.** Le canal, lui, est unique et porte le
+     * message a tout le monde : la diffusion ne peut pas filtrer par lecteur. C'est donc le
+     * navigateur qui ecarte les memes auteurs en direct, depuis la meme liste — et ce que le joueur
+     * voit apres un rechargement concorde avec ce qu'il a vu arriver.
+     *
+     * @return Collection<int, ChatMessage>
+     */
+    public function getGeneralMessages(int $viewerId, int $limit = 50, int|null $beforeId = null): Collection
+    {
+        $query = ChatMessage::whereNull('recipient_id')
+            ->whereNull('alliance_id')
+            ->whereNotIn('sender_id', $this->playersIgnoredBy($viewerId))
+            ->with(['sender', 'replyTo.sender']);
+
+        if ($beforeId) {
+            $query->where('id', '<', $beforeId);
+        }
+
+        return $query->orderBy('id', 'desc')->limit($limit)->get()->reverse()->values();
+    }
+
+    /**
+     * The identifiers this player has chosen not to hear from.
+     *
+     * @return list<int>
+     */
+    public function playersIgnoredBy(int $viewerId): array
+    {
+        $identifiants = IgnoredPlayer::where('user_id', $viewerId)->pluck('ignored_user_id')->all();
+
+        return array_values(array_map(static fn ($identifiant): int => (int)$identifiant, $identifiants));
+    }
+
+    /**
      * Get alliance chat message history.
      *
      * @return Collection<int, ChatMessage>
