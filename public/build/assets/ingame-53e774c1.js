@@ -75320,11 +75320,6 @@ ogame.chat = {
     var ignores = {};
     var affiches = {};
 
-    // Un traducteur par langue source, garde d'un message a l'autre : les creer coute, et le
-    // premier peut demander le telechargement d'un modele.
-    var traducteurs = {};
-    var langueCible = typeof generalChatLangue === 'string' ? generalChatLangue : 'en';
-
     /**
      * Le texte, rendu inoffensif.
      *
@@ -75403,48 +75398,51 @@ ogame.chat = {
     }
 
     /**
-     * Le navigateur sait-il traduire ?
+     * Le traducteur est-il joignable ?
      *
-     * **Les deux interfaces sont necessaires** : il faut reconnaitre la langue du message avant de
-     * pouvoir le traduire, et `Translator.create()` exige une langue source explicite. Sans l'une
-     * ou l'autre, le bouton n'apparait pas — mieux vaut pas de bouton qu'un bouton qui echoue.
+     * **Le serveur repond a cette question, pas le navigateur.** La premiere version lisait
+     * l'interface integree de Chrome ; mesure faite, elle n'existe ni sous Brave, ni sous Firefox,
+     * ni sous Safari. Le jeu declare desormais lui-meme si un traducteur repond derriere sa route,
+     * et sans lui le bouton n'est pas ecrit du tout.
      */
     function traductionDisponible() {
-        return typeof window.Translator !== 'undefined'
-            && typeof window.Translator.create === 'function'
-            && typeof window.LanguageDetector !== 'undefined'
-            && typeof window.LanguageDetector.create === 'function';
+        return typeof generalChatTraductionActive !== 'undefined'
+            && generalChatTraductionActive === true
+            && typeof generalChatTraductionUrl === 'string'
+            && generalChatTraductionUrl !== '';
     }
 
     /**
      * Le texte traduit, ou un motif de refus.
      *
      * Rend `{ texte }` en cas de succes, `{ meme: true }` si le message est deja dans la langue du
-     * joueur, et `null` si rien n'a pu etre fait. Trois issues distinctes : « deja dans ta langue »
+     * lecteur, et `null` si rien n'a pu etre fait. Trois issues distinctes : « deja dans ta langue »
      * n'est pas un echec, et l'annoncer comme tel serait faux.
+     *
+     * La langue cible n'est pas envoyee : le serveur la connait — c'est celle de la session — et la
+     * laisser choisir au navigateur serait lui confier une decision qu'il n'a pas a prendre.
      */
-    async function traduireTexte(texte) {
-        var detecteur = await window.LanguageDetector.create();
-        var trouves = await detecteur.detect(texte);
-        var source = trouves && trouves.length > 0 ? trouves[0].detectedLanguage : null;
+    function traduireTexte(texte) {
+        return jQuery.ajax({
+            url: generalChatTraductionUrl,
+            type: 'POST',
+            dataType: 'json',
+            data: { text: texte },
+        }).then(function (reponse) {
+            if (!reponse || reponse.status === 'UNAVAILABLE' || reponse.status === 'TOO_MANY_TRANSLATIONS') {
+                return null;
+            }
 
-        if (!source || source === 'und') {
-            return null;
-        }
+            if (reponse.status === 'SAME_LANGUAGE') {
+                return { meme: true };
+            }
 
-        // Comparaison sur la langue seule : « fr-CA » et « fr » sont la meme langue pour un lecteur.
-        if (String(source).split('-')[0] === String(langueCible).split('-')[0]) {
-            return { meme: true };
-        }
+            if (reponse.status !== 'OK' || typeof reponse.text !== 'string') {
+                return null;
+            }
 
-        if (!traducteurs[source]) {
-            traducteurs[source] = await window.Translator.create({
-                sourceLanguage: source,
-                targetLanguage: langueCible,
-            });
-        }
-
-        return { texte: await traducteurs[source].translate(texte) };
+            return { texte: reponse.text };
+        });
     }
 
     /**
