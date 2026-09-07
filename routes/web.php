@@ -20,6 +20,7 @@ use OGame\Http\Controllers\FacilitiesController;
 use OGame\Http\Controllers\FleetController;
 use OGame\Http\Controllers\FleetEventsController;
 use OGame\Http\Controllers\GalaxyController;
+use OGame\Http\Controllers\GalaxyFleetsController;
 use OGame\Http\Controllers\HighscoreController;
 use OGame\Http\Controllers\JumpGateController;
 use OGame\Http\Controllers\LanguageController;
@@ -148,6 +149,9 @@ Route::middleware(['auth', 'banned', 'globalgame', 'locale', 'firstlogin'])->gro
     // Galaxy
     Route::get('/galaxy', [GalaxyController::class, 'index'])->name('galaxy.index');
     Route::post('/ajax/galaxy', [GalaxyController::class, 'ajax'])->name('galaxy.ajax');
+    // Les mouvements de flotte d un systeme, prives au joueur : un point d entree distinct de la
+    // photographie publique du systeme, pour que la charge publique ne porte jamais un champ prive.
+    Route::get('/ajax/galaxy/fleets', [GalaxyFleetsController::class, 'index'])->name('galaxy.fleets');
     Route::get('/overlay/galaxy/missile-attack', [GalaxyController::class, 'missileAttackOverlay'])->name('galaxy.missile-attack.overlay');
     Route::post('/ajax/galaxy/missile-attack', [GalaxyController::class, 'missileAttack'])->name('galaxy.missile-attack');
 

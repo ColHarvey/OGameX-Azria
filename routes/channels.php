@@ -59,3 +59,25 @@ Broadcast::channel('chat.alliance.{allianceId}', function ($user, $allianceId) {
 Broadcast::channel('combat.player.{playerId}', function ($user, $playerId) {
     return (int) $user->id === (int) $playerId;
 });
+
+/*
+ * Les changements publics d un systeme de la Galaxie : colonie, lune, debris, destruction.
+ *
+ * Prive au sens de Laravel — une session est exigee — mais commun a tous les joueurs qui
+ * regardent ce systeme, comme la Galaxie elle-meme. L annonce ne porte que des coordonnees :
+ * ce que le navigateur apprend ensuite vient de la photographie du systeme, sous ses droits.
+ */
+Broadcast::channel('galaxy.system.{galaxy}.{system}', function ($user) {
+    return $user !== null;
+});
+
+/*
+ * Les mouvements de flotte qu un joueur a le droit de voir.
+ *
+ * Un canal par joueur, et lui seul : qui attaque qui, et quand, est l information la plus
+ * sensible de la Galaxie. Elle ne part que vers l expediteur et vers le proprietaire du corps
+ * vise — les deux que la boite d evenements sert deja. Un tiers n a pas de canal ou l entendre.
+ */
+Broadcast::channel('galaxy.player.{playerId}', function ($user, $playerId) {
+    return (int) $user->id === (int) $playerId;
+});

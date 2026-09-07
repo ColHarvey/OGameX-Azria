@@ -76322,8 +76322,9 @@ ogame.chat = {
  * gestionnaires du jeu — infobulles, overlay de missile, ami, ignore — et une carte qui recalculerait
  * un droit cote client serait une regression de securite, pas une refonte d'interface.
  *
- * Il n'affiche **aucune flotte** : la Galaxie n'en envoie encore aucune au client (`'fleet' => []`
- * sans exception). Les trajectoires, les portes de bord et le temps reel sont la passe suivante.
+ * Les flottes qu'il affiche sont celles que `galaxyFleetsUrl` lui rend — les mouvements que ce
+ * joueur voit deja dans sa boite d'evenements, filtres au systeme affiche. Rien n'est cache par
+ * la feuille : ce qui n'est pas visible n'est pas envoye.
  */
 (function () {
     'use strict';
@@ -76761,6 +76762,347 @@ ogame.chat = {
     }
 
     /*
+     * ## La couche des flottes
+     *
+     * **Le droit vient du serveur, la position vient de l'horloge du serveur.** Le point d'entree
+     * `galaxyFleetsUrl` rend les mouvements que ce joueur a deja le droit de voir dans sa boite
+     * d'evenements, filtres au systeme affiche — rien de plus. Ce module ne recoit jamais une
+     * flotte qu'il devrait cacher : ce qui n'est pas visible n'est pas envoye.
+     *
+     * Chaque mouvement porte ses deux instants autoritatifs. La position dessinee est une simple
+     * interpolation entre eux, sur l'heure du serveur (`server_now` corrige l'ecart des horloges).
+     * Le navigateur ne calcule ni vitesse, ni trajet metier, ni arrivee : quand une flotte arrive,
+     * c'est le serveur qui le dit, par le canal du joueur, et la couche est redemandee.
+     *
+     * Un vol vers ou depuis un autre systeme ne traverse pas la carte : il rejoint une **porte de
+     * bord** dans la direction du corps concerne, et sa fiche porte les coordonnees exterieures.
+     */
+    var COUCHE_SVG = 'http://www.w3.org/2000/svg';
+    var COUCHE_XLINK = 'http://www.w3.org/1999/xlink';
+    var ICONES_DE_MISSION = {
+        1: 'attack', 2: 'acs-attack', 3: 'transport', 4: 'deploy', 5: 'acs-defend',
+        6: 'espionage', 7: 'colonize', 8: 'recycle', 9: 'moon-destruction', 10: 'missile', 15: 'expedition'
+    };
+    var MISSILE = 10;
+    var RAFRAICHISSEMENT_SANS_MOUVEMENT = 5000;
+
+    var jetonDeSysteme = 0;
+    var decalageHorloge = 0;
+    var mouvements = [];
+    var animation = null;
+    var minuterieStatique = null;
+    var systemeAbonne = null;
+    var joueurAbonne = false;
+
+    function mouvementReduit() {
+        return typeof window.matchMedia === 'function'
+            && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    }
+
+    function maintenantServeur() {
+        return Date.now() + decalageHorloge;
+    }
+
+    function svg(balise, attributs) {
+        var e = document.createElementNS(COUCHE_SVG, balise);
+
+        Object.keys(attributs || {}).forEach(function (nom) {
+            e.setAttribute(nom, String(attributs[nom]));
+        });
+
+        return e;
+    }
+
+    /*
+     * La porte de bord : le point ou une trajectoire quitte ou rejoint la carte. Elle est prise dans
+     * la direction du corps local, poussee jusqu'au bord — un vol vers l'exterieur part donc du
+     * cote ou il se dirige, et un vol entrant arrive par le cote oppose a l'etoile.
+     */
+    function porteDeBord(position) {
+        var c = centre();
+        var p = pointDe(position);
+        var dx = p.x - c.x;
+        var dy = p.y - c.y;
+        var longueur = Math.sqrt(dx * dx + dy * dy) || 1;
+        var bord = Math.min(LARGEUR, HAUTEUR - PIED) / 2 - 14;
+
+        return { x: c.x + (dx / longueur) * bord * (LARGEUR / (HAUTEUR - PIED)), y: c.y + (dy / longueur) * bord };
+    }
+
+    function extremites(mouvement, galaxie, systeme) {
+        var partIci = mouvement.from.galaxy === galaxie && mouvement.from.system === systeme;
+        var arriveIci = mouvement.to.galaxy === galaxie && mouvement.to.system === systeme;
+
+        var depart = partIci ? pointDe(mouvement.from.position) : porteDeBord(mouvement.to.position);
+        var arrivee = arriveIci ? pointDe(mouvement.to.position) : porteDeBord(mouvement.from.position);
+
+        return { depart: depart, arrivee: arrivee, partIci: partIci, arriveIci: arriveIci };
+    }
+
+    function coordonnees(bout) {
+        return '[' + bout.galaxy + ':' + bout.system + ':' + bout.position + ']';
+    }
+
+    function coucheDe(carte) {
+        var couche = carte.querySelector('.gtFleetLayer');
+
+        if (couche) {
+            return couche;
+        }
+
+        couche = svg('svg', {
+            'class': 'gtFleetLayer',
+            viewBox: '0 0 ' + LARGEUR + ' ' + (HAUTEUR - PIED),
+            width: LARGEUR,
+            height: HAUTEUR - PIED,
+            'aria-hidden': 'true'
+        });
+        couche.setAttribute('aria-label', locaDeLaCarte(carte, 'fleets', 'Mouvements de flotte'));
+        carte.appendChild(couche);
+
+        return couche;
+    }
+
+    function dessinerLesMouvements(carte, galaxie, systeme) {
+        var couche = coucheDe(carte);
+
+        while (couche.firstChild) {
+            couche.removeChild(couche.firstChild);
+        }
+
+        mouvements.forEach(function (mouvement) {
+            var bouts = extremites(mouvement, galaxie, systeme);
+            var genre = Number(mouvement.mission_type) === MISSILE ? 'gtTrajMissile' : 'gtTraj' + mouvement.side.charAt(0).toUpperCase() + mouvement.side.slice(1);
+            var groupe = svg('g', { 'class': 'gtMovement ' + genre + (mouvement.is_return ? ' gtTrajReturn' : '') });
+            groupe.setAttribute('data-mission-id', String(mouvement.id));
+
+            groupe.appendChild(svg('line', {
+                'class': 'gtTrajectory',
+                x1: bouts.depart.x.toFixed(1), y1: bouts.depart.y.toFixed(1),
+                x2: bouts.arrivee.x.toFixed(1), y2: bouts.arrivee.y.toFixed(1)
+            }));
+
+            /* Une porte de bord se voit : un vol qui sort ou entre a une marque a son extremite. */
+            if (!bouts.partIci || !bouts.arriveIci) {
+                var porte = bouts.partIci ? bouts.arrivee : bouts.depart;
+                var image = svg('image', { 'class': 'gtEdge', width: 18, height: 18, x: (porte.x - 9).toFixed(1), y: (porte.y - 9).toFixed(1) });
+                var fichier = bouts.partIci ? 'system-edge-outbound' : (mouvement.side === 'hostile' ? 'system-edge-inbound-hostile' : 'system-edge-inbound-personal');
+                image.setAttributeNS(COUCHE_XLINK, 'href', '/img/galaxy-tactical/' + fichier + '.svg');
+                groupe.appendChild(image);
+            }
+
+            var marqueur = svg('g', { 'class': 'gtFleetMarker' });
+            var icone = svg('image', { width: 16, height: 16, x: -8, y: -8 });
+            var nomIcone = mouvement.is_return ? 'mission-return' : 'mission-' + (ICONES_DE_MISSION[Number(mouvement.mission_type)] || 'transport');
+
+            if (Number(mouvement.mission_type) === MISSILE) {
+                nomIcone = mouvement.side === 'hostile' ? 'missile-incoming' : 'missile-outgoing';
+            }
+
+            icone.setAttributeNS(COUCHE_XLINK, 'href', '/img/galaxy-tactical/' + nomIcone + '.svg');
+            marqueur.appendChild(icone);
+
+            var titre = svg('title', {});
+            titre.textContent = mouvement.label
+                + (mouvement.is_return ? ' — ' + locaDeLaCarte(carte, 'return', 'Retour') : '')
+                + ' ' + coordonnees(mouvement.from) + ' → ' + coordonnees(mouvement.to)
+                + ((!bouts.partIci || !bouts.arriveIci) ? ' — ' + locaDeLaCarte(carte, 'edge', 'Vers un autre systeme') : '');
+            marqueur.appendChild(titre);
+
+            groupe.appendChild(marqueur);
+            couche.appendChild(groupe);
+
+            mouvement._bouts = bouts;
+            mouvement._marqueur = marqueur;
+        });
+
+        placerLesMarqueurs();
+    }
+
+    /* La position d'un marqueur : interpolation lineaire entre les deux instants du serveur. */
+    function placerLesMarqueurs() {
+        var maintenant = maintenantServeur() / 1000;
+
+        mouvements.forEach(function (mouvement) {
+            if (!mouvement._marqueur || !mouvement._bouts) {
+                return;
+            }
+
+            var duree = Math.max(1, mouvement.time_arrival - mouvement.time_departure);
+            var avancement = Math.min(1, Math.max(0, (maintenant - mouvement.time_departure) / duree));
+            var x = mouvement._bouts.depart.x + (mouvement._bouts.arrivee.x - mouvement._bouts.depart.x) * avancement;
+            var y = mouvement._bouts.depart.y + (mouvement._bouts.arrivee.y - mouvement._bouts.depart.y) * avancement;
+
+            mouvement._marqueur.setAttribute('transform', 'translate(' + x.toFixed(1) + ',' + y.toFixed(1) + ')');
+        });
+    }
+
+    function arreterLAnimation() {
+        if (animation !== null) {
+            window.cancelAnimationFrame(animation);
+            animation = null;
+        }
+
+        if (minuterieStatique !== null) {
+            window.clearInterval(minuterieStatique);
+            minuterieStatique = null;
+        }
+    }
+
+    /*
+     * L'animation ne tourne que si elle sert : aucun mouvement, onglet cache ou reduction des
+     * mouvements demandee — et dans ce dernier cas les marqueurs sont reposes toutes les cinq
+     * secondes, sans transition.
+     */
+    function animer() {
+        arreterLAnimation();
+
+        if (mouvements.length === 0 || document.hidden) {
+            return;
+        }
+
+        if (mouvementReduit()) {
+            minuterieStatique = window.setInterval(placerLesMarqueurs, RAFRAICHISSEMENT_SANS_MOUVEMENT);
+
+            return;
+        }
+
+        var boucle = function () {
+            placerLesMarqueurs();
+            animation = window.requestAnimationFrame(boucle);
+        };
+
+        animation = window.requestAnimationFrame(boucle);
+    }
+
+    /*
+     * La demande, marquee d'un jeton : une reponse tardive de l'ancien systeme n'ecrase jamais le
+     * nouveau. Le serveur seul dit quels mouvements existent ; la reponse remplace tout.
+     */
+    function chargerLesFlottes(carte, galaxie, systeme) {
+        if (typeof galaxyFleetsUrl === 'undefined' || !galaxyFleetsUrl || !window.jQuery) {
+            return;
+        }
+
+        var jeton = ++jetonDeSysteme;
+
+        window.jQuery.getJSON(galaxyFleetsUrl, { galaxy: galaxie, system: systeme })
+            .done(function (reponse) {
+                if (jeton !== jetonDeSysteme || !reponse || !reponse.success) {
+                    return;
+                }
+
+                decalageHorloge = Number(reponse.server_now) * 1000 - Date.now();
+                mouvements = Array.isArray(reponse.movements) ? reponse.movements : [];
+                dessinerLesMouvements(carte, galaxie, systeme);
+                animer();
+            });
+    }
+
+    function redemanderLeSysteme(galaxie, systeme) {
+        if (!window.jQuery || typeof galaxyContentLink === 'undefined' || typeof window.renderContentGalaxy !== 'function') {
+            return;
+        }
+
+        window.jQuery.post(galaxyContentLink, {
+            galaxy: galaxie,
+            system: systeme,
+            _token: typeof token !== 'undefined' ? token : undefined
+        }, window.renderContentGalaxy, 'json');
+    }
+
+    /*
+     * ## Les abonnements
+     *
+     * Le canal du systeme annonce un changement public (colonie, lune, debris, destruction) : la
+     * photographie est redemandee. Le canal du joueur annonce un mouvement qu'il a le droit de voir :
+     * si l'un de ses deux bouts est le systeme affiche, la couche est redemandee.
+     *
+     * Le changement de systeme quitte l'ancien canal avant de rejoindre le nouveau : une annonce
+     * tardive de l'ancien n'a plus personne pour l'entendre.
+     */
+    function ecouterLeSysteme(carte, galaxie, systeme) {
+        if (typeof window.Echo === 'undefined' || typeof window.Echo.private !== 'function') {
+            return;
+        }
+
+        var nom = 'galaxy.system.' + galaxie + '.' + systeme;
+
+        if (systemeAbonne === nom) {
+            return;
+        }
+
+        try {
+            if (systemeAbonne !== null && typeof window.Echo.leave === 'function') {
+                window.Echo.leave(systemeAbonne);
+            }
+
+            systemeAbonne = nom;
+            window.Echo.private(nom).listen('.GalaxySystemChanged', function (recu) {
+                if (!recu || Number(recu.galaxy) !== galaxie || Number(recu.system) !== systeme) {
+                    return;
+                }
+
+                redemanderLeSysteme(galaxie, systeme);
+            });
+        } catch (e) {
+            systemeAbonne = null;
+        }
+    }
+
+    function ecouterLeJoueur(carte) {
+        if (joueurAbonne || typeof window.Echo === 'undefined' || typeof window.Echo.private !== 'function') {
+            return;
+        }
+
+        if (typeof playerId === 'undefined' || !playerId) {
+            return;
+        }
+
+        try {
+            joueurAbonne = true;
+            window.Echo.private('galaxy.player.' + playerId).listen('.FleetMovementChanged', function (recu) {
+                if (!recu || !recu.from || !recu.to || !carte.gtSysteme) {
+                    return;
+                }
+
+                var g = carte.gtSysteme.galaxie;
+                var s = carte.gtSysteme.systeme;
+                var concerne = (Number(recu.from.galaxy) === g && Number(recu.from.system) === s)
+                    || (Number(recu.to.galaxy) === g && Number(recu.to.system) === s);
+
+                if (concerne) {
+                    chargerLesFlottes(carte, g, s);
+                }
+            });
+        } catch (e) {
+            joueurAbonne = false;
+        }
+    }
+
+    function demarrerLaCoucheFlottes(carte, galaxie, systeme) {
+        if (!galaxie || !systeme) {
+            return;
+        }
+
+        carte.gtSysteme = { galaxie: galaxie, systeme: systeme };
+        mouvements = [];
+        arreterLAnimation();
+        chargerLesFlottes(carte, galaxie, systeme);
+        ecouterLeSysteme(carte, galaxie, systeme);
+        ecouterLeJoueur(carte);
+    }
+
+    /* Un onglet qui revient au premier plan reprend l'animation ; un onglet cache l'arrete. */
+    document.addEventListener('visibilitychange', function () {
+        if (document.hidden) {
+            arreterLAnimation();
+        } else {
+            animer();
+        }
+    });
+
+    /*
      * L'etat des filtres survit au redessin.
      *
      * `filterToggle()` pose `filtered_filter_empty` au moment du clic, sur les elements presents
@@ -76792,7 +77134,16 @@ ogame.chat = {
     function dessiner(json) {
         var carte = document.getElementById('galaxyTactical');
 
-        if (!carte || !json || !json.galaxy) {
+        /*
+         * **Les lignes sont sous `system.galaxyContent`, pas sous `galaxy`.** La premiere version
+         * lisait `json.galaxy`, qui n'existe pas, et sortait ici sans rien tracer : l'etoile et les
+         * orbites vus en jeu venaient du fond JPG du pack. `renderContentGalaxy()` lit
+         * `json.system.galaxyContent` depuis toujours ; la carte lit desormais la meme chose.
+         */
+        var systeme = json && json.system ? json.system : null;
+        var lignes = systeme && Array.isArray(systeme.galaxyContent) ? systeme.galaxyContent : null;
+
+        if (!carte || !lignes) {
             return;
         }
 
@@ -76811,7 +77162,7 @@ ogame.chat = {
 
         var parPosition = {};
 
-        json.galaxy.forEach(function (ligne) {
+        lignes.forEach(function (ligne) {
             parPosition[Number(ligne.position)] = ligne;
         });
 
@@ -76878,6 +77229,7 @@ ogame.chat = {
         }
 
         appliquerLesFiltres(carte);
+        demarrerLaCoucheFlottes(carte, Number(systeme.galaxy), Number(systeme.system));
 
         var pied = element('div', 'gtFooter');
         pied.id = 'galaxyTacticalFooter';

@@ -446,6 +446,102 @@ class GalaxyTacticalMapTest extends UnitTestCase
     }
 
     /**
+     * **La carte lit les lignes la ou le serveur les met.**
+     *
+     * La premiere version lisait `json.galaxy`, qui n'existe pas : la reponse porte les lignes sous
+     * `system.galaxyContent`, comme `renderContentGalaxy()` les lit depuis toujours. La garde
+     * sortait avant de rien tracer, et l'etoile vue en jeu venait du fond JPG du pack. Trois faits
+     * sont epingles : le module lit le bon chemin, le rendu herite lit le meme, et le controleur
+     * l'emet sous cette clef.
+     */
+    public function testTheMapReadsTheRowsWhereTheServerPutsThem(): void
+    {
+        $module = $this->module();
+
+        $this->assertStringContainsString(
+            'systeme.galaxyContent',
+            $module,
+            'The map no longer reads system.galaxyContent: it draws nothing, silently.'
+        );
+
+        $this->assertStringNotContainsString(
+            'json.galaxy.forEach',
+            $module,
+            'The map iterates json.galaxy, which the response never carries: the loop never runs.'
+        );
+
+        $this->assertStringNotContainsString(
+            '!json.galaxy)',
+            $module,
+            'The map guards on json.galaxy, which the response never carries: it returns before drawing.'
+        );
+
+        $herite = file_get_contents(resource_path('js/ingame/e7c74974620fa35b197315ebdbb8c2.js'));
+        $this->assertIsString($herite);
+        $this->assertStringContainsString(
+            'json.system.galaxyContent',
+            $herite,
+            'The legacy render no longer reads system.galaxyContent: the payload shape changed and the map must follow.'
+        );
+
+        $controleur = file_get_contents(app_path('Http/Controllers/GalaxyController.php'));
+        $this->assertIsString($controleur);
+        $this->assertStringContainsString(
+            "'galaxyContent' => \$galaxyContent",
+            $controleur,
+            'The controller no longer emits galaxyContent: both renders would go blind.'
+        );
+    }
+
+    /**
+     * La couche des flottes est raccordee de bout en bout : la vue publie l'adresse, la route
+     * existe, le module s'abonne aux deux canaux et quitte l'ancien systeme avant le nouveau.
+     */
+    public function testTheFleetLayerIsWiredEndToEnd(): void
+    {
+        $this->assertStringContainsString(
+            "var galaxyFleetsUrl = \"{{ route('galaxy.fleets') }}\";",
+            $this->vue(),
+            'The view no longer publishes galaxyFleetsUrl: the module never asks for fleets.'
+        );
+
+        $module = $this->module();
+
+        foreach (["'galaxy.system.'", "'galaxy.player.'", ".listen('.GalaxySystemChanged'", ".listen('.FleetMovementChanged'", 'window.Echo.leave('] as $motif) {
+            $this->assertStringContainsString(
+                $motif,
+                $module,
+                'The fleet layer lost ' . $motif . ': live updates would silently stop for that channel.'
+            );
+        }
+
+        $this->assertStringContainsString(
+            'jeton !== jetonDeSysteme',
+            $module,
+            'A late response from the previous system can overwrite the new one: the sequence token is gone.'
+        );
+
+        $this->assertStringContainsString(
+            "'(prefers-reduced-motion: reduce)'",
+            $module,
+            'The fleet animation ignores prefers-reduced-motion.'
+        );
+    }
+
+    /**
+     * La couche ne capte aucun clic sauf sur ses marqueurs : les corps et la fiche restent
+     * cliquables sous les trajectoires.
+     */
+    public function testTheFleetLayerDoesNotStealClicksFromTheBodies(): void
+    {
+        $this->assertMatchesRegularExpression(
+            '/#galaxyTactical \.gtFleetLayer \{[^}]*pointer-events:\s*none/',
+            $this->feuille(),
+            'The fleet layer catches pointer events: every trajectory that crosses a planet makes it unclickable.'
+        );
+    }
+
+    /**
      * Le module est bien dans le paquet construit par Vite.
      *
      * Un fichier de `resources/js` que `vite.config.js` ne nomme pas n'est concatene nulle part :

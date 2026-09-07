@@ -11,9 +11,15 @@ use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameMissions\BattleEngine\Draws\BattleDraws;
 use OGame\GameMissions\BattleEngine\Draws\SystemDraws;
+use OGame\Models\DebrisField;
+use OGame\Models\FleetMission;
 use OGame\Models\Message;
+use OGame\Models\Planet;
 use OGame\Models\User;
+use OGame\Observers\DebrisFieldObserver;
+use OGame\Observers\FleetMissionObserver;
 use OGame\Observers\MessageObserver;
+use OGame\Observers\PlanetObserver;
 use OGame\Observers\UserObserver;
 use OGame\Services\SettingsService;
 
@@ -40,6 +46,11 @@ class AppServiceProvider extends ServiceProvider
         // Register model observers
         User::observe(UserObserver::class);
         Message::observe(MessageObserver::class);
+        // La Galaxie tactique apprend les changements a l ecriture, jamais de l appelant :
+        // mouvements de flotte vers leurs deux parties, corps et debris vers le systeme.
+        FleetMission::observe(FleetMissionObserver::class);
+        Planet::observe(PlanetObserver::class);
+        DebrisField::observe(DebrisFieldObserver::class);
     }
 
     /**

@@ -262,6 +262,60 @@
     }
 }
 
+/*
+ * ## La couche des flottes
+ *
+ * Un SVG pose au-dessus des corps, de la taille exacte de la carte. Il ne capte aucun clic —
+ * `pointer-events: none` sur la couche, retabli sur les marqueurs seuls — pour que les corps et
+ * la fiche restent cliquables sous les trajectoires. Les couleurs sont celles du pack.
+ */
+#galaxyTactical .gtFleetLayer {
+    position: absolute;
+    left: 0;
+    top: 0;
+    pointer-events: none;
+    z-index: 5;
+    overflow: visible;
+}
+
+#galaxyTactical .gtFleetMarker {
+    pointer-events: auto;
+    cursor: help;
+}
+
+#galaxyTactical .gtTrajectory {
+    fill: none;
+    stroke-width: 1.2;
+    stroke-dasharray: 5 4;
+    stroke-linecap: round;
+    opacity: 0.85;
+}
+
+#galaxyTactical .gtTrajFriendly .gtTrajectory { stroke: #46dff8; }
+#galaxyTactical .gtTrajNeutral .gtTrajectory { stroke: #70ff72; }
+#galaxyTactical .gtTrajHostile .gtTrajectory { stroke: #ff693f; }
+#galaxyTactical .gtTrajMissile .gtTrajectory { stroke: #ffa53f; stroke-dasharray: 2 3; }
+
+/* Un retour se reconnait : meme couleur, trait plus discret. */
+#galaxyTactical .gtTrajReturn .gtTrajectory {
+    opacity: 0.45;
+    stroke-dasharray: 2 5;
+}
+
+#galaxyTactical .gtEdge {
+    opacity: 0.9;
+}
+
+/* Une pulsation discrete sur le marqueur : il bouge, on ne doit pas le chercher. */
+@keyframes gtMarkerPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+}
+
+#galaxyTactical .gtFleetMarker image {
+    animation: gtMarkerPulse 2.4s ease-in-out infinite;
+}
+
 /* Une animation qui ne demande rien a personne : celui qui a dit non ne la voit pas. */
 @media (prefers-reduced-motion: reduce) {
     #galaxyTactical * {

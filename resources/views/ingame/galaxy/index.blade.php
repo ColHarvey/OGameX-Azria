@@ -37,6 +37,7 @@
             var spionageAmount = 3;
             var contentLink = "{{ route('galaxy.ajax') }}";
             var galaxyContentLink = "{{ route('galaxy.ajax') }}";
+            var galaxyFleetsUrl = "{{ route('galaxy.fleets') }}";
             var preserveSystemOnPlanetChange = false;
             @php
                 $galaxyLocaData = [
@@ -325,6 +326,9 @@
                     <div id="galaxyTactical" role="application"
                          data-loca-card="{{ __('t_ingame.galaxy.tactical_detail') }}"
                          data-loca-close="{{ __('t_ingame.galaxy.tactical_close') }}"
+                         data-loca-fleets="{{ __('t_ingame.galaxy.tactical_fleets') }}"
+                         data-loca-edge="{{ __('t_ingame.galaxy.tactical_edge') }}"
+                         data-loca-return="{{ __('t_ingame.galaxy.tactical_return') }}"
                          aria-label="{{ __('t_ingame.galaxy.tactical_map') }}"></div>
                     <div class="galaxyRow ctGalaxyHead headBold">
                         <div class="galaxyCell span1-2">{{ __('t_ingame.galaxy.planet_col') }}</div>
