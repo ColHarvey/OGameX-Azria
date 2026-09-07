@@ -2108,5 +2108,6 @@ Improved fleet escape rate',
         'general_too_many' => 'You are writing too fast. Try again in :seconds seconds.',
         'general_send_failed' => 'Your message did not go through. Try again.',
         'general_disconnected' => 'The live feed is down: new messages will only appear on reload.',
+        'emoji_open' => 'Insert an emoji',
     ],
 ];

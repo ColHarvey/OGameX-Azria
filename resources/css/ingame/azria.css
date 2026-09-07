@@ -309,3 +309,140 @@
     margin: 4px 0;
     text-align: center;
 }
+
+/*
+ * La salle occupe la largeur des deux colonnes qu'elle surmonte.
+ *
+ * Mesures lues dans la feuille du jeu, pas estimees : `#chatList` fait 480 px, `.pl_container`
+ * 180 px, et chaque `contentbox` porte 5 px de marge horizontale. La salle en fait donc 665, pour
+ * que son bord droit tombe exactement sur celui de la liste des joueurs.
+ *
+ * `float: none` et `clear: both` la sortent du flot des deux colonnes : sans cela elles
+ * remonteraient a cote d'elle des que la fenetre est assez large.
+ */
+#generalChat {
+    width: 665px;
+    float: none;
+    clear: both;
+}
+
+/*
+ * La hauteur va aux messages, pas a la saisie.
+ *
+ * Une zone de texte sans hauteur imposee prend la place que le navigateur lui donne — ici la
+ * quasi-totalite du panneau, la salle etant reduite a une ligne. L'inverse de ce qu'on lit.
+ */
+#generalChat .largeChatContainer {
+    height: 320px;
+    overflow-y: auto;
+}
+
+#generalChat .editor_wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+#generalChat .editor_wrap > div {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+#generalChatText {
+    width: 100%;
+    height: 26px;
+    min-height: 26px;
+    /*
+     * **La poignee de redimensionnement est retiree, pas seulement decouragee.**
+     *
+     * Une zone de texte est redimensionnable par defaut dans tous les navigateurs : un joueur
+     * qui l'etire repousse la salle hors du panneau et n'a aucun moyen de revenir en arriere
+     * sans recharger. `max-height` fixe la borne meme si un style tiers reactivait la poignee.
+     */
+    resize: none;
+    max-height: 26px;
+    overflow-y: auto;
+    box-sizing: border-box;
+    padding: 4px 6px;
+}
+
+#generalChatSend {
+    flex: 0 0 auto;
+}
+
+/*
+ * Le selecteur d'emoji du chat general.
+ *
+ * Il s'ouvre **au-dessus** de la ligne de saisie et non en dessous : sous elle, il sortirait du
+ * panneau et serait coupe par le pied de la boite. `position: relative` sur l'enveloppe donne au
+ * panneau son point d'ancrage — sans lui il se placerait par rapport a la page et se decalerait
+ * des que la salle change de hauteur.
+ */
+#generalChat .editor_wrap {
+    position: relative;
+}
+
+#generalChatEmoji {
+    /* Le bouton porte un signe, pas un mot : il n'a pas besoin de la largeur d'« Envoyer ». */
+    min-width: 0;
+    padding: 4px 10px;
+}
+
+#generalChatEmojiPanel {
+    position: absolute;
+    right: 0;
+    bottom: 100%;
+    margin-bottom: 6px;
+    z-index: 20;
+
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 2px;
+    padding: 6px;
+
+    background: #0b1a2b;
+    border: 1px solid #4fd1e0;
+    border-radius: 3px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+}
+
+#generalChatEmojiPanel button {
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 4px;
+}
+
+#generalChatEmojiPanel button:hover,
+#generalChatEmojiPanel button:focus {
+    background: rgba(79, 209, 224, 0.15);
+    border-color: #4fd1e0;
+    outline: none;
+}
+
+/*
+ * Le pied de la salle reste dans le cadre.
+ *
+ * Le pied commun est decale de 7 px vers la droite (`left: 7px`) et son coin droit de 8 px de plus
+ * (`right: -8px`) : la decoration deborde donc de **15 px** au-dela du cadre. Sur une boite de
+ * 480 px cela tombe dans la gouttiere entre les deux colonnes et ne se voit pas. La salle en fait
+ * 665, soit toute la largeur disponible : les 15 px sortaient de la page.
+ *
+ * Les coins sont ramenes sur les bords plutot que la boite retrecie : la decoration s'aligne alors
+ * exactement sur le cadre, et la salle garde la largeur des deux colonnes qu'elle surmonte.
+ */
+#generalChat .footer {
+    left: 0;
+}
+
+#generalChat .footer .c-left {
+    left: 0;
+}
+
+#generalChat .footer .c-right {
+    right: 0;
+}

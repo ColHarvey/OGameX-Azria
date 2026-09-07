@@ -1775,5 +1775,6 @@ Taux d\'évasion de la flotte amélioré',
         'general_too_many' => 'Tu écris trop vite. Réessaie dans :seconds secondes.',
         'general_send_failed' => 'Ton message n\'est pas parti. Réessaie.',
         'general_disconnected' => 'Le direct est coupé : les nouveaux messages n\'arriveront qu\'au rechargement.',
+        'emoji_open' => 'Insérer une émoticône',
     ],
 ];

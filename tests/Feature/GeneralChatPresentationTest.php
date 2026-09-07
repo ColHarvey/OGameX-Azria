@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use OGame\Chat\ChatEmojiPalette;
 use OGame\Chat\PresentedAuthor;
 use OGame\Events\ChatMessageSent;
 use OGame\Models\ChatMessage;
@@ -188,6 +189,111 @@ class GeneralChatPresentationTest extends AccountTestCase
 
         $this->assertStringContainsString('#generalChat .ally-tag', $feuille);
         $this->assertStringContainsString('#generalChat .honorScore', $feuille);
+    }
+
+    /**
+     * La salle prend la largeur des deux colonnes, et la hauteur va aux messages.
+     *
+     * Livree sans ces regles, elle faisait la largeur d'une seule colonne, et sa zone de saisie
+     * occupait presque tout le panneau — la salle etant reduite a une ligne, l'inverse de ce
+     * qu'on vient y lire. Les 665 pixels sont une mesure : `#chatList` en fait 480,
+     * `.pl_container` 180, et chaque `contentbox` porte 5 pixels de marge.
+     */
+    public function testTheRoomSpansBothColumnsAndGivesItsHeightToTheMessages(): void
+    {
+        $feuille = (string)file_get_contents(base_path('resources/css/ingame/azria.css'));
+
+        $this->assertMatchesRegularExpression(
+            '/#generalChat\s*\{[^}]*width:\s*665px/',
+            $feuille,
+            'The room no longer spans both columns: it renders as wide as the chat list alone.'
+        );
+
+        $this->assertMatchesRegularExpression(
+            '/#generalChat \.largeChatContainer\s*\{[^}]*height:/',
+            $feuille,
+            'The message area has no height of its own: the input takes the panel and the room is one line.'
+        );
+
+        $gabarit = (string)file_get_contents(base_path('resources/views/ingame/chat/partials/general.blade.php'));
+
+        $this->assertStringContainsString(
+            'rows="1"',
+            $gabarit,
+            'The input falls back to a multi-line box whenever the stylesheet is late.'
+        );
+
+        // **La poignee de redimensionnement est retiree**, pas seulement decouragee : un joueur
+        // qui etire la zone repousse la salle hors du panneau, sans moyen de revenir en arriere.
+        $this->assertMatchesRegularExpression(
+            '/#generalChatText\s*\{(?:[^}]*)resize:\s*none/s',
+            $feuille,
+            'The message box can be dragged larger: the room gets pushed out of the panel.'
+        );
+
+        $this->assertMatchesRegularExpression(
+            '/#generalChatText\s*\{(?:[^}]*)max-height:/s',
+            $feuille,
+            'Nothing bounds the input height should another stylesheet re-enable the handle.'
+        );
+    }
+
+    /**
+     * La palette ne se repete pas et tient dans sa grille.
+     *
+     * Six rangees de huit : un doublon decalerait tout et laisserait un trou en fin de grille.
+     */
+    public function testThePaletteIsWhatTheGridExpects(): void
+    {
+        $palette = ChatEmojiPalette::all();
+
+        $this->assertCount(48, $palette, 'The palette no longer fills six rows of eight.');
+        $this->assertSame($palette, array_values(array_unique($palette)), 'The palette repeats a sign.');
+
+        foreach ($palette as $signe) {
+            $this->assertNotSame('', trim($signe), 'The palette carries an empty entry.');
+        }
+    }
+
+    /**
+     * La page offre les emoji, et le module les pose la ou est le curseur.
+     *
+     * **Coller a la fin serait faux la moitie du temps** : ecrire une phrase puis vouloir un
+     * signe au milieu est le cas normal.
+     */
+    public function testTheRoomOffersEmojiAndPlacesThemAtTheCursor(): void
+    {
+        $reponse = $this->get('/chat');
+
+        $reponse->assertStatus(200);
+        $reponse->assertSee('id="generalChatEmojiPanel"', false);
+
+        $rendu = (string)$reponse->getContent();
+        $this->assertSame(
+            count(ChatEmojiPalette::all()),
+            substr_count($rendu, 'js_generalChatEmoji'),
+            'The page does not offer every sign of the palette.'
+        );
+
+        $module = (string)file_get_contents(base_path('resources/js/ingame/chat-general.js'));
+
+        // **Chercher `zone.selectionStart` ne prouvait rien** : la chaine apparait aussi dans la
+        // ligne qui replace le curseur apres l'insertion, donc le temoin survivait a une version
+        // qui collait tout a la fin. Ce qui compte, c'est **d'ou vient la position d'insertion**.
+        $this->assertStringContainsString(
+            "var debut = typeof zone.selectionStart === 'number' ? zone.selectionStart",
+            $module,
+            'The insertion point no longer comes from the cursor: the emoji is appended at the end.'
+        );
+
+        $this->assertStringContainsString(
+            'zone.value.slice(0, debut) + signe + zone.value.slice(fin)',
+            $module,
+            'The text is not rebuilt around the selection: a selected passage would not be replaced.'
+        );
+
+        $feuille = (string)file_get_contents(base_path('resources/css/ingame/azria.css'));
+        $this->assertStringContainsString('#generalChatEmojiPanel', $feuille, 'The picker has no styling of its own.');
     }
 
     /**

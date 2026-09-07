@@ -27,10 +27,23 @@
         <div id="generalChatNotice" class="overmark" style="display: none;"></div>
         <div class="editor_wrap">
             <div>
-                <textarea id="generalChatText" name="text" class="new_msg_textarea"
+                {{-- `rows="1"` autant que la feuille de style : la hauteur doit tenir meme si la
+                     CSS tarde, sinon la saisie occupe le panneau et la salle est reduite a une ligne. --}}
+                <textarea id="generalChatText" name="text" class="new_msg_textarea" rows="1"
                           maxlength="2000" placeholder="{{ __('t_ingame.chat.general_placeholder') }}"></textarea>
             </div>
-            <a href="javascript:void(0);" class="btn_blue fright" id="generalChatSend">{{ __('t_ingame.chat.submit') }}</a>
+            {{-- Le panneau vit **dans** l'enveloppe de saisie, positionne par rapport a elle :
+                 ailleurs dans la page, il se decalerait des que la salle change de hauteur. --}}
+            <a href="javascript:void(0);" class="btn_blue" id="generalChatEmoji"
+               title="{{ __('t_ingame.chat.emoji_open') }}"
+               aria-label="{{ __('t_ingame.chat.emoji_open') }}">☺</a>
+            <a href="javascript:void(0);" class="btn_blue" id="generalChatSend">{{ __('t_ingame.chat.submit') }}</a>
+
+            <div id="generalChatEmojiPanel" hidden>
+                @foreach (\OGame\Chat\ChatEmojiPalette::all() as $signe)
+                    <button type="button" class="js_generalChatEmoji" tabindex="-1">{{ $signe }}</button>
+                @endforeach
+            </div>
         </div>
     </div>
     <div class="footer">
