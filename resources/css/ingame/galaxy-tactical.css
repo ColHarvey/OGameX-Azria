@@ -51,25 +51,28 @@
  */
 #galaxyTactical .gtStar {
     position: absolute;
-    width: 120px;
-    height: 120px;
+    width: 76px;
+    height: 76px;
     transform: translate(-50%, -50%);
     pointer-events: none;
 }
 
-#galaxyTactical .gtSunSvg {
-    display: block;
-    width: 120px;
-    height: 120px;
-    overflow: visible;
-}
-
 /*
- * Le mouvement du soleil vit dans le SVG que le module ecrit (`soleilVivant()`) : bruit fractal
- * qui coule, couronne qui respire, eruptions sur le bord. La premiere version — degrade conique
- * flou en rotation — faisait une tache qui tourne ; Keven l'a refusee : « remets comme c'etait,
- * je veux une animation qui bouge, comme un vrai soleil ».
+ * ## Le soleil de Codex (`sun-animated.css`, revue 113), repris tel quel
+ *
+ * Classes isolees `.ogx-sun` : l'image porte la surface, `::before` le halo qui pulse, `::after`
+ * l'eclat qui varie. Le disque visible fait environ 70 % de la largeur du composant (76 px, soit
+ * ~53 px de disque : les orbites interieures a 72 px restent degagees). La regle de reduction des
+ * mouvements est celle de Codex, et elle nomme les pseudo-elements — `*` ne les atteint pas.
  */
+.ogx-sun { position: relative; display: block; width: var(--sun-size, 76px); aspect-ratio: 1; pointer-events: none; isolation: isolate; }
+.ogx-sun img { display: block; width: 100%; height: 100%; object-fit: contain; position: relative; animation: ogx-sun-light 5s ease-in-out infinite alternate; }
+.ogx-sun::before { content: ''; position: absolute; inset: -24%; border-radius: 50%; background: radial-gradient(circle, rgba(255,182,40,.32) 0%, rgba(255,117,12,.16) 34%, transparent 66%); animation: ogx-sun-corona 4s ease-in-out infinite alternate; z-index: -1; }
+.ogx-sun::after { content: ''; position: absolute; inset: 13%; border-radius: 50%; box-shadow: 0 0 12px 2px #ffad3238, inset 0 0 8px #ffdc6930; animation: ogx-sun-flare 7s ease-in-out infinite; }
+@keyframes ogx-sun-light { from { filter: brightness(.96); } to { filter: brightness(1.14); } }
+@keyframes ogx-sun-corona { from { transform: scale(.88); opacity: .5; } to { transform: scale(1.16); opacity: 1; } }
+@keyframes ogx-sun-flare { 0%,100% { opacity: .25; } 43% { opacity: .9; } 67% { opacity: .4; } }
+@media (prefers-reduced-motion: reduce) { .ogx-sun img, .ogx-sun::before, .ogx-sun::after { animation: none; } }
 
 /* Les orbites : un trait, et rien de plus. Elles situent, elles ne se cliquent pas. */
 #galaxyTactical .gtOrbit {

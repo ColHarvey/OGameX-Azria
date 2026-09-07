@@ -826,32 +826,37 @@ class GalaxyTacticalMapTest extends UnitTestCase
     public function testTheSunIsAnimatedAndStillsUnderReducedMotion(): void
     {
         $module = $this->module();
+        $feuille = $this->feuille();
 
         /*
-         * Le mouvement est en SMIL dans un SVG que le module ecrit : bruit fractal qui deplace le
-         * disque, groupe en rotation, couronne qui respire, eruptions. Keven a refuse la version CSS
-         * (« une tache qui tourne ») ; celle-ci bouge vraiment. Les trois traits sont exiges.
+         * Le soleil est celui du pack (revue 113 de Codex) : l'image `sun-detailed-v1.png` dans le
+         * composant `.ogx-sun`, dont la feuille anime le halo et la lumiere. Le SVG au bruit fractal
+         * a disparu entierement — un seul soleil, un seul halo.
          */
-        /* Chaque motif porte le debut de son attribut : `<feTurbulenceX` contient `<feTurbulence`. */
-        foreach (['<feTurbulence type=', '<feDisplacementMap in=', '<animateTransform attributeName=', '<animate attributeName="r"'] as $trait) {
-            $this->assertStringContainsString($trait, $module, 'The living sun lost ' . $trait . ': it is a still disc again.');
+        $this->assertStringContainsString("var SOLEIL_DE_CODEX = '/img/galaxy-tactical/sun-detailed-v1.png';", $module, 'The map no longer uses the Codex sun image.');
+        $this->assertStringContainsString("element('span', 'ogx-sun')", $module, 'The sun is no longer wrapped in the .ogx-sun component: its CSS effects do not apply.');
+        $this->assertStringContainsString("composant.setAttribute('aria-hidden', 'true');", $module, 'The decorative sun is exposed to screen readers.');
+        $this->assertStringNotContainsString('<feTurbulence', $module, 'The old SVG sun is back: two suns, two halos.');
+
+        $this->assertFileExists(public_path('img/galaxy-tactical/sun-detailed-v1.png'), 'The Codex sun image is missing.');
+
+        /* L'alpha du PNG est reel : le coin est transparent, pas un carre noir sur la carte. */
+        $image = imagecreatefrompng(public_path('img/galaxy-tactical/sun-detailed-v1.png'));
+        $this->assertNotFalse($image);
+        $this->assertGreaterThanOrEqual(120, (imagecolorat($image, 0, 0) >> 24) & 0x7F, 'The sun PNG lost its transparency.');
+
+        /* La feuille de Codex, reprise telle quelle : les trois animations et leur extinction. */
+        foreach (['@keyframes ogx-sun-light {', '@keyframes ogx-sun-corona {', '@keyframes ogx-sun-flare {'] as $animation) {
+            $this->assertStringContainsString($animation, $feuille, 'The sun animation ' . $animation . ' is gone.');
         }
 
-        /*
-         * SMIL ne s'eteint pas par CSS : le module ne cree les `<animate>` que si le joueur n'a pas
-         * demande moins de mouvement. Le gabarit passe par `a(...)`, et l'appel lit la preference.
-         */
         $this->assertStringContainsString(
-            'soleilVivant(!mouvementReduit())',
-            $module,
-            'The sun animations no longer depend on prefers-reduced-motion: CSS cannot stop SMIL, only omitting the animate nodes does.'
+            '@media (prefers-reduced-motion: reduce) { .ogx-sun img, .ogx-sun::before, .ogx-sun::after { animation: none; } }',
+            $feuille,
+            'Reduced motion no longer stills the sun: the universal selector does not reach pseudo-elements.'
         );
 
-        $this->assertMatchesRegularExpression(
-            "/var a = function \(balise\) \{\s*return anime \? balise : '';/",
-            $module,
-            'The animate nodes are no longer gated by the anime flag: reduced motion would still get a moving sun.'
-        );
+        $this->assertDoesNotMatchRegularExpression('/#galaxyTactical \.gtSunSvg/', $feuille, 'The old SVG sun rules are back.');
     }
 
     /**

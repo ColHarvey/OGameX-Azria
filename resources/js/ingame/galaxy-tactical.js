@@ -1137,53 +1137,28 @@
     }
 
     /*
-     * ## Le soleil vivant
+     * ## Le soleil
      *
-     * Un SVG en ligne, sans image. Le disque garde son degrade radial ; par-dessus, une couche de
-     * bruit fractal (`feTurbulence`) deplace le disque (`feDisplacementMap`) et le groupe qui la
-     * porte tourne lentement : le bruit vit en espace utilisateur, donc la rotation fait **couler**
-     * la surface au lieu de la faire tourner d'un bloc. La couronne respire ; quatre eruptions
-     * tournent sur le bord et s'allument tour a tour. Rien ne capte un clic.
-     *
-     * Sous `prefers-reduced-motion`, aucun `<animate>` n'est cree : SMIL ne s'eteint pas par CSS,
-     * et une regle `animation: none` ne l'atteindrait pas. Le soleil est alors une image fixe.
+     * Celui du pack (revue 113 de Codex) : `sun-detailed-v1.png`, surface granuleuse, protuberances
+     * et fond transparent, dans le composant `.ogx-sun` dont la feuille anime le halo et la
+     * lumiere. Le disque est stable — ce n'est ni un GIF ni un plasma qui coule ; Keven l'a
+     * choisi ainsi. Decoratif : masque aux lecteurs d'ecran, aucun clic capte. La feuille de Codex
+     * eteint ses animations sous `prefers-reduced-motion` d'elle-meme.
      */
-    function soleilVivant(anime) {
-        var a = function (balise) {
-            return anime ? balise : '';
-        };
+    var SOLEIL_DE_CODEX = '/img/galaxy-tactical/sun-detailed-v1.png';
+    var SOLEIL_TAILLE = '76px';
 
-        return '<svg class="gtSunSvg" viewBox="-60 -60 120 120" width="120" height="120" aria-hidden="true">'
-            + '<defs>'
-            + '<radialGradient id="gtSunCore"><stop offset="0" stop-color="#fff8e6"/><stop offset="0.45" stop-color="#ffd27a"/><stop offset="0.72" stop-color="#ff9a3c"/><stop offset="1" stop-color="#e0651f"/></radialGradient>'
-            + '<radialGradient id="gtSunGlow"><stop offset="0.35" stop-color="rgba(255,179,71,0.55)"/><stop offset="0.7" stop-color="rgba(224,101,31,0.18)"/><stop offset="1" stop-color="rgba(224,101,31,0)"/></radialGradient>'
-            + '<filter id="gtSunPlasma" x="-30%" y="-30%" width="160%" height="160%">'
-            + '<feTurbulence type="fractalNoise" baseFrequency="0.045" numOctaves="3" seed="7" result="bruit">'
-            + a('<animate attributeName="baseFrequency" values="0.045;0.06;0.045" dur="7s" repeatCount="indefinite"/>')
-            + '</feTurbulence>'
-            + '<feDisplacementMap in="SourceGraphic" in2="bruit" scale="7" xChannelSelector="R" yChannelSelector="G"/>'
-            + '</filter>'
-            + '<clipPath id="gtSunClip"><circle r="23"/></clipPath>'
-            + '</defs>'
-            + '<circle class="gtSunGlow" r="58" fill="url(#gtSunGlow)">'
-            + a('<animate attributeName="r" values="54;60;54" dur="4.5s" repeatCount="indefinite"/>')
-            + '</circle>'
-            + '<g clip-path="url(#gtSunClip)">'
-            + '<g filter="url(#gtSunPlasma)">'
-            + a('<animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="48s" repeatCount="indefinite"/>')
-            + '<circle r="30" fill="url(#gtSunCore)"/>'
-            + '<circle r="30" fill="url(#gtSunCore)" opacity="0.55" transform="rotate(137)"/>'
-            + '</g>'
-            + '</g>'
-            + '<g class="gtSunFlares">'
-            + a('<animateTransform attributeName="transform" type="rotate" from="0" to="-360" dur="31s" repeatCount="indefinite"/>')
-            + [0, 97, 190, 274].map(function (deg, i) {
-                return '<ellipse rx="9" ry="3" cx="25" cy="0" fill="#ffd27a" opacity="0.35" transform="rotate(' + deg + ')">'
-                    + a('<animate attributeName="opacity" values="0.1;0.75;0.1" dur="' + (5 + i * 1.7) + 's" repeatCount="indefinite"/>')
-                    + '</ellipse>';
-            }).join('')
-            + '</g>'
-            + '</svg>';
+    function soleilDeCodex() {
+        var composant = element('span', 'ogx-sun');
+        var image = element('img', '');
+
+        composant.style.setProperty('--sun-size', SOLEIL_TAILLE);
+        composant.setAttribute('aria-hidden', 'true');
+        image.src = SOLEIL_DE_CODEX;
+        image.alt = '';
+        composant.appendChild(image);
+
+        return composant;
     }
 
     /*
@@ -1237,7 +1212,7 @@
         var etoile = element('div', 'gtStar');
         etoile.style.left = Math.round(c.x) + 'px';
         etoile.style.top = Math.round(c.y) + 'px';
-        etoile.innerHTML = soleilVivant(!mouvementReduit());
+        etoile.appendChild(soleilDeCodex());
         carte.appendChild(etoile);
 
         var parPosition = {};
