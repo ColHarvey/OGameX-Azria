@@ -21,15 +21,18 @@ ogame.chat = {
             }
 
             // Subscribe to user's private channel for direct messages
+            // **Le point initial n'est pas cosmetique.** Sans lui, la bibliotheque prefixe le nom
+            // par son espace de noms par defaut, `App.Events`, et attend un evenement que ce jeu
+            // n'emet pas : ses classes vivent sous `OGame\Events`.
             window.Echo.private('chat.user.' + c.playerId)
-                .listen('ChatMessageSent', function (e) {
+                .listen('.ChatMessageSent', function (e) {
                     c.messageReceived(e);
                 });
 
             // If user has alliance, subscribe to alliance channel
             if (c.associationId) {
                 window.Echo.private('chat.alliance.' + c.associationId)
-                    .listen('ChatMessageSent', function (e) {
+                    .listen('.ChatMessageSent', function (e) {
                         c.messageReceived(e);
                     });
             }
@@ -222,7 +225,7 @@ ogame.chat = {
     messageReceived: function (h) {
         var g = ogame.chat;
         if (typeof h.refAuthor !== "undefined" && typeof h.refText !== "undefined") {
-            $refData = {author: h.refAuhtor, text: h.refText}
+            $refData = {author: h.refAuthor, text: h.refText}
         } else {
             $refData = 0
         }
@@ -482,7 +485,10 @@ ogame.chat = {
         }
         var w = u.createChatItem(y);
         var s = u.getLastChatItemData();
-        if (s !== null && (y.date != s.date || y.chatContent != s.text)) {
+        // **Un chat vide n'a pas de dernier element** : `s` vaut alors `null`, et la condition
+        // d'origine faisait disparaitre le tout premier message jusqu'au rechargement. Rien a
+        // comparer ne veut pas dire rien a afficher.
+        if (s === null || y.date != s.date || y.chatContent != s.text) {
             q.find(".chat").append(w);
             u.updateCustomScrollbar(q.find(".chat_box_ctn"));
             var C = $(".js_chatHistory");

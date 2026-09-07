@@ -66,6 +66,33 @@
             forceTLS: reverbScheme === 'https',
             enabledTransports: ['ws', 'wss'],
         });
+        /*
+         * **`toOthers()` n'exclut personne sans cet en-tete.**
+         *
+         * Le serveur diffuse les messages de chat par `broadcast(...)->toOthers()`, dont le
+         * seul moyen de reconnaitre l'expediteur est l'identifiant de socket que la requete
+         * porte. Il n'etait envoye nulle part : l'auteur d'un message d'alliance le recevait
+         * donc en retour, en double de la copie que son propre envoi affiche.
+         *
+         * En `beforeSend` et non dans `headers` : l'identifiant n'existe qu'une fois la
+         * connexion etablie, et il change a chaque reconnexion. Quatre autres appels a
+         * `ajaxSetup` posent `headers` ; une cle distincte les laisse tranquilles.
+         */
+        if (window.jQuery) {
+            window.jQuery.ajaxSetup({
+                beforeSend: function (requete) {
+                    if (!window.Echo || typeof window.Echo.socketId !== 'function') {
+                        return;
+                    }
+
+                    var socket = window.Echo.socketId();
+
+                    if (socket) {
+                        requete.setRequestHeader('X-Socket-ID', socket);
+                    }
+                },
+            });
+        }
     } catch (e) {
         // **L'echec ne doit emporter personne.** Ce fichier est concatene avant chat.js, combat.js
         // et la pastille de courrier : une exception qui sort d'ici arrete le script et les prive

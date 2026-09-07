@@ -44,6 +44,20 @@ class ChatMessageSent implements ShouldBroadcast
     }
 
     /**
+     * Le nom de cet evenement sur le fil.
+     *
+     * **Sans lui, le nom est la classe complete** — `OGame\Events\ChatMessageSent` — tandis que
+     * le navigateur, faute de point initial, attend `App\Events\ChatMessageSent` : l'espace de
+     * noms par defaut de la bibliotheque. Les deux ne se rencontraient jamais, et le chat en
+     * direct n'a donc jamais rien recu. Les trois autres evenements diffuses suivent deja ce
+     * motif ; celui-ci etait le seul dehors.
+     */
+    public function broadcastAs(): string
+    {
+        return 'ChatMessageSent';
+    }
+
+    /**
      * Get the data to broadcast.
      *
      * @return array<string, mixed>
