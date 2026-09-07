@@ -1009,6 +1009,42 @@ class GalaxyTacticalMapTest extends UnitTestCase
     }
 
     /**
+     * **La fenetre d'hyperespace se joue une fois par transition observee, et a l'envers a la sortie.**
+     *
+     * Ressource de Codex (revue 114, `wormhole-entry.js`), reprise dans `galaxy-wormhole.js` et
+     * concatenee **avant** la carte. La carte ne la joue que sur une transition qu'elle a vue —
+     * l'etat precedent connu et different —, jamais au premier trace, au retour dans le systeme ou a
+     * la reconnexion ; un registre par mission et par phase ferme le doublon ; le changement de
+     * systeme annule tout. La sortie remonte les images par `previewAt(D − t)`.
+     */
+    public function testTheHyperspaceWindowPlaysOnceOnEachObservedTransition(): void
+    {
+        $module = $this->module();
+        $ressource = file_get_contents(resource_path('js/ingame/galaxy-wormhole.js'));
+        $this->assertIsString($ressource, 'The wormhole resource is missing.');
+
+        $this->assertStringContainsString('window.playOGameXWormhole = function (canvas) {', $ressource, 'The wormhole resource no longer exposes playOGameXWormhole.');
+        $this->assertStringContainsString("matchMedia('(prefers-reduced-motion:reduce)')", $ressource, 'The wormhole ignores prefers-reduced-motion.');
+
+        $configuration = file_get_contents(base_path('vite.config.js'));
+        $this->assertIsString($configuration);
+        $this->assertLessThan(
+            strpos($configuration, "'resources/js/ingame/galaxy-tactical.js'"),
+            strpos($configuration, "'resources/js/ingame/galaxy-wormhole.js'"),
+            'The wormhole resource is concatenated after the map: playOGameXWormhole is undefined when the map needs it.'
+        );
+
+        $this->assertStringContainsString("mouvement._etatPrecedent !== undefined && mouvement._etatPrecedent !== local.enTransit", $module, 'The window no longer waits for an observed transition: it would replay on every refresh or reconnection.');
+        $this->assertStringContainsString("jouerLaFenetre(mouvement, 'entree', mouvement._bouts.arrivee, false)", $module, 'Entering hyperspace no longer opens the window at the exit edge.');
+        $this->assertStringContainsString("jouerLaFenetre(mouvement, 'sortie', mouvement._bouts.depart, true)", $module, 'Leaving hyperspace no longer plays the window reversed at the entry edge.');
+        $this->assertStringContainsString("if (fenetresJouees[clef] ||", $module, 'The per-mission-and-phase registry is gone: the window can play twice.');
+        $this->assertStringContainsString('effet.previewAt(FENETRE_DUREE - ecoule);', $module, 'The reversed playback no longer drives previewAt backwards.');
+        $this->assertStringContainsString("        annulerLesFenetres();\n", str_replace("\r\n", "\n", $module), 'Changing system no longer cancels the windows in flight.');
+
+        $this->assertMatchesRegularExpression('/#galaxyTactical \.gtWormhole \{[^}]*pointer-events: none/', $this->feuille(), 'The wormhole canvas catches pointer events.');
+    }
+
+    /**
      * Le module est bien dans le paquet construit par Vite.
      *
      * Un fichier de `resources/js` que `vite.config.js` ne nomme pas n'est concatene nulle part :

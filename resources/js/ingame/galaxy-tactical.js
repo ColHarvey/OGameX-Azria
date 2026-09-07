@@ -889,7 +889,136 @@
             if (mouvement._trainee) {
                 mouvement._trainee.classList.toggle('gtWarpActive', local.enTransit);
             }
+
+            /*
+             * **La fenetre ne se joue que sur une transition observee.** L'etat precedent doit etre
+             * connu et different : au premier trace, au retour dans le systeme ou a la reconnexion,
+             * `etatPrecedent` est indefini et rien ne se joue — consigne de Codex.
+             */
+            if (mouvement._etatPrecedent !== undefined && mouvement._etatPrecedent !== local.enTransit) {
+                if (local.enTransit && mouvement._bouts.partIci) {
+                    jouerLaFenetre(mouvement, 'entree', mouvement._bouts.arrivee, false);
+                } else if (!local.enTransit && mouvement._bouts.arriveIci && !mouvement._bouts.partIci) {
+                    jouerLaFenetre(mouvement, 'sortie', mouvement._bouts.depart, true);
+                }
+            }
+
+            mouvement._etatPrecedent = local.enTransit;
         });
+    }
+
+    /*
+     * ## Les fenetres d'hyperespace
+     *
+     * `playOGameXWormhole(canvas)` (galaxy-wormhole.js, ressource de Codex) joue une ouverture, un
+     * tourbillon et une fermeture, puis s'efface. La carte en pose une a l'entree en hyperespace
+     * (le vaisseau atteint le bord de sortie) et une, **a l'envers**, a la sortie (le vaisseau
+     * apparait au bord d'entree). A l'envers : la carte pilote les images par `previewAt(D − t)`.
+     *
+     * Un registre par mission et par phase ferme tout doublon ; les fenetres sont annulees au
+     * changement de systeme ; leur nombre simultane est borne. Un canvas decoratif, sans clic,
+     * masque aux lecteurs d'ecran.
+     */
+    var FENETRE_DUREE = 4200;
+    var FENETRE_LARGEUR = 200;
+    var FENETRES_MAX = 4;
+    var fenetresJouees = {};
+    var fenetresEnCours = [];
+
+    function coucheDesFenetres(carte) {
+        var couche = carte.querySelector('.gtWormholes');
+
+        if (!couche) {
+            couche = element('div', 'gtWormholes');
+            couche.setAttribute('aria-hidden', 'true');
+            carte.appendChild(couche);
+        }
+
+        return couche;
+    }
+
+    function annulerLesFenetres() {
+        fenetresEnCours.forEach(function (f) {
+            f.arreter();
+        });
+
+        fenetresEnCours = [];
+    }
+
+    function jouerLaFenetre(mouvement, phase, point, aLEnvers) {
+        var clef = mouvement.id + ':' + phase;
+        var carte = document.getElementById('galaxyTactical');
+
+        if (fenetresJouees[clef] || !carte || typeof window.playOGameXWormhole !== 'function') {
+            return;
+        }
+
+        fenetresJouees[clef] = true;
+
+        while (fenetresEnCours.length >= FENETRES_MAX) {
+            fenetresEnCours.shift().arreter();
+        }
+
+        var canvas = document.createElement('canvas');
+        canvas.className = 'gtWormhole';
+        canvas.setAttribute('aria-hidden', 'true');
+        canvas.style.left = Math.round(point.x) + 'px';
+        canvas.style.top = Math.round(point.y) + 'px';
+        coucheDesFenetres(carte).appendChild(canvas);
+
+        var effet = window.playOGameXWormhole(canvas);
+        var minuterie = null;
+        var image = null;
+        var fenetre = {
+            arreter: function () {
+                if (image !== null) {
+                    window.cancelAnimationFrame(image);
+                }
+
+                if (minuterie !== null) {
+                    window.clearTimeout(minuterie);
+                }
+
+                effet.cancel();
+                canvas.remove();
+            }
+        };
+
+        fenetresEnCours.push(fenetre);
+
+        var finir = function () {
+            fenetresEnCours = fenetresEnCours.filter(function (f) {
+                return f !== fenetre;
+            });
+            fenetre.arreter();
+        };
+
+        if (!aLEnvers) {
+            minuterie = window.setTimeout(finir, FENETRE_DUREE + 100);
+
+            return;
+        }
+
+        /* A l'envers : la meme fenetre, remontee image par image depuis sa fin. */
+        var depart = null;
+        var remonter = function (maintenant) {
+            if (depart === null) {
+                depart = maintenant;
+            }
+
+            var ecoule = maintenant - depart;
+
+            if (ecoule >= FENETRE_DUREE) {
+                finir();
+
+                return;
+            }
+
+            effet.previewAt(FENETRE_DUREE - ecoule);
+            image = window.requestAnimationFrame(remonter);
+        };
+
+        image = window.requestAnimationFrame(remonter);
     }
 
     function arreterLAnimation() {
@@ -1057,6 +1186,7 @@
         carte.gtSysteme = { galaxie: galaxie, systeme: systeme };
         mouvements = [];
         arreterLAnimation();
+        annulerLesFenetres();
         chargerLesFlottes(carte, galaxie, systeme);
         ecouterLeSysteme(carte, galaxie, systeme);
         ecouterLeJoueur(carte);

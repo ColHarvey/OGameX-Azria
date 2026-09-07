@@ -350,6 +350,28 @@
     opacity: 0.9;
 }
 
+/*
+ * ## Les fenetres d'hyperespace
+ *
+ * Des canvas decoratifs poses au bord, centres sur leur point, sans aucun clic. Le repere de la
+ * ressource est 360 x 220 : le ratio est preserve, la largeur est celle mesuree pour la carte —
+ * le canvas porte une marge transparente, le vortex n'en occupe pas toute la largeur.
+ */
+#galaxyTactical .gtWormholes {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 6;
+}
+
+#galaxyTactical .gtWormhole {
+    position: absolute;
+    width: 200px;
+    aspect-ratio: 360 / 220;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+}
+
 /* Le bouton de saut vers l'autre systeme : il se clique, il se voit au survol. */
 #galaxyTactical .gtJump {
     pointer-events: auto;
