@@ -68,7 +68,12 @@
 
         <script type="text/javascript">
         $(document).ready(function() {
-            initBBCodeEditor(locaKeys, itemNames, false, '.new_msg_textarea', 2000, true);
+            // **Le selecteur est limite a la conversation ouverte.** Nu, il attrape toute zone
+            // de saisie portant cette classe — y compris celle du chat general, qui la porte
+            // pour avoir le meme style. L editeur BBCode s y accrochait alors aussi : barre
+            // d outils, compteur de caracteres et bouton d apercu apparaissaient au milieu de la
+            // salle des qu une conversation etait ouverte.
+            initBBCodeEditor(locaKeys, itemNames, false, '#chatContent .new_msg_textarea', 2000, true);
             initBBCodes();
 
             var chatPlayerId = {{ $chatPartner->id }};
@@ -236,7 +241,12 @@
 
         <script type="text/javascript">
         $(document).ready(function() {
-            initBBCodeEditor(locaKeys, itemNames, false, '.new_msg_textarea', 2000, true);
+            // **Le selecteur est limite a la conversation ouverte.** Nu, il attrape toute zone
+            // de saisie portant cette classe — y compris celle du chat general, qui la porte
+            // pour avoir le meme style. L editeur BBCode s y accrochait alors aussi : barre
+            // d outils, compteur de caracteres et bouton d apercu apparaissaient au milieu de la
+            // salle des qu une conversation etait ouverte.
+            initBBCodeEditor(locaKeys, itemNames, false, '#chatContent .new_msg_textarea', 2000, true);
             initBBCodes();
 
             var chatAllianceId = {{ $chatAllianceId }};

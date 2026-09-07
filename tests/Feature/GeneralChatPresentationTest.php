@@ -166,6 +166,42 @@ class GeneralChatPresentationTest extends AccountTestCase
     }
 
     /**
+     * La salle ne partage aucun point d'accroche JavaScript avec le reste de la page.
+     *
+     * ## Le defaut, vu en jeu
+     *
+     * Ma zone de saisie portait `new_msg_textarea` — pour le style, croyais-je. Cette classe
+     * **n'habille rien** : c'est un point d'accroche vise sans portee par une dizaine de scripts.
+     *
+     * Deux consequences sur la page de chat, toutes deux constatees a l'ecran. L'editeur BBCode
+     * s'accrochait a la salle des qu'une conversation etait ouverte : barre d'outils, compteur de
+     * caracteres et bouton d'apercu au milieu du panneau. Et surtout `$('.new_msg_textarea').val()`
+     * rend le **premier** element du lot — la salle, plus haut dans le document — donc l'envoi d'un
+     * message prive lisait une zone vide.
+     *
+     * Deux verrous : la classe est retiree, et l'editeur est limite a sa propre conversation.
+     */
+    public function testTheRoomSharesNoJavascriptHookWithTheRestOfThePage(): void
+    {
+        $reponse = $this->get('/chat');
+        $rendu = (string)$reponse->getContent();
+
+        $this->assertMatchesRegularExpression(
+            '/<textarea[^>]*id="generalChatText"(?![^>]*new_msg_textarea)[^>]*>/',
+            $rendu,
+            'The room reuses new_msg_textarea: unscoped scripts would read it instead of the open conversation.'
+        );
+
+        $page = (string)file_get_contents(base_path('resources/views/ingame/chat/index.blade.php'));
+
+        $this->assertSame(
+            0,
+            substr_count($page, "initBBCodeEditor(locaKeys, itemNames, false, '.new_msg_textarea'"),
+            'The BBCode editor attaches to every textarea on the page, the general chat one included.'
+        );
+    }
+
+    /**
      * Le panneau emploie les classes existantes, sans direction graphique nouvelle.
      *
      * Decision de Keven : le general reprend le style actuel. Ces classes sont celles des

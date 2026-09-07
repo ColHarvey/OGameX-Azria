@@ -27,9 +27,15 @@
         <div id="generalChatNotice" class="overmark" style="display: none;"></div>
         <div class="editor_wrap">
             <div>
-                {{-- `rows="1"` autant que la feuille de style : la hauteur doit tenir meme si la
+                {{-- **Aucune classe partagee ici.** `new_msg_textarea` n habille rien : c est un point
+                     d accroche JavaScript, vise sans portee par une dizaine de scripts du jeu. Sur
+                     cette page, `$('.new_msg_textarea').val()` rend le **premier** element du lot —
+                     celui-ci, place plus haut dans le document — et l envoi d un message prive lisait
+                     donc une zone vide. Toute l apparence vient de `#generalChatText`.
+
+                     `rows="1"` autant que la feuille de style : la hauteur doit tenir meme si la
                      CSS tarde, sinon la saisie occupe le panneau et la salle est reduite a une ligne. --}}
-                <textarea id="generalChatText" name="text" class="new_msg_textarea" rows="1"
+                <textarea id="generalChatText" name="text" rows="1"
                           maxlength="2000" placeholder="{{ __('t_ingame.chat.general_placeholder') }}"></textarea>
             </div>
             {{-- Le panneau vit **dans** l'enveloppe de saisie, positionne par rapport a elle :
