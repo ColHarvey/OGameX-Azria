@@ -920,7 +920,6 @@
      * masque aux lecteurs d'ecran.
      */
     var FENETRE_DUREE = 4200;
-    var FENETRE_LARGEUR = 200;
     var FENETRES_MAX = 4;
     var fenetresJouees = {};
     var fenetresEnCours = [];

@@ -1042,6 +1042,10 @@ class GalaxyTacticalMapTest extends UnitTestCase
         $this->assertStringContainsString("        annulerLesFenetres();\n", str_replace("\r\n", "\n", $module), 'Changing system no longer cancels the windows in flight.');
 
         $this->assertMatchesRegularExpression('/#galaxyTactical \.gtWormhole \{[^}]*pointer-events: none/', $this->feuille(), 'The wormhole canvas catches pointer events.');
+
+        /* Keven, sur la premiere taille (200 px) : « l'effet est trop gros ». Le vortex vaut 54 % du canvas. */
+        $this->assertMatchesRegularExpression('/#galaxyTactical \.gtWormhole \{[^}]*width: 100px;/', $this->feuille(), 'The wormhole canvas is no longer 100px wide: at 200px Keven found the effect too big.');
+        $this->assertStringNotContainsString('FENETRE_LARGEUR', $module, 'A dead width constant in the module contradicts the stylesheet, the only place the size lives.');
     }
 
     /**

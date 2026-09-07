@@ -354,8 +354,9 @@
  * ## Les fenetres d'hyperespace
  *
  * Des canvas decoratifs poses au bord, centres sur leur point, sans aucun clic. Le repere de la
- * ressource est 360 x 220 : le ratio est preserve, la largeur est celle mesuree pour la carte —
- * le canvas porte une marge transparente, le vortex n'en occupe pas toute la largeur.
+ * ressource est 360 x 220 : le ratio est preserve. A 100 px de large, le vortex (54 % du canvas)
+ * fait une cinquantaine de pixels, l'ordre de grandeur d'une planete : a 200 px, Keven l'a trouve
+ * trop gros (« l'effet est trop gros »). Le canvas porte une marge transparente.
  */
 #galaxyTactical .gtWormholes {
     position: absolute;
@@ -366,7 +367,7 @@
 
 #galaxyTactical .gtWormhole {
     position: absolute;
-    width: 200px;
+    width: 100px;
     aspect-ratio: 360 / 220;
     transform: translate(-50%, -50%);
     pointer-events: none;
