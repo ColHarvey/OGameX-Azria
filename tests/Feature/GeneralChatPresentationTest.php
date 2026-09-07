@@ -198,20 +198,26 @@ class GeneralChatPresentationTest extends AccountTestCase
      * occupait presque tout le panneau — la salle etant reduite a une ligne, l'inverse de ce
      * qu'on vient y lire.
      *
-     * **Les 650 pixels sont une mesure, pas un gout.** Les deux colonnes font 670 en tout
-     * (`#chatList` 480, `.pl_container` 180, 5 de marge chacune), et le pied d'une
-     * `contentbox` deborde de 15 px au-dela de sa boite — un decalage voulu, que les coins
-     * recouvrent. 650 + 15 = 665 : la decoration s'arrete pile au bord droit, sans qu'on ait
-     * a deplacer les coins, ce qui laissait apparaitre le fond du pied derriere eux.
+     * **Aucune largeur n'est imposee, et c'est le point.** Deux versions ont fixe un nombre —
+     * 665 puis 650 pixels — a partir d'une largeur de conteneur jamais mesuree ; les deux
+     * debordaient. La boite est un bloc : sans largeur, elle remplit ce qu'on lui donne. Et le
+     * pied, plus large que sa boite de 15 px par construction, est retreci d'autant : sa
+     * decoration s'arrete au bord droit quelle que soit la largeur.
      */
     public function testTheRoomSpansBothColumnsAndGivesItsHeightToTheMessages(): void
     {
         $feuille = (string)file_get_contents(base_path('resources/css/ingame/azria.css'));
 
-        $this->assertMatchesRegularExpression(
-            '/#generalChat\s*\{[^}]*width:\s*650px/',
+        $this->assertDoesNotMatchRegularExpression(
+            '/#generalChat\s*\{[^}]*width:/',
             $feuille,
-            'The room no longer spans both columns: it renders as wide as the chat list alone.'
+            'The room fixes its own width again: two such numbers were guessed and both overflowed.'
+        );
+
+        $this->assertMatchesRegularExpression(
+            '/#generalChat \.footer\s*\{[^}]*width:\s*calc\(100% - 15px\)/',
+            $feuille,
+            'The footer is not narrowed by its own overhang: its decoration runs past the right edge.'
         );
 
         $this->assertMatchesRegularExpression(
@@ -244,11 +250,13 @@ class GeneralChatPresentationTest extends AccountTestCase
 
         // **Les coins du pied gardent leur place.** Les deplacer decouvrait le fond repetitif
         // du pied a ses extremites — un eclat que les autres boites de la page n'ont pas.
-        $this->assertStringNotContainsString(
-            '#generalChat .footer',
-            $feuille,
-            'The room moves its footer corners: the strip behind them shows through at the ends.'
-        );
+        foreach (['#generalChat .footer .c-left', '#generalChat .footer .c-right'] as $coin) {
+            $this->assertStringNotContainsString(
+                $coin,
+                $feuille,
+                'The room moves a footer corner: the strip behind it shows through at that end.'
+            );
+        }
     }
 
     /**

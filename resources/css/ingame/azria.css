@@ -311,28 +311,37 @@
 }
 
 /*
- * La salle occupe la largeur des deux colonnes, decoration comprise.
+ * La salle prend la largeur qu'on lui donne, et son pied tient dedans.
  *
- * Mesures lues dans la feuille du jeu, pas estimees : `#chatList` fait 480 px, `.pl_container`
- * 180 px, chaque `contentbox` porte 5 px de marge — soit 670 px de large en tout.
+ * ## Deux largeurs calculees, deux echecs
  *
- * **Le pied d'une `contentbox` est plus large que sa boite, et c'est voulu.** Il est decale de
- * 7 px vers la droite et son coin droit de 8 px de plus : la decoration depasse donc de 15 px.
+ * Le pied d'une `contentbox` est **plus large que sa boite**, volontairement : decale de 7 px
+ * vers la droite, coin droit a 8 px de plus, soit 15 px de debordement que les coins recouvrent.
  * Sur une boite de 480 px cela tombe dans la gouttiere entre les colonnes et ne se voit pas.
  *
- * Une premiere version fixait 665 px et **rentrait les coins** pour rester dans la page. C'etait
- * un mauvais echange : les coins couvrent les extremites du pied, et les rentrer laissait
- * apparaitre son fond repetitif derriere eux — un eclat visible que la liste des discussions,
- * elle, n'a pas. La boite fait donc 650 px : la decoration s'arrete alors a 665, alignee sur le
- * bord droit de la liste des joueurs, et **les coins gardent leur place d'origine**.
+ * J'ai d'abord fixe 665 px en rentrant les coins : mauvais echange, le fond du pied
+ * transparaissait a ses extremites. Puis 650 px en les laissant en place : le pied depassait
+ * encore. **Les deux reposaient sur une largeur de conteneur que je n'avais pas mesuree**, et
+ * les deux etaient fausses.
+ *
+ * ## Ce qui ne demande aucun nombre
+ *
+ * La boite est un bloc : sans largeur imposee, elle remplit exactement ce que son conteneur lui
+ * offre, quelle que soit cette valeur. Et le pied est retreci de ses propres 15 px, donc sa
+ * decoration s'arrete pile au bord droit — quelle que soit la largeur, encore une fois.
+ *
+ * Les coins gardent leur place et couvrent bien les extremites ; il n'y a plus rien a estimer.
  *
  * `float: none` et `clear: both` la sortent du flot des deux colonnes : sans cela elles
  * remonteraient a cote d'elle des que la fenetre est assez large.
  */
 #generalChat {
-    width: 650px;
     float: none;
     clear: both;
+}
+
+#generalChat .footer {
+    width: calc(100% - 15px);
 }
 
 /*
