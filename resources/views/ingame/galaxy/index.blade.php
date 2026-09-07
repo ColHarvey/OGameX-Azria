@@ -140,6 +140,60 @@
             @endphp
             var galaxyLoca = @json($galaxyLocaData);
             var loca = @json($locaData);
+            {{-- Les libelles des fiches de la carte tactique : traduits ici, lus par galaxy-tactical.js. --}}
+            @php
+                $tactiqueLoca = [
+                    'planet' => __('t_ingame.fleet.planet'),
+                    'moon' => __('t_ingame.fleet.moon'),
+                    'debris' => __('t_ingame.galaxy.tactical_debris'),
+                    'deepSpace' => __('t_ingame.galaxy.tactical_deep_space'),
+                    'freeSlot' => __('t_ingame.galaxy.tactical_free_slot'),
+                    'emptySlot' => __('t_ingame.galaxy.tactical_empty_slot'),
+                    'emptyServer' => __('t_ingame.galaxy.tactical_empty_server'),
+                    'expeditionFleet' => __('t_ingame.galaxy.expedition_fleet'),
+                    'expeditionNote' => __('t_ingame.galaxy.tactical_expedition_note'),
+                    'actions' => __('t_ingame.galaxy.tactical_actions'),
+                    'targets' => __('t_ingame.galaxy.tactical_targets'),
+                    'labels' => [
+                        'espionner' => __('t_ingame.fleet.mission_espionage'),
+                        'attaquer' => __('t_ingame.fleet.mission_attack'),
+                        'transporter' => __('t_ingame.fleet.mission_transport'),
+                        'deployer' => __('t_ingame.fleet.mission_deploy'),
+                        'acs' => __('t_ingame.fleet.mission_acs_defend'),
+                        'missiles' => __('t_ingame.galaxy.missile_attack'),
+                        'phalange' => __('t_ingame.galaxy.use_phalanx'),
+                        'detruireLune' => __('t_ingame.fleet.mission_destroy_moon'),
+                        'recycler' => __('t_ingame.fleet.mission_recycle'),
+                        'message' => __('t_ingame.highscore.write_message'),
+                        'ami' => __('t_ingame.galaxy.tactical_buddy'),
+                        'ignorer' => __('t_buddies.ui.ignore_player_title'),
+                        'classement' => __('t_ingame.galaxy.ranking'),
+                        'alliance' => __('t_ingame.galaxy.alliance'),
+                        'coloniser' => __('t_ingame.fleet.mission_colonise'),
+                        'demenager' => __('t_ingame.galaxy.relocate_action'),
+                        'expedition' => __('t_ingame.fleet.mission_expedition'),
+                    ],
+                    'reasons' => [
+                        'own' => __('t_ingame.galaxy.tactical_reason_own'),
+                        'foreign' => __('t_ingame.galaxy.tactical_reason_foreign'),
+                        'buddy' => __('t_ingame.galaxy.tactical_reason_buddy'),
+                        'noMissiles' => __('t_ingame.galaxy.tactical_reason_no_missiles'),
+                        'range' => __('t_ingame.galaxy.tactical_reason_range'),
+                        'player' => __('t_ingame.galaxy.tactical_reason_player'),
+                        'phalanx' => __('t_ingame.galaxy.tactical_reason_phalanx'),
+                        'move' => __('t_ingame.galaxy.tactical_reason_move'),
+                        'noAlliance' => __('t_ingame.galaxy.tactical_reason_no_alliance'),
+                        'unavailable' => __('t_ingame.galaxy.tactical_reason_unavailable'),
+                        'destroyed' => __('t_ingame.galaxy.tactical_reason_destroyed'),
+                        'noProbes' => __('t_ingame.galaxy.espionage_not_possible'),
+                        'noSlots' => __('t_ingame.fleet.no_free_slots'),
+                        'recyclers' => __('t_ingame.galaxy.recyclers_needed'),
+                        'pathfinders' => __('t_ingame.galaxy.pathfinders_needed'),
+                        'colonize' => __('t_ingame.galaxy.colonize_error'),
+                    ],
+                ];
+            @endphp
+            var galaxyTacticalLoca = @json($tactiqueLoca);
             var shipsendingDone = 1;
             var premiumLink = "#?page=premium&openDetail=3";
             var sendDiscoverSystemUrl = "";

@@ -75,8 +75,13 @@
     var DEBRIS = 2;
     var LUNE = 3;
 
-    /* La fiche, et la largeur qu'elle occupe : elle doit rester entierement dans la carte. */
-    var FICHE_LARGEUR = 232;
+    /*
+     * La fiche, et la largeur qu'elle occupe : elle doit rester entierement dans la carte. 320 px,
+     * la largeur de `planet-card.css` de Codex (340 indicatifs, « reductible sans casser les
+     * libelles ») : deux colonnes de boutons a icone et libelle y tiennent, et la fiche reste dans
+     * les 656 px de la carte avec sa marge des deux cotes.
+     */
+    var FICHE_LARGEUR = 320;
     var FICHE_MARGE = 8;
 
     function centre() {
@@ -313,18 +318,554 @@
     }
 
     /*
-     * ## La fiche contextuelle
+     * ## La fiche contextuelle — les trois fiches de Codex (revue 115)
      *
      * **La ligne du tableau est deplacee dedans, jamais recopiee.** `renderContentGalaxy` accroche
      * ses gestionnaires sur ces noeuds a chaque rendu — infobulles, overlay de missile, demande
      * d'ami, mise a l'ignore. Un clone les perdrait tous, et *en silence* : la fiche s'afficherait,
-     * les liens seraient la, et rien ne repondrait au clic. Le meme noeud garde tout.
+     * les liens seraient la, et rien ne repondrait au clic. Le meme noeud garde tout — et il garde
+     * son identifiant, donc le rendu herite continue d'ecrire dans `#galaxyRow{N} .cellX` ou que la
+     * ligne soit. C'est pour cela que la ligne bouge entiere et que ses cellules ne bougent jamais :
+     * une cellule sortie de sa ligne ne serait plus retrouvee par `$("#galaxyRow3 .cellPlanet")`, et
+     * la fiche ouverte se figerait au premier evenement en direct.
      *
-     * La feuille se charge de la presentation : dans la fiche, la ligne devient une colonne et sa
-     * cellule d'actions une grille d'icones. Les regles, les droits et les textes restent
-     * exactement ceux du serveur.
+     * ## La presentation est celle de Codex, les droits sont ceux du serveur
+     *
+     * Les trois fiches V2 — planete, expedition, position libre — sont reprises telles qu'approuvees :
+     * cadre droit sans decoupe, boutons a icone et libelle, etats grises. La ligne, en
+     * `display: contents`, prete ses cellules a la grille de la fiche ; les cellules que le serveur
+     * a remplies (joueur, alliance, infobulles, phalange, compte a rebours) s'y placent par la
+     * feuille. Chaque bouton d'action **delegue son clic au lien que le serveur a rendu** dans la
+     * ligne (`.cellAction a.espionage`, `.phalanxlink`, ...) ou ouvre l'adresse de mission que la
+     * charge utile porte. Pas de lien rendu : bouton **reellement** desactive (`disabled`, qui bloque
+     * souris et clavier), avec la raison a cote, derivee des faits que le serveur envoie — la
+     * planete est la mienne, aucun missile, hors de portee, pas de sonde — jamais d'un motif invente.
+     * Aucun droit n'est recalcule ici : la fiche ne peut proposer que ce que la ligne propose.
      */
     var deplacee = null;
+
+    /* Les icones du pack, une par action. `tests/Feature/GalaxyTacticalMapTest.php` ouvre chaque fichier. */
+    var ICONES_D_ACTION = {
+        espionner: 'action-espionage.svg',
+        attaquer: 'action-attack.svg',
+        transporter: 'planet-card-transport.svg',
+        deployer: 'mission-deploy.svg',
+        acs: 'action-acs.svg',
+        missiles: 'action-missile.svg',
+        phalange: 'action-phalanx.svg',
+        detruireLune: 'mission-moon-destruction.svg',
+        recycler: 'action-recycle.svg',
+        message: 'action-message.svg',
+        ami: 'action-buddy.svg',
+        ignorer: 'action-ignore.svg',
+        classement: 'action-info.svg',
+        alliance: 'action-alliance.svg',
+        coloniser: 'action-colonize.svg',
+        demenager: 'action-relocate.svg',
+        expedition: 'action-expedition.svg'
+    };
+
+    /*
+     * Les actions que chaque genre de corps peut porter — l'inventaire de la revue 112, section 5.
+     * Une action absente de la ligne n'est pas cachee : elle est grisee avec sa raison.
+     */
+    var ACTIONS_PAR_GENRE = {
+        planete: ['espionner', 'attaquer', 'transporter', 'deployer', 'acs', 'missiles', 'phalange', 'message', 'ami', 'ignorer', 'classement', 'alliance'],
+        lune: ['espionner', 'attaquer', 'transporter', 'deployer', 'acs', 'detruireLune', 'message', 'ami', 'classement', 'alliance'],
+        debris: ['recycler'],
+        libre: ['coloniser', 'demenager'],
+        profond: ['expedition']
+    };
+
+    /*
+     * Les libelles de la fiche : `galaxyTacticalLoca`, publie par la vue et traduit par le serveur.
+     * Un chemin `labels.attaquer` descend dans la table ; une clef absente rend le defaut, jamais
+     * `undefined`.
+     */
+    function locaFiche(chemin, defaut) {
+        var noeud = window.galaxyTacticalLoca || {};
+        var morceaux = chemin.split('.');
+
+        for (var i = 0; i < morceaux.length; i++) {
+            if (noeud === null || typeof noeud !== 'object' || !(morceaux[i] in noeud)) {
+                return defaut;
+            }
+
+            noeud = noeud[morceaux[i]];
+        }
+
+        return typeof noeud === 'string' && noeud !== '' ? noeud : defaut;
+    }
+
+    /* Un texte HTML du serveur (description de colonisation) rendu en texte, sans ses balises. */
+    function texteSansBalises(html) {
+        var boite = document.createElement('div');
+        boite.innerHTML = String(html || '');
+
+        return (boite.textContent || '').replace(/\s+/g, ' ').trim();
+    }
+
+    /* La mission d'un type donne dans une liste de missions disponibles, ou `null`. */
+    function mission(porteur, type) {
+        var liste = (porteur && porteur.availableMissions) || [];
+
+        for (var i = 0; i < liste.length; i++) {
+            if (Number(liste[i].missionType) === type) {
+                return liste[i];
+            }
+        }
+
+        return null;
+    }
+
+    function estLaMienne(ligne, systeme) {
+        var moi = systeme && systeme.playerId !== undefined ? systeme.playerId : window.playerId;
+
+        return !!(ligne && ligne.playerId && moi && Number(ligne.playerId) === Number(moi));
+    }
+
+    /* Un lien herite ne compte que s'il porte un vrai gestionnaire en ligne : `onclick=""` n'en est pas un. */
+    function avecClic(lien) {
+        return !!(lien && (lien.getAttribute('onclick') || '').trim() !== '');
+    }
+
+    function cliquer(lien) {
+        return function () {
+            lien.click();
+        };
+    }
+
+    function ouvrir(adresse) {
+        return function () {
+            window.location.href = adresse;
+        };
+    }
+
+    function actif(executer, classe) {
+        return { actif: true, executer: executer, classe: classe || '' };
+    }
+
+    function inactif(raison) {
+        return { actif: false, raison: raison || locaFiche('reasons.unavailable', 'Indisponible ici') };
+    }
+
+    /*
+     * La raison d'un refus de colonisation, lue dans la description que le serveur rend : le nom de
+     * la mission, puis la description de la position, puis une ligne par empechement (vaisseau de
+     * colonisation, astrophysique, emplacements de flotte, amiral). Les empechements seuls font la
+     * raison ; la description de la position fait la note de la fiche.
+     */
+    function segmentsDeColonisation(m) {
+        return String((m && m.description) || '').split(/<br\s*\/?>/i).map(texteSansBalises).filter(function (s) {
+            return s !== '';
+        });
+    }
+
+    /*
+     * ## Les decisions, corps par corps
+     *
+     * Chaque action rend `actif(executer)` quand la ligne du serveur porte le lien correspondant, ou
+     * `inactif(raison)` sinon. Les raisons sont des faits de la charge utile, dans l'ordre ou ils
+     * expliquent le mieux le refus.
+     */
+    function decisionsDe(contexte) {
+        var f = contexte.fiche;
+        var ligne = contexte.ligne || {};
+        var objet = contexte.objet || {};
+        var systeme = contexte.systeme || {};
+        var position = contexte.position;
+        var joueur = ligne.player || {};
+        var droitsDuJoueur = joueur.actions || {};
+        var droits = ligne.actions || {};
+        var mienne = estLaMienne(ligne, systeme);
+        var admin = !!joueur.isAdmin;
+        var detruit = !!objet.isDestroyed;
+        var chercher = function (selecteur) {
+            return f.querySelector(selecteur);
+        };
+        /*
+         * Un lien porte par une infobulle heritee : Tipped peut l'avoir sorti de la ligne. Il est
+         * cherche dans la fiche, puis dans le document — par un identifiant, jamais par une classe
+         * seule, pour ne pas tomber sur une autre position.
+         */
+        var chercherDansLInfobulle = function (identifiant, selecteur) {
+            return f.querySelector('#' + identifiant + ' ' + selecteur) || document.querySelector('#' + identifiant + ' ' + selecteur);
+        };
+        var raison = function (clef) {
+            return locaFiche('reasons.' + clef, clef);
+        };
+        var refusOrdinaire = function () {
+            return inactif(detruit ? raison('destroyed') : mienne ? raison('own') : raison('unavailable'));
+        };
+        var parMission = function (type, classe) {
+            var m = mission(objet, type);
+
+            return m && typeof m.link === 'string' && m.link !== '' && m.link !== '#' ? actif(ouvrir(m.link), classe) : null;
+        };
+
+        return {
+            espionner: function () {
+                var m = mission(objet, 6);
+                var lien = chercher(contexte.genre === 'lune' ? '.cellMoon a[onclick]' : '.cellAction a.espionage');
+
+                if (m && m.canSpy && droits.canEspionage !== false && !admin && avecClic(lien)) {
+                    return actif(cliquer(lien));
+                }
+
+                if (droits.canEspionage === false && !mienne) {
+                    return inactif(raison('noProbes'));
+                }
+
+                return admin ? inactif(raison('player')) : refusOrdinaire();
+            },
+            attaquer: function () {
+                return parMission(1, 'gtAction--attack') || refusOrdinaire();
+            },
+            transporter: function () {
+                return parMission(3) || refusOrdinaire();
+            },
+            deployer: function () {
+                return parMission(4) || inactif(detruit ? raison('destroyed') : raison('foreign'));
+            },
+            acs: function () {
+                return parMission(5) || inactif(detruit ? raison('destroyed') : mienne ? raison('own') : raison('buddy'));
+            },
+            missiles: function () {
+                var lien = chercher('.cellAction a.missleattack');
+
+                if (lien && !lien.querySelector('.grayscale') && (avecClic(lien) || lien.classList.contains('overlay'))) {
+                    return actif(cliquer(lien));
+                }
+
+                if (mienne) {
+                    return inactif(raison('own'));
+                }
+
+                if (admin) {
+                    return inactif(raison('player'));
+                }
+
+                if (!droits.canMissileAttack) {
+                    return inactif(raison('range'));
+                }
+
+                return inactif(Number(systeme.availableMissiles) > 0 ? raison('unavailable') : raison('noMissiles'));
+            },
+            phalange: function () {
+                var lien = chercher('.phalanxlink');
+
+                if (droits.phalanxActive && lien) {
+                    return actif(cliquer(lien));
+                }
+
+                if (droits.phalanxInactive && droits.phalanxInactiveReason) {
+                    return inactif(droits.phalanxInactiveReason);
+                }
+
+                return inactif(mienne ? raison('own') : raison('phalanx'));
+            },
+            detruireLune: function () {
+                return parMission(9) || refusOrdinaire();
+            },
+            recycler: function () {
+                var lien = chercherDansLInfobulle('debris' + position, 'a[onclick]');
+
+                if (avecClic(lien)) {
+                    return actif(cliquer(lien));
+                }
+
+                if (systeme.canFly === false) {
+                    return inactif(raison('noSlots'));
+                }
+
+                var disponibles = Number(position === POSITION_ESPACE_PROFOND ? systeme.availablePathfinders : systeme.availableRecyclers);
+
+                return inactif(disponibles > 0 ? raison('unavailable') : raison(position === POSITION_ESPACE_PROFOND ? 'pathfinders' : 'recyclers'));
+            },
+            message: function () {
+                var droit = droitsDuJoueur.message || {};
+                var lien = chercher('.cellAction a.sendMail') || chercher('.cellAction a[data-playerId][href]');
+
+                if (droit.available && lien) {
+                    return actif(cliquer(lien));
+                }
+
+                return inactif(mienne ? raison('own') : raison('player'));
+            },
+            ami: function () {
+                var lien = chercher('.cellAction a.buddyrequest');
+
+                return lien ? actif(cliquer(lien)) : inactif(mienne ? raison('own') : raison('player'));
+            },
+            ignorer: function () {
+                var lien = joueur.playerId ? chercherDansLInfobulle('player' + joueur.playerId, '.ignorePlayerLink') : null;
+
+                return lien ? actif(cliquer(lien)) : inactif(mienne ? raison('own') : raison('player'));
+            },
+            classement: function () {
+                var droit = droitsDuJoueur.highscore || {};
+
+                return droit.available && droit.link ? actif(ouvrir(droit.link)) : inactif(raison('unavailable'));
+            },
+            alliance: function () {
+                var droit = droitsDuJoueur.alliance || {};
+
+                if (!joueur.allianceId) {
+                    return inactif(raison('noAlliance'));
+                }
+
+                return actif(ouvrir(joueur.isAllianceMember && droit.infoPageLink ? droit.infoPageLink : '/alliance/info/' + joueur.allianceId));
+            },
+            coloniser: function () {
+                var m = mission(ligne, 7);
+                var lien = chercher('.cellAction a.colonize-active');
+
+                if (m && typeof m.link === 'string' && m.link !== '#' && lien) {
+                    return actif(ouvrir(m.link));
+                }
+
+                var empechements = segmentsDeColonisation(m).slice(2);
+
+                return inactif(empechements.length ? empechements.join(' · ') : locaFiche('reasons.colonize', raison('unavailable')));
+            },
+            demenager: function () {
+                var m = mission(ligne, 0);
+                var lien = chercher('.cellAction a.planetMoveDefault');
+
+                if (m && m.planetMovePossible && lien) {
+                    return actif(cliquer(lien));
+                }
+
+                return inactif(m ? raison('move') : raison('unavailable'));
+            },
+            expedition: function () {
+                var envoi = document.getElementById('sendExpeditionFleetTemplateFleet');
+                var direct = document.getElementById('expeditionbutton');
+
+                if (envoi && envoi.style.display !== 'none') {
+                    return envoi.hasAttribute('disabled') ? inactif(raison('unavailable')) : actif(cliquer(envoi));
+                }
+
+                return direct ? actif(cliquer(direct)) : inactif(raison('unavailable'));
+            }
+        };
+    }
+
+    /*
+     * Un bouton d'action de la fiche. Actif : un vrai bouton qui execute la decision. Inactif : un
+     * vrai `disabled` — la souris et le clavier sont bloques par le navigateur, pas par un style —
+     * et la raison, visible a cote du libelle, portee aussi par `title`.
+     */
+    function boutonDAction(clef, decision) {
+        var b = element('button', 'gtAction' + (decision.classe ? ' ' + decision.classe : ''));
+        var icone = element('img', '');
+        var texte = element('span', 'gtActionText');
+        var libelle = element('span', 'gtActionLabel');
+
+        b.type = 'button';
+        b.setAttribute('data-action', clef);
+        icone.src = '/img/galaxy-tactical/' + ICONES_D_ACTION[clef];
+        icone.alt = '';
+        icone.setAttribute('aria-hidden', 'true');
+        libelle.textContent = locaFiche('labels.' + clef, clef);
+        texte.appendChild(libelle);
+
+        if (decision.actif) {
+            b.addEventListener('click', function (evenement) {
+                evenement.preventDefault();
+                decision.executer();
+            });
+        } else {
+            var motif = element('small', 'gtActionReason');
+            motif.textContent = decision.raison;
+            texte.appendChild(motif);
+            b.disabled = true;
+            b.setAttribute('aria-disabled', 'true');
+            b.title = decision.raison;
+        }
+
+        b.appendChild(icone);
+        b.appendChild(texte);
+
+        return b;
+    }
+
+    /* La grille des actions, recomposee a chaque ouverture — et quand le choix de flotte d'expedition change. */
+    function composerLesActions(f) {
+        var contexte = f.gtContexte;
+        var grille = f.querySelector('.gtCardActions');
+
+        if (!contexte || !grille) {
+            return;
+        }
+
+        var decisions = decisionsDe(contexte);
+        var noms = ACTIONS_PAR_GENRE[contexte.genre] || [];
+
+        if (contexte.genre === 'profond' && contexte.objet) {
+            noms = noms.concat(['recycler']);
+        }
+
+        grille.innerHTML = '';
+
+        noms.forEach(function (clef) {
+            grille.appendChild(boutonDAction(clef, decisions[clef]()));
+        });
+    }
+
+    /*
+     * L'activite d'un corps, telle que le serveur la mesure (`getPlanetActivityStatus()`) : moins de
+     * quinze minutes, ou le nombre de minutes jusqu'a une heure, rien au-dela. C'est ce que la
+     * vignette du tableau montrait par une etoile et une infobulle ; la fiche l'ecrit.
+     */
+    function activiteDe(objet, pageLoca) {
+        var a = objet && objet.activity;
+
+        if (!a || !a.showActivity) {
+            return '';
+        }
+
+        var libelle = pageLoca.LOCA_ALL_ACTIVITY || 'Activite';
+        var minute = pageLoca.LOCA_ALL_TIME_MINUTE || 'm';
+
+        return a.showActivity === 60 && a.idleTime ? libelle + ' : ' + a.idleTime + minute : libelle + ' : < 15' + minute;
+    }
+
+    function avecDetail(base, detail) {
+        return detail ? base + ' \u00b7 ' + detail : base;
+    }
+
+    function imageDeFiche(chemin, classe) {
+        var img = element('img', classe);
+        img.src = chemin;
+        img.alt = '';
+        img.setAttribute('aria-hidden', 'true');
+
+        return img;
+    }
+
+    function nombre(valeur) {
+        return Number(valeur || 0).toLocaleString();
+    }
+
+    /*
+     * La composition d'une fiche : ce qui precede la ligne dans la grille (vignette, nature, cibles)
+     * et ce qui la suit (note, actions). Le titre revient quand le corps choisi n'est pas la planete.
+     */
+    function composerLaFiche(carte, f, bloc, position, corps) {
+        var lignes = carte.gtLignes || {};
+        var ligne = lignes[position] || null;
+        var systeme = carte.gtSystemeJson || {};
+        var genre;
+        var objet;
+
+        if (position === POSITION_ESPACE_PROFOND) {
+            genre = 'profond';
+            objet = ligne && ligne.planets && !Array.isArray(ligne.planets) ? ligne.planets : null;
+        } else if (corps === 'moon') {
+            genre = 'lune';
+            objet = corpsDeGenre(ligne, LUNE);
+        } else if (corps === 'debris') {
+            genre = 'debris';
+            objet = corpsDeGenre(ligne, DEBRIS);
+        } else {
+            objet = corpsDeGenre(ligne, PLANETE);
+            genre = objet ? 'planete' : 'libre';
+        }
+
+        f.gtContexte = { fiche: f, ligne: ligne, objet: objet, systeme: systeme, position: position, genre: genre };
+
+        var avant = [];
+        var apres = [];
+        var titre = null;
+        var nature = element('div', 'gtCardKind');
+        var pageLoca = window.loca || {};
+
+        if (genre === 'planete') {
+            avant.push(texture(objet));
+            avant[0].classList.add('gtCardArt');
+            nature.textContent = avecDetail(locaFiche('planet', 'Planete'), activiteDe(objet, pageLoca));
+        } else if (genre === 'lune') {
+            avant.push(imageDeFiche('/img/galaxy-tactical/moon-tactical-v1.png', 'gtCardArt' + (objet && objet.isDestroyed ? ' gtDestroyed' : '')));
+            nature.textContent = avecDetail(
+                avecDetail(locaFiche('moon', 'Lune'), objet && objet.size ? nombre(objet.size) + ' ' + (pageLoca.LOCA_OVERVIEW_JS_KM || 'km') : ''),
+                activiteDe(objet, pageLoca)
+            );
+            titre = objet && objet.planetName ? objet.planetName : locaFiche('moon', 'Lune');
+        } else if (genre === 'debris') {
+            avant.push(imageDeFiche('/img/galaxy-tactical/debris-marker.svg', 'gtCardArt'));
+            var ressources = (objet && objet.resources) || {};
+            nature.textContent = [
+                (pageLoca.LOCA_ALL_METAL || 'Metal') + ' ' + nombre(ressources.metal && ressources.metal.amount),
+                (pageLoca.LOCA_ALL_CRYSTAL || 'Cristal') + ' ' + nombre(ressources.crystal && ressources.crystal.amount),
+                (pageLoca.LOCA_ALL_DEUTERIUM || 'Deuterium') + ' ' + nombre(ressources.deuterium && ressources.deuterium.amount)
+            ].join(' \u00b7 ');
+            titre = locaFiche('debris', 'Champ de debris');
+        } else if (genre === 'libre') {
+            avant.push(imageDeFiche('/img/galaxy-tactical/empty-position-preview.svg', 'gtCardArt gtCardGhost'));
+            var description = segmentsDeColonisation(mission(ligne, 7));
+            nature.textContent = avecDetail(locaFiche('emptySlot', 'Emplacement inoccupe'), description.length > 1 ? description[1] : '');
+        } else {
+            avant.push(imageDeFiche('/img/galaxy-tactical/deep-space-nebula-v2.png', 'gtCardNebula'));
+            var etiquette = element('label', 'gtCardLabel');
+            etiquette.setAttribute('for', 'expeditionFleetTemplateSelect');
+            etiquette.textContent = locaFiche('expeditionFleet', 'Flotte d\'expedition');
+            nature = etiquette;
+        }
+
+        avant.push(nature);
+
+        /* Les cibles d'une meme position : la planete, sa lune, son champ de debris — celles qui existent. */
+        if (genre === 'planete' || genre === 'lune' || genre === 'debris') {
+            var cibles = element('div', 'gtCardTargets');
+            cibles.setAttribute('role', 'group');
+            cibles.setAttribute('aria-label', locaFiche('targets', 'Corps de la position'));
+
+            [['planet', PLANETE, 'planet'], ['moon', LUNE, 'moon'], ['debris', DEBRIS, 'debris']].forEach(function (cible) {
+                if (!corpsDeGenre(ligne, cible[1])) {
+                    return;
+                }
+
+                var b = element('button', 'gtTarget');
+                b.type = 'button';
+                b.textContent = locaFiche(cible[2], cible[2]);
+                b.setAttribute('aria-pressed', corps === cible[0] ? 'true' : 'false');
+                b.addEventListener('click', function () {
+                    if (corps !== cible[0]) {
+                        choisir(carte, bloc, cible[0]);
+                    }
+                });
+                cibles.appendChild(b);
+            });
+
+            if (cibles.children.length > 1) {
+                avant.push(cibles);
+            }
+        }
+
+        var note = element('p', 'gtCardNote');
+
+        if (genre === 'libre') {
+            note.textContent = locaFiche('emptyServer', '');
+        } else if (genre === 'profond') {
+            var choix = document.getElementById('galaxyExpeditionFleetTemplateContainer');
+            var selection = document.getElementById('expeditionFleetTemplateSelect');
+            note.textContent = selection && selection.disabled && choix && choix.getAttribute('title')
+                ? choix.getAttribute('title')
+                : locaFiche('expeditionNote', '');
+        }
+
+        if (note.textContent !== '') {
+            apres.push(note);
+        }
+
+        var grille = element('div', 'gtCardActions');
+        grille.setAttribute('role', 'group');
+        grille.setAttribute('aria-label', locaFiche('actions', 'Actions'));
+        apres.push(grille);
+
+        return { avant: avant, apres: apres, titre: titre };
+    }
 
     function fiche(carte) {
         var f = carte.querySelector('.gtCard');
@@ -351,7 +892,7 @@
         fermer.setAttribute('aria-label', locaDeLaCarte(carte, 'close', 'Fermer'));
         fermer.textContent = '×';
         fermer.addEventListener('click', function () {
-            deselectionner(carte);
+            deselectionner(carte, true);
         });
 
         tete.appendChild(identite);
@@ -359,6 +900,14 @@
 
         f.appendChild(tete);
         f.appendChild(element('div', 'gtCardBody'));
+
+        /* Le choix d'une flotte d'expedition montre ou cache le bouton d'envoi herite : la grille suit. */
+        f.addEventListener('change', function (evenement) {
+            if (evenement.target && evenement.target.id === 'expeditionFleetTemplateSelect') {
+                composerLesActions(f);
+            }
+        });
+
         carte.appendChild(f);
 
         return f;
@@ -374,19 +923,31 @@
         deplacee = null;
     }
 
-    function deselectionner(carte) {
+    /*
+     * Fermer la fiche. `rendreLeFocus` : quand la fermeture vient du joueur (croix, Echap), le focus
+     * revient sur le corps choisi — Codex, revue 115 : « retour du focus sur le corps selectionne ».
+     * Un redessin ne le demande pas : il ne doit pas voler le focus.
+     */
+    function deselectionner(carte, rendreLeFocus) {
         rendreLaLigne();
 
         var f = carte.querySelector('.gtCard');
+        var bloc = f ? f.gtBloc : null;
 
         if (f) {
             f.hidden = true;
+            f.gtBloc = null;
+            f.gtContexte = null;
         }
 
         var choisis = carte.querySelectorAll('.gtBody.gtSelected');
 
         for (var i = 0; i < choisis.length; i++) {
             choisis[i].classList.remove('gtSelected');
+        }
+
+        if (rendreLeFocus && bloc && carte.contains(bloc) && typeof bloc.focus === 'function') {
+            bloc.focus();
         }
     }
 
@@ -431,19 +992,15 @@
 
         /* Recliquer le corps deja ouvert le referme ; cliquer un autre corps de la meme position bascule. */
         if (deplacee && deplacee.noeud === ligne && f.getAttribute('data-corps') === corps) {
-            deselectionner(carte);
+            deselectionner(carte, true);
 
             return;
         }
 
-        deselectionner(carte);
+        deselectionner(carte, false);
 
         var titre = f.querySelector('.gtCardTitle');
         var coords = f.querySelector('.gtCardCoords');
-
-        if (titre) {
-            titre.textContent = bloc.getAttribute('data-titre') || String(position);
-        }
 
         if (coords) {
             coords.textContent = bloc.getAttribute('data-coords') || '';
@@ -453,10 +1010,29 @@
         f.setAttribute('data-corps', corps);
 
         var contenant = f.querySelector('.gtCardBody');
+        contenant.innerHTML = '';
+
+        var composition = composerLaFiche(carte, f, bloc, position, corps);
+
+        composition.avant.forEach(function (n) {
+            contenant.appendChild(n);
+        });
+
         deplacee = { noeud: ligne, parent: ligne.parentNode, suivant: ligne.nextSibling, position: position, corps: corps };
         contenant.appendChild(ligne);
 
+        composition.apres.forEach(function (n) {
+            contenant.appendChild(n);
+        });
+
+        if (titre) {
+            titre.textContent = composition.titre || bloc.getAttribute('data-titre') || String(position);
+        }
+
+        composerLesActions(f);
+
         f.hidden = false;
+        f.gtBloc = bloc;
         bloc.classList.add('gtSelected');
         placer(f, bloc);
     }
@@ -495,7 +1071,7 @@
 
         carte.addEventListener('keydown', function (evenement) {
             if (evenement.key === 'Escape' || evenement.key === 'Esc') {
-                deselectionner(carte);
+                deselectionner(carte, true);
 
                 return;
             }
@@ -1350,6 +1926,10 @@
             parPosition[Number(ligne.position)] = ligne;
         });
 
+        /* La fiche lit la charge utile : missions, droits et faits du systeme, tels que le serveur les rend. */
+        carte.gtLignes = parPosition;
+        carte.gtSystemeJson = systeme;
+
         for (var position = 1; position <= POSITIONS; position++) {
             var ligne = parPosition[position];
             var planete = corpsDeGenre(ligne, PLANETE);
@@ -1361,7 +1941,11 @@
                  * (astrophysique, vaisseau disponible, position reservee, portee). Rederiver la
                  * regle ici en ferait une seconde source de verite, qui divergerait un jour.
                  */
-                var libre = loca('LOCA_GALAXY_EMPTY_SLOT', 'position libre');
+                /*
+                 * `LOCA_GALAXY_EMPTY_SLOT` n'a jamais existe dans `jsloca` : la premiere version
+                 * rendait son repli francais a tout le monde. Le libelle vient de la vue, traduit.
+                 */
+                var libre = locaFiche('freeSlot', 'Position libre');
                 var silhouette = element('div', 'gtEmpty' + (colonisationPermise(ligne) ? '' : ' gtUnavailable'));
                 /*
                  * `empty_filter` est la classe que le filtre « E » du bandeau vise. En la portant,

@@ -577,61 +577,6 @@
     50% { opacity: 1; }
 }
 
-/* La boite historique, une fois dans la fiche : elle s'empile, ses controles gardent leur style. */
-#galaxyContent #galaxyTactical .gtCardBody .expeditionDebrisSlotBox {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    width: auto;
-    min-height: 0;
-    margin: 0;
-    padding: 2px;
-}
-
-/*
- * Le jeu dispose cette boite en **ligne**, avec des largeurs en pour cent (38 % / 9 % / 53 %).
- * En colonne dans une fiche de 232 px, ces largeurs ecrasaient tout et laissaient un vide au
- * milieu — c'est ce que la capture de Keven montrait. Ici chaque bloc prend sa largeur, et le
- * bloc du titre disparait avec le titre qu'il ne portait que pour la bande horizontale.
- */
-#galaxyContent #galaxyTactical .gtCardBody .expeditionDebrisSlotBox > div {
-    width: auto;
-    justify-content: flex-start;
-}
-
-#galaxyContent #galaxyTactical .gtCardBody .expeditionDebrisSlotBox > div:has(> h3.title) {
-    display: none;
-}
-
-/* La tete de fiche dit deja « Espace profond · 16 » : le titre de la boite ferait doublon. */
-#galaxyContent #galaxyTactical .gtCardBody .expeditionDebrisSlotBox h3.title {
-    display: none;
-}
-
-/* Sans debris, le conteneur est un vide de la hauteur d'une ligne : il disparait. */
-#galaxyContent #galaxyTactical .gtCardBody #expeditionDebrisSlotDebrisContainer:not(:has(*)) {
-    display: none;
-}
-
-#galaxyContent #galaxyTactical .gtCardBody #expeditionDebrisSlotActions {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-/* Les boutons flottaient a droite dans une bande horizontale ; en colonne ils prennent la largeur. */
-#galaxyContent #galaxyTactical .gtCardBody #expeditionDebrisSlotActions .btn_blue,
-#galaxyContent #galaxyTactical .gtCardBody #galaxyExpeditionFleetTemplateContainer {
-    float: none;
-    width: auto;
-    text-align: center;
-}
-
-#galaxyContent #galaxyTactical .gtCardBody #expeditionFleetTemplateSelect {
-    width: 100%;
-    box-sizing: border-box;
-}
-
 /*
  * ## La bascule Vue tactique / Vue liste
  *
@@ -670,23 +615,34 @@
 }
 
 /*
- * ## La fiche contextuelle
+ * ## La fiche contextuelle — les fiches V2 de Codex (revue 115)
  *
  * Elle vit **sur** la carte, comme la maquette le montre, et non sous elle. La ligne du tableau y
- * est deplacee : la feuille ne fait que la presenter en colonne. Les icones, les infobulles, les
- * liens et les etats desactives restent exactement ceux que le serveur a rendus — on ne redessine
- * pas des droits.
+ * est deplacee et, en `display: contents`, prete ses cellules a la grille de la fiche : le joueur,
+ * l'alliance, les infobulles, la phalange et le compte a rebours restent les noeuds que le serveur
+ * a remplis — on ne redessine pas des droits. Les boutons d'action sont ceux du module ; ils
+ * deleguent leur clic aux liens de `.cellAction`, seule cellule masquee avec le numero.
+ *
+ * Le cadre est celui de `planet-card-clean.css` : contours droits legerement arrondis, metalliques,
+ * **sans** `border-image` ni `clip-path` — Keven a retire les coins biseautes. `border-image: none`
+ * est ecrit pour que le resultat calcule le dise, quelle que soit la feuille du jeu.
  */
 #galaxyTactical .gtCard {
     position: absolute;
     z-index: 20;
-    width: 232px;
+    width: 320px;
+    max-width: calc(100% - 16px);
+    max-height: 572px;
+    overflow: auto;
     box-sizing: border-box;
-    background: rgba(2, 11, 21, 0.96);
-    border: 1px solid #12384a;
+    padding: 12px 14px 14px;
+    background: linear-gradient(145deg, #14202a, #071018 65%);
+    border: 1px solid #52616b;
+    border-image: none;
     border-radius: 4px;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
-    color: #d6f5fb;
+    box-shadow: inset 0 0 0 3px #080f15, inset 0 0 0 4px #27343e, 0 6px 18px rgba(0, 0, 0, 0.55);
+    color: #cee0ec;
+    font: 13px/1.4 Arial, sans-serif;
 }
 
 /*
@@ -702,9 +658,9 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 6px;
-    padding: 4px 6px;
-    border-bottom: 1px solid #12384a;
+    gap: 12px;
+    padding: 0 0 10px;
+    border-bottom: 1px solid #344c5b;
 }
 
 /* Le nom et les coordonnees, empiles : la revue 112 demande les deux dans la fiche. */
@@ -714,104 +670,388 @@
     min-width: 0;
 }
 
-#galaxyTactical .gtCardCoords {
-    font-size: 10px;
-    color: #7fa9b7;
-    font-variant-numeric: tabular-nums;
-}
-
 #galaxyTactical .gtCardTitle {
-    font-size: 12px;
+    font-size: 18px;
     font-weight: bold;
-    color: #d6f5fb;
+    color: #edf5fa;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
+#galaxyTactical .gtCardCoords {
+    font-size: 12px;
+    color: #83b5cf;
+    font-variant-numeric: tabular-nums;
+}
+
+/* La croix : un vrai bouton, visible, jamais recouvert. */
 #galaxyTactical .gtCardClose {
-    background: none;
-    border: 0;
-    color: #7fa9b7;
+    flex: none;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    background: #0e1e2b;
+    border: 1px solid #465863;
+    border-radius: 3px;
+    color: #b8e7ff;
     cursor: pointer;
-    font-size: 15px;
-    line-height: 15px;
-    padding: 0 2px;
+    font-size: 21px;
+    line-height: 28px;
 }
 
 #galaxyTactical .gtCardClose:hover {
-    color: #43c9e8;
+    filter: brightness(1.35);
+    box-shadow: 0 0 8px rgba(90, 195, 255, 0.33);
 }
 
-#galaxyTactical .gtCardBody {
-    padding: 4px;
+#galaxyTactical .gtCard :focus-visible {
+    outline: 2px solid #efc678;
+    outline-offset: 2px;
 }
 
 /*
- * La ligne deplacee devient une colonne. Elle garde ses classes, donc ses couleurs de statut, ses
- * infobulles et ses liens ; seule la disposition change.
+ * ## La grille de la fiche
+ *
+ * Quatre colonnes : la vignette, puis l'identite. La ligne deplacee est en `display: contents`,
+ * donc ses cellules sont placees ici une a une, a cote des elements du module. Une cellule vide
+ * n'occupe rien (`:empty`), et une piste sans contenu se reduit a zero.
+ *
+ *     vignette | joueur (cellPlayerName)
+ *     vignette | nature
+ *     vignette | alliance (cellAlliance)
+ *     cibles (planete / lune / debris)
+ *     cellPlanetName — la phalange, le compte a rebours d'une position reservee
+ *     note
+ *     actions
  */
-#galaxyContent #galaxyTactical .gtCardBody .galaxyRow {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-height: 0;
+#galaxyTactical .gtCardBody {
+    display: grid;
+    grid-template-columns: 64px minmax(0, 1fr) auto auto;
+    grid-auto-rows: auto;
+    align-items: center;
+    column-gap: 12px;
+    row-gap: 4px;
+    padding: 12px 0 0;
 }
 
+#galaxyContent #galaxyTactical .gtCardBody .galaxyRow,
+#galaxyContent #galaxyTactical .gtCardBody .expeditionDebrisSlotBox,
+#galaxyContent #galaxyTactical .gtCardBody #expeditionDebrisSlotActions,
+#galaxyContent #galaxyTactical .gtCardBody #galaxyExpeditionFleetTemplateContainer {
+    display: contents;
+}
+
+#galaxyTactical .gtCardArt {
+    grid-column: 1;
+    grid-row: 1 / span 3;
+    width: 64px;
+    height: 64px;
+    object-fit: contain;
+    justify-self: center;
+}
+
+/* La texture de la planete, en 64 px dans la fiche : la meme image que sur la carte, plus lisible. */
+#galaxyTactical .gtCardBody .gtTexture {
+    width: 64px;
+    height: 64px;
+}
+
+#galaxyTactical .gtCardArt.gtDestroyed {
+    filter: grayscale(1) brightness(0.55);
+}
+
+/* La sphere grise d'une position libre : translucide, sans planete predeterminee. */
+#galaxyTactical .gtCardArt.gtCardGhost {
+    opacity: 0.9;
+}
+
+#galaxyContent #galaxyTactical .gtCardBody .cellPlayerName {
+    grid-column: 2 / span 3;
+    grid-row: 1;
+    font-size: 15px;
+    color: #e6f2f9;
+}
+
+/* Les abreviations de statut que le rendu herite met dans un `pre` : en ligne, discretes. */
+#galaxyContent #galaxyTactical .gtCardBody .cellPlayerName pre {
+    display: inline;
+    font: inherit;
+    font-size: 11px;
+    color: #8aa8be;
+    white-space: normal;
+}
+
+#galaxyTactical .gtCardKind {
+    grid-column: 2 / span 3;
+    grid-row: 2;
+    font-size: 12px;
+    color: #8aa8be;
+}
+
+#galaxyContent #galaxyTactical .gtCardBody .cellAlliance {
+    grid-column: 2 / span 3;
+    grid-row: 3;
+    font-size: 12px;
+    color: #83b5cf;
+}
+
+#galaxyTactical .gtCardTargets {
+    grid-column: 1 / span 4;
+    grid-row: 4;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+#galaxyTactical .gtTarget {
+    padding: 5px 8px;
+    background: #10202c;
+    border: 1px solid #3b5363;
+    border-radius: 3px;
+    color: #b9d7e8;
+    cursor: pointer;
+    font: 12px Arial, sans-serif;
+}
+
+#galaxyTactical .gtTarget:hover {
+    filter: brightness(1.35);
+    box-shadow: 0 0 8px rgba(90, 195, 255, 0.33);
+}
+
+#galaxyTactical .gtTarget[aria-pressed="true"] {
+    border-color: #43c9e8;
+    color: #d6f5fb;
+}
+
+/*
+ * Les cellules que le serveur a remplies. `.cellPlanetName` porte la phalange et, sur une position
+ * libre reservee, le compte a rebours : elle fait la ligne de details. `.cellPlanet`, `.cellMoon` et
+ * `.cellDebris` sont masquees : leur vignette n'a pas d'image hors du tableau, **le clic des deux
+ * premieres est l'espionnage rapide** — une pastille qui enverrait trois sondes sans le dire —, et
+ * ce qu'elles portent d'utile est rendu ailleurs : l'espionnage par le bouton de la grille (qui
+ * delegue au meme lien), les ressources du champ et l'activite par la ligne de nature, lues dans la
+ * charge utile.
+ */
 #galaxyContent #galaxyTactical .gtCardBody .galaxyCell {
     width: auto;
     min-height: 0;
-    padding: 1px 3px;
+    padding: 0;
     background-color: transparent;
     text-align: left;
 }
 
-/*
- * **Seule la cellule du numero est masquee, et c'est deliberement etroit.**
- *
- * Une premiere version masquait aussi `.cellPlanet` et `.cellPlanetName` au motif que la
- * carte porte deja la vignette et le nom. L'inventaire du rendu herite a montre ce que cela
- * coutait : `.cellPlanet` porte le lien d'**espionnage rapide**, l'etoile d'activite, le
- * conteneur de flotte et l'infobulle de planete ; `.cellPlanetName` porte le lien de
- * **phalange**. Deux fonctions disparaissaient de la fiche, en silence.
- *
- * `.cellPosition` ne porte qu'un numero, que les coordonnees de la fiche redisent.
- */
-#galaxyContent #galaxyTactical .gtCardBody .cellPosition {
+#galaxyContent #galaxyTactical .gtCardBody .cellPlanetName {
+    grid-column: 1 / span 4;
+    grid-row: 5;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 0;
+}
+
+/* La tete de fiche porte deja le nom : la cellule ne garde que la phalange et le compte a rebours. */
+#galaxyContent #galaxyTactical .gtCardBody .cellPlanetName > span:not(.planetMoveGalaxyCooldown) {
     display: none;
 }
 
-/* Le nom repete par la ligne reste utile : il porte le statut d'ami et le lien de phalange. */
+/*
+ * **Cinq cellules sont masquees, chacune pour une raison verifiee** — les trois vignettes ci-dessus,
+ * puis `.cellPosition`, qui ne porte qu'un numero que les coordonnees de la fiche redisent, et
+ * `.cellAction`, qui porte les liens d'action du serveur : **chacun** a son bouton dans la grille,
+ * qui lui delegue le clic (`tests/Feature/GalaxyTacticalMapTest.php` exige la delegation de chaque
+ * classe de lien). Une cellule vide ne merite pas une ligne.
+ */
+#galaxyContent #galaxyTactical .gtCardBody .cellPosition,
+#galaxyContent #galaxyTactical .gtCardBody .cellAction,
 #galaxyContent #galaxyTactical .gtCardBody .cellPlanet,
-#galaxyContent #galaxyTactical .gtCardBody .cellPlanetName {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-}
-
-/* Une cellule vide ne merite pas une ligne : lune et debris n'apparaissent que s'ils existent. */
+#galaxyContent #galaxyTactical .gtCardBody .cellMoon,
+#galaxyContent #galaxyTactical .gtCardBody .cellDebris,
 #galaxyContent #galaxyTactical .gtCardBody .galaxyCell:empty {
     display: none;
 }
 
-/*
- * Les actions : une grille d'icones, pas une rangee comprimee. Les elements sont ceux du jeu ;
- * on ne fait que leur donner de la place et une cible cliquable honnete.
- */
-#galaxyContent #galaxyTactical .gtCardBody .cellAction {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 3px;
-    padding-top: 3px;
-    border-top: 1px solid #12384a;
+#galaxyTactical .gtCardNote {
+    grid-column: 1 / span 4;
+    grid-row: 6;
+    margin: 6px 0 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #92aabb;
 }
 
 /*
- * **Taille intrinseque, jamais une boite minimale.** Ces icones sont des sprites de 17 px decoupes
- * dans une bande ; une boite de 22 px montrait cinq pixels de l'icone voisine, et les icones
- * paraissaient empilees. L'espace entre elles vient de `gap`, pas de leur boite.
+ * ## Les actions : la grille de boutons de Codex
+ *
+ * Deux colonnes, une icone et un libelle. Un bouton grise est un vrai `disabled` — le navigateur
+ * bloque la souris et le clavier —, desature par la feuille (pas d'icone dupliquee), sans eclat au
+ * survol, et sa raison est ecrite sous le libelle. Un libelle long se tronque, il ne se plie jamais
+ * en colonne de lettres.
  */
-#galaxyContent #galaxyTactical .gtCardBody .cellAction > * {
-    flex: 0 0 auto;
-    position: static;
+#galaxyTactical .gtCardActions {
+    grid-column: 1 / span 4;
+    grid-row: 7;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 8px;
+    padding-top: 12px;
+    border-top: 1px solid #344c5b;
+}
+
+#galaxyTactical .gtAction {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    min-height: 42px;
+    padding: 6px 8px;
+    background: linear-gradient(#20313d, #0b1720);
+    border: 1px solid #465863;
+    border-image: none;
+    border-radius: 3px;
+    box-shadow: inset 0 1px rgba(255, 255, 255, 0.05);
+    color: #bddfee;
+    cursor: pointer;
+    font: 600 12px Arial, sans-serif;
+    text-align: left;
+    transition: filter 150ms, box-shadow 150ms;
+}
+
+#galaxyTactical .gtAction img {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    object-fit: contain;
+}
+
+#galaxyTactical .gtActionText {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+#galaxyTactical .gtActionLabel {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#galaxyTactical .gtActionReason {
+    font-weight: normal;
+    font-size: 10px;
+    line-height: 1.3;
+    color: #92aabb;
+    white-space: normal;
+}
+
+#galaxyTactical .gtAction--attack {
+    background: linear-gradient(#302326, #1b1418);
+    border-color: #67443f;
+    color: #f2b6ac;
+}
+
+#galaxyTactical .gtAction:not(:disabled):hover {
+    filter: brightness(1.35);
+    box-shadow: 0 0 8px rgba(90, 195, 255, 0.33);
+}
+
+/* L'etat grise commun de Codex (`planet-card-clean.css`) : desature, sans survol, curseur qui refuse. */
+#galaxyTactical .gtAction:disabled,
+#galaxyTactical .gtAction:disabled:hover {
+    filter: grayscale(1);
+    opacity: 0.65;
+    background: linear-gradient(#24282c, #191d21);
+    border-color: #494e53;
+    box-shadow: none;
+    color: #a8adb2;
+    cursor: not-allowed;
+    transition: none;
+}
+
+#galaxyTactical .gtAction:disabled img {
+    filter: grayscale(1);
+    opacity: 0.7;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #galaxyTactical .gtAction,
+    #galaxyTactical .gtTarget,
+    #galaxyTactical .gtCardClose {
+        transition: none;
+    }
+}
+
+/*
+ * ## La fiche de l'espace profond
+ *
+ * La nebuleuse en pleine largeur, le libelle horizontal « Flotte d'expedition », la liste des
+ * compositions du jeu en pleine largeur, la note, puis le bouton Expedition (et Recycler quand des
+ * debris d'expedition existent). La boite historique `#galaxyRow16` est en `display: contents` avec
+ * ses deux conteneurs : sa liste se place dans la grille, ses deux boutons sont delegues et masques.
+ */
+#galaxyTactical .gtCardNebula {
+    grid-column: 1 / span 4;
+    grid-row: 1;
+    width: 100%;
+    height: 86px;
+    object-fit: contain;
+    margin: 4px 0;
+}
+
+#galaxyTactical .gtCardLabel {
+    grid-column: 1 / span 4;
+    grid-row: 2;
+    margin-top: 4px;
+    color: #c9dce8;
+}
+
+#galaxyContent #galaxyTactical .gtCardBody #expeditionFleetTemplateSelect {
+    grid-column: 1 / span 4;
+    grid-row: 3;
+    width: 100%;
+    min-height: 36px;
+    box-sizing: border-box;
+    padding: 8px;
+    background: #0a1722;
+    border: 1px solid #465863;
+    border-radius: 3px;
+    color: #d4e6f2;
+    font: inherit;
+}
+
+#galaxyContent #galaxyTactical .gtCardBody #expeditionFleetTemplateSelect:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+
+/* Les debris d'expedition, avec leur infobulle : une ligne de details, sous la note. */
+#galaxyContent #galaxyTactical .gtCardBody #expeditionDebrisSlotDebrisContainer {
+    grid-column: 1 / span 4;
+    grid-row: 5;
+    width: auto;
+    justify-content: flex-start;
+}
+
+/*
+ * Ce que la boite historique montrait et que la fiche dit autrement : son titre (la tete de fiche
+ * le porte), le bouton-icone de la liste (le libelle le remplace), et ses deux boutons d'envoi, que
+ * le bouton Expedition de la grille actionne. `!important` sur le second : le rendu herite le
+ * montre par `.show()`, un style en ligne que la feuille ne battrait pas autrement.
+ */
+#galaxyContent #galaxyTactical .gtCardBody .expeditionDebrisSlotBox > div:has(> h3.title),
+#galaxyContent #galaxyTactical .gtCardBody .expeditionDebrisSlotBox h3.title,
+#galaxyContent #galaxyTactical .gtCardBody #expeditionFleetTemplateBtn,
+#galaxyContent #galaxyTactical .gtCardBody #expeditionbutton {
+    display: none;
+}
+
+#galaxyContent #galaxyTactical .gtCardBody #sendExpeditionFleetTemplateFleet {
+    display: none !important;
+}
+
+/* Sans debris, le conteneur est un vide de la hauteur d'une ligne : il disparait. */
+#galaxyContent #galaxyTactical .gtCardBody #expeditionDebrisSlotDebrisContainer:not(:has(*)) {
+    display: none;
 }

@@ -392,26 +392,67 @@ class GalaxyTacticalMapTest extends UnitTestCase
     }
 
     /**
-     * **Aucune cellule porteuse d'action n'est masquee dans la fiche.**
+     * **Seules deux cellules sont masquees dans la fiche, et chacune pour une raison verifiee.**
      *
-     * C'est le temoin de parite, et il ferme un defaut reel : la feuille masquait `.cellPlanet` et
-     * `.cellPlanetName` au motif que la carte porte deja la vignette et le nom. Or `.cellPlanet`
-     * porte le lien d'espionnage rapide, l'etoile d'activite et l'infobulle de planete, et
-     * `.cellPlanetName` porte le lien de phalange. Deux fonctions disparaissaient de la fiche sans
+     * Ce temoin de parite a ferme un defaut reel : la feuille masquait `.cellPlanet` et
+     * `.cellPlanetName` au motif que la carte porte deja la vignette et le nom — et le lien
+     * d'espionnage rapide, l'etoile d'activite, l'infobulle et la phalange disparaissaient sans
      * qu'aucun essai ne s'en plaigne.
      *
-     * Seule `.cellPosition` peut etre masquee : elle ne porte qu'un numero, que les coordonnees de
-     * la fiche redisent.
+     * Depuis les fiches V2 (revue 115), `.cellAction` est masquee aussi : ses liens sont ceux que les
+     * boutons de la grille actionnent. Ce masquage n'est permis que parce que **chaque classe de lien**
+     * que le rendu herite y ecrit a sa delegation dans le module — seconde moitie de ce temoin ;
+     * `testTheLegacyRenderStillPutsThoseActionsInThoseCells` verifie que ces classes existent encore.
+     *
+     * Les trois vignettes (`.cellPlanet`, `.cellMoon`, `.cellDebris`) sont masquees a leur tour : le
+     * clic des deux premieres est l'espionnage rapide — une pastille d'information qui enverrait trois
+     * sondes —, et ce qu'elles portaient d'utile est rendu depuis la charge utile (activite, ressources
+     * du champ), ce que la fin de ce temoin exige. `.cellPlanetName` (phalange, compte a rebours),
+     * `.cellPlayerName` et `.cellAlliance` restent visibles.
      */
-    public function testNoCellThatCarriesAnActionIsHiddenInTheCard(): void
+    public function testTheCardHidesOnlyWhatItDelegates(): void
     {
         $feuille = $this->feuille();
+        $module = $this->module();
 
-        foreach (['cellPlanet', 'cellPlanetName', 'cellMoon', 'cellDebris', 'cellPlayerName', 'cellAlliance', 'cellAction'] as $cellule) {
+        foreach (['cellPlanetName', 'cellPlayerName', 'cellAlliance'] as $cellule) {
             $this->assertDoesNotMatchRegularExpression(
-                '/\.gtCardBody[^{}]*\.' . $cellule . '\b[^{}]*\{[^}]*display:\s*none/',
+                '/\.gtCardBody \.' . $cellule . '\s*[,{][^}]*display:\s*none/',
                 $feuille,
-                'The card hides .' . $cellule . ', which carries actions rendered by the server: they vanish from the map with no error anywhere.'
+                'The card hides .' . $cellule . ', which carries content rendered by the server: it vanishes from the map with no error anywhere.'
+            );
+        }
+
+        foreach (['cellAction', 'cellPlanet', 'cellMoon', 'cellDebris'] as $cellule) {
+            $this->assertMatchesRegularExpression(
+                '/\.gtCardBody \.' . $cellule . ',\s*[^{]*\{\s*display: none;/',
+                $feuille,
+                'The legacy .' . $cellule . ' is visible in the card: a sprite without its image whose click is quick espionage, or the same actions twice.'
+            );
+        }
+
+        /* Ce que les vignettes portaient d'utile, la fiche le lit dans la charge utile. */
+        /* La planete et la lune, chacune : une mutation qui retirait l'activite de la planete survivait grace a la lune. */
+        $this->assertStringContainsString("avecDetail(locaFiche('planet', 'Planete'), activiteDe(objet, pageLoca))", $module, 'The planet card no longer shows the activity the hidden sprite carried.');
+        $this->assertMatchesRegularExpression("/locaFiche\('moon', 'Lune'\)[^;]*activiteDe\(objet, pageLoca\)/s", $module, 'The moon card no longer shows the activity the hidden sprite carried.');
+        $this->assertStringContainsString('nombre(ressources.metal && ressources.metal.amount)', $module, 'The card no longer shows the resources the hidden debris sprite carried in its tooltip.');
+
+        foreach ([
+            "'.cellAction a.espionage'" => 'quick espionage',
+            "'.cellMoon a[onclick]'" => 'moon espionage',
+            "'.cellAction a.missleattack'" => 'missile attack',
+            "'.cellAction a.sendMail'" => 'message',
+            "'.cellAction a.buddyrequest'" => 'buddy request',
+            "chercherDansLInfobulle('player' + joueur.playerId, '.ignorePlayerLink')" => 'ignore',
+            "'.phalanxlink'" => 'phalanx',
+            "'.cellAction a.colonize-active'" => 'colonisation',
+            "'.cellAction a.planetMoveDefault'" => 'relocation',
+            "chercherDansLInfobulle('debris' + position, 'a[onclick]')" => 'recycling',
+        ] as $selecteur => $action) {
+            $this->assertStringContainsString(
+                $selecteur,
+                $module,
+                'The card no longer delegates ' . $action . ' to the link the server rendered: the button is decorative, or recomputes a right.'
             );
         }
     }
@@ -438,6 +479,24 @@ class GalaxyTacticalMapTest extends UnitTestCase
             $herite,
             'The phalanx link is no longer rendered into .cellPlanetName: the parity witness now protects a cell for a reason that no longer holds.'
         );
+
+        /* Les classes de lien que les boutons de la fiche actionnent : le rendu herite les ecrit toujours. */
+        foreach ([
+            'class="tooltip js_hideTipOnMobile espionage' => 'espionage',
+            'class="tooltip js_hideTipOnMobile overlay missleattack"' => 'missile attack',
+            'class="sendMail js_openChat tooltip"' => 'message',
+            'class="tooltip buddyrequest' => 'buddy request',
+            'class="ignorePlayerLink"' => 'ignore',
+            'class="tooltip planetMoveIcons colonize-active' => 'colonisation',
+            'class="planetMoveIcons planetMoveDefault' => 'relocation',
+            'onClick="sendShips(${8},' => 'recycling',
+        ] as $marque => $action) {
+            $this->assertStringContainsString(
+                $marque,
+                $herite,
+                'The legacy render no longer emits the ' . $action . ' link the card delegates to: the button would find nothing to click.'
+            );
+        }
     }
 
     /**
@@ -807,7 +866,7 @@ class GalaxyTacticalMapTest extends UnitTestCase
         );
 
         $this->assertMatchesRegularExpression(
-            '/\.gtCardBody \.expeditionDebrisSlotBox h3\.title \{[^}]*display:\s*none/',
+            '/\.gtCardBody \.expeditionDebrisSlotBox h3\.title[^{]*\{[^}]*display:\s*none/',
             $feuille,
             'The historical box repeats its own title under the card head.'
         );
@@ -898,23 +957,147 @@ class GalaxyTacticalMapTest extends UnitTestCase
 
     /**
      * La boite historique de l'espace profond, dans la fiche, ne garde ni ses largeurs en pour cent
-     * ni le bloc de son titre — c'etait le vide de la capture de Keven.
+     * ni le bloc de son titre — c'etait le vide de la capture de Keven. Depuis les fiches V2 elle
+     * n'est plus une boite du tout : en `display: contents`, sa liste de flottes prend sa place dans
+     * la grille de la fiche, et ses largeurs n'ont plus rien a ecraser.
      */
     public function testTheDeepSpaceCardUnfoldsTheHistoricalBox(): void
     {
         $feuille = $this->feuille();
 
         $this->assertMatchesRegularExpression(
-            '/\.gtCardBody \.expeditionDebrisSlotBox > div \{[^}]*width: auto;/s',
+            '/\.gtCardBody \.expeditionDebrisSlotBox,\s*[^{]*\{\s*display: contents;/',
             $feuille,
-            'The historical box keeps its percentage widths in the card: its blocks are crushed and a blank appears.'
+            'The historical box is a box again inside the card: its percentage widths crush its blocks, and the blank of Keven\'s capture is back.'
+        );
+
+        $this->assertMatchesRegularExpression(
+            '/\.gtCardBody #expeditionFleetTemplateSelect \{[^}]*grid-row: 3;[^}]*width: 100%;/s',
+            $feuille,
+            'The expedition fleet list is no longer placed full width in the card grid.'
         );
 
         $this->assertStringContainsString(
             '.expeditionDebrisSlotBox > div:has(> h3.title)',
             $feuille,
-            'The block that only carried the hidden title stays in the card as an empty flex item.'
+            'The block that only carried the hidden title stays in the card.'
         );
+    }
+
+    /**
+     * **Les trois fiches de Codex (revue 115) : de vrais boutons, de vraies raisons, de vraies icones.**
+     *
+     * La fiche presente ; le serveur decide. Ce temoin epingle ce qui ferait mentir la presentation :
+     * une icone absente du disque (bouton sans image), un bouton « grise » qui repondrait encore au
+     * clavier (`aria-disabled` seul ne bloque rien — Codex), un libelle dont la clef manque dans la
+     * table publiee par la vue (`undefined` a l'ecran), un cadre biseaute revenu (`border-image`,
+     * `clip-path` — Keven les a retires), une largeur de fiche qui ne serait plus celle que le module
+     * emploie pour la garder dans la carte.
+     */
+    public function testTheThreeCodexCardsAreWiredWithRealDisabledButtons(): void
+    {
+        $module = $this->module();
+        $feuille = $this->feuille();
+        $vue = $this->vue();
+
+        /* Chaque icone d'action existe sur le disque. */
+        preg_match('/var ICONES_D_ACTION = \{(.*?)\};/s', $module, $bloc);
+        $tableDesIcones = $bloc[1] ?? '';
+        $this->assertNotSame('', $tableDesIcones, 'The action icon table is gone.');
+        preg_match_all("/([a-zA-Z]+): '([a-z0-9-]+\.svg)'/", $tableDesIcones, $icones, PREG_SET_ORDER);
+        $this->assertCount(17, $icones, 'The action icon table no longer lists the seventeen actions of the inventory.');
+
+        foreach ($icones as [, $action, $fichier]) {
+            $this->assertFileExists(public_path('img/galaxy-tactical/' . $fichier), 'The icon of ' . $action . ' is missing on disk: a button without an image.');
+        }
+
+        /* Chaque action qu'un genre emploie a une icone et une decision. */
+        $connues = array_column($icones, 1);
+        preg_match('/var ACTIONS_PAR_GENRE = \{(.*?)\};/s', $module, $genres);
+        $inventaire = $genres[1] ?? '';
+        $this->assertNotSame('', $inventaire, 'The per-kind action inventory is gone.');
+        preg_match_all("/'([a-zA-Z]+)'/", $inventaire, $employees);
+
+        foreach (array_unique($employees[1]) as $action) {
+            $this->assertContains($action, $connues, 'The action ' . $action . ' has no icon.');
+            $this->assertStringContainsString('            ' . $action . ': function () {', $module, 'The action ' . $action . ' has no decision: its button would throw on click.');
+        }
+
+        $this->assertStringContainsString('            recycler: function () {', $module, 'Expedition debris lost their Recycle decision.');
+
+        /* Un bouton grise est un vrai `disabled`, il porte sa raison, et il est desature sans survol. */
+        $this->assertStringContainsString('            b.disabled = true;', $module, 'A greyed button is only styled: keyboard and mouse still fire it.');
+        $this->assertStringContainsString('            motif.textContent = decision.raison;', $module, 'The reason is no longer written next to the label.');
+        $this->assertMatchesRegularExpression(
+            '/#galaxyTactical \.gtAction:disabled,\s*#galaxyTactical \.gtAction:disabled:hover \{[^}]*filter: grayscale\(1\);[^}]*cursor: not-allowed;/s',
+            $feuille,
+            'The disabled state is not the common greyed state Codex delivered.'
+        );
+
+        /* Les libelles : chaque chemin lu par le module est publie par la vue, et chaque clef publiee se traduit. */
+        preg_match('/\$tactiqueLoca = \[(.*?)\n\s{16}\];/s', $vue, $table);
+        $tableDesLibelles = $table[1] ?? '';
+        $this->assertNotSame('', $tableDesLibelles, 'The view no longer publishes galaxyTacticalLoca.');
+        $this->assertStringContainsString('var galaxyTacticalLoca = @json($tactiqueLoca);', $vue);
+        preg_match_all("/'([a-zA-Z]+)' => __\('([a-z_]+)\.([a-z_]+)\.([a-z_]+)'\)/", $tableDesLibelles, $publiees, PREG_SET_ORDER);
+        $this->assertGreaterThan(40, count($publiees), 'The published label table shrank.');
+        $nomsPublies = array_column($publiees, 1);
+
+        foreach (['fr', 'en'] as $langue) {
+            foreach ($publiees as [, $nom, $fichier, $section, $clef]) {
+                $lignes = require resource_path('lang/' . $langue . '/' . $fichier . '.php');
+                $this->assertTrue(
+                    isset($lignes[$section][$clef]) && $lignes[$section][$clef] !== '',
+                    'The label ' . $nom . ' (' . $fichier . '.' . $section . '.' . $clef . ') is missing in ' . $langue . ': the card would show the key itself.'
+                );
+            }
+        }
+
+        preg_match_all("/locaFiche\('([a-zA-Z.]+)'/", $module, $lues);
+        $this->assertNotEmpty($lues[1], 'The module no longer reads the published labels.');
+
+        foreach (array_unique($lues[1]) as $chemin) {
+            /* `labels.` et `reasons.` sont completes a l'execution : leurs clefs sont verifiees plus bas. */
+            foreach (explode('.', $chemin) as $segment) {
+                if ($segment === '' || in_array($segment, ['labels', 'reasons'], true)) {
+                    continue;
+                }
+
+                $this->assertContains($segment, $nomsPublies, 'The module reads galaxyTacticalLoca.' . $chemin . ' but the view does not publish it: undefined on screen.');
+            }
+        }
+
+        foreach ($connues as $action) {
+            $this->assertContains($action, $nomsPublies, 'The label of the action ' . $action . ' is not published.');
+        }
+
+        preg_match_all("/raison\('([a-zA-Z]+)'\)/", $module, $raisons);
+        $this->assertNotEmpty($raisons[1]);
+
+        foreach (array_unique($raisons[1]) as $clef) {
+            $this->assertContains($clef, $nomsPublies, 'The reason ' . $clef . ' is not published by the view.');
+        }
+
+        /* Le cadre V2 : pas de decoupe, et la largeur de la feuille est celle que le module emploie. */
+        $this->assertStringNotContainsString('border-image: url(', $feuille, 'A sliced frame is back: Keven removed the bevelled corners.');
+        $this->assertStringNotContainsString('clip-path: polygon(', $feuille, 'A diagonal cut is back: Keven removed the bevelled corners.');
+        preg_match('/var FICHE_LARGEUR = (\d+);/', $module, $largeur);
+        $largeurDuModule = $largeur[1] ?? '';
+        $this->assertNotSame('', $largeurDuModule, 'The module no longer declares the card width.');
+        $this->assertMatchesRegularExpression('/#galaxyTactical \.gtCard \{[^}]*width: ' . $largeurDuModule . 'px;/', $feuille, 'The card is not as wide in the stylesheet as the module believes: it can leave the map.');
+
+        /* La ligne prete ses cellules a la grille ; le bouton d'envoi herite est masque malgre son style en ligne. */
+        $this->assertMatchesRegularExpression('/\.gtCardBody \.galaxyRow,\s*[^{]*\{\s*display: contents;/', $feuille, 'The moved row is a box again: its cells cannot take their place in the card grid.');
+        $this->assertMatchesRegularExpression('/#sendExpeditionFleetTemplateFleet \{\s*display: none !important;/', $feuille, 'The legacy send button is shown by an inline style the stylesheet no longer beats: two Expedition buttons.');
+
+        /* Les deux ressources de Codex copiees pour ces fiches. */
+        $this->assertFileExists(public_path('img/galaxy-tactical/empty-position-preview.svg'), 'The translucent sphere of a free position is missing.');
+        $this->assertFileExists(public_path('img/galaxy-tactical/planet-card-transport.svg'), 'The transport icon is missing.');
+        $this->assertStringContainsString("'/img/galaxy-tactical/empty-position-preview.svg'", $module, 'The free position lost its translucent sphere.');
+
+        /* Le focus revient sur le corps quand le joueur ferme la fiche (croix, Echap). */
+        $this->assertStringContainsString("deselectionner(carte, true);", $module, 'Closing the card no longer returns the focus to the selected body.');
+        $this->assertStringContainsString('bloc.focus();', $module);
     }
 
     /**
