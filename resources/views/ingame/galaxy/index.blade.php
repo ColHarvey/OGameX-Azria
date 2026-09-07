@@ -329,6 +329,9 @@
                          data-loca-fleets="{{ __('t_ingame.galaxy.tactical_fleets') }}"
                          data-loca-edge="{{ __('t_ingame.galaxy.tactical_edge') }}"
                          data-loca-return="{{ __('t_ingame.galaxy.tactical_return') }}"
+                         data-loca-moon="{{ __('t_ingame.galaxy.tactical_moon') }}"
+                         data-loca-debris="{{ __('t_ingame.galaxy.tactical_debris') }}"
+                         data-loca-deep="{{ __('t_ingame.galaxy.tactical_deep_space') }}"
                          aria-label="{{ __('t_ingame.galaxy.tactical_map') }}"></div>
                     <div class="galaxyRow ctGalaxyHead headBold">
                         <div class="galaxyCell span1-2">{{ __('t_ingame.galaxy.planet_col') }}</div>

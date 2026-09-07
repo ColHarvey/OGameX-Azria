@@ -216,18 +216,65 @@ class GalaxyTacticalMapTest extends UnitTestCase
     }
 
     /**
-     * Le creneau d'espace profond n'est pas masque.
+     * **L'espace profond est une nebuleuse qui porte la ligne historique**, et rien ne se perd.
      *
-     * Il portait la regle de masquage des lignes du tableau, et la carte ne le dessine pas : les
-     * debris d'expedition et le modele de flotte d'expedition avaient purement disparu du jeu.
+     * Trois etats successifs : la bande de la position 16 masquee sans rien a la place (deux
+     * fonctions perdues), puis visible sous la carte, puis — consigne de Codex — remplacee par une
+     * nebuleuse cliquable dont la fiche deplace `#galaxyRow16` avec son bouton d'expedition, son
+     * choix de flotte et ses debris. Ce temoin exige les trois moities a la fois : la bande masquee
+     * **avec le prefixe d'identifiant** (sinon la regle perd, cf. le tableau), la nebuleuse posee
+     * sous `data-position="16"` (sinon la fiche ne trouve pas la ligne), et le point des
+     * trajectoires d'expedition pris sur la nebuleuse et non sur une seizieme orbite.
      */
-    public function testTheDeepSpaceSlotIsNeverHidden(): void
+    public function testTheDeepSpaceNebulaCarriesTheHistoricalSlot(): void
     {
-        $this->assertStringNotContainsString(
-            'gtReplaced > .expeditionDebrisSlotBoxRow',
-            $this->feuille(),
-            'The deep space slot is hidden again: expedition debris and the expedition fleet template are unreachable, and the map does not draw them either.'
+        $feuille = $this->feuille();
+        $module = $this->module();
+
+        $this->assertStringContainsString(
+            '#galaxyContent .galaxyTable.gtReplaced > .expeditionDebrisSlotBoxRow',
+            $feuille,
+            'The historical deep-space strip is no longer hidden under the id prefix: it would show twice, or not hide at all.'
         );
+
+        $this->assertStringContainsString(
+            "bloc.setAttribute('data-position', String(POSITION_ESPACE_PROFOND));",
+            $module,
+            'The nebula no longer carries data-position 16: the card cannot find #galaxyRow16, and expedition, fleet template and debris are lost.'
+        );
+
+        $this->assertStringContainsString(
+            'return pointDeLaNebuleuse();',
+            $module,
+            'Expedition trajectories no longer end on the nebula: position 16 goes back through the orbit geometry.'
+        );
+
+        $this->assertFileExists(
+            public_path('img/galaxy-tactical/deep-space-nebula-v2.png'),
+            'The nebula sprite is missing.'
+        );
+
+        $this->assertStringContainsString(
+            'deep-space-nebula-v2.png',
+            $feuille,
+            'The stylesheet no longer paints the nebula.'
+        );
+
+        /* L'alpha du PNG est reel : le premier pixel du coin est transparent. */
+        $image = imagecreatefrompng(public_path('img/galaxy-tactical/deep-space-nebula-v2.png'));
+        $this->assertNotFalse($image);
+        $this->assertGreaterThanOrEqual(120, (imagecolorat($image, 0, 0) >> 24) & 0x7F, 'The nebula PNG lost its transparency: a rectangle of space would sit on the map.');
+
+        $this->assertMatchesRegularExpression(
+            '/@keyframes gtNebulaPulse/',
+            $feuille,
+            'The nebula pulsation is gone.'
+        );
+
+        foreach (['fr', 'en'] as $langue) {
+            $lignes = require resource_path('lang/' . $langue . '/t_ingame.php');
+            $this->assertArrayHasKey('tactical_deep_space', $lignes['galaxy'], 'The deep-space label is missing in ' . $langue . '.');
+        }
     }
 
     /**
@@ -245,7 +292,7 @@ class GalaxyTacticalMapTest extends UnitTestCase
         $module = $this->module();
 
         $this->assertStringContainsString(
-            'corps.appendChild(ligne)',
+            'contenant.appendChild(ligne)',
             $module,
             'The module no longer moves the table row into the card.'
         );
@@ -538,6 +585,131 @@ class GalaxyTacticalMapTest extends UnitTestCase
             '/#galaxyTactical \.gtFleetLayer \{[^}]*pointer-events:\s*none/',
             $this->feuille(),
             'The fleet layer catches pointer events: every trajectory that crosses a planet makes it unclickable.'
+        );
+    }
+
+    /**
+     * **Un seul soleil, au centre des orbites, et des sprites entiers.** Les deux defauts de la
+     * capture de Keven.
+     *
+     * Le fond v2 du pack ne peint ni soleil ni orbites (mesure : un pixel au-dessus du seuil de
+     * luminance) ; le module dessine le soleil **une fois**, depuis `centre()` — le meme point que
+     * les orbites. La premiere version le posait a 50 % / 50 % de la boite, quatorze pixels plus bas,
+     * et le fond v1 en peignait un autre : deux astres. Et une boite minimale de 22 px sur des
+     * sprites de 17 px montrait cinq pixels de l'icone voisine — des icones « empilees ».
+     */
+    public function testOneSunAndWholeSprites(): void
+    {
+        $module = $this->module();
+
+        $this->assertSame(
+            1,
+            substr_count($module, "element('div', 'gtStar')"),
+            'The sun must be drawn exactly once by the module: the v2 background paints none.'
+        );
+
+        $this->assertStringContainsString(
+            "etoile.style.top = Math.round(c.y) + 'px';",
+            $module,
+            'The sun is no longer placed from centre(): it would sit off the orbits again.'
+        );
+
+        /*
+         * Cree ne veut pas dire pose. Une mutation qui gardait la creation et retirait l'ajout
+         * survivait a ce temoin : la carte n'avait plus de soleil et rien ne rougissait.
+         */
+        $this->assertStringContainsString(
+            'carte.appendChild(etoile);',
+            $module,
+            'The sun is created but never appended to the map: no sun is drawn, silently.'
+        );
+
+        $feuille = $this->feuille();
+
+        $this->assertStringContainsString(
+            'galaxy-tactical-background-v2.jpg',
+            $feuille,
+            'The map no longer uses the v2 background: v1 paints its own sun and orbits, doubling the drawn ones.'
+        );
+
+        $this->assertFileExists(
+            public_path('img/galaxy-tactical/galaxy-tactical-background-v2.jpg'),
+            'The v2 background file is missing: the map would show the panel colour only.'
+        );
+
+        $this->assertDoesNotMatchRegularExpression(
+            '/#galaxyTactical \.gtStar\s*\{[^}]*top:\s*50%/',
+            $feuille,
+            'The .gtStar rule fixes top: 50% again: that is the box centre, fourteen pixels below the orbit centre.'
+        );
+
+        $this->assertDoesNotMatchRegularExpression(
+            '/\.gtCardBody \.cellAction > \* \{[^}]*min-(width|height)/',
+            $feuille,
+            'The card forces a minimum box on action icons: 17px sprite strips would bleed into the next icon again.'
+        );
+    }
+
+    /**
+     * Les quatre constats de Codex qui etaient des defauts, chacun epingle par le trait de code qui
+     * le ferme.
+     */
+    public function testTheFourCodexFindingsAreClosed(): void
+    {
+        $module = $this->module();
+
+        // 1. Une reponse tardive de l'ancien systeme ne remplace pas celui qui est affiche.
+        $this->assertStringContainsString(
+            'if (courant && (courant.galaxie !== galaxie || courant.systeme !== systeme)) {',
+            $module,
+            'A late system response is rendered without checking the displayed system: switching fast can show the previous one.'
+        );
+
+        // 2. Lune et debris sont des cibles distinctes, et la fiche dit lequel est choisi.
+        $this->assertStringContainsString("cibleDistincte(creneau, 'moon'", $module, 'The moon is no longer a distinct target: clicking it selects the planet.');
+        $this->assertStringContainsString("cibleDistincte(champ, 'debris'", $module, 'The debris field is no longer a distinct target.');
+        $this->assertStringContainsString("f.setAttribute('data-corps', corps);", $module, 'The card no longer says which body is selected.');
+
+        // 3. Les trajectoires suivent le type de la cible, et l'espace profond a son point.
+        $this->assertStringContainsString('pointDeCorps(mouvement.to.position, mouvement.to.type)', $module, 'Trajectories ignore the destination type again: a mission to a moon lands on the planet.');
+        $this->assertStringContainsString('Number(position) === POSITION_ESPACE_PROFOND', $module, 'Position 16 goes through the orbit geometry again.');
+
+        // 4. Un redessin du meme systeme ne ferme pas la fiche.
+        $this->assertStringContainsString('restaurerLaSelection(carte, aRestaurer);', $module, 'A live redraw closes the open card again.');
+        $this->assertStringContainsString('var aRestaurer = memeSysteme && deplacee', $module, 'The selection is not remembered before the redraw.');
+
+        foreach (['fr', 'en'] as $langue) {
+            $lignes = require resource_path('lang/' . $langue . '/t_ingame.php');
+
+            foreach (['tactical_moon', 'tactical_debris'] as $clef) {
+                $this->assertArrayHasKey($clef, $lignes['galaxy'], 'The label ' . $clef . ' is missing in ' . $langue . '.');
+            }
+        }
+    }
+
+    /**
+     * **L'enveloppe est posee des l'execution du module, pas a `DOMContentLoaded`.**
+     *
+     * Le premier chargement du systeme part d'un script du corps de la page, avant l'evenement, et
+     * le rendu herite passe la fonction par valeur au `$.post`. Une enveloppe posee trop tard laisse
+     * ce premier appel capturer la fonction nue : carte vide jusqu'au premier changement de systeme
+     * — le defaut que Keven a vu. `renderContentGalaxy` est une declaration hissee du meme script
+     * concatene : elle existe deja quand ce module s'execute.
+     */
+    public function testTheMapWrapsTheLegacyRenderImmediately(): void
+    {
+        $module = $this->module();
+
+        $this->assertMatchesRegularExpression(
+            '/^    brancher\(\);\R\R    if \(document\.readyState === \'loading\'\) \{/m',
+            $module,
+            'The module waits for DOMContentLoaded before wrapping renderContentGalaxy: the first system load captures the bare function and the map stays empty until the player changes system.'
+        );
+
+        $this->assertStringNotContainsString(
+            "    } else {\n        brancher();\n    }",
+            str_replace("\r\n", "\n", $module),
+            'The wrap is back to deferred-or-immediate: the first load can still capture the bare function.'
         );
     }
 

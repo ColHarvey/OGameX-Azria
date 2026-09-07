@@ -31,7 +31,8 @@
     width: 656px;
     height: 610px;
     overflow: hidden;
-    background: var(--gt-fond) url("/img/galaxy-tactical/galaxy-tactical-background-v1.jpg") center / cover no-repeat;
+    /* Le fond v2 du pack : ni soleil ni orbites peints — le module dessine les deux, une fois. */
+    background: var(--gt-fond) url("/img/galaxy-tactical/galaxy-tactical-background-v2.jpg") center / cover no-repeat;
     border: 1px solid #1b2f42;
     box-sizing: border-box;
     color: var(--gt-texte);
@@ -42,13 +43,17 @@
  * L'etoile du systeme. Elle n'est pas un objet du jeu : aucune action, aucun rang de tabulation.
  * `pointer-events: none` l'empeche de voler le curseur d'une planete proche.
  */
+/*
+ * Le soleil, une fois. Le module le pose depuis `centre()` — le meme point que les orbites — par
+ * `left`/`top` en ligne ; cette regle ne fixe donc **aucune** position : un `top: 50%` ici
+ * tombait quatorze pixels sous le centre des orbites, et avec un fond qui peignait le sien on
+ * voyait deux astres. Le fond v2 n'en peint plus.
+ */
 #galaxyTactical .gtStar {
     position: absolute;
-    left: 50%;
-    top: 50%;
     width: 46px;
     height: 46px;
-    margin: -23px 0 0 -23px;
+    transform: translate(-50%, -50%);
     border-radius: 50%;
     background: radial-gradient(circle, #fff4d6 0%, #ffb347 38%, #e0651f 62%, rgba(224, 101, 31, 0) 78%);
     pointer-events: none;
@@ -316,6 +321,31 @@
     animation: gtMarkerPulse 2.4s ease-in-out infinite;
 }
 
+/*
+ * ## Le corps choisi
+ *
+ * La lune et les debris sont des cibles a part (`data-corps`) : elles prennent le focus et se
+ * signalent au survol. La fiche porte le corps qu'elle decrit, et la cellule correspondante est
+ * mise en avant — le joueur voit sur quoi ses actions porteront.
+ */
+#galaxyTactical [data-corps] {
+    cursor: pointer;
+    border-radius: 50%;
+}
+
+#galaxyTactical [data-corps]:hover,
+#galaxyTactical [data-corps]:focus-visible {
+    outline: 1px solid #43c9e8;
+    outline-offset: 2px;
+}
+
+#galaxyContent #galaxyTactical .gtCard[data-corps="moon"] .gtCardBody .cellMoon,
+#galaxyContent #galaxyTactical .gtCard[data-corps="debris"] .gtCardBody .cellDebris {
+    outline: 1px solid #43c9e8;
+    outline-offset: 1px;
+    border-radius: 3px;
+}
+
 /* Une animation qui ne demande rien a personne : celui qui a dit non ne la voit pas. */
 @media (prefers-reduced-motion: reduce) {
     #galaxyTactical * {
@@ -345,7 +375,8 @@
  * deployee. C'est la troisieme fois dans ce depot qu'une regle d'identite bat une regle de classe.
  */
 #galaxyContent .galaxyTable.gtReplaced > .ctContentRow,
-#galaxyContent .galaxyTable.gtReplaced > .headBold {
+#galaxyContent .galaxyTable.gtReplaced > .headBold,
+#galaxyContent .galaxyTable.gtReplaced > .expeditionDebrisSlotBoxRow {
     display: none;
 }
 
@@ -355,11 +386,58 @@
 }
 
 /*
- * **Le creneau d'espace profond reste visible.** Il portait la meme regle de masquage, et il
- * la portait a tort : ce n'est pas une position en orbite mais un panneau a part — debris
- * d'expedition et modele de flotte d'expedition. La carte ne le dessine pas et ne le
- * remplace pas ; le masquer supprimait purement et simplement deux fonctions du jeu.
+ * **Le creneau d'espace profond est masque en vue tactique, parce que la nebuleuse le porte.**
+ * Une premiere version le masquait sans rien offrir a la place — deux fonctions perdues — puis le
+ * rendait visible sous la carte. Desormais la fiche de la nebuleuse deplace `#galaxyRow16` avec
+ * son bouton d'expedition, son choix de flotte et ses debris : rien n'est perdu, et la bande
+ * historique n'a plus a s'afficher. Le prefixe d'identifiant est ce qui fait gagner la regle.
  */
+
+/*
+ * ## La nebuleuse d'espace profond
+ *
+ * Un PNG a transparence reelle (jamais converti en JPEG), pose en fond d'un bloc de 100 x 66 ; le
+ * libelle est du texte HTML sous l'image. Halo au survol et au focus, pulsation douce de six
+ * secondes sur l'opacite — jamais sur la position — coupee par la regle de reduction des
+ * mouvements plus bas.
+ */
+#galaxyTactical .gtDeepSpace {
+    flex-direction: column;
+    gap: 2px;
+    width: 110px;
+}
+
+#galaxyTactical .gtNebula {
+    display: block;
+    width: 100px;
+    height: 66px;
+    background: url("/img/galaxy-tactical/deep-space-nebula-v2.png") center / contain no-repeat;
+    animation: gtNebulaPulse 6s ease-in-out infinite;
+}
+
+#galaxyTactical .gtDeepSpace:hover .gtNebula,
+#galaxyTactical .gtDeepSpace:focus-visible .gtNebula,
+#galaxyTactical .gtDeepSpace.gtSelected .gtNebula {
+    filter: drop-shadow(0 0 8px rgba(67, 201, 232, 0.85));
+}
+
+#galaxyTactical .gtDeepSpace .gtName {
+    color: #7fa9b7;
+    white-space: nowrap;
+}
+
+@keyframes gtNebulaPulse {
+    0%, 100% { opacity: 0.85; }
+    50% { opacity: 1; }
+}
+
+/* La boite historique, une fois dans la fiche : elle s'empile, ses controles gardent leur style. */
+#galaxyContent #galaxyTactical .gtCardBody .expeditionDebrisSlotBox {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: auto;
+}
 
 /*
  * ## La bascule Vue tactique / Vue liste
@@ -535,8 +613,12 @@
     border-top: 1px solid #12384a;
 }
 
+/*
+ * **Taille intrinseque, jamais une boite minimale.** Ces icones sont des sprites de 17 px decoupes
+ * dans une bande ; une boite de 22 px montrait cinq pixels de l'icone voisine, et les icones
+ * paraissaient empilees. L'espace entre elles vient de `gap`, pas de leur boite.
+ */
 #galaxyContent #galaxyTactical .gtCardBody .cellAction > * {
     flex: 0 0 auto;
-    min-width: 22px;
-    min-height: 22px;
+    position: static;
 }

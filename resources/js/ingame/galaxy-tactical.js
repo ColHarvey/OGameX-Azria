@@ -350,7 +350,15 @@
         f.style.top = Math.max(FICHE_MARGE, Math.min(y, hauteurUtile - f.offsetHeight)) + 'px';
     }
 
-    function choisir(carte, bloc) {
+    /* Un corps secondaire — lune, debris — devient une cible clavier et souris a part entiere. */
+    function cibleDistincte(noeud, corps, intitule) {
+        noeud.setAttribute('data-corps', corps);
+        noeud.setAttribute('role', 'button');
+        noeud.setAttribute('tabindex', '0');
+        noeud.setAttribute('aria-label', intitule);
+    }
+
+    function choisir(carte, bloc, corps) {
         var position = Number(bloc.getAttribute('data-position'));
         var ligne = document.getElementById('galaxyRow' + position);
         var f = fiche(carte);
@@ -359,8 +367,10 @@
             return;
         }
 
-        /* Recliquer la position deja ouverte la referme : le meme geste dans les deux sens. */
-        if (deplacee && deplacee.noeud === ligne) {
+        corps = corps || 'planet';
+
+        /* Recliquer le corps deja ouvert le referme ; cliquer un autre corps de la meme position bascule. */
+        if (deplacee && deplacee.noeud === ligne && f.getAttribute('data-corps') === corps) {
             deselectionner(carte);
 
             return;
@@ -379,9 +389,12 @@
             coords.textContent = bloc.getAttribute('data-coords') || '';
         }
 
-        var corps = f.querySelector('.gtCardBody');
-        deplacee = { noeud: ligne, parent: ligne.parentNode, suivant: ligne.nextSibling };
-        corps.appendChild(ligne);
+        /* La fiche dit quel corps est choisi ; la feuille met sa cellule en avant. */
+        f.setAttribute('data-corps', corps);
+
+        var contenant = f.querySelector('.gtCardBody');
+        deplacee = { noeud: ligne, parent: ligne.parentNode, suivant: ligne.nextSibling, position: position, corps: corps };
+        contenant.appendChild(ligne);
 
         f.hidden = false;
         bloc.classList.add('gtSelected');
@@ -393,6 +406,13 @@
      * rendu, et des gestionnaires poses sur les corps disparaitraient avec eux. Poses une fois sur
      * le contenant, ils survivent a tous les rendus.
      */
+    /* Le corps vise par un clic ou un focus : la lune, les debris, ou la planete par defaut. */
+    function corpsClique(cible) {
+        var secondaire = cible && cible.closest ? cible.closest('[data-corps]') : null;
+
+        return secondaire ? secondaire.getAttribute('data-corps') : 'planet';
+    }
+
     function armerLaSelection(carte) {
         if (carte.gtArmee) {
             return;
@@ -409,7 +429,7 @@
             var bloc = evenement.target.closest ? evenement.target.closest('.gtBody') : null;
 
             if (bloc) {
-                choisir(carte, bloc);
+                choisir(carte, bloc, corpsClique(evenement.target));
             }
         });
 
@@ -429,7 +449,7 @@
             /* Un element qui annonce `role="button"` doit repondre a Entree et a Espace. */
             if (evenement.key === 'Enter' || evenement.key === ' ' || evenement.key === 'Spacebar') {
                 evenement.preventDefault();
-                choisir(carte, bloc);
+                choisir(carte, bloc, corpsClique(evenement.target));
             }
         });
     }
@@ -541,12 +561,59 @@
         return { x: c.x + (dx / longueur) * bord * (LARGEUR / (HAUTEUR - PIED)), y: c.y + (dy / longueur) * bord };
     }
 
-    function extremites(mouvement, galaxie, systeme) {
-        var partIci = mouvement.from.galaxy === galaxie && mouvement.from.system === systeme;
-        var arriveIci = mouvement.to.galaxy === galaxie && mouvement.to.system === systeme;
+    /*
+     * Le point d'un corps selon son type — constat de Codex : une mission vers la lune arrivait
+     * au meme pixel que vers la planete, et la position 16 passait par le calcul des orbites.
+     *
+     * La lune est dessinee a droite de sa planete (`.gtMoonSlot`), les debris sous elle ; les
+     * decalages suivent la mise en page de `poser()`. L'espace profond n'a pas d'orbite : son
+     * point est au bas de la carte, au-dessus du pied, la ou son bandeau se trouve.
+     */
+    var TYPE_DEBRIS = 2;
+    var TYPE_LUNE = 3;
+    var POSITION_ESPACE_PROFOND = 16;
 
-        var depart = partIci ? pointDe(mouvement.from.position) : porteDeBord(mouvement.to.position);
-        var arrivee = arriveIci ? pointDe(mouvement.to.position) : porteDeBord(mouvement.from.position);
+    /*
+     * La nebuleuse d'espace profond : coin inferieur droit, au-dela des orbites, sans chevaucher la
+     * position 15 (rayon maximal 310 x 0,58 = 180 px sous le centre, soit y = 474 au plus bas).
+     * Ces deux nombres sont son centre ; les trajectoires d'expedition y aboutissent.
+     */
+    var NEBULEUSE_LARGEUR = 100;
+    var NEBULEUSE_HAUTEUR = 66;
+    var NEBULEUSE_MARGE = 10;
+
+    function pointDeLaNebuleuse() {
+        return {
+            x: LARGEUR - NEBULEUSE_MARGE - NEBULEUSE_LARGEUR / 2,
+            y: HAUTEUR - PIED - NEBULEUSE_MARGE - NEBULEUSE_HAUTEUR / 2 - 14,
+            aDroite: true
+        };
+    }
+
+    function pointDeCorps(position, type) {
+        if (Number(position) === POSITION_ESPACE_PROFOND || Number(position) > POSITIONS) {
+            return pointDeLaNebuleuse();
+        }
+
+        var p = pointDe(position);
+
+        if (Number(type) === TYPE_LUNE) {
+            return { x: p.x + (p.aDroite ? -26 : 26), y: p.y, aDroite: p.aDroite };
+        }
+
+        if (Number(type) === TYPE_DEBRIS) {
+            return { x: p.x, y: p.y + 20, aDroite: p.aDroite };
+        }
+
+        return p;
+    }
+
+    function extremites(mouvement, galaxie, systeme) {
+        var partIci = Number(mouvement.from.galaxy) === galaxie && Number(mouvement.from.system) === systeme;
+        var arriveIci = Number(mouvement.to.galaxy) === galaxie && Number(mouvement.to.system) === systeme;
+
+        var depart = partIci ? pointDeCorps(mouvement.from.position, mouvement.from.type) : porteDeBord(mouvement.to.position);
+        var arrivee = arriveIci ? pointDeCorps(mouvement.to.position, mouvement.to.type) : porteDeBord(mouvement.from.position);
 
         return { depart: depart, arrivee: arrivee, partIci: partIci, arriveIci: arriveIci };
     }
@@ -716,11 +783,25 @@
             return;
         }
 
+        /*
+         * **Une reponse tardive ne remplace jamais le systeme affiche.** Le joueur a pu changer de
+         * systeme entre la demande et la reponse ; on compare avant de rendre. La couche des
+         * flottes avait ce garde-fou, la photographie non — constat de Codex.
+         */
         window.jQuery.post(galaxyContentLink, {
             galaxy: galaxie,
             system: systeme,
             _token: typeof token !== 'undefined' ? token : undefined
-        }, window.renderContentGalaxy, 'json');
+        }, function (reponse) {
+            var carte = document.getElementById('galaxyTactical');
+            var courant = carte && carte.gtSysteme ? carte.gtSysteme : null;
+
+            if (courant && (courant.galaxie !== galaxie || courant.systeme !== systeme)) {
+                return;
+            }
+
+            window.renderContentGalaxy(reponse);
+        }, 'json');
     }
 
     /*
@@ -815,6 +896,49 @@
     });
 
     /*
+     * ## L'espace profond
+     *
+     * La position 16 n'est pas une orbite : c'est une nebuleuse dans le coin inferieur droit, et
+     * son libelle est du HTML traduit, hors de l'image. Le bloc est un corps comme les autres
+     * pour la selection (`data-position="16"`) : la fiche deplace `#galaxyRow16`, la boite
+     * historique qui porte le bouton d'expedition, le choix de flotte et les debris — tous
+     * raccordes par le rendu herite. Rien n'est recode, aucun portail n'est ajoute.
+     */
+    function poserLaNebuleuse(carte, galaxie, systeme) {
+        var p = pointDeLaNebuleuse();
+        var bloc = element('div', 'gtBody gtDeepSpace');
+        var nuage = element('span', 'gtNebula');
+        var etiquette = element('span', 'gtName');
+        var libelle = locaDeLaCarte(carte, 'deep', 'Espace profond') + ' \u00b7 ' + POSITION_ESPACE_PROFOND;
+
+        etiquette.textContent = libelle;
+        bloc.style.left = Math.round(p.x) + 'px';
+        bloc.style.top = Math.round(p.y) + 'px';
+        bloc.setAttribute('data-position', String(POSITION_ESPACE_PROFOND));
+        bloc.setAttribute('data-titre', libelle);
+        bloc.setAttribute('data-coords', '[' + galaxie + ':' + systeme + ':' + POSITION_ESPACE_PROFOND + ']');
+        bloc.setAttribute('tabindex', '0');
+        bloc.setAttribute('role', 'button');
+        bloc.setAttribute('aria-label', libelle);
+        bloc.appendChild(nuage);
+        bloc.appendChild(etiquette);
+        carte.appendChild(bloc);
+    }
+
+    /* La fiche rouvre sur le meme corps apres un redessin du meme systeme, avec la ligne rafraichie. */
+    function restaurerLaSelection(carte, memoire) {
+        if (!memoire) {
+            return;
+        }
+
+        var bloc = carte.querySelector('.gtBody[data-position="' + memoire.position + '"]');
+
+        if (bloc) {
+            choisir(carte, bloc, memoire.corps);
+        }
+    }
+
+    /*
      * L'etat des filtres survit au redessin.
      *
      * `filterToggle()` pose `filtered_filter_empty` au moment du clic, sur les elements presents
@@ -860,17 +984,34 @@
         }
 
         /*
-         * La ligne rentre **avant** que la carte soit videe. Le systeme a change : la position
-         * choisie n'a plus de sens, et une ligne laissee dans la fiche y afficherait les donnees
-         * du nouveau systeme sous l'ancienne selection.
+         * La ligne rentre **avant** que la carte soit videe, et la selection est memorisee : un
+         * redessin du **meme** systeme — un evenement en direct, une colonie voisine — ne doit pas
+         * fermer la fiche que le joueur consulte (constat de Codex). Un changement de systeme,
+         * lui, la ferme : la position choisie n'y a plus de sens.
          */
+        var memeSysteme = carte.gtSysteme
+            && carte.gtSysteme.galaxie === Number(systeme.galaxy)
+            && carte.gtSysteme.systeme === Number(systeme.system);
+        var aRestaurer = memeSysteme && deplacee ? { position: deplacee.position, corps: deplacee.corps } : null;
+
         deselectionner(carte);
 
         carte.innerHTML = '';
         armerLaSelection(carte);
         armerLaBascule(carte);
         dessinerOrbites(carte);
-        carte.appendChild(element('div', 'gtStar'));
+        /*
+         * **Un soleil, dessine ici, au meme centre que les orbites.** Le fond v2 du pack n'en
+         * porte aucun — mesure : un seul pixel au-dessus du seuil de luminance. La premiere
+         * version le posait a 50 % / 50 % de la boite, quatorze pixels sous le centre de la
+         * geometrie (le pied de 22 px n'entre pas dans le calcul des orbites) : deux astres a
+         * l'ecran avec le fond v1, qui en peignait un. Le point vient de `centre()`, comme tout.
+         */
+        var c = centre();
+        var etoile = element('div', 'gtStar');
+        etoile.style.left = Math.round(c.x) + 'px';
+        etoile.style.top = Math.round(c.y) + 'px';
+        carte.appendChild(etoile);
 
         var parPosition = {};
 
@@ -916,14 +1057,23 @@
              * gardent la texture du serveur : une lune n'a que deux etats et un champ de debris une
              * seule variante, donc aucune identite par corps ne se perd.
              */
+            /*
+             * **La lune et les debris sont des cibles a part.** Chacun prend le focus et repond au
+             * clic pour lui-meme : la fiche s'ouvre sur la meme position, mais dit quel corps est
+             * choisi et met sa cellule en avant. Avant, le clic remontait au bloc de la planete et
+             * la lune n'etait jamais choisie — constat de Codex.
+             */
             if (lune) {
                 var creneau = element('span', 'gtMoonSlot');
                 creneau.appendChild(element('span', 'gtMoon' + (lune.isDestroyed ? ' gtDestroyed' : '')));
+                cibleDistincte(creneau, 'moon', locaDeLaCarte(carte, 'moon', 'Lune'));
                 contenu.push(creneau);
             }
 
             if (debris) {
-                contenu.push(element('span', 'gtDebris'));
+                var champ = element('span', 'gtDebris');
+                cibleDistincte(champ, 'debris', locaDeLaCarte(carte, 'debris', 'Debris'));
+                contenu.push(champ);
             }
 
             var nom = planete.planetName || '';
@@ -940,7 +1090,9 @@
             corpsBloc.setAttribute('data-coords', coordonneesDe(ligne, position));
         }
 
+        poserLaNebuleuse(carte, Number(systeme.galaxy), Number(systeme.system));
         appliquerLesFiltres(carte);
+        restaurerLaSelection(carte, aRestaurer);
         demarrerLaCoucheFlottes(carte, Number(systeme.galaxy), Number(systeme.system));
 
         var pied = element('div', 'gtFooter');
@@ -978,9 +1130,18 @@
         window.renderContentGalaxy = enveloppe;
     }
 
+    /*
+     * **Envelopper des maintenant, pas a `DOMContentLoaded`.** Le premier chargement du systeme
+     * est lance par un script du corps de la page, qui s'execute a la lecture, avant
+     * `DOMContentLoaded` ; et le rendu herite passe la fonction par valeur au `$.post`. Attendre
+     * l'evenement laissait ce premier appel capturer la fonction nue : carte vide jusqu'au premier
+     * changement de systeme. `renderContentGalaxy` est une declaration hissee du meme script
+     * concatene, donc deja definie ici. L'appel a `DOMContentLoaded` reste en secours ; il ne fait
+     * rien si l'enveloppe est deja posee.
+     */
+    brancher();
+
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', brancher);
-    } else {
-        brancher();
     }
 })();
