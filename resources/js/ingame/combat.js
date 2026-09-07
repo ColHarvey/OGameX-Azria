@@ -482,6 +482,21 @@
         }
     }
 
-    ecouter();
+    /*
+     * **L'abonnement attend que la page ait declare ses variables.**
+     *
+     * Ce fichier est concatene dans le bundle, que `@vite` charge dans l'en-tete ; `playerId` et
+     * `window.Echo`, eux, naissent plus bas dans le corps. Appele ici meme, `ecouter()` ne trouvait
+     * ni l'un ni l'autre et sortait par sa garde — en silence. Les pertes « en direct » venaient
+     * donc du sondage de secours, jamais du websocket, et rien ne le disait.
+     *
+     * `planifier()` n'a pas ce besoin : il ne lit aucune de ces variables.
+     */
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', ecouter);
+    } else {
+        ecouter();
+    }
+
     planifier();
 })();

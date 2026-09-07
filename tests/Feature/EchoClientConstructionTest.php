@@ -95,6 +95,53 @@ class EchoClientConstructionTest extends TestCase
     }
 
     /**
+     * Les reglages du temps reel sont declares avant le bundle qui les lit.
+     *
+     * **C'est le defaut qui a reellement bloque**, et il est d'ordre, pas de logique. `echo.js`
+     * annoncait depuis toujours « expected to be set in the main Blade layout before this script
+     * loads » ; personne ne l'avait verifie. `@vite` chargeait le bundle dans l'en-tete et les
+     * quatre variables etaient declarees dans le corps, plusieurs centaines de lignes plus bas.
+     *
+     * `echo.js` sortait alors a sa premiere ligne, **en silence**, et les trois consommateurs se
+     * taisaient a leur tour. Aucun essai ne pouvait le voir : le code etait juste, seule sa place
+     * dans la page etait fausse.
+     */
+    public function testTheRealtimeSettingsAreDeclaredBeforeTheBundle(): void
+    {
+        $gabarit = (string)file_get_contents(base_path('resources/views/ingame/layouts/main.blade.php'));
+
+        $reglages = strpos($gabarit, 'var reverbAppKey');
+        $bundle = strpos($gabarit, "@vite(['resources/css/ingame.css'");
+
+        $this->assertNotFalse($reglages, 'The real-time settings are gone from the layout: the client can never be configured.');
+        $this->assertNotFalse($bundle, 'The bundle is no longer loaded by @vite: this guard no longer measures anything.');
+
+        $this->assertLessThan(
+            $bundle,
+            $reglages,
+            'The real-time settings are declared after the bundle that reads them: echo.js exits silently and chat, combat and the mail badge all stay mute.'
+        );
+    }
+
+    /**
+     * Le combat attend la page avant de s'abonner.
+     *
+     * Meme famille que le defaut ci-dessus, autre variable : `combat.js` lisait `playerId` au
+     * chargement de l'en-tete, ou il n'existe pas encore. Il sortait par sa garde, et son sondage
+     * de secours donnait l'illusion d'un temps reel qui n'avait jamais eu lieu.
+     */
+    public function testTheCombatSubscriptionWaitsForThePage(): void
+    {
+        $source = (string)file_get_contents(base_path('resources/js/ingame/combat.js'));
+
+        $this->assertStringContainsString(
+            "document.addEventListener('DOMContentLoaded', ecouter)",
+            $source,
+            'The combat subscription runs at bundle time, before playerId exists: it would silently fall back to polling.'
+        );
+    }
+
+    /**
      * Le code du fichier, ses commentaires retires.
      *
      * **Un garde qui lit la prose se trompe de cible.** Le commentaire de `echo.js` cite

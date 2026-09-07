@@ -47,6 +47,19 @@
 
     <title>{{ config('app.name', 'Laravel') }}</title>
 
+    {{-- **Ces valeurs precedent le bundle, et ce n'est pas cosmetique.** `echo.js` y est
+         concatene et s'execute des le chargement de l'en-tete : declarees plus bas, elles
+         n'existaient pas encore, le client temps reel sortait en silence, et le chat, les
+         pertes de combat et la pastille de courrier restaient muets. Lues par `config()` et
+         jamais par `env()` : sous `config:cache`, `env()` ne rend que l'environnement du
+         conteneur, vide. --}}
+    <script type="text/javascript">
+        var reverbAppKey = "{{ config('broadcasting.connections.reverb.key', '') }}";
+        var reverbHost = "{{ config('broadcasting.connections.reverb.client.host', 'localhost') }}";
+        var reverbPort = "{{ config('broadcasting.connections.reverb.client.port', '8080') }}";
+        var reverbScheme = "{{ config('broadcasting.connections.reverb.client.scheme', 'http') }}";
+    </script>
+
     @vite(['resources/css/ingame.css', 'resources/js/ingame.js'])
 
     <script type="text/javascript">
@@ -930,12 +943,6 @@
                 var miniFleetLink = "{{ route('fleet.dispatch.sendminifleet') }}";
                 var ogameUrl = "{{ str_replace('/', '\/', URL::to('/')) }}";
                 var startpageUrl = "{{ str_replace('/', '\/', URL::to('/')) }}";
-                // Laravel Reverb / Echo configuration for real-time chat
-                {{-- Lues dans la configuration, jamais par env() : sous config:cache, env() est vide. --}}
-                var reverbAppKey = "{{ config('broadcasting.connections.reverb.key', '') }}";
-                var reverbHost = "{{ config('broadcasting.connections.reverb.client.host', 'localhost') }}";
-                var reverbPort = "{{ config('broadcasting.connections.reverb.client.port', '8080') }}";
-                var reverbScheme = "{{ config('broadcasting.connections.reverb.client.scheme', 'http') }}";
                 var chatUrl = "{{ route('chat.send') }}";
                 var chatHistoryUrl = "{{ route('chat.history') }}";
                 var chatUrlLoadMoreMessages = "{{ route('chat.more') }}";
