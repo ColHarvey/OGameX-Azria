@@ -9,11 +9,14 @@ use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Laravel\Fortify\Contracts\FailedPasswordResetLinkRequestResponse;
+use Laravel\Fortify\Contracts\SuccessfulPasswordResetLinkRequestResponse;
 use Laravel\Fortify\Fortify;
 use OGame\Actions\Fortify\CreateNewUser;
 use OGame\Actions\Fortify\ResetUserPassword;
 use OGame\Actions\Fortify\UpdateUserPassword;
 use OGame\Actions\Fortify\UpdateUserProfileInformation;
+use OGame\Auth\NeutralPasswordResetLinkResponse;
 use OGame\Models\User;
 
 class FortifyServiceProvider extends ServiceProvider
@@ -23,7 +26,20 @@ class FortifyServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        /*
+         * **La demande de lien repond toujours la meme chose.**
+         *
+         * Fortify distinguait « adresse inconnue » de « lien envoye » : n'importe qui pouvait
+         * donc savoir si un compte existe en soumettant une adresse au formulaire de mot de
+         * passe oublie. Les deux contrats pointent desormais vers la meme reponse, mot pour
+         * mot.
+         *
+         * `bind` et non `singleton` : Fortify construit la reponse avec l'issue en parametre
+         * (`app(Contrat::class, ['status' => $status])`), et une instance mise en cache
+         * figerait la premiere issue rencontree pour toutes les suivantes.
+         */
+        $this->app->bind(FailedPasswordResetLinkRequestResponse::class, NeutralPasswordResetLinkResponse::class);
+        $this->app->bind(SuccessfulPasswordResetLinkRequestResponse::class, NeutralPasswordResetLinkResponse::class);
     }
 
     /**

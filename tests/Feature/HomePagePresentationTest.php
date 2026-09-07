@@ -30,6 +30,23 @@ class HomePagePresentationTest extends TestCase
     use RefreshDatabase;
 
     /**
+     * Un visiteur qui arrive sur le site atterrit sur cette page.
+     *
+     * **Le trajet passe par deux redirections**, et il valait la peine de le mesurer plutot que de
+     * le supposer : `/` renvoie en 301 vers `/overview`, qui exige une session, et le garde
+     * d'authentification renvoie alors vers `/login`. C'est donc bien le nouveau design qu'un
+     * inconnu voit en tapant l'adresse du jeu.
+     */
+    public function testAVisitorArrivingAtTheSiteLandsOnThisPage(): void
+    {
+        $reponse = $this->followingRedirects()->get('/');
+
+        $reponse->assertStatus(200);
+        $reponse->assertSee('data-panel="register"', false);
+        $reponse->assertSee('azria-home/v2/home.css', false);
+    }
+
+    /**
      * La page d'accueil s'affiche et porte ses deux formulaires.
      */
     public function testTheHomePageCarriesBothForms(): void
@@ -401,49 +418,58 @@ class HomePagePresentationTest extends TestCase
     }
 
     /**
-     * Une adresse inconnue **se distingue** aujourd'hui d'une adresse connue.
+     * Une adresse inconnue est indistinguable d'une adresse connue.
      *
-     * ## Ce temoin decrit l'etat des lieux, il ne le valide pas
+     * ## Le defaut ferme
      *
-     * Codex signalait qu'un message neutre dans la vue ne protege pas, a lui seul, contre
-     * l'enumeration des comptes. **Mesure faite : la protection n'existe pas.** Une adresse
-     * inconnue recoit « We can't find a user with that email address. » ; une adresse connue ne
-     * recoit aucune erreur. N'importe qui peut donc savoir si un compte existe.
+     * Fortify rendait ses trois issues telles quelles : une adresse inconnue recevait « We can't find
+     * a user with that email address. », une adresse connue n'en recevait aucune. **N'importe qui
+     * pouvait savoir si un compte existe** en soumettant une adresse au formulaire — sur un jeu ou
+     * les pseudonymes sont publics, c'est le premier pas d'une attaque ciblee.
      *
-     * J'avais d'abord annonce l'inverse, sur la foi d'un essai qui employait la mauvaise API et ne
-     * verifiait rien. Ce temoin-ci mesure vraiment.
+     * ## Pourquoi les trois issues, et pas seulement deux
      *
-     * **Pourquoi il epingle l'ecart au lieu de le combler** : uniformiser la reponse change le
-     * comportement du backend, et le perimetre fixe par Keven pour ce chantier est « les pages
-     * d'avant-jeu, rien d'autre ». Le jour ou l'ecart sera comble, cet essai tombera — et son
-     * message dira quoi en faire.
+     * La limitation ne s'applique qu'aux comptes reels : c'est leur jeton precedent qui la declenche.
+     * Masquer la seule adresse inconnue aurait donc laisse « trop de demandes » dire « ce compte
+     * existe », en deux clics au lieu d'un. Le canal se referme entierement ou pas du tout.
      *
-     * Il ne dit rien du temps de reponse, un canal distinct qu'aucun essai d'ici ne mesure
-     * serieusement.
+     * La limitation **fonctionne toujours** — aucun courriel supplementaire ne part. Elle n'est plus
+     * annoncee, voila tout.
+     *
+     * ## Ce que ce temoin ne couvre pas
+     *
+     * Le temps de reponse. Envoyer un courriel prend plus longtemps que ne rien faire, et l'ecart
+     * reste mesurable par qui le cherche. Le fermer demande de sortir l'envoi de la requete : un
+     * travail distinct, non fait, et qu'il serait faux de laisser croire fait.
      */
-    public function testAnUnknownAddressIsStillDistinguishableFromAKnownOne(): void
+    public function testAnUnknownAddressIsIndistinguishableFromAKnownOne(): void
     {
         User::factory()->create(['email' => 'connu@exemple.test']);
 
-        // **Chaque reponse est jugee avant la suivante.** La session est partagee : asserter sur
-        // la premiere apres avoir envoye la seconde revient a lire les erreurs de la seconde.
+        // **Chaque reponse est jugee avant la suivante.** La session est partagee : asserter sur la
+        // premiere apres avoir envoye la seconde revient a lire l'etat laisse par la seconde.
         $connue = $this->post(route('password.email'), ['email' => 'connu@exemple.test']);
         $connue->assertSessionHasNoErrors();
         $codeConnue = $connue->getStatusCode();
+        $phraseConnue = session('status');
 
         $inconnue = $this->post(route('password.email'), ['email' => 'jamais-vu@exemple.test']);
 
         $this->assertSame(
             $codeConnue,
             $inconnue->getStatusCode(),
-            'The two answers now differ by status code as well: the leak got wider, not narrower.'
+            'A known and an unknown address answer with different status codes: the accounts can be enumerated.'
         );
 
-        $inconnue->assertSessionHasErrors(
-            [],
-            null,
-            'The unknown address no longer draws an error — the enumeration gap is closed. Good news:'
-            . ' delete this test and say so, rather than keeping a guard that describes a past state.'
+        $inconnue->assertSessionHasNoErrors();
+
+        $this->assertSame(
+            $phraseConnue,
+            session('status'),
+            'The two answers carry a different sentence: the difference tells which addresses exist.'
         );
+
+        // Et la phrase ne promet pas un envoi qui n'a pas eu lieu.
+        $this->assertSame(trans('t_recovery.sent'), session('status'));
     }
 }
