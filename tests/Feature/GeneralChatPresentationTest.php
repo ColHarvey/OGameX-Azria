@@ -268,12 +268,15 @@ class GeneralChatPresentationTest extends AccountTestCase
     /**
      * Un message se traduit, et lui seul.
      *
-     * ## Le moteur est celui du navigateur
+     * ## Le moteur vit chez Keven
      *
-     * Decision de Keven : ni service a heberger, ni cle d'API, ni facturation — et **le message
-     * ne quitte jamais la machine du joueur**. Les deux interfaces sont necessaires : reconnaitre
-     * la langue, puis traduire. Sans elles, le bouton **n'est pas ecrit du tout** : mieux vaut pas
-     * de bouton qu'un bouton inerte.
+     * La premiere version employait le traducteur integre de Chrome. **Mesure faite sur sa
+     * machine : `typeof Translator` rend `'undefined'`** — l'interface n'existe ni sous Brave, ni
+     * sous Firefox, ni sous Safari, ni sous un Chrome dont le drapeau n'est pas leve.
+     *
+     * Le moteur est donc un LibreTranslate heberge a cote du jeu, joint par une route du jeu.
+     * Decision de Keven : plutot un service de plus a maintenir qu'un tiers a qui confier les
+     * messages de ses joueurs. Sans traducteur configure, le bouton **n'est pas ecrit du tout**.
      *
      * ## Ce que le bouton ne touche pas
      *
@@ -285,23 +288,18 @@ class GeneralChatPresentationTest extends AccountTestCase
         $module = (string)file_get_contents(base_path('resources/js/ingame/chat-general.js'));
 
         $this->assertStringContainsString(
-            "typeof window.Translator !== 'undefined'",
+            'generalChatTraductionActive === true',
             $module,
-            'Nothing checks the browser can translate: the button would appear and do nothing.'
+            'The button no longer asks the server whether a translator answers: it would appear and fail.'
         );
 
-        $this->assertStringContainsString(
-            "typeof window.LanguageDetector !== 'undefined'",
-            $module,
-            'The source language is never detected, yet Translator.create() requires one.'
-        );
-
-        // **Rien ne sort du navigateur.** Aucune requete vers un service de traduction.
-        foreach (['translate.googleapis', 'deepl', 'libretranslate', 'translate.google'] as $service) {
+        // **Le navigateur ne parle a aucun tiers.** Il ne connait qu'une route du jeu ; l'adresse
+        // du traducteur est interne et ne descend jamais jusqu'a lui.
+        foreach (['translate.googleapis', 'deepl.com', 'libretranslate.com', ':5000'] as $tiers) {
             $this->assertStringNotContainsString(
-                $service,
+                $tiers,
                 $module,
-                'The chat sends player messages to ' . $service . ': that was not the engine that was chosen.'
+                'The browser reaches ' . $tiers . ' directly: the translator must stay behind the game.'
             );
         }
 
@@ -319,7 +317,8 @@ class GeneralChatPresentationTest extends AccountTestCase
         );
 
         $reponse = $this->get('/chat');
-        $reponse->assertSee('var generalChatLangue =', false);
+        $reponse->assertSee('var generalChatTraductionActive =', false);
+        $reponse->assertSee('var generalChatTraductionUrl =', false);
 
         foreach (['translate', 'translateOriginal', 'translateWorking', 'translateFailed', 'translateSame'] as $cle) {
             $reponse->assertSee($cle . ':', false);

@@ -6,6 +6,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\View\View;
+use OGame\Chat\ChatTranslator;
 use OGame\Chat\PresentedAuthor;
 use OGame\Models\Alliance;
 use OGame\Models\ChatMessage;
@@ -26,6 +27,15 @@ class ChatController extends OGameController
      * celui-ci atteint le serveur entier. La valeur est un choix d'Azria, pas une regle d'OGame.
      */
     private const int GENERAL_MESSAGES_PER_MINUTE = 20;
+
+    /**
+     * Combien de traductions un joueur peut demander par minute.
+     *
+     * Le traducteur est un service de Keven : sans borne, un seul lecteur pourrait le saturer
+     * pour tous les autres. Vingt suffisent a lire une conversation ; une rafale n'a pas de sens
+     * humain.
+     */
+    private const int TRANSLATIONS_PER_MINUTE = 20;
 
     /**
      * Show the dedicated chat page.
@@ -169,6 +179,11 @@ class ChatController extends OGameController
         // La liste d'ignores, elle, doit accompagner la page : le canal general est unique, donc
         // la diffusion ne peut pas filtrer par lecteur.
         $viewData['generalIgnoredPlayerIds'] = $chatService->playersIgnoredBy($userId);
+
+        // **Le bouton de traduction ne s affiche que si le traducteur repond.** Sans adresse
+        // configuree, il n est pas ecrit du tout : mieux vaut pas de bouton qu un bouton qui
+        // echoue a chaque clic.
+        $viewData['generalTranslationAvailable'] = resolve(ChatTranslator::class)->configured();
 
         return view('ingame.chat.index', $viewData);
     }
@@ -408,6 +423,69 @@ class ChatController extends OGameController
             'chatItems' => $formatted['chatItems'],
             'chatItemsByDateAsc' => $formatted['chatItemsByDateAsc'],
         ]);
+    }
+
+    /**
+     * Traduire un message du chat general dans la langue du lecteur.
+     *
+     * **Le traducteur n'est jamais joignable depuis le navigateur.** Il tourne sur le reseau interne,
+     * sans port publie ; cette route est le seul chemin, elle exige une session, et elle borne le
+     * debit — sans quoi le service deviendrait une API de traduction gratuite pour qui la trouve.
+     *
+     * La traduction n'est ni enregistree ni diffusee : elle ne change rien pour les autres lecteurs,
+     * qui voient toujours le message d'origine.
+     */
+    public function translate(Request $request, ChatTranslator $translator): JsonResponse
+    {
+        $userId = (int) auth()->id();
+        $cle = 'chat-translate:' . $userId;
+
+        if (RateLimiter::tooManyAttempts($cle, self::TRANSLATIONS_PER_MINUTE)) {
+            return response()->json([
+                'status' => 'TOO_MANY_TRANSLATIONS',
+                'retryAfter' => RateLimiter::availableIn($cle),
+            ]);
+        }
+
+        $validated = $request->validate([
+            'text' => 'required|string|max:2000',
+        ]);
+
+        if (!$translator->configured()) {
+            return response()->json(['status' => 'UNAVAILABLE']);
+        }
+
+        RateLimiter::hit($cle, 60);
+
+        $cible = $this->translationTargetLanguage();
+        $issue = $translator->translate($validated['text'], $cible);
+
+        if ($issue === null) {
+            return response()->json(['status' => 'UNAVAILABLE']);
+        }
+
+        // **« Deja dans ta langue » n'est pas un echec**, et l'annoncer comme tel serait faux. La
+        // comparaison porte sur la langue seule : « pt-BR » et « pt » se lisent pareil.
+        if ($issue['source'] !== '' && explode('-', $issue['source'])[0] === explode('-', $cible)[0]) {
+            return response()->json(['status' => 'SAME_LANGUAGE']);
+        }
+
+        return response()->json([
+            'status' => 'OK',
+            'text' => $issue['texte'],
+        ]);
+    }
+
+    /**
+     * La langue vers laquelle traduire, telle que le moteur l'attend.
+     *
+     * Le jeu stocke `zh-TW` ; LibreTranslate parle en etiquettes courtes. Les autres coincident.
+     */
+    private function translationTargetLanguage(): string
+    {
+        $correspondances = ['fr' => 'fr', 'en' => 'en', 'it' => 'it', 'nl' => 'nl', 'zh-TW' => 'zt'];
+
+        return $correspondances[app()->getLocale()] ?? 'en';
     }
 
     /**

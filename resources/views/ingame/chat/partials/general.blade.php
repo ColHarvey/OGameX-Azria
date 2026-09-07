@@ -64,13 +64,12 @@
     var generalChatIgnoredIds = @json($generalIgnoredPlayerIds ?? []);
     {{-- **La langue cible, en etiquette BCP-47.** Le jeu stocke `zh-TW` ; l'interface de
          traduction attend l'ecriture, pas le pays. Les quatre autres coincident. --}}
-    @php
-        // **Calcule ici, pas dans @json.** La directive ne survit pas a une indexation de tableau
-        // litteral : la vue compilee levait « Unclosed [ does not match ) » et la page rendait 500.
-        $languesDeTraduction = ['fr' => 'fr', 'en' => 'en', 'it' => 'it', 'nl' => 'nl', 'zh-TW' => 'zh-Hant'];
-        $langueDeTraduction = $languesDeTraduction[app()->getLocale()] ?? 'en';
-    @endphp
-    var generalChatLangue = @json($langueDeTraduction);
+    {{-- **Le traducteur vit sur le serveur, pas dans le navigateur.** La premiere version employait
+         l'interface integree de Chrome ; mesure faite, elle n'existe ni sous Brave, ni sous Firefox,
+         ni sous Safari, donc chez presque personne. Le module passe desormais par une route du jeu,
+         et le bouton ne s'ecrit que si cette route a un traducteur derriere elle. --}}
+    var generalChatTraductionActive = @json((bool)($generalTranslationAvailable ?? false));
+    var generalChatTraductionUrl = @json(route('chat.translate'));
     var generalChatLoca = {
         empty: @json(__('t_ingame.chat.general_empty')),
         tooMany: @json(__('t_ingame.chat.general_too_many')),

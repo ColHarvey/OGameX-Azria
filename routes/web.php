@@ -233,6 +233,7 @@ Route::middleware(['auth', 'banned', 'globalgame', 'locale', 'firstlogin'])->gro
     Route::post('/chat/more', [ChatController::class, 'loadMore'])->name('chat.more');
     Route::post('/chat/read', [ChatController::class, 'markRead'])->name('chat.read');
     Route::post('/chat/visibility', [ChatController::class, 'toggleVisibility'])->name('chat.visibility');
+    Route::post('/chat/translate', [ChatController::class, 'translate'])->name('chat.translate');
 
     Route::get('/buddies', [BuddiesController::class, 'index'])->name('buddies.index');
     Route::post('/buddies', [BuddiesController::class, 'post'])->name('buddies.post');

@@ -132,6 +132,29 @@ services:
     volumes:
       - ./docker/phpmyadmin/.htaccess:/var/www/html/.htaccess
 
+  # Traducteur du chat general (LibreTranslate)
+  #
+  # **Aucun port publie, et c'est delibere.** Le navigateur ne lui parle jamais : le jeu expose une
+  # route qui exige une session et borne le debit, et c'est elle seule qui interroge ce conteneur.
+  # Publier un port ferait de lui une API de traduction gratuite pour qui la trouverait.
+  #
+  # `LT_LOAD_ONLY` est le levier qui compte : chaque langue chargee coute de la memoire et du
+  # disque. La liste par defaut couvre les langues que le jeu sert et celles qu'on croise le plus
+  # en jeu ; l'elargir se fait dans le `.env`, sans toucher a ce fichier.
+  #
+  # Les modeles vivent dans un volume nomme : sans lui, chaque redemarrage les retelecharge.
+  ogamex-libretranslate:
+    image: libretranslate/libretranslate:latest
+    restart: unless-stopped
+    environment:
+      LT_LOAD_ONLY: "${LIBRETRANSLATE_LANGUAGES:-en,fr,es,de,it,pt,nl}"
+      LT_DISABLE_WEB_UI: "true"
+      LT_UPDATE_MODELS: "false"
+    volumes:
+      - libretranslate-models:/home/libretranslate/.local/share/argos-translate
+    networks:
+      - app-network
+
 # Docker Networks
 networks:
   app-network:
@@ -140,4 +163,6 @@ networks:
 # Volumes
 volumes:
   ogame-dbdata:
+    driver: local
+  libretranslate-models:
     driver: local
