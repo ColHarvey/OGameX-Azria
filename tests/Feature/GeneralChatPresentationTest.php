@@ -202,6 +202,70 @@ class GeneralChatPresentationTest extends AccountTestCase
     }
 
     /**
+     * Le script d'une conversation ne sort jamais de sa boite.
+     *
+     * ## Le defaut, et pourquoi il n'etait pas visible
+     *
+     * La salle generale porte les memes classes que le fil d'une conversation — `chat`,
+     * `largeChat`, `largeChatContainer` — pour avoir le meme style, ce qui etait la consigne.
+     * Le script du fil, lui, visait `$('ul.chat.largeChat')` **sans portee** : le selecteur
+     * designait donc **deux** listes.
+     *
+     * `append()` ajoute a chacune des correspondances. Un message prive envoye apparaissait donc
+     * aussi dans la salle generale, et le sondage a cinq secondes l'y recopiait. La barre de
+     * defilement personnalisee du fil s'installait par-dessus celle de la salle.
+     *
+     * Rien ne le montrait tant qu'aucune conversation n'etait ouverte : c'est la coexistence des
+     * deux sur la meme page qui le revele.
+     */
+    public function testTheThreadScriptNeverReachesOutsideItsOwnBox(): void
+    {
+        $code = $this->pageDeChatSansCommentaires();
+
+        foreach (["ul.chat.largeChat", '.new_msg_textarea', '.send_new_msg', '.cnt_chars'] as $partage) {
+            $this->assertStringNotContainsString(
+                "\$('" . $partage . "')",
+                $code,
+                'The thread targets ' . $partage . ' without scope: the general chat carries the same classes and would be hit too.'
+            );
+        }
+
+        $this->assertStringContainsString(
+            "\$('#chatContent ul.chat.largeChat')",
+            $code,
+            'The thread no longer reads its own message list at all: this guard would measure nothing.'
+        );
+    }
+
+    /**
+     * Le code de la page de chat, ses commentaires retires.
+     *
+     * **Un garde qui lit la prose se trompe de cible** : les commentaires citent les ecritures
+     * fautives pour les expliquer, et l'essai echouerait sur une explication.
+     */
+    private function pageDeChatSansCommentaires(): string
+    {
+        $brut = (string)file_get_contents(base_path('resources/views/ingame/chat/index.blade.php'));
+        $lignes = [];
+
+        foreach (explode("
+", str_replace("
+", "
+", $brut)) as $ligne) {
+            if (!str_starts_with(trim($ligne), '//')) {
+                $lignes[] = $ligne;
+            }
+        }
+
+        $code = implode("
+", $lignes);
+
+        $this->assertStringContainsString('chatContent', $code, 'Stripping the comments left no code to read.');
+
+        return $code;
+    }
+
+    /**
      * Un message se traduit, et lui seul.
      *
      * ## Le moteur est celui du navigateur

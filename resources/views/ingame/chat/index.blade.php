@@ -68,6 +68,12 @@
 
         <script type="text/javascript">
         $(document).ready(function() {
+            // **Tout ce que ce script touche est dans `#chatContent`.**
+            //
+            // Nus, ces selecteurs sortent de la conversation : la salle generale, juste au-dessus,
+            // porte les memes classes pour avoir le meme style. `$('ul.chat.largeChat')` designait
+            // donc **deux** listes, et `append()` ajoute a chacune — un message prive envoye
+            // apparaissait aussi dans la salle, et le sondage a cinq secondes faisait de meme.
             // **Le selecteur est limite a la conversation ouverte.** Nu, il attrape toute zone
             // de saisie portant cette classe — y compris celle du chat general, qui la porte
             // pour avoir le meme style. L editeur BBCode s y accrochait alors aussi : barre
@@ -79,7 +85,7 @@
             var chatPlayerId = {{ $chatPartner->id }};
             var currentUserId = {{ auth()->id() }};
             var currentUserName = '{{ e(auth()->user()->username) }}';
-            var $chatList = $('ul.chat.largeChat');
+            var $chatList = $('#chatContent ul.chat.largeChat');
 
             function formatDate(timestamp) {
                 var d = new Date(timestamp * 1000);
@@ -113,9 +119,9 @@
             $container.mCustomScrollbar("scrollTo", "bottom", {scrollInertia: 0});
 
             // Send message
-            $('.send_new_msg').on('click', function(e) {
+            $('#chatContent .send_new_msg').on('click', function(e) {
                 e.preventDefault();
-                var text = $('.new_msg_textarea').val();
+                var text = $('#chatContent .new_msg_textarea').val();
                 if (text.trim() === '') return;
 
                 var $btn = $(this);
@@ -133,9 +139,9 @@
                     success: function(response) {
                         if (response.status === 'OK') {
                             appendMessage(response.id, currentUserName, response.text, response.date, true);
-                            $('.new_msg_textarea').val('');
+                            $('#chatContent .new_msg_textarea').val('');
                             // Update character count
-                            $('.cnt_chars').html(2000);
+                            $('#chatContent .cnt_chars').html(2000);
                         }
                         $btn.removeClass('disabled');
                     },
@@ -146,10 +152,10 @@
             });
 
             // Submit on Enter (without Shift)
-            $('.new_msg_textarea').on('keydown', function(e) {
+            $('#chatContent .new_msg_textarea').on('keydown', function(e) {
                 if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
-                    $('.send_new_msg').click();
+                    $('#chatContent .send_new_msg').click();
                 }
             });
 
@@ -252,7 +258,7 @@
             var chatAllianceId = {{ $chatAllianceId }};
             var currentUserId = {{ auth()->id() }};
             var currentUserName = '{{ e(auth()->user()->username) }}';
-            var $chatList = $('ul.chat.largeChat');
+            var $chatList = $('#chatContent ul.chat.largeChat');
 
             function formatDate(timestamp) {
                 var d = new Date(timestamp * 1000);
@@ -285,9 +291,9 @@
             $container.mCustomScrollbar("scrollTo", "bottom", {scrollInertia: 0});
 
             // Send message
-            $('.send_new_msg').on('click', function(e) {
+            $('#chatContent .send_new_msg').on('click', function(e) {
                 e.preventDefault();
-                var text = $('.new_msg_textarea').val();
+                var text = $('#chatContent .new_msg_textarea').val();
                 if (text.trim() === '') return;
 
                 var $btn = $(this);
@@ -305,8 +311,8 @@
                     success: function(response) {
                         if (response.status === 'OK') {
                             appendMessage(response.id, currentUserName, response.text, response.date, true);
-                            $('.new_msg_textarea').val('');
-                            $('.cnt_chars').html(2000);
+                            $('#chatContent .new_msg_textarea').val('');
+                            $('#chatContent .cnt_chars').html(2000);
                         }
                         $btn.removeClass('disabled');
                     },
@@ -317,10 +323,10 @@
             });
 
             // Submit on Enter (without Shift)
-            $('.new_msg_textarea').on('keydown', function(e) {
+            $('#chatContent .new_msg_textarea').on('keydown', function(e) {
                 if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
-                    $('.send_new_msg').click();
+                    $('#chatContent .send_new_msg').click();
                 }
             });
 
