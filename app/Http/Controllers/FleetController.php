@@ -404,6 +404,17 @@ class FleetController extends OGameController
             $possible = $mission->isMissionPossible($currentPlanet, $targetCoordinates, $planetType, $units);
             if ($possible->possible) {
                 $enabledMissions[] = $mission::getTypeId();
+
+                continue;
+            }
+
+            // **La raison d'un refus d'expedition atteint le joueur.** Sur la position 16, l'expedition est
+            // la seule mission qui ait un sens ; quand elle est refusee avec une raison — Astrophysique
+            // absente, le cas le plus frequent —, la taire laisse un bouton gris et un joueur qui ne
+            // comprend pas pourquoi sa classe Explorateur « ne marche pas ». Les autres missions gardent
+            // leur silence : sur une planete, dix refus muets valent mieux que dix messages.
+            if ($mission::getTypeId() === 15 && $position === 16 && $possible->error !== '') {
+                $errors[] = ['message' => $possible->error, 'error' => 0];
             }
         }
 
