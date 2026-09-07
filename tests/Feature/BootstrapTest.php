@@ -26,8 +26,9 @@ class BootstrapTest extends TestCase
     {
         $response = $this->get('/login');
 
-        // Check for existence of register form
-        $response->assertSee('subscribeForm');
+        // Le formulaire d'inscription est present — marque de la page d'accueil actuelle, l'ancien
+        // `subscribeForm` appartenant au gabarit hors-jeu qu'elle n'etend plus.
+        $response->assertSee('data-panel="register"', false);
 
         // Simulate form data
         // Generate random email

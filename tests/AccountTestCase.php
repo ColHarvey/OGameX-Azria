@@ -128,7 +128,7 @@ abstract class AccountTestCase extends TestCase
     {
         // **Etre invite est un fait de depart, pas une esperance.** Le montage postait `/logout` et
         // passait a la suite : quand la session survivait — un passage sur trois, sans cause stable —
-        // `/login` redirigeait vers le jeu, et l'echec tombait sur `assertSee('subscribeForm')`, loin
+        // `/login` redirigeait vers le jeu, et l'echec tombait sur la sentinelle du formulaire, loin
         // de sa cause. La deconnexion est donc prononcee des deux cotes (la route pour ses effets
         // applicatifs, le garde et la session pour l'etat), puis **verifiee**.
         $this->post('/logout');
@@ -138,8 +138,11 @@ abstract class AccountTestCase extends TestCase
 
         $response = $this->get('/login');
 
-        // Check for existence of register form
-        $response->assertSee('subscribeForm');
+        // **La sentinelle a change avec la page d'accueil.** Elle cherchait `subscribeForm`, un
+        // identifiant de l'ancien gabarit hors-jeu que la nouvelle vue n'etend plus. Ce qui est
+        // verifie n'a pas change : le formulaire d'inscription est bien la, donc nous ne sommes
+        // pas deja connectes — sinon `/login` renverrait vers le jeu.
+        $response->assertSee('data-panel="register"', false);
 
         // Simulate form data
         // Generate random email

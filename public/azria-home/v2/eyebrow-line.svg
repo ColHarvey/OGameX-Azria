@@ -1,0 +1,2 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="190" height="10" viewBox="0 0 190 10" fill="none"><defs><linearGradient id="g"><stop stop-color="#516777" stop-opacity=".1"/><stop offset=".5" stop-color="#9bddff"/><stop offset="1" stop-color="#426580" stop-opacity="0"/></linearGradient><radialGradient id="a"><stop stop-color="#6bceff" stop-opacity=".5"/><stop offset="1" stop-color="#206a96" stop-opacity="0"/></radialGradient></defs><ellipse cx="90" cy="5" rx="65" ry="5" fill="url(#a)"/><path d="M0 5H190" stroke="url(#g)"/></svg>
+

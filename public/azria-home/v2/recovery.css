@@ -1,0 +1,5 @@
+.recovery-page .site-header nav{display:flex;gap:32px;padding:0}
+.recovery-shell{width:min(1120px,calc(100% - 48px));margin:60px auto 100px;display:grid;grid-template-columns:1fr 440px;gap:70px;align-items:start;min-height:570px}
+.recovery-copy{padding-top:42px}.recovery-copy h1{font-size:64px;line-height:1.1;max-width:530px;margin:0 0 22px}.recovery-copy p{color:#c2d2df;line-height:1.7;max-width:380px}
+.recovery-page .auth-panel{min-height:0;padding:34px 32px}.recovery-description{color:#b9cbd8;font-size:15px;line-height:1.7;margin:0 0 22px}.recovery-page .primary{margin-top:24px;font-size:18px;height:auto;min-height:54px}.recovery-footnote{color:#9fb4c4;font-size:12px;line-height:1.6;margin-top:18px}.recovery-page input[type=hidden]{display:none}.recovery-page .site-footer{margin-left:24px;margin-right:24px}
+@media(max-width:850px){.recovery-shell{grid-template-columns:1fr;gap:32px;max-width:480px;margin-top:30px;margin-bottom:50px;min-height:0}.recovery-copy{padding:0}.recovery-copy h1{font-size:42px}.recovery-page .site-header nav>a:not(.nav-login){display:none}.recovery-page .auth-panel{padding:28px 24px}.recovery-copy p{font-size:14px}}

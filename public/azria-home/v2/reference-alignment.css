@@ -1,0 +1,23 @@
+/* Corrections measured against the 1536 × 1024 reference, limited to requested areas. */
+.auth-section select{display:block;width:100%;height:40px;appearance:none;background:#081925 url('chevron-down.svg') right 12px center/16px 16px no-repeat;border:1px solid #658090;border-radius:5px;padding:8px 38px 8px 12px;color:#f3deb1;font:inherit;font-size:14px;cursor:pointer}
+.auth-section select:hover{border-color:#d6bc7e;box-shadow:0 0 8px #96cfee20}
+.auth-section select option{background:#0a1b28;color:#f3deb1}
+.universe-help{font-size:11px;line-height:1.5;color:#a8bbc9;margin:5px 0 12px}
+.password-help{text-align:center;font-size:14px;line-height:1.6;margin:14px 0 0}
+.password-help a{color:#f1cd89;text-decoration:underline;text-underline-offset:4px}
+.password-help a:hover{color:#fff3d9;text-shadow:0 0 10px #e4b75970}
+.primary,.secondary,.nav-login{transition:filter .16s ease,transform .16s ease;will-change:auto}
+@media(hover:hover){
+  .primary:not(:disabled):hover{filter:brightness(1.4) saturate(1.15) drop-shadow(0 0 9px #edbd5970);transform:translateY(-2px);color:#fff}
+  .secondary:not(:disabled):hover,.nav-login:hover{filter:brightness(1.65) drop-shadow(0 0 8px #80c6ed65);transform:translateY(-2px);color:#fff}
+}
+.primary:focus-visible{filter:brightness(1.4) saturate(1.15) drop-shadow(0 0 9px #edbd5970)}
+.secondary:focus-visible,.nav-login:focus-visible{filter:brightness(1.65) drop-shadow(0 0 8px #80c6ed65)}
+.primary:not(:disabled):active,.secondary:not(:disabled):active,.nav-login:active{transform:translateY(1px);filter:brightness(1.12);transition-duration:.06s}
+@media(prefers-reduced-motion:reduce){.primary,.secondary,.nav-login{transition:none!important;transform:none!important}}
+body{background-image:linear-gradient(180deg,transparent 70%,#02090f 100%),url('hero-detailed.webp');background-size:auto,max(1536px,100vw) auto;background-position:center,center top;background-repeat:no-repeat}
+@media(max-width:800px){body{background-size:auto,auto 1024px;background-position:center,44% 20px}}
+.hero-copy .secondary{width:218px;min-height:50px;height:50px;padding:10px 16px;gap:10px;font-family:'Segoe UI',sans-serif;font-size:18px;white-space:nowrap}
+.hero-copy .secondary>span{width:16px;height:18px;flex-shrink:0}
+.primary{font-family:'Segoe UI',sans-serif;font-size:21px;font-weight:600}
+@media(min-width:1251px){.site-header nav{display:grid;grid-template-columns:122px 124px 171px 146px 150px;justify-content:initial;gap:0}.site-header nav .nav-home::after{right:auto;width:95px}}
