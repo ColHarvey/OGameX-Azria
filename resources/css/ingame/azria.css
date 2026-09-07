@@ -311,17 +311,26 @@
 }
 
 /*
- * La salle occupe la largeur des deux colonnes qu'elle surmonte.
+ * La salle occupe la largeur des deux colonnes, decoration comprise.
  *
  * Mesures lues dans la feuille du jeu, pas estimees : `#chatList` fait 480 px, `.pl_container`
- * 180 px, et chaque `contentbox` porte 5 px de marge horizontale. La salle en fait donc 665, pour
- * que son bord droit tombe exactement sur celui de la liste des joueurs.
+ * 180 px, chaque `contentbox` porte 5 px de marge — soit 670 px de large en tout.
+ *
+ * **Le pied d'une `contentbox` est plus large que sa boite, et c'est voulu.** Il est decale de
+ * 7 px vers la droite et son coin droit de 8 px de plus : la decoration depasse donc de 15 px.
+ * Sur une boite de 480 px cela tombe dans la gouttiere entre les colonnes et ne se voit pas.
+ *
+ * Une premiere version fixait 665 px et **rentrait les coins** pour rester dans la page. C'etait
+ * un mauvais echange : les coins couvrent les extremites du pied, et les rentrer laissait
+ * apparaitre son fond repetitif derriere eux — un eclat visible que la liste des discussions,
+ * elle, n'a pas. La boite fait donc 650 px : la decoration s'arrete alors a 665, alignee sur le
+ * bord droit de la liste des joueurs, et **les coins gardent leur place d'origine**.
  *
  * `float: none` et `clear: both` la sortent du flot des deux colonnes : sans cela elles
  * remonteraient a cote d'elle des que la fenetre est assez large.
  */
 #generalChat {
-    width: 665px;
+    width: 650px;
     float: none;
     clear: both;
 }
@@ -436,25 +445,3 @@
     outline: none;
 }
 
-/*
- * Le pied de la salle reste dans le cadre.
- *
- * Le pied commun est decale de 7 px vers la droite (`left: 7px`) et son coin droit de 8 px de plus
- * (`right: -8px`) : la decoration deborde donc de **15 px** au-dela du cadre. Sur une boite de
- * 480 px cela tombe dans la gouttiere entre les deux colonnes et ne se voit pas. La salle en fait
- * 665, soit toute la largeur disponible : les 15 px sortaient de la page.
- *
- * Les coins sont ramenes sur les bords plutot que la boite retrecie : la decoration s'aligne alors
- * exactement sur le cadre, et la salle garde la largeur des deux colonnes qu'elle surmonte.
- */
-#generalChat .footer {
-    left: 0;
-}
-
-#generalChat .footer .c-left {
-    left: 0;
-}
-
-#generalChat .footer .c-right {
-    right: 0;
-}

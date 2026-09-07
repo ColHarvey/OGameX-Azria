@@ -196,15 +196,20 @@ class GeneralChatPresentationTest extends AccountTestCase
      *
      * Livree sans ces regles, elle faisait la largeur d'une seule colonne, et sa zone de saisie
      * occupait presque tout le panneau — la salle etant reduite a une ligne, l'inverse de ce
-     * qu'on vient y lire. Les 665 pixels sont une mesure : `#chatList` en fait 480,
-     * `.pl_container` 180, et chaque `contentbox` porte 5 pixels de marge.
+     * qu'on vient y lire.
+     *
+     * **Les 650 pixels sont une mesure, pas un gout.** Les deux colonnes font 670 en tout
+     * (`#chatList` 480, `.pl_container` 180, 5 de marge chacune), et le pied d'une
+     * `contentbox` deborde de 15 px au-dela de sa boite — un decalage voulu, que les coins
+     * recouvrent. 650 + 15 = 665 : la decoration s'arrete pile au bord droit, sans qu'on ait
+     * a deplacer les coins, ce qui laissait apparaitre le fond du pied derriere eux.
      */
     public function testTheRoomSpansBothColumnsAndGivesItsHeightToTheMessages(): void
     {
         $feuille = (string)file_get_contents(base_path('resources/css/ingame/azria.css'));
 
         $this->assertMatchesRegularExpression(
-            '/#generalChat\s*\{[^}]*width:\s*665px/',
+            '/#generalChat\s*\{[^}]*width:\s*650px/',
             $feuille,
             'The room no longer spans both columns: it renders as wide as the chat list alone.'
         );
@@ -235,6 +240,14 @@ class GeneralChatPresentationTest extends AccountTestCase
             '/#generalChatText\s*\{(?:[^}]*)max-height:/s',
             $feuille,
             'Nothing bounds the input height should another stylesheet re-enable the handle.'
+        );
+
+        // **Les coins du pied gardent leur place.** Les deplacer decouvrait le fond repetitif
+        // du pied a ses extremites — un eclat que les autres boites de la page n'ont pas.
+        $this->assertStringNotContainsString(
+            '#generalChat .footer',
+            $feuille,
+            'The room moves its footer corners: the strip behind them shows through at the ends.'
         );
     }
 
