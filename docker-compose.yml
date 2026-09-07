@@ -142,6 +142,11 @@ services:
   # disque. La liste par defaut couvre les langues que le jeu sert et celles qu'on croise le plus
   # en jeu ; l'elargir se fait dans le `.env`, sans toucher a ce fichier.
   #
+  # **Pas de `LT_UPDATE_MODELS: "false"` ici.** Il evitait une verification au demarrage, mais il
+  # empechait surtout d'installer un modele **manquant** : ajouter `tr` a la liste ne telechargeait
+  # rien, et le journal ne mentionnait meme pas la tentative. Le cout de son absence est une
+  # verification reseau a chaque demarrage du conteneur, ce qui arrive rarement.
+  #
   # Les modeles vivent dans un volume nomme : sans lui, chaque redemarrage les retelecharge.
   #
   # **Le montage vise `.local`, pas le dossier des modeles.** Docker n initialise un volume neuf
@@ -156,7 +161,6 @@ services:
     environment:
       LT_LOAD_ONLY: "${LIBRETRANSLATE_LANGUAGES:-en,fr,es,de,it,pt,nl}"
       LT_DISABLE_WEB_UI: "true"
-      LT_UPDATE_MODELS: "false"
     volumes:
       - libretranslate-models:/home/libretranslate/.local
     networks:

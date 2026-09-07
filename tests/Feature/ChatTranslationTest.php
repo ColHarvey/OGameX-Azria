@@ -243,6 +243,16 @@ class ChatTranslationTest extends AccountTestCase
                 $service,
                 $fichier . ' mounts a path the image does not contain: that is exactly the layout that failed.'
             );
+
+            // **Aucun blocage des mises a jour de modeles.** `LT_UPDATE_MODELS: "false"` evitait une
+            // verification au demarrage, mais empechait surtout d installer un modele **manquant** :
+            // ajouter une langue a la liste ne telechargeait rien, et le journal ne mentionnait meme
+            // pas la tentative.
+            $this->assertStringNotContainsString(
+                'LT_UPDATE_MODELS',
+                $service,
+                $fichier . ' blocks model updates: adding a language to the list would silently install nothing.'
+            );
         }
     }
 

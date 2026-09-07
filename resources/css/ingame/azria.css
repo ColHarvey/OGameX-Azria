@@ -466,8 +466,14 @@
  * tout ailleurs, plutot que de l'afficher inerte.
  */
 #generalChat .js_generalChatTranslate {
+    /*
+     * **La marge va a droite, pas a gauche.** Le lien et la date flottent tous deux a droite, et
+     * le lien vient apres dans le document : il se place donc **a gauche** de la date. Une marge
+     * gauche l ecartait de ce qui le precede — c est-a-dire de rien — et il restait colle a
+     * l heure, illisible.
+     */
     float: right;
-    margin-left: 8px;
+    margin-right: 10px;
     font-size: 10px;
     font-weight: normal;
     line-height: 14px;

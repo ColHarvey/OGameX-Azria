@@ -374,6 +374,15 @@ class GeneralChatPresentationTest extends AccountTestCase
             $feuille,
             'The translate link has no styling: it would render as a full-size link, not a discreet one.'
         );
+
+        // **La marge va a droite.** Le lien et la date flottent tous deux a droite et le lien vient
+        // apres dans le document : il se place a gauche de la date. Une marge gauche l ecarte de ce
+        // qui le precede — rien — et il reste colle a l heure.
+        $this->assertMatchesRegularExpression(
+            '/#generalChat \.js_generalChatTranslate\s*\{(?:[^}]*)margin-right:/s',
+            $feuille,
+            'The link has no right margin: it renders glued to the timestamp.'
+        );
     }
 
     /**
