@@ -64830,6 +64830,9 @@ function FleetDispatcher(cfg) {
   this.standardFleets = cfg.standardFleets || [];
   this.expeditionFleetTemplates = cfg.expeditionFleetTemplates || [];
   this.unions = cfg.unions || [];
+  // Publiee par le gabarit depuis FleetUnionService::MAX_DELAY_PERCENTAGE. Aucune valeur de
+  // repli : une constante recopiee ici aurait diverge du serveur sans que rien ne le dise.
+  this.unionMaxDelayRatio = cfg.unionMaxDelayRatio;
   this.orders = [];
   this.orderNames = cfg.orderNames || [];
   this.orderDescriptions = cfg.orderDescriptions || [];
@@ -65785,26 +65788,48 @@ FleetDispatcher.prototype.refreshFleetTimes = function () {
 
   duration = !isNaN(duration) && isFinite(duration) ? duration : 0;
   holdingTime = !isNaN(holdingTime) && isFinite(holdingTime) ? holdingTime : 0;
-  let arrivalTime = getFormatedDate(serverTime.getTime() + duration * 1000, '[d].[m].[y] [G]:[i]:[s]');
-  let returnTime = getFormatedDate(serverTime.getTime() + (2 * duration + holdingTime) * 1000, '[d].[m].[y] [G]:[i]:[s]');
-  $('#fleet2 #arrivalTime').html(arrivalTime);
-  $('#fleet2 #returnTime').html(returnTime);
 
-  if (this.mission === this.fleetHelper.MISSION_UNIONATTACK) {
-    let union = this.getUnionData(this.union);
+  // Tout se calcule en secondes serveur : `union.time` en est une, `serverTime.getTime()`
+  // rend des millisecondes.
+  let departure = serverTime.getTime() / 1000;
+  let ownArrival = departure + duration;
+  let arrival = ownArrival;
 
-    if (union !== null) {
-      let durationAKS = parseInt(union.time - serverTime.getTime() / 1000);
-      let unionArrivalTime = formatTime(durationAKS);
-      $('#durationAKS').html(unionArrivalTime);
-      // TODO: Show the player the actual synchronized arrival time they will be locked to.
-      // If this fleet arrives earlier than the union, it will be delayed to union.time.
-      // If this fleet arrives later (within the 30% delay window), all union members
-      // will be pushed to this fleet's arrival time. The live #arrivalTime display above
-      // should reflect the post-sync arrival time so the player knows exactly when their
-      // fleet will land before confirming dispatch.
+  let union = this.mission === this.fleetHelper.MISSION_UNIONATTACK ? this.getUnionData(this.union) : null;
+  let syncLine = $('#unionSyncLine');
+
+  if (union === null) {
+    syncLine.hide();
+  } else {
+    // La fenetre vient du serveur ; inconnue, on n'annonce aucune limite plutot qu'une fausse.
+    let ratio = this.unionMaxDelayRatio;
+    let hasWindow = typeof ratio === 'number' && isFinite(ratio);
+    let deadline = hasWindow
+      ? union.time + Math.floor(Math.max(0, union.time - departure) * ratio)
+      : null;
+    let tooLate = hasWindow && ownArrival > deadline;
+    let message;
+
+    if (ownArrival <= union.time) {
+      // Plus rapide que l'union : le serveur retient la flotte jusqu'a l'heure de l'union.
+      arrival = union.time;
+      message = this.loca.LOCA_FLEET_UNION_SYNC_WAITING;
+    } else if (tooLate) {
+      message = this.loca.LOCA_FLEET_UNION_SYNC_TOO_LATE.replace(
+        '#deadline#',
+        getFormatedDate(deadline * 1000, '[d].[m].[y] [G]:[i]:[s]')
+      );
+    } else {
+      // Plus lente : toute l'union est tiree vers cette arrivee.
+      message = this.loca.LOCA_FLEET_UNION_SYNC_DELAYING;
     }
+
+    $('#durationAKS').html(message).toggleClass('overmark', tooLate);
+    syncLine.show();
   }
+
+  $('#fleet2 #arrivalTime').html(getFormatedDate(arrival * 1000, '[d].[m].[y] [G]:[i]:[s]'));
+  $('#fleet2 #returnTime').html(getFormatedDate((arrival + duration + holdingTime) * 1000, '[d].[m].[y] [G]:[i]:[s]'));
 };
 
 FleetDispatcher.prototype.refreshMaxSpeed = function () {
