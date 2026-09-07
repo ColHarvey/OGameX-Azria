@@ -75540,6 +75540,79 @@ ogame.chat = {
             });
     }
 
+    /**
+     * Le selecteur d'emoji.
+     *
+     * **L'insertion se fait a la position du curseur**, pas a la fin : ecrire « bien joue » puis
+     * vouloir un signe au milieu est le cas normal, et coller a la fin serait faux la moitie du
+     * temps. `selectionStart` et `selectionEnd` decrivent aussi une selection, qui est alors
+     * remplacee — le comportement attendu de n'importe quelle zone de texte.
+     */
+    function insererEmoji(signe) {
+        var zone = document.getElementById('generalChatText');
+
+        if (zone === null) {
+            return;
+        }
+
+        var debut = typeof zone.selectionStart === 'number' ? zone.selectionStart : zone.value.length;
+        var fin = typeof zone.selectionEnd === 'number' ? zone.selectionEnd : zone.value.length;
+
+        zone.value = zone.value.slice(0, debut) + signe + zone.value.slice(fin);
+
+        // Le curseur se replace apres le signe insere, pour qu'on puisse continuer a ecrire.
+        var apres = debut + signe.length;
+        zone.selectionStart = apres;
+        zone.selectionEnd = apres;
+        zone.focus();
+    }
+
+    function panneauEmoji() {
+        return document.getElementById('generalChatEmojiPanel');
+    }
+
+    function fermerLesEmoji() {
+        var panneau = panneauEmoji();
+
+        if (panneau !== null) {
+            panneau.hidden = true;
+        }
+    }
+
+    function armerLesEmoji() {
+        var bouton = document.getElementById('generalChatEmoji');
+        var panneau = panneauEmoji();
+
+        if (bouton === null || panneau === null) {
+            return;
+        }
+
+        bouton.addEventListener('click', function (evenement) {
+            evenement.stopPropagation();
+            panneau.hidden = !panneau.hidden;
+        });
+
+        panneau.addEventListener('click', function (evenement) {
+            evenement.stopPropagation();
+
+            var choix = evenement.target;
+
+            if (choix && choix.classList && choix.classList.contains('js_generalChatEmoji')) {
+                insererEmoji(choix.textContent);
+                panneau.hidden = true;
+            }
+        });
+
+        // Un clic ailleurs referme, et la touche d'echappement aussi : un panneau qui reste ouvert
+        // par-dessus la salle cache ce qu'on vient d'y ecrire.
+        document.addEventListener('click', fermerLesEmoji);
+        document.addEventListener('keydown', function (evenement) {
+            if (evenement.key === 'Escape') {
+                fermerLesEmoji();
+            }
+        });
+    }
+
     function demarrer() {
         if (!jQuery(listeSelecteur).length) {
             return;
@@ -75563,6 +75636,7 @@ ogame.chat = {
             }
         });
 
+        armerLesEmoji();
         chargerHistorique();
         ecouter();
     }
