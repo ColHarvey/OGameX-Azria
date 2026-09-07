@@ -294,6 +294,17 @@ class GeneralChatPresentationTest extends AccountTestCase
 
         $feuille = (string)file_get_contents(base_path('resources/css/ingame/azria.css'));
         $this->assertStringContainsString('#generalChatEmojiPanel', $feuille, 'The picker has no styling of its own.');
+
+        // **`hidden` doit gagner, et il ne gagne pas tout seul.** L'attribut n'agit que par la
+        // regle `[hidden] { display: none }` du navigateur, de specificite minuscule ; la regle
+        // de mise en grille, portee par un identifiant, l'ecrasait. Le panneau s'ouvrait alors
+        // au chargement et le clic qui bascule l'attribut ne changeait rien de visible — donc
+        // impossible de le fermer. Mesure faite a l'ecran, pas deduite.
+        $this->assertMatchesRegularExpression(
+            '/#generalChatEmojiPanel\[hidden\]\s*\{[^}]*display:\s*none/',
+            $feuille,
+            'Nothing makes the hidden attribute win: the emoji panel opens on load and cannot be closed.'
+        );
     }
 
     /**

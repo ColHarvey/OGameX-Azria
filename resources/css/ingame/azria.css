@@ -389,6 +389,18 @@
     padding: 4px 10px;
 }
 
+/*
+ * **`hidden` doit gagner, et il ne gagne pas tout seul.**
+ *
+ * L attribut `hidden` n agit que par la regle `[hidden] { display: none }` de la feuille du
+ * navigateur, dont la specificite est minuscule. La regle ci-dessous, portee par un
+ * identifiant, l ecrasait : le panneau restait ouvert au chargement, et le clic qui bascule
+ * l attribut ne changeait rien de visible — donc impossible de le fermer.
+ */
+#generalChatEmojiPanel[hidden] {
+    display: none;
+}
+
 #generalChatEmojiPanel {
     position: absolute;
     right: 0;
