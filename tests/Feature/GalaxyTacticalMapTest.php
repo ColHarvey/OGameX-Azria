@@ -627,10 +627,21 @@ class GalaxyTacticalMapTest extends UnitTestCase
             'A late response from the previous system can overwrite the new one: the sequence token is gone.'
         );
 
+        /*
+         * La position d'un vaisseau suit chaque image, meme sous la reduction des mouvements : c'est
+         * une information, pas un effet. Le repli qui reposait les marqueurs toutes les cinq secondes
+         * les faisait sauter (retour de Keven) ; les effets decoratifs s'eteignent par leurs regles.
+         */
         $this->assertStringContainsString(
-            "'(prefers-reduced-motion: reduce)'",
+            "            placerLesMarqueurs();\n            animation = window.requestAnimationFrame(boucle);",
+            str_replace("\r\n", "\n", $module),
+            'The markers are no longer placed on every animation frame.'
+        );
+
+        $this->assertStringNotContainsString(
+            'setInterval(placerLesMarqueurs',
             $module,
-            'The fleet animation ignores prefers-reduced-motion.'
+            'A timer places the markers again: the ship jumps every few seconds instead of moving.'
         );
     }
 
@@ -972,15 +983,49 @@ class GalaxyTacticalMapTest extends UnitTestCase
         );
 
         /*
-         * La liste de la fiche est un miroir de la vraie : le rendu herite cache la sienne derriere son
-         * propre menu, et ses regles a chaines d'identifiants ne se laissent pas placer dans la grille.
-         * Chaque choix est reporte sur la vraie liste avec son `change` : le parcours du jeu decide.
+         * La liste de la fiche est celle des flottes standard du jeu (page Flotte), et le parcours est
+         * celui de la page Flotte : controle de la cible des qu'une flotte est choisie, puis envoi avec
+         * la composition, la vitesse et la duree par defaut. Le parcours herite de la boite — liste
+         * jamais remplie, adresse de controle fictive, envoi par les mini-flottes qui refusent
+         * l'expedition — est mort dans ce fork ; la fiche ne le rejoue pas.
          */
         $module = $this->module();
-        $this->assertStringContainsString('avant.push(listeMiroir());', $module, 'The deep-space card no longer shows the expedition fleet list.');
-        $this->assertStringContainsString('copie.value = option.value;', $module, 'The mirrored list no longer copies the real options: an invented list.');
-        $this->assertStringContainsString("source.dispatchEvent(new Event('change', { bubbles: true }));", $module, 'A choice in the mirrored list no longer reaches the real list: the game flow never checks the target.');
-        $this->assertStringContainsString("attributeFilter: ['disabled', 'style']", $module, 'The card no longer follows the legacy send button the game flow enables after its server round-trip.');
+        $vue = $this->vue();
+        $routes = file_get_contents(base_path('routes/web.php'));
+        $this->assertIsString($routes);
+        $controleur = file_get_contents(app_path('Http/Controllers/FleetController.php'));
+        $this->assertIsString($controleur);
+
+        $this->assertStringContainsString('avant.push(listeDesFlottesStandard(carte, f, systeme));', $module, 'The deep-space card no longer shows the standard fleet list.');
+
+        foreach ([
+            "var galaxyFleetTemplatesUrl = \"{{ route('fleet.templates.index') }}\";" => "Route::get('/ajax/fleet/templates'",
+            "var galaxyCheckTargetUrl = \"{{ route('fleet.dispatch.checktarget') }}\";" => "Route::post('/ajax/fleet/dispatch/check-target'",
+            "var galaxySendFleetUrl = \"{{ route('fleet.dispatch.sendfleet') }}\";" => "Route::post('/ajax/fleet/dispatch/send-fleet'",
+        ] as $publication => $route) {
+            $this->assertStringContainsString($publication, $vue, 'The view no longer publishes ' . $publication);
+            $this->assertStringContainsString($route, $routes, 'The route behind ' . $publication . ' is gone.');
+        }
+
+        foreach ([
+            'mission: 15,',
+            'speed: VITESSE_PAR_DEFAUT,',
+            'holdingtime: DUREE_D_EXPEDITION_PAR_DEFAUT,',
+            "charge['am' + id] = Number(modele.ships[id]);",
+            'reponse.orders[15] === true',
+            'liste.disabled = !(systeme && systeme.hasAdmiral) || modeles.length === 0;',
+            "var direct = document.getElementById('expeditionbutton');",
+        ] as $motif) {
+            $this->assertStringContainsString($motif, $module, 'The expedition flow of the card lost ' . $motif);
+        }
+
+        /* Les valeurs par defaut sont celles que le serveur accepte : 10 = 100 % dans sa liste des vitesses, une heure au moins. */
+        $this->assertStringContainsString('var VITESSE_PAR_DEFAUT = 10;', $module, 'The default speed is no longer 100 %.');
+        $this->assertStringContainsString('var DUREE_D_EXPEDITION_PAR_DEFAUT = 1;', $module, 'The default expedition duration is no longer one hour.');
+        $this->assertMatchesRegularExpression('/\$validSpeeds = \[[^\]]*\b10\.0\]/', $controleur, 'The dispatch endpoint no longer accepts speed 10 (100 %): the card would send a speed the server refuses.');
+        $this->assertStringContainsString('if ($holding_hours < 1 || $holding_hours > $astrophysics_level)', $controleur, 'The expedition duration rule changed: check the default the card sends.');
+
+        $this->assertStringNotContainsString("source.dispatchEvent(new Event('change'", $module, 'The card replays the dead legacy template flow again.');
 
         $this->assertMatchesRegularExpression(
             '/#galaxyTactical \.gtSelect \{[^}]*grid-row: 3;[^}]*width: 100%;/s',
@@ -1113,6 +1158,10 @@ class GalaxyTacticalMapTest extends UnitTestCase
 
         /* Keven : aucun eclat cyan au survol de la fiche. La luminosite seule. */
         $this->assertDoesNotMatchRegularExpression('/:hover \{[^}]*box-shadow: 0 0 8px rgba\(90, 195, 255/', $feuille, 'A cyan glow is back on hover: Keven asked for none.');
+
+        /* Le contour cyan des cibles lune/debris ne vaut que pour elles : la fiche porte aussi data-corps. */
+        $this->assertStringContainsString('#galaxyTactical .gtBody [data-corps]:hover,', $feuille, 'The moon/debris targets lost their hover outline.');
+        $this->assertDoesNotMatchRegularExpression('/#galaxyTactical \[data-corps\]/', $feuille, 'The card, which carries data-corps too, gets the hover outline of the moon and debris targets: the cyan line around the box Keven saw.');
 
         /* Les deux ressources de Codex copiees pour ces fiches. */
         $this->assertFileExists(public_path('img/galaxy-tactical/empty-position-preview.svg'), 'The translucent sphere of a free position is missing.');

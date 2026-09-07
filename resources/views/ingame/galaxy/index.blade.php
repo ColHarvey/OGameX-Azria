@@ -38,6 +38,10 @@
             var contentLink = "{{ route('galaxy.ajax') }}";
             var galaxyContentLink = "{{ route('galaxy.ajax') }}";
             var galaxyFleetsUrl = "{{ route('galaxy.fleets') }}";
+            {{-- Les flottes standard et le parcours d'envoi de la page Flotte, pour la fiche de l'espace profond. --}}
+            var galaxyFleetTemplatesUrl = "{{ route('fleet.templates.index') }}";
+            var galaxyCheckTargetUrl = "{{ route('fleet.dispatch.checktarget') }}";
+            var galaxySendFleetUrl = "{{ route('fleet.dispatch.sendfleet') }}";
             var preserveSystemOnPlanetChange = false;
             @php
                 $galaxyLocaData = [
@@ -152,6 +156,10 @@
                     'emptyServer' => __('t_ingame.galaxy.tactical_empty_server'),
                     'expeditionFleet' => __('t_ingame.galaxy.expedition_fleet'),
                     'expeditionNote' => __('t_ingame.galaxy.tactical_expedition_note'),
+                    'expeditionChoose' => __('t_ingame.galaxy.tactical_expedition_choose'),
+                    'expeditionNone' => __('t_ingame.galaxy.tactical_expedition_none'),
+                    'expeditionChecking' => __('t_ingame.galaxy.tactical_expedition_checking'),
+                    'expeditionSent' => __('t_ingame.galaxy.tactical_expedition_sent'),
                     'actions' => __('t_ingame.galaxy.tactical_actions'),
                     'targets' => __('t_ingame.galaxy.tactical_targets'),
                     'labels' => [

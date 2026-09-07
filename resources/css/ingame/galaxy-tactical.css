@@ -464,13 +464,18 @@
  * signalent au survol. La fiche porte le corps qu'elle decrit, et la cellule correspondante est
  * mise en avant — le joueur voit sur quoi ses actions porteront.
  */
-#galaxyTactical [data-corps] {
+/*
+ * Les cibles secondaires d'un corps de la carte, et elles seules : la fiche porte aussi `data-corps`
+ * (le corps qu'elle montre), et un selecteur sans `.gtBody` lui donnait ce contour cyan au survol —
+ * « une ligne cyan autour de la box », retour de Keven.
+ */
+#galaxyTactical .gtBody [data-corps] {
     cursor: pointer;
     border-radius: 50%;
 }
 
-#galaxyTactical [data-corps]:hover,
-#galaxyTactical [data-corps]:focus-visible {
+#galaxyTactical .gtBody [data-corps]:hover,
+#galaxyTactical .gtBody [data-corps]:focus-visible {
     outline: 1px solid #43c9e8;
     outline-offset: 2px;
 }

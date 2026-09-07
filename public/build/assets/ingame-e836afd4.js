@@ -77088,12 +77088,25 @@ window.playOGameXWormhole = function (canvas) {
                 return inactif(m ? raison('move') : raison('unavailable'));
             },
             expedition: function () {
-                var envoi = document.getElementById('sendExpeditionFleetTemplateFleet');
-                var direct = document.getElementById('expeditionbutton');
+                var e = f.gtExpedition;
 
-                if (envoi && envoi.style.display !== 'none') {
-                    return envoi.hasAttribute('disabled') ? inactif(raison('unavailable')) : actif(cliquer(envoi));
+                /* Une flotte standard choisie : le verdict du serveur decide, puis l'envoi par le parcours de la page Flotte. */
+                if (e && e.modele) {
+                    if (e.envoiEnCours || !e.verdict || e.verdict.enCours) {
+                        return inactif(locaFiche('expeditionChecking', ''));
+                    }
+
+                    if (!e.verdict.ok) {
+                        return inactif(e.verdict.raison || raison('unavailable'));
+                    }
+
+                    return actif(function () {
+                        lancerLExpedition(contexte.carte, f, e.modele);
+                    });
                 }
+
+                /* Sans flotte choisie : la page Flotte, avec l'espace profond de ce systeme pour cible (bouton herite). */
+                var direct = document.getElementById('expeditionbutton');
 
                 return direct ? actif(cliquer(direct)) : inactif(raison('unavailable'));
             }
@@ -77185,37 +77198,261 @@ window.playOGameXWormhole = function (canvas) {
     }
 
     /*
-     * La liste des flottes d'expedition de la fiche : **un miroir de la vraie**, jamais une liste
-     * inventee. Le rendu herite remplace `#expeditionFleetTemplateSelect` par son propre menu et
-     * cache la liste (`ogameDropDown`, `select.hide()`) ; ni l'un ni l'autre ne se placent dans la
-     * grille de la fiche. La fiche montre donc sa liste, avec exactement les options et l'etat de
-     * la vraie, et reporte chaque choix sur la vraie avec son evenement `change` : c'est le parcours
-     * du jeu qui verifie la cible et active le bouton d'envoi, pas la fiche.
+     * ## Les flottes standard pour l'expedition
+     *
+     * Le jeu enregistre des flottes standard sur la page Flotte (un nom, des vaisseaux) et les rend
+     * par `galaxyFleetTemplatesUrl`. La boite historique de la Galaxie avait une liste pour elles,
+     * mais rien ne la remplissait, son controle de cible visait une adresse fictive et son envoi
+     * passait par le point d'entree des mini-flottes, qui refuse l'expedition : un parcours mort
+     * dans ce fork. La fiche prend donc le parcours **vivant**, celui de la page Flotte : controle
+     * de la cible (`galaxyCheckTargetUrl`) des qu'une flotte est choisie, puis envoi
+     * (`galaxySendFleetUrl`) avec la composition de la flotte, la vitesse et la duree par defaut de
+     * la page Flotte — 100 % et une heure. Le serveur decide de tout (emplacements, astrophysique,
+     * classe, carburant) et sa raison est ecrite sous le bouton. Sans flotte choisie, le bouton
+     * ouvre la page Flotte, par le bouton herite. Le droit d'employer une flotte standard depuis
+     * la Galaxie vient du serveur : `hasAdmiral` dans la charge utile du systeme.
      */
-    function listeMiroir() {
-        var source = document.getElementById('expeditionFleetTemplateSelect');
-        var liste = element('select', 'gtSelect');
+    var VITESSE_PAR_DEFAUT = 10;
+    var DUREE_D_EXPEDITION_PAR_DEFAUT = 1;
 
-        liste.id = 'gtExpeditionSelect';
-
-        if (!source) {
-            liste.disabled = true;
-
-            return liste;
+    function jetonCsrf() {
+        if (typeof window.token === 'string' && window.token !== '') {
+            return window.token;
         }
 
-        Array.prototype.forEach.call(source.options, function (option) {
-            var copie = document.createElement('option');
-            copie.value = option.value;
-            copie.textContent = option.textContent;
-            copie.selected = option.selected;
-            liste.appendChild(copie);
+        var meta = document.querySelector('meta[name="csrf-token"]');
+
+        return meta ? meta.getAttribute('content') || '' : '';
+    }
+
+    /* Les flottes standard, demandees une fois par page ; les fiches ouvertes entre-temps attendent. */
+    function chargerLesFlottesStandard(carte, apres) {
+        var etat = carte.gtFlottesStandard;
+
+        if (etat && etat.chargees) {
+            apres(etat.modeles);
+
+            return;
+        }
+
+        if (etat && etat.enCours) {
+            etat.attentes.push(apres);
+
+            return;
+        }
+
+        etat = { chargees: false, enCours: true, modeles: [], attentes: [apres] };
+        carte.gtFlottesStandard = etat;
+
+        var finir = function (modeles) {
+            var attentes = etat.attentes;
+            etat.enCours = false;
+            etat.chargees = true;
+            etat.modeles = modeles;
+            etat.attentes = [];
+            attentes.forEach(function (attente) {
+                attente(modeles);
+            });
+        };
+
+        if (typeof galaxyFleetTemplatesUrl === 'undefined' || !galaxyFleetTemplatesUrl || !window.jQuery) {
+            finir([]);
+
+            return;
+        }
+
+        window.jQuery.getJSON(galaxyFleetTemplatesUrl)
+            .done(function (reponse) {
+                finir(reponse && Array.isArray(reponse.templates) ? reponse.templates : []);
+            })
+            .fail(function () {
+                finir([]);
+            });
+    }
+
+    /* La note sous la liste : le droit d'abord, puis l'absence de flotte, sinon les valeurs par defaut. */
+    function noteDExpedition(systeme, modeles) {
+        if (!systeme || !systeme.hasAdmiral) {
+            var conteneur = document.getElementById('galaxyExpeditionFleetTemplateContainer');
+
+            return (conteneur && conteneur.getAttribute('title')) || locaFiche('reasons.unavailable', '');
+        }
+
+        if (modeles !== null && modeles.length === 0) {
+            return locaFiche('expeditionNone', '');
+        }
+
+        return locaFiche('expeditionNote', '');
+    }
+
+    function mettreLaNote(f, texte) {
+        var note = f.querySelector('.gtCardNote');
+
+        if (note) {
+            note.textContent = texte;
+        }
+    }
+
+    /* La charge d'une expedition avec cette flotte : celle que la page Flotte envoie. */
+    function chargeDExpedition(carte, modele) {
+        var s = carte.gtSysteme || {};
+        var charge = {
+            galaxy: s.galaxie,
+            system: s.systeme,
+            position: POSITION_ESPACE_PROFOND,
+            type: 1,
+            mission: 15,
+            speed: VITESSE_PAR_DEFAUT,
+            holdingtime: DUREE_D_EXPEDITION_PAR_DEFAUT,
+            _token: jetonCsrf()
+        };
+
+        Object.keys(modele.ships || {}).forEach(function (id) {
+            if (Number(modele.ships[id]) > 0) {
+                charge['am' + id] = Number(modele.ships[id]);
+            }
         });
 
-        liste.disabled = source.disabled;
+        return charge;
+    }
+
+    /* Le serveur dit si cette flotte peut partir en expedition d'ici ; sa raison est gardee pour le bouton. */
+    function verifierLaCible(carte, f, modele) {
+        var e = f.gtExpedition;
+
+        if (!e || typeof galaxyCheckTargetUrl === 'undefined' || !galaxyCheckTargetUrl || !window.jQuery) {
+            return;
+        }
+
+        var demande = ++e.jeton;
+        e.verdict = { enCours: true, ok: false, raison: '' };
+        composerLesActions(f);
+
+        var conclure = function (ok, raison) {
+            if (demande !== e.jeton) {
+                return;
+            }
+
+            e.verdict = { enCours: false, ok: ok, raison: raison };
+            composerLesActions(f);
+        };
+
+        window.jQuery.post(galaxyCheckTargetUrl, chargeDExpedition(carte, modele), null, 'json')
+            .done(function (reponse) {
+                var ok = !!(reponse && reponse.orders && reponse.orders[15] === true);
+                var raison = reponse && reponse.errors && reponse.errors.length ? String(reponse.errors[0].message || '') : '';
+                conclure(ok, ok ? '' : raison || locaFiche('reasons.unavailable', ''));
+            })
+            .fail(function () {
+                conclure(false, locaFiche('reasons.unavailable', ''));
+            });
+    }
+
+    /* L'envoi, par le point d'entree de la page Flotte ; le message du serveur est montre, la couche redemandee. */
+    function lancerLExpedition(carte, f, modele) {
+        var e = f.gtExpedition;
+
+        if (!e || e.envoiEnCours || typeof galaxySendFleetUrl === 'undefined' || !galaxySendFleetUrl || !window.jQuery) {
+            return;
+        }
+
+        e.envoiEnCours = true;
+        composerLesActions(f);
+
+        var dire = function (message, erreur) {
+            if (typeof window.fadeBox === 'function' && message) {
+                window.fadeBox(message, erreur);
+            }
+        };
+
+        window.jQuery.post(galaxySendFleetUrl, chargeDExpedition(carte, modele), null, 'json')
+            .done(function (reponse) {
+                e.envoiEnCours = false;
+
+                if (reponse && reponse.success) {
+                    dire(locaFiche('expeditionSent', ''), false);
+                    e.liste.value = '';
+                    e.modele = null;
+                    e.verdict = null;
+                    composerLesActions(f);
+
+                    if (carte.gtSysteme) {
+                        chargerLesFlottes(carte, carte.gtSysteme.galaxie, carte.gtSysteme.systeme);
+                    }
+
+                    return;
+                }
+
+                var raison = reponse && reponse.errors && reponse.errors.length ? String(reponse.errors[0].message || '') : '';
+                e.verdict = { enCours: false, ok: false, raison: raison || locaFiche('reasons.unavailable', '') };
+                dire(raison, true);
+                composerLesActions(f);
+            })
+            .fail(function () {
+                e.envoiEnCours = false;
+                e.verdict = { enCours: false, ok: false, raison: locaFiche('reasons.unavailable', '') };
+                composerLesActions(f);
+            });
+    }
+
+    /* Le choix d'une flotte dans la liste : le verdict du serveur est redemande a chaque changement. */
+    function choisirLaFlotteStandard(carte, f) {
+        var e = f.gtExpedition;
+
+        if (!e) {
+            return;
+        }
+
+        var id = Number(e.liste.value);
+        var modele = null;
+
+        e.modeles.forEach(function (m) {
+            if (Number(m.id) === id) {
+                modele = m;
+            }
+        });
+
+        e.modele = modele;
+        e.verdict = null;
+        e.jeton++;
+        composerLesActions(f);
+
+        if (modele) {
+            verifierLaCible(carte, f, modele);
+        }
+    }
+
+    /* La liste de la fiche, remplie des flottes standard du joueur des qu'elles sont connues. */
+    function listeDesFlottesStandard(carte, f, systeme) {
+        var liste = element('select', 'gtSelect');
+        var choisir = document.createElement('option');
+
+        liste.id = 'gtExpeditionSelect';
+        liste.disabled = true;
+        choisir.value = '';
+        choisir.textContent = locaFiche('expeditionChoose', '');
+        liste.appendChild(choisir);
+
+        f.gtExpedition = { liste: liste, modeles: [], modele: null, verdict: null, jeton: 0, envoiEnCours: false };
+
         liste.addEventListener('change', function () {
-            source.value = liste.value;
-            source.dispatchEvent(new Event('change', { bubbles: true }));
+            choisirLaFlotteStandard(carte, f);
+        });
+
+        chargerLesFlottesStandard(carte, function (modeles) {
+            if (!f.gtExpedition || f.gtExpedition.liste !== liste) {
+                return;
+            }
+
+            f.gtExpedition.modeles = modeles;
+            modeles.forEach(function (m) {
+                var option = document.createElement('option');
+                option.value = String(m.id);
+                option.textContent = String(m.name);
+                liste.appendChild(option);
+            });
+            liste.disabled = !(systeme && systeme.hasAdmiral) || modeles.length === 0;
+            mettreLaNote(f, noteDExpedition(systeme, modeles));
         });
 
         return liste;
@@ -77259,7 +77496,7 @@ window.playOGameXWormhole = function (canvas) {
             genre = objet ? 'planete' : 'libre';
         }
 
-        f.gtContexte = { fiche: f, ligne: ligne, objet: objet, systeme: systeme, position: position, genre: genre };
+        f.gtContexte = { carte: carte, fiche: f, ligne: ligne, objet: objet, systeme: systeme, position: position, genre: genre };
 
         var avant = [];
         var apres = [];
@@ -77302,7 +77539,7 @@ window.playOGameXWormhole = function (canvas) {
         avant.push(nature);
 
         if (genre === 'profond') {
-            avant.push(listeMiroir());
+            avant.push(listeDesFlottesStandard(carte, f, systeme));
         }
 
         /* Les cibles d'une meme position : la planete, sa lune, son champ de debris — celles qui existent. */
@@ -77338,11 +77575,7 @@ window.playOGameXWormhole = function (canvas) {
         if (genre === 'libre') {
             note.textContent = locaFiche('emptyServer', '');
         } else if (genre === 'profond') {
-            var choix = document.getElementById('galaxyExpeditionFleetTemplateContainer');
-            var selection = document.getElementById('expeditionFleetTemplateSelect');
-            note.textContent = selection && selection.disabled && choix && choix.getAttribute('title')
-                ? choix.getAttribute('title')
-                : locaFiche('expeditionNote', '');
+            note.textContent = noteDExpedition(systeme, null);
         }
 
         if (note.textContent !== '') {
@@ -77391,27 +77624,6 @@ window.playOGameXWormhole = function (canvas) {
         f.appendChild(tete);
         f.appendChild(element('div', 'gtCardBody'));
 
-        /*
-         * Le choix d'une flotte d'expedition montre ou cache le bouton d'envoi herite, et le parcours
-         * du jeu l'active apres un aller-retour serveur (`galaxyCheckTarget`) : la grille suit les
-         * deux — l'evenement `change` de la liste heritee, et les attributs du bouton d'envoi.
-         */
-        f.addEventListener('change', function (evenement) {
-            if (evenement.target && evenement.target.id === 'expeditionFleetTemplateSelect') {
-                composerLesActions(f);
-            }
-        });
-
-        var envoi = document.getElementById('sendExpeditionFleetTemplateFleet');
-
-        if (envoi && typeof window.MutationObserver === 'function') {
-            new window.MutationObserver(function () {
-                if (f.gtContexte && f.gtContexte.genre === 'profond') {
-                    composerLesActions(f);
-                }
-            }).observe(envoi, { attributes: true, attributeFilter: ['disabled', 'style'] });
-        }
-
         carte.appendChild(f);
 
         return f;
@@ -77442,6 +77654,7 @@ window.playOGameXWormhole = function (canvas) {
             f.hidden = true;
             f.gtBloc = null;
             f.gtContexte = null;
+            f.gtExpedition = null;
         }
 
         var choisis = carte.querySelectorAll('.gtBody.gtSelected');
@@ -77656,7 +77869,6 @@ window.playOGameXWormhole = function (canvas) {
         6: 'espionage', 7: 'colonize', 8: 'recycle', 9: 'moon-destruction', 10: 'missile', 15: 'expedition'
     };
     var MISSILE = 10;
-    var RAFRAICHISSEMENT_SANS_MOUVEMENT = 5000;
 
     /* Le vaisseau de la page « Mouvement de flotte » : le meme GIF anime, il regarde vers la droite. */
     var VAISSEAU_BLANC = '/img/icons/f9cb590cdf265f499b0e2e5d91fc75.gif';
@@ -77689,14 +77901,8 @@ window.playOGameXWormhole = function (canvas) {
     var decalageHorloge = 0;
     var mouvements = [];
     var animation = null;
-    var minuterieStatique = null;
     var systemeAbonne = null;
     var joueurAbonne = false;
-
-    function mouvementReduit() {
-        return typeof window.matchMedia === 'function'
-            && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    }
 
     function maintenantServeur() {
         return Date.now() + decalageHorloge;
@@ -78105,28 +78311,20 @@ window.playOGameXWormhole = function (canvas) {
             window.cancelAnimationFrame(animation);
             animation = null;
         }
-
-        if (minuterieStatique !== null) {
-            window.clearInterval(minuterieStatique);
-            minuterieStatique = null;
-        }
     }
 
     /*
-     * L'animation ne tourne que si elle sert : aucun mouvement, onglet cache ou reduction des
-     * mouvements demandee — et dans ce dernier cas les marqueurs sont reposes toutes les cinq
-     * secondes, sans transition.
+     * L'animation ne tourne que si elle sert : aucun mouvement, ou onglet cache. Elle tourne a
+     * chaque image, **y compris sous la reduction des mouvements** : la position d'un vaisseau est
+     * une information, pas un effet — la reposer toutes les cinq secondes faisait sauter le
+     * marqueur (retour de Keven : « ca fait quelques secondes, l'image change de place »). Les
+     * effets decoratifs — trainee, fenetre d'hyperespace, soleil — s'eteignent par leurs propres
+     * regles sous cette preference.
      */
     function animer() {
         arreterLAnimation();
 
         if (mouvements.length === 0 || document.hidden) {
-            return;
-        }
-
-        if (mouvementReduit()) {
-            minuterieStatique = window.setInterval(placerLesMarqueurs, RAFRAICHISSEMENT_SANS_MOUVEMENT);
-
             return;
         }
 
