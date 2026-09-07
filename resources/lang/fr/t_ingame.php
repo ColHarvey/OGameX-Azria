@@ -324,6 +324,8 @@ return [
         'tactical_moon' => 'Lune',
         'tactical_debris' => 'Champ de débris',
         'tactical_deep_space' => 'Espace profond',
+        'tactical_follow' => 'Suivre la flotte vers',
+        'tactical_hyperspace' => 'En hyperespace vers',
         'planet_col' => 'Planète',
         'name_col' => 'Nom',
         'moon_col' => 'Lune',

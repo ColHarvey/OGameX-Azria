@@ -51,59 +51,25 @@
  */
 #galaxyTactical .gtStar {
     position: absolute;
-    width: 46px;
-    height: 46px;
+    width: 120px;
+    height: 120px;
     transform: translate(-50%, -50%);
-    border-radius: 50%;
-    background: radial-gradient(circle, #fff8e6 0%, #ffd27a 30%, #ffb347 48%, #e0651f 66%, rgba(224, 101, 31, 0) 80%);
-    box-shadow: 0 0 18px 6px rgba(255, 179, 71, 0.45), 0 0 48px 14px rgba(224, 101, 31, 0.22);
     pointer-events: none;
-    animation: gtSunBreath 4.5s ease-in-out infinite;
+}
+
+#galaxyTactical .gtSunSvg {
+    display: block;
+    width: 120px;
+    height: 120px;
+    overflow: visible;
 }
 
 /*
- * La couronne : un degrade conique flou qui tourne lentement derriere le disque. Elle ne
- * deplace rien et ne capte aucun clic — c'est une lumiere, pas un objet.
+ * Le mouvement du soleil vit dans le SVG que le module ecrit (`soleilVivant()`) : bruit fractal
+ * qui coule, couronne qui respire, eruptions sur le bord. La premiere version — degrade conique
+ * flou en rotation — faisait une tache qui tourne ; Keven l'a refusee : « remets comme c'etait,
+ * je veux une animation qui bouge, comme un vrai soleil ».
  */
-#galaxyTactical .gtStar::before {
-    content: "";
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    width: 96px;
-    height: 96px;
-    margin: -48px 0 0 -48px;
-    border-radius: 50%;
-    background: conic-gradient(from 0deg, rgba(255, 210, 122, 0.55), rgba(224, 101, 31, 0.05) 30%, rgba(255, 179, 71, 0.5) 55%, rgba(224, 101, 31, 0.05) 80%, rgba(255, 210, 122, 0.55));
-    filter: blur(7px);
-    opacity: 0.7;
-    animation: gtSunCorona 38s linear infinite;
-    z-index: -1;
-}
-
-/* Les taches et eruptions : un second degrade, contre-rotation, plus serre. */
-#galaxyTactical .gtStar::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: 50%;
-    background: conic-gradient(from 90deg, rgba(255, 255, 255, 0) 0, rgba(255, 244, 214, 0.35) 12%, rgba(255, 255, 255, 0) 24%, rgba(255, 244, 214, 0.25) 61%, rgba(255, 255, 255, 0) 75%);
-    mix-blend-mode: screen;
-    animation: gtSunSpots 23s linear infinite reverse;
-}
-
-@keyframes gtSunBreath {
-    0%, 100% { box-shadow: 0 0 18px 6px rgba(255, 179, 71, 0.45), 0 0 48px 14px rgba(224, 101, 31, 0.22); }
-    50% { box-shadow: 0 0 24px 9px rgba(255, 179, 71, 0.6), 0 0 64px 20px rgba(224, 101, 31, 0.3); }
-}
-
-@keyframes gtSunCorona {
-    to { transform: rotate(360deg); }
-}
-
-@keyframes gtSunSpots {
-    to { transform: rotate(360deg); }
-}
 
 /* Les orbites : un trait, et rien de plus. Elles situent, elles ne se cliquent pas. */
 #galaxyTactical .gtOrbit {
@@ -142,21 +108,19 @@
     white-space: nowrap;
 }
 
+/*
+ * **Le bloc ne se dessine jamais.** Keven : « pas le carre, juste le rond de la grosseur de la
+ * planete ». Survol, focus et selection ne posent ni fond ni bordure sur le bloc ; seul l'anneau
+ * (`::before`) apparait, a la taille exacte de la texture. Le focus clavier reste visible par cet
+ * anneau — c'est lui l'indicateur, pas un contour de boite.
+ */
 #galaxyTactical .gtBody:hover,
-#galaxyTactical .gtBody:focus-visible {
-    background: rgba(2, 11, 21, 0.72);
-    border-color: rgba(67, 201, 232, 0.55);
-    outline: none;
-}
-
-#galaxyTactical .gtBody:focus-visible {
-    border-color: var(--gt-interactif);
-    box-shadow: 0 0 0 1px var(--gt-interactif);
-}
-
+#galaxyTactical .gtBody:focus-visible,
 #galaxyTactical .gtBody.gtSelected {
-    background: rgba(2, 11, 21, 0.85);
-    border-color: var(--gt-interactif);
+    background: none;
+    border-color: transparent;
+    box-shadow: none;
+    outline: none;
 }
 
 /*
@@ -232,15 +196,23 @@
  * graphique avec les icones d'action qui arriveront a l'etape suivante. Poses derriere la
  * vignette, ils ne captent pas le curseur.
  */
+/*
+ * L'anneau de survol et de selection : un cercle de **44 px**, la taille de la texture, centre
+ * sur elle (la texture occupe les 44 premiers pixels du bloc). Un anneau CSS, pas une image mise
+ * a l'echelle : il est net a toute taille et ne depend d'aucun fichier.
+ */
 #galaxyTactical .gtBody::before {
     content: "";
     position: absolute;
     left: 50%;
     top: 22px;
-    width: 46px;
-    height: 46px;
-    margin: -23px 0 0 -23px;
-    background: url("/img/galaxy-tactical/planet-hover-halo.svg") center / contain no-repeat;
+    width: 44px;
+    height: 44px;
+    margin: -22px 0 0 -22px;
+    box-sizing: border-box;
+    border: 2px solid rgba(67, 201, 232, 0.85);
+    border-radius: 50%;
+    box-shadow: 0 0 8px rgba(67, 201, 232, 0.55), inset 0 0 6px rgba(67, 201, 232, 0.35);
     opacity: 0;
     pointer-events: none;
     transition: opacity 120ms ease-out;
@@ -252,7 +224,7 @@
 }
 
 #galaxyTactical .gtBody.gtSelected::before {
-    background-image: url("/img/galaxy-tactical/planet-selection-ring.svg");
+    border-color: var(--gt-interactif);
     opacity: 1;
 }
 
@@ -263,8 +235,8 @@
 
 /* Une position libre : une silhouette, pas une planete. Elle ne devient reelle qu'apres le serveur. */
 #galaxyTactical .gtEmpty {
-    width: 22px;
-    height: 22px;
+    width: 44px;
+    height: 44px;
     background: url("/img/galaxy-tactical/slot-colonizable.svg") center / contain no-repeat;
     opacity: 0.42;
     flex: 0 0 auto;
@@ -375,6 +347,80 @@
     opacity: 0.9;
 }
 
+/* Le bouton de saut vers l'autre systeme : il se clique, il se voit au survol. */
+#galaxyTactical .gtJump {
+    pointer-events: auto;
+    cursor: pointer;
+    opacity: 0.8;
+}
+
+#galaxyTactical .gtJump:hover,
+#galaxyTactical .gtJump:focus-visible {
+    opacity: 1;
+    filter: drop-shadow(0 0 4px rgba(67, 201, 232, 0.9));
+}
+
+/* En hyperespace : le vaisseau n'est sur aucune carte — le marqueur s'efface, la trainee parle. */
+#galaxyTactical .gtFleetMarker.gtInTransit {
+    display: none;
+}
+
+/*
+ * ## La trainee d'hyperespace
+ *
+ * Un trait qui file dans le sens du vol, au bord de sortie du systeme de depart et au bord
+ * d'entree du systeme d'arrivee, visible tant que la flotte est entre les deux. Un coeur clair
+ * sur une trainee cyan, pointilles qui defilent : le mouvement se lit sans que rien ne bouge
+ * de place. Fige sous la reduction des mouvements par la regle commune plus bas.
+ */
+#galaxyTactical .gtWarp {
+    display: none;
+    pointer-events: none;
+}
+
+#galaxyTactical .gtWarp.gtWarpActive {
+    display: block;
+}
+
+#galaxyTactical .gtWarpStreak {
+    stroke: rgba(70, 223, 248, 0.55);
+    stroke-width: 3;
+    stroke-linecap: round;
+    stroke-dasharray: 6 5;
+    animation: gtWarpFlow 0.9s linear infinite;
+    filter: drop-shadow(0 0 4px rgba(70, 223, 248, 0.8));
+}
+
+#galaxyTactical .gtTrajHostile .gtWarpStreak {
+    stroke: rgba(255, 105, 63, 0.55);
+    filter: drop-shadow(0 0 4px rgba(255, 105, 63, 0.8));
+}
+
+#galaxyTactical .gtWarpCore {
+    stroke: rgba(255, 255, 255, 0.85);
+    stroke-width: 1.2;
+    stroke-linecap: round;
+    animation: gtWarpBreath 1.8s ease-in-out infinite;
+}
+
+@keyframes gtWarpFlow {
+    to { stroke-dashoffset: -11; }
+}
+
+@keyframes gtWarpBreath {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1; }
+}
+
+/* Le vaisseau : une lueur de reacteur derriere lui, dans la couleur de son camp via le trait. */
+#galaxyTactical .gtShip image {
+    filter: drop-shadow(0 0 3px rgba(70, 223, 248, 0.85));
+}
+
+#galaxyTactical .gtTrajHostile .gtShip image {
+    filter: drop-shadow(0 0 3px rgba(255, 105, 63, 0.85));
+}
+
 /* Une pulsation discrete sur le marqueur : il bouge, on ne doit pas le chercher. */
 @keyframes gtMarkerPulse {
     0%, 100% { opacity: 1; }
@@ -411,10 +457,12 @@
 }
 
 /* Une animation qui ne demande rien a personne : celui qui a dit non ne la voit pas. */
+/*
+ * Les animations CSS s'eteignent ici ; celles du soleil sont en SMIL, que CSS n'atteint pas —
+ * le module ne les cree pas quand le joueur a demande moins de mouvement.
+ */
 @media (prefers-reduced-motion: reduce) {
-    #galaxyTactical *,
-    #galaxyTactical .gtStar::before,
-    #galaxyTactical .gtStar::after {
+    #galaxyTactical * {
         animation: none !important;
         transition: none !important;
     }
@@ -509,7 +557,24 @@
     flex-direction: column;
     gap: 6px;
     width: auto;
+    min-height: 0;
+    margin: 0;
     padding: 2px;
+}
+
+/*
+ * Le jeu dispose cette boite en **ligne**, avec des largeurs en pour cent (38 % / 9 % / 53 %).
+ * En colonne dans une fiche de 232 px, ces largeurs ecrasaient tout et laissaient un vide au
+ * milieu — c'est ce que la capture de Keven montrait. Ici chaque bloc prend sa largeur, et le
+ * bloc du titre disparait avec le titre qu'il ne portait que pour la bande horizontale.
+ */
+#galaxyContent #galaxyTactical .gtCardBody .expeditionDebrisSlotBox > div {
+    width: auto;
+    justify-content: flex-start;
+}
+
+#galaxyContent #galaxyTactical .gtCardBody .expeditionDebrisSlotBox > div:has(> h3.title) {
+    display: none;
 }
 
 /* La tete de fiche dit deja « Espace profond · 16 » : le titre de la boite ferait doublon. */

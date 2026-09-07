@@ -825,18 +825,181 @@ class GalaxyTacticalMapTest extends UnitTestCase
      */
     public function testTheSunIsAnimatedAndStillsUnderReducedMotion(): void
     {
-        $feuille = $this->feuille();
+        $module = $this->module();
 
-        /* L'accolade fait partie du motif : `gtSunCoronaBis` contient `gtSunCorona`, et une mutation qui
-         * renommait l'animation survivait a un motif sans elle. */
-        foreach (['gtSunBreath', 'gtSunCorona', 'gtSunSpots'] as $animation) {
-            $this->assertStringContainsString('@keyframes ' . $animation . ' {', $feuille, 'The sun animation ' . $animation . ' is gone.');
+        /*
+         * Le mouvement est en SMIL dans un SVG que le module ecrit : bruit fractal qui deplace le
+         * disque, groupe en rotation, couronne qui respire, eruptions. Keven a refuse la version CSS
+         * (« une tache qui tourne ») ; celle-ci bouge vraiment. Les trois traits sont exiges.
+         */
+        /* Chaque motif porte le debut de son attribut : `<feTurbulenceX` contient `<feTurbulence`. */
+        foreach (['<feTurbulence type=', '<feDisplacementMap in=', '<animateTransform attributeName=', '<animate attributeName="r"'] as $trait) {
+            $this->assertStringContainsString($trait, $module, 'The living sun lost ' . $trait . ': it is a still disc again.');
         }
 
+        /*
+         * SMIL ne s'eteint pas par CSS : le module ne cree les `<animate>` que si le joueur n'a pas
+         * demande moins de mouvement. Le gabarit passe par `a(...)`, et l'appel lit la preference.
+         */
+        $this->assertStringContainsString(
+            'soleilVivant(!mouvementReduit())',
+            $module,
+            'The sun animations no longer depend on prefers-reduced-motion: CSS cannot stop SMIL, only omitting the animate nodes does.'
+        );
+
         $this->assertMatchesRegularExpression(
-            '/@media \(prefers-reduced-motion: reduce\) \{[^}]*#galaxyTactical \.gtStar::before,[^}]*#galaxyTactical \.gtStar::after[^}]*animation: none !important/s',
+            "/var a = function \(balise\) \{\s*return anime \? balise : '';/",
+            $module,
+            'The animate nodes are no longer gated by the anime flag: reduced motion would still get a moving sun.'
+        );
+    }
+
+    /**
+     * **Le survol est un rond de la grosseur de la planete, et rien d'autre.**
+     *
+     * Keven : « je veux pas le carre, je veux juste l'effet de genre planete, le rond » — sur une
+     * position libre comme sur une planete prise. Le bloc ne dessine ni fond ni bordure ; l'anneau
+     * fait 44 px, la taille de la texture ; la silhouette d'une position libre fait la meme taille
+     * pour que l'anneau soit le meme.
+     */
+    public function testHoverIsARingTheSizeOfThePlanetAndNothingElse(): void
+    {
+        $feuille = $this->feuille();
+
+        $this->assertMatchesRegularExpression(
+            '/#galaxyTactical \.gtBody:hover,\s*#galaxyTactical \.gtBody:focus-visible,\s*#galaxyTactical \.gtBody\.gtSelected \{[^}]*background: none;[^}]*border-color: transparent;/s',
             $feuille,
-            'Reduced motion no longer stills the sun corona: the universal selector does not reach pseudo-elements.'
+            'Hover draws a box around the body again: Keven asked for the ring alone.'
+        );
+
+        $this->assertMatchesRegularExpression(
+            '/#galaxyTactical \.gtBody::before \{[^}]*width: 44px;[^}]*height: 44px;[^}]*border-radius: 50%;/s',
+            $feuille,
+            'The hover ring is no longer a 44px circle: it does not match the texture.'
+        );
+
+        $this->assertStringNotContainsString(
+            'planet-hover-halo.svg',
+            $feuille,
+            'The hover ring is an image again: scaled, blurry, and not the size of the planet.'
+        );
+
+        $this->assertMatchesRegularExpression(
+            '/#galaxyTactical \.gtEmpty \{[^}]*width: 44px;[^}]*height: 44px;/s',
+            $feuille,
+            'The free-slot silhouette is smaller than the ring: hovering an empty slot shows a ring around nothing.'
+        );
+    }
+
+    /**
+     * La boite historique de l'espace profond, dans la fiche, ne garde ni ses largeurs en pour cent
+     * ni le bloc de son titre — c'etait le vide de la capture de Keven.
+     */
+    public function testTheDeepSpaceCardUnfoldsTheHistoricalBox(): void
+    {
+        $feuille = $this->feuille();
+
+        $this->assertMatchesRegularExpression(
+            '/\.gtCardBody \.expeditionDebrisSlotBox > div \{[^}]*width: auto;/s',
+            $feuille,
+            'The historical box keeps its percentage widths in the card: its blocks are crushed and a blank appears.'
+        );
+
+        $this->assertStringContainsString(
+            '.expeditionDebrisSlotBox > div:has(> h3.title)',
+            $feuille,
+            'The block that only carried the hidden title stays in the card as an empty flex item.'
+        );
+    }
+
+    /**
+     * **Un vol vers un autre systeme se suit d'un systeme a l'autre.**
+     *
+     * Keven voyait une sonde aller au bord pendant tout le vol puis « rebondir » avec le retour. Le
+     * modele : la premiere moitie du vol se joue dans le systeme de depart (planete → bord), la
+     * seconde dans celui de l'arrivee (bord → cible) ; pendant l'autre moitie le marqueur est au bord,
+     * en transit, avec un bouton qui charge l'autre systeme pour suivre la flotte. « Si je vais dans
+     * l'autre systeme je veux la voir continuer jusqu'a la planete » — c'est ce bouton, et cette
+     * seconde moitie.
+     */
+    public function testAnInterSystemFlightIsFollowedFromOneSystemToTheNext(): void
+    {
+        $module = $this->module();
+
+        /*
+         * Decision de Keven : pas de traversee des systemes intermediaires — un quart du vol pour
+         * sortir, un quart pour entrer, et entre les deux la flotte est en hyperespace : le vaisseau
+         * n'est sur aucune carte, une trainee au bord le dit a sa place.
+         */
+        $this->assertStringContainsString('var PART_LOCALE = 0.25;', $module, 'The local share of an inter-system flight changed: the two views disagree on where the fleet is.');
+        $this->assertStringContainsString("classList.toggle('gtWarpActive', local.enTransit)", $module, 'The hyperspace streak no longer follows the transit state.');
+        $this->assertStringContainsString("locaDeLaCarte(carte, 'hyperspace'", $module, 'The streak no longer says the fleet is in hyperspace.');
+
+        $feuille = $this->feuille();
+        $this->assertMatchesRegularExpression('/#galaxyTactical \.gtFleetMarker\.gtInTransit \{[^}]*display: none/', $feuille, 'A fleet in hyperspace is still drawn at the edge: it is on no map at that moment.');
+        $this->assertStringContainsString('@keyframes gtWarpFlow {', $feuille, 'The hyperspace streak no longer flows.');
+        $this->assertStringContainsString('data-loca-hyperspace=', $this->vue(), 'The view no longer publishes the hyperspace label.');
+
+        foreach (['fr', 'en'] as $langue) {
+            $lignes = require resource_path('lang/' . $langue . '/t_ingame.php');
+            $this->assertArrayHasKey('tactical_hyperspace', $lignes['galaxy'], 'The hyperspace label is missing in ' . $langue . '.');
+        }
+        $this->assertStringContainsString('global >= PART_LOCALE', $module, 'An outbound flight no longer leaves the system after its local share.');
+        $this->assertStringContainsString('(global - (1 - PART_LOCALE)) / PART_LOCALE', $module, 'An inbound flight no longer enters during its local share: it would sit at the edge until arrival.');
+        $this->assertStringContainsString("classList.toggle('gtInTransit', local.enTransit)", $module, 'A fleet in the other system is no longer marked in transit.');
+        $this->assertStringContainsString("'route-jump-destination'", $module, 'The edge no longer offers the jump to the destination system: the player cannot follow the fleet.');
+        $this->assertStringContainsString('allerAuSysteme(Number(autre.galaxy), Number(autre.system))', $module, 'The jump button no longer loads the other system.');
+
+        $this->assertMatchesRegularExpression(
+            '/#galaxyTactical \.gtJump \{[^}]*pointer-events: auto/',
+            $this->feuille(),
+            'The jump button inherits pointer-events: none from the layer: it cannot be clicked.'
+        );
+
+        $this->assertStringContainsString('data-loca-follow=', $this->vue(), 'The view no longer publishes the follow label.');
+
+        foreach (['fr', 'en'] as $langue) {
+            $lignes = require resource_path('lang/' . $langue . '/t_ingame.php');
+            $this->assertArrayHasKey('tactical_follow', $lignes['galaxy'], 'The follow label is missing in ' . $langue . '.');
+        }
+    }
+
+    /**
+     * **Le marqueur d'une flotte est le vaisseau blanc de la page de mouvement, tourne dans le sens
+     * du vol.**
+     *
+     * Keven : « les petits vaisseaux blancs animes du voyage, et qu'il pointe dans la bonne direction ».
+     * Le GIF regarde vers la droite (lu : cap natif 0 degre) ; l'angle du segment depart → arrivee le
+     * fait pointer la ou il va. Les missiles gardent leur propre marqueur.
+     */
+    public function testTheFleetMarkerIsTheWhiteShipPointingAlongItsPath(): void
+    {
+        $module = $this->module();
+
+        $this->assertStringContainsString(
+            "var VAISSEAU_BLANC = '/img/icons/f9cb590cdf265f499b0e2e5d91fc75.gif';",
+            $module,
+            'The fleet marker is no longer the white ship of the movement page.'
+        );
+
+        $this->assertFileExists(public_path('img/icons/f9cb590cdf265f499b0e2e5d91fc75.gif'), 'The white ship GIF is missing.');
+
+        $this->assertStringContainsString(
+            'Math.atan2(bouts.arrivee.y - bouts.depart.y, bouts.arrivee.x - bouts.depart.x)',
+            $module,
+            'The heading is no longer computed from the trajectory: the ship would not point where it goes.'
+        );
+
+        $this->assertStringContainsString(
+            "transform: 'rotate(' + capDe(bouts).toFixed(1) + ')'",
+            $module,
+            'The ship is no longer rotated by its heading.'
+        );
+
+        $this->assertStringContainsString(
+            "'missile-incoming' : 'missile-outgoing'",
+            $module,
+            'Missiles lost their own marker: a missile would look like a ship.'
         );
     }
 

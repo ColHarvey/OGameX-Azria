@@ -332,6 +332,8 @@
                          data-loca-moon="{{ __('t_ingame.galaxy.tactical_moon') }}"
                          data-loca-debris="{{ __('t_ingame.galaxy.tactical_debris') }}"
                          data-loca-deep="{{ __('t_ingame.galaxy.tactical_deep_space') }}"
+                         data-loca-follow="{{ __('t_ingame.galaxy.tactical_follow') }}"
+                         data-loca-hyperspace="{{ __('t_ingame.galaxy.tactical_hyperspace') }}"
                          aria-label="{{ __('t_ingame.galaxy.tactical_map') }}"></div>
                     <div class="galaxyRow ctGalaxyHead headBold">
                         <div class="galaxyCell span1-2">{{ __('t_ingame.galaxy.planet_col') }}</div>

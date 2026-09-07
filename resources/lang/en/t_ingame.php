@@ -438,6 +438,8 @@ return [
         'tactical_moon'         => 'Moon',
         'tactical_debris'       => 'Debris field',
         'tactical_deep_space'   => 'Deep space',
+        'tactical_follow'       => 'Follow the fleet to',
+        'tactical_hyperspace'   => 'In hyperspace towards',
         'planet_col'                   => 'Planet',
         'name_col'                     => 'Name',
         'moon_col'                     => 'Moon',

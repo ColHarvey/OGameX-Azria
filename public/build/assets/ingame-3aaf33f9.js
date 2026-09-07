@@ -76866,6 +76866,33 @@ ogame.chat = {
     var MISSILE = 10;
     var RAFRAICHISSEMENT_SANS_MOUVEMENT = 5000;
 
+    /* Le vaisseau de la page « Mouvement de flotte » : le meme GIF anime, il regarde vers la droite. */
+    var VAISSEAU_BLANC = '/img/icons/f9cb590cdf265f499b0e2e5d91fc75.gif';
+
+    /* Le cap d'une trajectoire, en degres, dans le sens du vol. */
+    function capDe(bouts) {
+        return (Math.atan2(bouts.arrivee.y - bouts.depart.y, bouts.arrivee.x - bouts.depart.x) * 180) / Math.PI;
+    }
+
+    /*
+     * La part d'un vol inter-systemes qui se joue dans chaque systeme : le premier quart dans
+     * celui du depart (planete → bord), le dernier dans celui de l'arrivee (bord → cible). Entre
+     * les deux, la flotte est en **hyperespace** — decision de Keven : elle ne traverse pas les
+     * systemes intermediaires ; une trainee anime le bord, et un bouton permet de la suivre.
+     */
+    var PART_LOCALE = 0.25;
+
+    /* Charger un autre systeme, par le chemin du jeu quand il existe. */
+    function allerAuSysteme(galaxie, systeme) {
+        if (typeof window.loadContent === 'function') {
+            window.loadContent(galaxie, systeme);
+
+            return;
+        }
+
+        redemanderLeSysteme(galaxie, systeme);
+    }
+
     var jetonDeSysteme = 0;
     var decalageHorloge = 0;
     var mouvements = [];
@@ -76990,6 +77017,54 @@ ogame.chat = {
         return couche;
     }
 
+    /*
+     * La porte de bord d'un vol inter-systemes : la marque de sortie ou d'entree, le bouton qui
+     * charge l'autre bout du vol, et **la trainee d'hyperespace** — un trait qui file dans le sens
+     * du vol, visible tant que la flotte est entre les deux systemes. Le vaisseau, lui, n'est
+     * alors sur aucune carte : c'est la trainee qui dit ou il est parti, ou il va arriver.
+     */
+    function poserLaPorte(carte, groupe, bouts, mouvement) {
+        var sortie = bouts.partIci;
+        var porte = sortie ? bouts.arrivee : bouts.depart;
+        var image = svg('image', { 'class': 'gtEdge', width: 18, height: 18, x: (porte.x - 9).toFixed(1), y: (porte.y - 9).toFixed(1) });
+        var fichier = sortie ? 'system-edge-outbound' : (mouvement.side === 'hostile' ? 'system-edge-inbound-hostile' : 'system-edge-inbound-personal');
+        image.setAttributeNS(COUCHE_XLINK, 'href', '/img/galaxy-tactical/' + fichier + '.svg');
+        groupe.appendChild(image);
+
+        var cap = capDe(bouts);
+        var trainee = svg('g', { 'class': 'gtWarp', transform: 'translate(' + porte.x.toFixed(1) + ',' + porte.y.toFixed(1) + ') rotate(' + cap.toFixed(1) + ')' });
+        trainee.appendChild(svg('line', { 'class': 'gtWarpStreak', x1: sortie ? 0 : -44, y1: 0, x2: sortie ? 44 : 0, y2: 0 }));
+        trainee.appendChild(svg('line', { 'class': 'gtWarpCore', x1: sortie ? 0 : -30, y1: 0, x2: sortie ? 30 : 0, y2: 0 }));
+
+        var autre = sortie ? mouvement.to : mouvement.from;
+        var titreTrainee = svg('title', {});
+        titreTrainee.textContent = mouvement.label + ' — ' + locaDeLaCarte(carte, 'hyperspace', 'En hyperespace vers') + ' ' + coordonnees(autre);
+        trainee.appendChild(titreTrainee);
+        groupe.appendChild(trainee);
+        mouvement._trainee = trainee;
+
+        var saut = svg('image', { 'class': 'gtJump', width: 16, height: 16, x: (porte.x - 8).toFixed(1), y: (porte.y + 11).toFixed(1), role: 'button', tabindex: '0' });
+        saut.setAttributeNS(COUCHE_XLINK, 'href', '/img/galaxy-tactical/' + (sortie ? 'route-jump-destination' : 'route-jump-origin') + '.svg');
+        saut.setAttribute('data-galaxy', String(autre.galaxy));
+        saut.setAttribute('data-system', String(autre.system));
+
+        var titreSaut = svg('title', {});
+        titreSaut.textContent = locaDeLaCarte(carte, 'follow', 'Suivre la flotte vers') + ' ' + coordonnees(autre);
+        saut.appendChild(titreSaut);
+
+        saut.addEventListener('click', function (evenement) {
+            evenement.stopPropagation();
+            allerAuSysteme(Number(autre.galaxy), Number(autre.system));
+        });
+        saut.addEventListener('keydown', function (evenement) {
+            if (evenement.key === 'Enter' || evenement.key === ' ') {
+                evenement.preventDefault();
+                allerAuSysteme(Number(autre.galaxy), Number(autre.system));
+            }
+        });
+        groupe.appendChild(saut);
+    }
+
     function dessinerLesMouvements(carte, galaxie, systeme) {
         var couche = coucheDe(carte);
 
@@ -77009,25 +77084,34 @@ ogame.chat = {
                 x2: bouts.arrivee.x.toFixed(1), y2: bouts.arrivee.y.toFixed(1)
             }));
 
-            /* Une porte de bord se voit : un vol qui sort ou entre a une marque a son extremite. */
+            /*
+             * Une porte de bord se voit, et elle se clique : un vol qui sort ou entre a une marque a
+             * son extremite, et un bouton qui charge l'autre systeme pour suivre la flotte — c'est ainsi
+             * qu'on la voit « continuer son chemin jusqu'a la planete ».
+             */
+            mouvement._trainee = null;
+
             if (!bouts.partIci || !bouts.arriveIci) {
-                var porte = bouts.partIci ? bouts.arrivee : bouts.depart;
-                var image = svg('image', { 'class': 'gtEdge', width: 18, height: 18, x: (porte.x - 9).toFixed(1), y: (porte.y - 9).toFixed(1) });
-                var fichier = bouts.partIci ? 'system-edge-outbound' : (mouvement.side === 'hostile' ? 'system-edge-inbound-hostile' : 'system-edge-inbound-personal');
-                image.setAttributeNS(COUCHE_XLINK, 'href', '/img/galaxy-tactical/' + fichier + '.svg');
-                groupe.appendChild(image);
+                poserLaPorte(carte, groupe, bouts, mouvement);
             }
 
             var marqueur = svg('g', { 'class': 'gtFleetMarker' });
             var icone = svg('image', { width: 16, height: 16, x: -8, y: -8 });
-            var nomIcone = mouvement.is_return ? 'mission-return' : 'mission-' + (ICONES_DE_MISSION[Number(mouvement.mission_type)] || 'transport');
 
+            /*
+             * **Le vaisseau blanc de la page de mouvement, tourne dans le sens du vol.** Le GIF regarde
+             * vers la droite (cap natif 0 degre) ; l'angle du segment depart → arrivee le fait pointer
+             * la ou il va. Un missile garde son marqueur : ce n'est pas un vaisseau.
+             */
             if (Number(mouvement.mission_type) === MISSILE) {
-                nomIcone = mouvement.side === 'hostile' ? 'missile-incoming' : 'missile-outgoing';
+                icone.setAttributeNS(COUCHE_XLINK, 'href', '/img/galaxy-tactical/' + (mouvement.side === 'hostile' ? 'missile-incoming' : 'missile-outgoing') + '.svg');
+                marqueur.appendChild(icone);
+            } else {
+                var cap = svg('g', { 'class': 'gtShip', transform: 'rotate(' + capDe(bouts).toFixed(1) + ')' });
+                icone.setAttributeNS(COUCHE_XLINK, 'href', VAISSEAU_BLANC);
+                cap.appendChild(icone);
+                marqueur.appendChild(cap);
             }
-
-            icone.setAttributeNS(COUCHE_XLINK, 'href', '/img/galaxy-tactical/' + nomIcone + '.svg');
-            marqueur.appendChild(icone);
 
             var titre = svg('title', {});
             titre.textContent = mouvement.label
@@ -77046,6 +77130,31 @@ ogame.chat = {
         placerLesMarqueurs();
     }
 
+    /*
+     * La progression **dans ce systeme** d'un mouvement, a partir de sa progression globale.
+     *
+     *   - vol interne : la meme ;
+     *   - vol sortant : la premiere moitie se joue ici (planete → bord), puis la flotte est sortie
+     *     et le marqueur reste au bord, en transit ;
+     *   - vol entrant : la premiere moitie, la flotte n'est pas encore la (marqueur au bord, en
+     *     transit), puis la seconde se joue ici (bord → cible).
+     */
+    function progressionLocale(global, bouts) {
+        if (bouts.partIci && bouts.arriveIci) {
+            return { avancement: global, enTransit: false };
+        }
+
+        if (bouts.partIci) {
+            return global >= PART_LOCALE
+                ? { avancement: 1, enTransit: true }
+                : { avancement: global / PART_LOCALE, enTransit: false };
+        }
+
+        return global <= 1 - PART_LOCALE
+            ? { avancement: 0, enTransit: true }
+            : { avancement: (global - (1 - PART_LOCALE)) / PART_LOCALE, enTransit: false };
+    }
+
     /* La position d'un marqueur : interpolation lineaire entre les deux instants du serveur. */
     function placerLesMarqueurs() {
         var maintenant = maintenantServeur() / 1000;
@@ -77056,11 +77165,18 @@ ogame.chat = {
             }
 
             var duree = Math.max(1, mouvement.time_arrival - mouvement.time_departure);
-            var avancement = Math.min(1, Math.max(0, (maintenant - mouvement.time_departure) / duree));
-            var x = mouvement._bouts.depart.x + (mouvement._bouts.arrivee.x - mouvement._bouts.depart.x) * avancement;
-            var y = mouvement._bouts.depart.y + (mouvement._bouts.arrivee.y - mouvement._bouts.depart.y) * avancement;
+            var global = Math.min(1, Math.max(0, (maintenant - mouvement.time_departure) / duree));
+            var local = progressionLocale(global, mouvement._bouts);
+            var x = mouvement._bouts.depart.x + (mouvement._bouts.arrivee.x - mouvement._bouts.depart.x) * local.avancement;
+            var y = mouvement._bouts.depart.y + (mouvement._bouts.arrivee.y - mouvement._bouts.depart.y) * local.avancement;
 
             mouvement._marqueur.setAttribute('transform', 'translate(' + x.toFixed(1) + ',' + y.toFixed(1) + ')');
+            mouvement._marqueur.classList.toggle('gtInTransit', local.enTransit);
+
+            /* En hyperespace, le vaisseau n'est sur aucune carte : la trainee du bord le dit a sa place. */
+            if (mouvement._trainee) {
+                mouvement._trainee.classList.toggle('gtWarpActive', local.enTransit);
+            }
         });
     }
 
@@ -77309,6 +77425,56 @@ ogame.chat = {
     }
 
     /*
+     * ## Le soleil vivant
+     *
+     * Un SVG en ligne, sans image. Le disque garde son degrade radial ; par-dessus, une couche de
+     * bruit fractal (`feTurbulence`) deplace le disque (`feDisplacementMap`) et le groupe qui la
+     * porte tourne lentement : le bruit vit en espace utilisateur, donc la rotation fait **couler**
+     * la surface au lieu de la faire tourner d'un bloc. La couronne respire ; quatre eruptions
+     * tournent sur le bord et s'allument tour a tour. Rien ne capte un clic.
+     *
+     * Sous `prefers-reduced-motion`, aucun `<animate>` n'est cree : SMIL ne s'eteint pas par CSS,
+     * et une regle `animation: none` ne l'atteindrait pas. Le soleil est alors une image fixe.
+     */
+    function soleilVivant(anime) {
+        var a = function (balise) {
+            return anime ? balise : '';
+        };
+
+        return '<svg class="gtSunSvg" viewBox="-60 -60 120 120" width="120" height="120" aria-hidden="true">'
+            + '<defs>'
+            + '<radialGradient id="gtSunCore"><stop offset="0" stop-color="#fff8e6"/><stop offset="0.45" stop-color="#ffd27a"/><stop offset="0.72" stop-color="#ff9a3c"/><stop offset="1" stop-color="#e0651f"/></radialGradient>'
+            + '<radialGradient id="gtSunGlow"><stop offset="0.35" stop-color="rgba(255,179,71,0.55)"/><stop offset="0.7" stop-color="rgba(224,101,31,0.18)"/><stop offset="1" stop-color="rgba(224,101,31,0)"/></radialGradient>'
+            + '<filter id="gtSunPlasma" x="-30%" y="-30%" width="160%" height="160%">'
+            + '<feTurbulence type="fractalNoise" baseFrequency="0.045" numOctaves="3" seed="7" result="bruit">'
+            + a('<animate attributeName="baseFrequency" values="0.045;0.06;0.045" dur="7s" repeatCount="indefinite"/>')
+            + '</feTurbulence>'
+            + '<feDisplacementMap in="SourceGraphic" in2="bruit" scale="7" xChannelSelector="R" yChannelSelector="G"/>'
+            + '</filter>'
+            + '<clipPath id="gtSunClip"><circle r="23"/></clipPath>'
+            + '</defs>'
+            + '<circle class="gtSunGlow" r="58" fill="url(#gtSunGlow)">'
+            + a('<animate attributeName="r" values="54;60;54" dur="4.5s" repeatCount="indefinite"/>')
+            + '</circle>'
+            + '<g clip-path="url(#gtSunClip)">'
+            + '<g filter="url(#gtSunPlasma)">'
+            + a('<animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="48s" repeatCount="indefinite"/>')
+            + '<circle r="30" fill="url(#gtSunCore)"/>'
+            + '<circle r="30" fill="url(#gtSunCore)" opacity="0.55" transform="rotate(137)"/>'
+            + '</g>'
+            + '</g>'
+            + '<g class="gtSunFlares">'
+            + a('<animateTransform attributeName="transform" type="rotate" from="0" to="-360" dur="31s" repeatCount="indefinite"/>')
+            + [0, 97, 190, 274].map(function (deg, i) {
+                return '<ellipse rx="9" ry="3" cx="25" cy="0" fill="#ffd27a" opacity="0.35" transform="rotate(' + deg + ')">'
+                    + a('<animate attributeName="opacity" values="0.1;0.75;0.1" dur="' + (5 + i * 1.7) + 's" repeatCount="indefinite"/>')
+                    + '</ellipse>';
+            }).join('')
+            + '</g>'
+            + '</svg>';
+    }
+
+    /*
      * Le systeme entier, redessine a neuf.
      *
      * Vider puis reconstruire est volontaire : une carte qui se met a jour par differences devrait
@@ -77359,6 +77525,7 @@ ogame.chat = {
         var etoile = element('div', 'gtStar');
         etoile.style.left = Math.round(c.x) + 'px';
         etoile.style.top = Math.round(c.y) + 'px';
+        etoile.innerHTML = soleilVivant(!mouvementReduit());
         carte.appendChild(etoile);
 
         var parPosition = {};
