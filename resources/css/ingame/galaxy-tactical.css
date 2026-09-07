@@ -55,8 +55,54 @@
     height: 46px;
     transform: translate(-50%, -50%);
     border-radius: 50%;
-    background: radial-gradient(circle, #fff4d6 0%, #ffb347 38%, #e0651f 62%, rgba(224, 101, 31, 0) 78%);
+    background: radial-gradient(circle, #fff8e6 0%, #ffd27a 30%, #ffb347 48%, #e0651f 66%, rgba(224, 101, 31, 0) 80%);
+    box-shadow: 0 0 18px 6px rgba(255, 179, 71, 0.45), 0 0 48px 14px rgba(224, 101, 31, 0.22);
     pointer-events: none;
+    animation: gtSunBreath 4.5s ease-in-out infinite;
+}
+
+/*
+ * La couronne : un degrade conique flou qui tourne lentement derriere le disque. Elle ne
+ * deplace rien et ne capte aucun clic — c'est une lumiere, pas un objet.
+ */
+#galaxyTactical .gtStar::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 96px;
+    height: 96px;
+    margin: -48px 0 0 -48px;
+    border-radius: 50%;
+    background: conic-gradient(from 0deg, rgba(255, 210, 122, 0.55), rgba(224, 101, 31, 0.05) 30%, rgba(255, 179, 71, 0.5) 55%, rgba(224, 101, 31, 0.05) 80%, rgba(255, 210, 122, 0.55));
+    filter: blur(7px);
+    opacity: 0.7;
+    animation: gtSunCorona 38s linear infinite;
+    z-index: -1;
+}
+
+/* Les taches et eruptions : un second degrade, contre-rotation, plus serre. */
+#galaxyTactical .gtStar::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: conic-gradient(from 90deg, rgba(255, 255, 255, 0) 0, rgba(255, 244, 214, 0.35) 12%, rgba(255, 255, 255, 0) 24%, rgba(255, 244, 214, 0.25) 61%, rgba(255, 255, 255, 0) 75%);
+    mix-blend-mode: screen;
+    animation: gtSunSpots 23s linear infinite reverse;
+}
+
+@keyframes gtSunBreath {
+    0%, 100% { box-shadow: 0 0 18px 6px rgba(255, 179, 71, 0.45), 0 0 48px 14px rgba(224, 101, 31, 0.22); }
+    50% { box-shadow: 0 0 24px 9px rgba(255, 179, 71, 0.6), 0 0 64px 20px rgba(224, 101, 31, 0.3); }
+}
+
+@keyframes gtSunCorona {
+    to { transform: rotate(360deg); }
+}
+
+@keyframes gtSunSpots {
+    to { transform: rotate(360deg); }
 }
 
 /* Les orbites : un trait, et rien de plus. Elles situent, elles ne se cliquent pas. */
@@ -74,13 +120,21 @@
  * Un corps du systeme. Le bloc est ancre par son centre, ce qui laisse le calcul de position
  * exprimer une coordonnee d'orbite et non un coin de boite.
  */
+/*
+ * Un corps est une **colonne** : la vignette, puis le nom et le numero dessous. Le nom a cote
+ * de la vignette donnait a chaque corps une empreinte de 150 px de large, et deux voisins sur
+ * des orbites proches se chevauchaient — c'est ce que Keven appelait « s'empiler ». Le point
+ * d'ancrage (`left`/`top`) reste le centre de la vignette : `translate(-50%, -22px)` y ramene
+ * le bloc, quelle que soit la hauteur du nom.
+ */
 #galaxyTactical .gtBody {
     position: absolute;
-    transform: translate(-50%, -50%);
+    transform: translate(-50%, -22px);
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 4px;
-    padding: 2px 4px 2px 2px;
+    gap: 1px;
+    padding: 0 2px 2px;
     background: none;
     border: 1px solid transparent;
     border-radius: 3px;
@@ -181,11 +235,11 @@
 #galaxyTactical .gtBody::before {
     content: "";
     position: absolute;
-    left: 2px;
-    top: 50%;
-    width: 42px;
-    height: 42px;
-    margin-top: -21px;
+    left: 50%;
+    top: 22px;
+    width: 46px;
+    height: 46px;
+    margin: -23px 0 0 -23px;
     background: url("/img/galaxy-tactical/planet-hover-halo.svg") center / contain no-repeat;
     opacity: 0;
     pointer-events: none;
@@ -233,10 +287,20 @@
 }
 
 #galaxyTactical .gtName {
-    max-width: 108px;
+    max-width: 92px;
     overflow: hidden;
     text-overflow: ellipsis;
-    font-size: 11px;
+    font-size: 10px;
+    line-height: 12px;
+    text-align: center;
+    text-shadow: 0 0 3px #020b15, 0 0 6px #020b15;
+}
+
+/* Le numero de position, tout petit, sous le nom. */
+#galaxyTactical .gtBody .gtIndex {
+    min-width: 0;
+    text-align: center;
+    line-height: 10px;
 }
 
 #galaxyTactical .gtBody.gtOwn .gtName {
@@ -348,7 +412,9 @@
 
 /* Une animation qui ne demande rien a personne : celui qui a dit non ne la voit pas. */
 @media (prefers-reduced-motion: reduce) {
-    #galaxyTactical * {
+    #galaxyTactical *,
+    #galaxyTactical .gtStar::before,
+    #galaxyTactical .gtStar::after {
         animation: none !important;
         transition: none !important;
     }
@@ -405,6 +471,12 @@
     flex-direction: column;
     gap: 2px;
     width: 110px;
+    transform: translate(-50%, -50%);
+}
+
+/* Le halo rond est fait pour une planete : sur un nuage rectangulaire il faisait une bague. */
+#galaxyTactical .gtDeepSpace::before {
+    display: none;
 }
 
 #galaxyTactical .gtNebula {
@@ -435,8 +507,38 @@
 #galaxyContent #galaxyTactical .gtCardBody .expeditionDebrisSlotBox {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
     width: auto;
+    padding: 2px;
+}
+
+/* La tete de fiche dit deja « Espace profond · 16 » : le titre de la boite ferait doublon. */
+#galaxyContent #galaxyTactical .gtCardBody .expeditionDebrisSlotBox h3.title {
+    display: none;
+}
+
+/* Sans debris, le conteneur est un vide de la hauteur d'une ligne : il disparait. */
+#galaxyContent #galaxyTactical .gtCardBody #expeditionDebrisSlotDebrisContainer:not(:has(*)) {
+    display: none;
+}
+
+#galaxyContent #galaxyTactical .gtCardBody #expeditionDebrisSlotActions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+/* Les boutons flottaient a droite dans une bande horizontale ; en colonne ils prennent la largeur. */
+#galaxyContent #galaxyTactical .gtCardBody #expeditionDebrisSlotActions .btn_blue,
+#galaxyContent #galaxyTactical .gtCardBody #galaxyExpeditionFleetTemplateContainer {
+    float: none;
+    width: auto;
+    text-align: center;
+}
+
+#galaxyContent #galaxyTactical .gtCardBody #expeditionFleetTemplateSelect {
+    width: 100%;
+    box-sizing: border-box;
 }
 
 /*

@@ -58,9 +58,17 @@
     var ANGLE_OR = 137.508;
 
     var POSITIONS = 15;
-    var RAYON_MIN = 46;
-    var RAYON_MAX = 310;
+    var RAYON_MIN = 72;
+    var RAYON_MAX = 300;
     var APLATISSEMENT = 0.58;
+
+    /*
+     * La distance minimale entre deux corps, centre a centre. Une vignette fait 44 px ; le nom
+     * est sous elle, pas a cote, pour que l'empreinte horizontale reste celle de la vignette.
+     * L'angle d'or seul ne garantit rien sur une ellipse aplatie : l'ecartement ci-dessous le fait.
+     */
+    var DISTANCE_MIN = 72;
+    var PASSES_D_ECARTEMENT = 60;
 
     /* Les trois genres de corps que la charge utile distingue. */
     var PLANETE = 1;
@@ -80,16 +88,72 @@
         return RAYON_MIN + ((position - 1) * (RAYON_MAX - RAYON_MIN)) / (POSITIONS - 1);
     }
 
-    function pointDe(position) {
+    function pointSurOrbite(position, angle) {
         var c = centre();
         var rx = rayonDe(position);
-        var angle = ((position * ANGLE_OR - 90) * Math.PI) / 180;
 
         return {
             x: c.x + rx * Math.cos(angle),
             y: c.y + rx * APLATISSEMENT * Math.sin(angle),
             aDroite: Math.cos(angle) > 0
         };
+    }
+
+    /*
+     * Les angles des quinze positions : l'angle d'or, puis un ecartement **deterministe**.
+     *
+     * A chaque passe, toute paire plus proche que DISTANCE_MIN est repoussee : chacun des deux
+     * corps tourne sur sa propre orbite, de la moitie du manque convertie en angle, dans le sens
+     * qui les eloigne. Meme entree, meme sortie — le meme systeme se dessine toujours pareil, et
+     * aucune planete ne change d'orbite. `tests/Feature/GalaxyTacticalMapTest.php` rejoue cette
+     * arithmetique en PHP et exige la distance minimale sur toutes les paires.
+     */
+    var anglesCalcules = null;
+
+    function anglesDesPositions() {
+        if (anglesCalcules !== null) {
+            return anglesCalcules;
+        }
+
+        var angles = [];
+        var i;
+        var j;
+
+        for (i = 1; i <= POSITIONS; i++) {
+            angles[i] = ((i * ANGLE_OR - 90) * Math.PI) / 180;
+        }
+
+        for (var passe = 0; passe < PASSES_D_ECARTEMENT; passe++) {
+            for (i = 1; i <= POSITIONS; i++) {
+                for (j = i + 1; j <= POSITIONS; j++) {
+                    var a = pointSurOrbite(i, angles[i]);
+                    var b = pointSurOrbite(j, angles[j]);
+                    var dx = b.x - a.x;
+                    var dy = b.y - a.y;
+                    var d = Math.sqrt(dx * dx + dy * dy);
+
+                    if (d >= DISTANCE_MIN) {
+                        continue;
+                    }
+
+                    var manque = (DISTANCE_MIN - d) / 2;
+                    var ecart = angles[j] - angles[i];
+                    ecart = Math.atan2(Math.sin(ecart), Math.cos(ecart));
+                    var sens = ecart >= 0 ? 1 : -1;
+
+                    angles[i] -= (sens * manque) / rayonDe(i);
+                    angles[j] += (sens * manque) / rayonDe(j);
+                }
+            }
+        }
+
+        anglesCalcules = angles;
+
+        return angles;
+    }
+
+    function pointDe(position) {
+        return pointSurOrbite(position, anglesDesPositions()[position]);
     }
 
     function element(balise, classe) {
@@ -227,10 +291,6 @@
 
         if (options && options.intitule) {
             bloc.setAttribute('aria-label', options.intitule);
-        }
-
-        if (p.aDroite) {
-            bloc.style.flexDirection = 'row-reverse';
         }
 
         contenu.forEach(function (n) {

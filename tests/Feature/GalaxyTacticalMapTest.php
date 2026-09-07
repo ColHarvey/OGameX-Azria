@@ -714,6 +714,133 @@ class GalaxyTacticalMapTest extends UnitTestCase
     }
 
     /**
+     * Une constante numerique du module, lue dans sa source.
+     */
+    private function constanteDuModule(string $nom): float
+    {
+        $ok = preg_match('/var ' . $nom . ' = ([0-9.]+);/', $this->module(), $m);
+        $this->assertSame(1, $ok, 'The module no longer declares ' . $nom . '.');
+
+        return (float)$m[1];
+    }
+
+    /**
+     * **Les quinze corps se tiennent a distance, sur toutes les paires.**
+     *
+     * Keven : « ne pas mettre les planetes trop proches, qu'elles ne s'empilent pas ». L'angle d'or
+     * seul ne garantit rien sur une ellipse aplatie ; le module repousse chaque paire trop proche par
+     * un ecartement deterministe. Ce temoin **rejoue la meme arithmetique en PHP**, avec les
+     * constantes lues dans le module — pas les miennes —, et exige la distance minimale sur les 105
+     * paires. Il prouve la formule et ses parametres ; il ne prouve pas le JavaScript lui-meme, qui
+     * n'a pas de banc ici. Une divergence entre les deux se verrait a l'ecran, pas ici : le dire.
+     */
+    public function testTheLayoutKeepsEveryPairOfBodiesApart(): void
+    {
+        $positions = (int)$this->constanteDuModule('POSITIONS');
+        $rayonMin = $this->constanteDuModule('RAYON_MIN');
+        $rayonMax = $this->constanteDuModule('RAYON_MAX');
+        $aplat = $this->constanteDuModule('APLATISSEMENT');
+        $angleOr = $this->constanteDuModule('ANGLE_OR');
+        $distanceMin = $this->constanteDuModule('DISTANCE_MIN');
+        $passes = (int)$this->constanteDuModule('PASSES_D_ECARTEMENT');
+
+        $rayon = static fn (int $p): float => $rayonMin + (($p - 1) * ($rayonMax - $rayonMin)) / ($positions - 1);
+        $point = static fn (int $p, float $a) => [$rayon($p) * cos($a), $rayon($p) * $aplat * sin($a)];
+
+        $angles = [];
+
+        for ($i = 1; $i <= $positions; $i++) {
+            $angles[$i] = (($i * $angleOr - 90) * M_PI) / 180;
+        }
+
+        for ($passe = 0; $passe < $passes; $passe++) {
+            for ($i = 1; $i <= $positions; $i++) {
+                for ($j = $i + 1; $j <= $positions; $j++) {
+                    [$ax, $ay] = $point($i, $angles[$i]);
+                    [$bx, $by] = $point($j, $angles[$j]);
+                    $d = sqrt(($bx - $ax) ** 2 + ($by - $ay) ** 2);
+
+                    if ($d >= $distanceMin) {
+                        continue;
+                    }
+
+                    $manque = ($distanceMin - $d) / 2;
+                    $ecart = atan2(sin($angles[$j] - $angles[$i]), cos($angles[$j] - $angles[$i]));
+                    $sens = $ecart >= 0 ? 1 : -1;
+                    $angles[$i] -= ($sens * $manque) / $rayon($i);
+                    $angles[$j] += ($sens * $manque) / $rayon($j);
+                }
+            }
+        }
+
+        $plusProche = INF;
+
+        for ($i = 1; $i <= $positions; $i++) {
+            for ($j = $i + 1; $j <= $positions; $j++) {
+                [$ax, $ay] = $point($i, $angles[$i]);
+                [$bx, $by] = $point($j, $angles[$j]);
+                $plusProche = min($plusProche, sqrt(($bx - $ax) ** 2 + ($by - $ay) ** 2));
+            }
+        }
+
+        $this->assertGreaterThanOrEqual(
+            $distanceMin - 0.5,
+            $plusProche,
+            sprintf('Two bodies end up %.1f px apart with these constants: planets would stack again.', $plusProche)
+        );
+
+        /* Et l'ellipse la plus large tient dans la carte, corps compris. */
+        $this->assertLessThanOrEqual(656 / 2 - 24, $rayonMax, 'The outer orbit runs past the map edge.');
+    }
+
+    /**
+     * La nebuleuse n'a pas le halo rond des planetes, et la boite historique s'y range proprement.
+     */
+    public function testTheNebulaAndItsCardLookLikeThemselves(): void
+    {
+        $feuille = $this->feuille();
+
+        $this->assertMatchesRegularExpression(
+            '/#galaxyTactical \.gtDeepSpace::before \{[^}]*display:\s*none/',
+            $feuille,
+            'The round planet halo is back on the nebula: a ring around a cloud, the effect Keven called weird.'
+        );
+
+        $this->assertMatchesRegularExpression(
+            '/\.gtCardBody \.expeditionDebrisSlotBox h3\.title \{[^}]*display:\s*none/',
+            $feuille,
+            'The historical box repeats its own title under the card head.'
+        );
+
+        $this->assertStringContainsString(
+            '#expeditionDebrisSlotDebrisContainer:not(:has(*))',
+            $feuille,
+            'An empty debris container keeps a line of blank space in the deep-space card.'
+        );
+    }
+
+    /**
+     * Le soleil vit, et se fige sous la reduction des mouvements — pseudo-elements compris, que `*`
+     * n'atteint pas.
+     */
+    public function testTheSunIsAnimatedAndStillsUnderReducedMotion(): void
+    {
+        $feuille = $this->feuille();
+
+        /* L'accolade fait partie du motif : `gtSunCoronaBis` contient `gtSunCorona`, et une mutation qui
+         * renommait l'animation survivait a un motif sans elle. */
+        foreach (['gtSunBreath', 'gtSunCorona', 'gtSunSpots'] as $animation) {
+            $this->assertStringContainsString('@keyframes ' . $animation . ' {', $feuille, 'The sun animation ' . $animation . ' is gone.');
+        }
+
+        $this->assertMatchesRegularExpression(
+            '/@media \(prefers-reduced-motion: reduce\) \{[^}]*#galaxyTactical \.gtStar::before,[^}]*#galaxyTactical \.gtStar::after[^}]*animation: none !important/s',
+            $feuille,
+            'Reduced motion no longer stills the sun corona: the universal selector does not reach pseudo-elements.'
+        );
+    }
+
+    /**
      * Le module est bien dans le paquet construit par Vite.
      *
      * Un fichier de `resources/js` que `vite.config.js` ne nomme pas n'est concatene nulle part :
