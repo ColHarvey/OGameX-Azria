@@ -128,6 +128,7 @@ class FleetController extends OGameController
             'expeditionSlotsMax' => $player->getExpeditionSlotsMax(),
             'fleetSpeedIncrement' => $fleetSpeedIncrement,
             'availableUnions' => $availableUnions,
+            'unionMaxDelayRatio' => FleetUnionService::MAX_DELAY_PERCENTAGE,
             'tacticalRetreatRatio' => $tacticalRetreatRatio,
             'tacticalRetreatDeuteriumCost' => $tacticalRetreatDeuteriumCost,
             'hasAdmiral' => $player->hasAdmiral(),
@@ -608,7 +609,7 @@ class FleetController extends OGameController
             $union = FleetUnion::find($unionId);
             if ($union !== null) {
                 if ($union->hasReachedMaxFleets()) {
-                    return $this->validationErrorResponse(__('t_ingame.fleet.err_union_max_fleets'));
+                    return $this->validationErrorResponse(__('t_ingame.fleet.err_union_max_fleets', ['max' => $union->max_fleets]));
                 }
 
                 // Pre-validate max players (only if this would be a new player in the union)
@@ -616,7 +617,7 @@ class FleetController extends OGameController
                     ->where('user_id', $player->getId())
                     ->exists();
                 if ($isNewPlayer && $union->hasReachedMaxPlayers()) {
-                    return $this->validationErrorResponse(__('t_ingame.fleet.err_union_max_players'));
+                    return $this->validationErrorResponse(__('t_ingame.fleet.err_union_max_players', ['max' => $union->max_players]));
                 }
 
                 // Pre-validate timing: calculate would-be arrival and check against union delay limit
@@ -1266,33 +1267,35 @@ class FleetController extends OGameController
             abort(404, 'Fleet mission not found or cannot be converted to a union.');
         }
 
-        // Load existing union members (players who already have fleets in the union)
+        // **L'union se lit sur la mission, jamais sur la requete.** Le parametre `union` etait
+        // accepte tel quel et servait a un `FleetUnion::find()` sans aucun controle : n'importe quel
+        // identifiant rendait la liste des membres d'une union etrangere. La mission, elle, a deja
+        // ete verifiee comme appartenant au joueur, et elle sait a quelle union elle appartient —
+        // c'est le meme identifiant pour tout usage legitime, puisque la page de mouvement le
+        // construit depuis `union_id`.
         $unionMembers = [];
-        $unionId = $request->input('union');
-        if ($unionId) {
-            /** @var FleetUnion|null $union */
-            $union = FleetUnion::find($unionId);
-            if ($union !== null) {
-                $memberUserIds = $union->activeFleetMissions()
-                    ->distinct('user_id')
-                    ->pluck('user_id')
-                    ->toArray();
-                foreach ($memberUserIds as $userId) {
-                    if ($userId === $player->getId()) {
-                        continue; // Current player is already shown separately
-                    }
-                    /** @var User|null $user */
-                    $user = User::find($userId);
-                    if ($user !== null) {
-                        $unionMembers[] = $user->username;
-                    }
+        $union = $mission->union_id !== null ? FleetUnion::find($mission->union_id) : null;
+
+        if ($union !== null) {
+            $memberUserIds = $union->activeFleetMissions()
+                ->distinct('user_id')
+                ->pluck('user_id')
+                ->toArray();
+            foreach ($memberUserIds as $userId) {
+                if ($userId === $player->getId()) {
+                    continue; // Current player is already shown separately
+                }
+                /** @var User|null $user */
+                $user = User::find($userId);
+                if ($user !== null) {
+                    $unionMembers[] = $user->username;
                 }
             }
         }
 
         // Determine the union name to pre-fill in the overlay
         $unionName = 'KV' . $fleetMissionId;
-        if (isset($union) && $union instanceof FleetUnion) {
+        if ($union !== null) {
             $unionName = $union->name ?? ('KV' . $union->id);
         }
 
@@ -1301,6 +1304,10 @@ class FleetController extends OGameController
             'playerName' => $player->getUsername(false),
             'unionMembers' => $unionMembers,
             'unionName' => $unionName,
+            // Le joueur courant est toujours de l'union : l'overlay s'ouvre depuis sa propre
+            // mission, et la liste des membres l'exclut deja pour l'afficher a part.
+            'unionPlayerCount' => count($unionMembers) + 1,
+            'unionMaxPlayers' => $union !== null ? $union->max_players : FleetUnion::DEFAULT_MAX_PLAYERS,
         ]);
     }
 

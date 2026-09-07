@@ -4,6 +4,7 @@ namespace OGame\ViewModels;
 
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Enums\PlanetType;
+use OGame\Models\FleetUnion;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
 
@@ -82,7 +83,7 @@ class FleetEventRowViewModel
     /**
      * @var int Maximum number of fleets allowed in this union.
      */
-    public int $union_max_fleets = 16;
+    public int $union_max_fleets = FleetUnion::DEFAULT_MAX_FLEETS;
 
     /**
      * @var int Number of unique players in this union.
@@ -92,7 +93,7 @@ class FleetEventRowViewModel
     /**
      * @var int Maximum number of players allowed in this union.
      */
-    public int $union_max_players = 5;
+    public int $union_max_players = FleetUnion::DEFAULT_MAX_PLAYERS;
 
     /**
      * @var array<FleetEventRowViewModel> Individual fleet rows within this union (for expanded view).

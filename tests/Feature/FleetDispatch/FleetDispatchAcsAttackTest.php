@@ -1454,7 +1454,13 @@ class FleetDispatchAcsAttackTest extends FleetDispatchTestCase
         $response->assertStatus(200);
         $data = $response->json();
         $this->assertFalse($data['success']);
-        $this->assertEquals(__('t_ingame.fleet.err_union_max_fleets'), $data['errors'][0]['message']);
+        // **La limite citee est celle de cette union**, plus un nombre grave dans la phrase :
+        // le message porte desormais `:max`, et le lire sans parametre rendrait le jeton brut.
+        $this->assertEquals(
+            __('t_ingame.fleet.err_union_max_fleets', ['max' => $union->max_fleets]),
+            $data['errors'][0]['message']
+        );
+        $this->assertStringContainsString('1', $data['errors'][0]['message']);
     }
 
     /**

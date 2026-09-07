@@ -62,6 +62,19 @@ use OGame\Models\Planet\Coordinate;
 class FleetUnion extends Model
 {
     /**
+     * Les plafonds d'une union neuve.
+     *
+     * Ils vivent ici parce que trois lecteurs les emploient : le service qui cree l'union, le
+     * modele de vue qui decrit une union deja formee, et l'overlay qui affiche le compteur. Ecrits
+     * a la main dans chacun, ils divergeaient — l'overlay annoncait « 1/5 » quelle que soit la
+     * colonne. Ce sont des valeurs de depart : `max_fleets` et `max_players` restent des colonnes,
+     * et une union deja creee repond par les siennes.
+     */
+    public const int DEFAULT_MAX_FLEETS = 16;
+
+    public const int DEFAULT_MAX_PLAYERS = 5;
+
+    /**
      * @var array<string, string>
      */
     protected $casts = [

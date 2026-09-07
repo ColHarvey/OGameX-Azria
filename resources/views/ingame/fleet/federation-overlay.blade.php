@@ -30,7 +30,7 @@
                         <input type="button" onclick="removeUserFromUnion(); return false" class="btn_blue" value="&lt;&lt; {{ __('t_ingame.fleet.kick') }}">
                 </div>
                 <div class="wrapInner">
-                    <div class="textBeefy">{{ __('t_ingame.fleet.union_user') }}: (1/5)</div>
+                    <div class="textBeefy">{{ __('t_ingame.fleet.union_user') }}: (<span id="unionParticipantCount">{{ $unionPlayerCount }}</span>/{{ $unionMaxPlayers }})</div>
                     <ul size="7" id="participantselect" class="ui-selectable">
                         <li ref="current" class="undermark">{{ $playerName }}</li>
                         @foreach ($unionMembers as $memberName)
@@ -85,5 +85,28 @@ function submit_unionUserSearch(){ajaxFormSubmit('unionUserSearch','{{ route('fl
             initFederationLayer();
         }
     });
+})();
+
+(function() {
+    // Le compteur suit la liste, pas les boutons : trois chemins la modifient (les deux
+    // boutons, la recherche par nom, le double-clic delegue) et un seul serait vite oublie.
+    var liste = document.getElementById('participantselect');
+    var compteur = document.getElementById('unionParticipantCount');
+
+    if (liste === null || compteur === null || typeof MutationObserver !== 'function') {
+        return;
+    }
+
+    var maximum = {{ (int) $unionMaxPlayers }};
+
+    var recompter = function() {
+        var nombre = liste.querySelectorAll('li').length;
+        compteur.textContent = String(nombre);
+        // Le serveur refuse au-dela ; la page le dit avant l'envoi plutot qu'apres.
+        compteur.className = nombre > maximum ? 'overmark' : '';
+    };
+
+    new MutationObserver(recompter).observe(liste, { childList: true });
+    recompter();
 })();
 </script>

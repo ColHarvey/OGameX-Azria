@@ -23,8 +23,12 @@ class FleetUnionService
 {
     /**
      * Maximum delay percentage (30% of remaining time).
+     *
+     * **Publique parce que la page d'envoi doit annoncer la meme fenetre que celle appliquee
+     * ici.** Recopiee dans le JavaScript, elle aurait diverge en silence : le joueur aurait lu
+     * une limite et le serveur en aurait applique une autre.
      */
-    private const MAX_DELAY_PERCENTAGE = 0.30;
+    public const float MAX_DELAY_PERCENTAGE = 0.30;
 
     /**
      * FleetUnionService constructor.
@@ -100,8 +104,8 @@ class FleetUnionService
                 'position_to' => $tenue->position_to,
                 'planet_type_to' => $tenue->type_to,
                 'time_arrival' => $tenue->time_arrival,
-                'max_fleets' => 16,
-                'max_players' => 5,
+                'max_fleets' => FleetUnion::DEFAULT_MAX_FLEETS,
+                'max_players' => FleetUnion::DEFAULT_MAX_PLAYERS,
             ]);
 
             // Link the mission to the union and convert to ACS Attack

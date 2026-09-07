@@ -256,6 +256,10 @@
             }];
             var standardFleets = [];
             var unions = @json(collect($availableUnions)->map(fn($u) => ['id' => $u['id'], 'time' => $u['time']])->values());
+            {{-- La meme fenetre que celle appliquee par FleetUnionService : recopiee ici en dur,
+                 elle aurait diverge en silence et la page aurait annonce une limite que le
+                 serveur n'applique pas. --}}
+            var unionMaxDelayRatio = {{ $unionMaxDelayRatio }};
 
             var mission = {{ $mission ?? 0}};
             var unionID = 0;
@@ -384,7 +388,10 @@
                 "LOCA_NETWORK_ON": @json(__('t_ingame.fleet.network_on')),
                 "LOCA_NETWORK_OFF": @json(__('t_ingame.fleet.network_off')),
                 // "LOCA_LOOT_FOOD": "Plunder food",
-                "LOCA_BASHING_SYSTEM_LIMIT_REACHED_ATTACK_MISSIONS_DISABLED": @json(__('t_ingame.fleet.bashing_disabled'))
+                "LOCA_BASHING_SYSTEM_LIMIT_REACHED_ATTACK_MISSIONS_DISABLED": @json(__('t_ingame.fleet.bashing_disabled')),
+                "LOCA_FLEET_UNION_SYNC_WAITING": @json(__('t_ingame.fleet.union_sync_note_waiting')),
+                "LOCA_FLEET_UNION_SYNC_DELAYING": @json(__('t_ingame.fleet.union_sync_note_delaying')),
+                "LOCA_FLEET_UNION_SYNC_TOO_LATE": @json(__('t_ingame.fleet.union_sync_note_too_late'))
             };
             var locadyn = {
                 "locaAllOutlawWarning": @json(__('t_ingame.layout.js_outlaw_warning')),
@@ -1138,9 +1145,6 @@
                                             </div>
                                         </div>
                                         <div style="padding-top: 12px;">
-                                            {{-- TODO: show the player their synchronized arrival time when a union is
-                                                 selected. The live arrival time update logic is in ingame.js
-                                                 (FleetDispatcher.prototype refreshFleetTimes / MISSION_UNIONATTACK block). --}}
                                             <span id="combatunits tips">{{ __('t_ingame.fleet.combat_forces') }}:</span>
                                             <div class="glow">
                                                 <select size="1" class="combatunits" id="aksbox"
@@ -1313,6 +1317,13 @@
                                             <li>
                                                 {{ __('t_ingame.fleet.return_trip') }}: <span class="value"><span
                                                             id="returnTime">18.03.24 23:16:15</span> {{ __('t_ingame.fleet.clock') }}</span>
+                                            </li>
+                                            {{-- **L'heure ci-dessus est deja l'heure synchronisee** quand une union est
+                                                 choisie : rejoindre aligne l'arrivee sur l'union, ou retarde l'union sur
+                                                 celle-ci. Cette ligne dit laquelle des deux, et previent quand la flotte
+                                                 est trop lente pour etre acceptee. Remplie par refreshFleetTimes(). --}}
+                                            <li id="unionSyncLine" style="display: none;">
+                                                <span id="durationAKS"></span>
                                             </li>
                                             <li>
                                                 {{ __('t_ingame.fleet.deuterium_consumption') }}:
