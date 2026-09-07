@@ -75316,7 +75316,18 @@ ogame.chat = {
  */
 (function () {
     var listeSelecteur = '#generalChatList';
-    var loca = typeof generalChatLoca === 'object' && generalChatLoca !== null ? generalChatLoca : {};
+    /*
+     * **Rempli au demarrage, jamais au chargement du fichier.**
+     *
+     * Ce module est concatene dans un bundle que `@vite` charge dans l'en-tete ; les valeurs
+     * que la page publie vivent, elles, dans le corps du document. Lu ici, `generalChatLoca`
+     * n'existe pas encore et cet objet restait vide — les libelles etaient donc des chaines
+     * vides, et le lien de traduction s'affichait **sans texte**, donc invisible.
+     *
+     * Meme famille que le defaut des reglages Reverb : le code etait juste, seule sa place
+     * dans la page etait fausse.
+     */
+    var loca = {};
     var ignores = {};
     var affiches = {};
 
@@ -75733,6 +75744,10 @@ ogame.chat = {
     function demarrer() {
         if (!jQuery(listeSelecteur).length) {
             return;
+        }
+
+        if (typeof generalChatLoca === 'object' && generalChatLoca !== null) {
+            loca = generalChatLoca;
         }
 
         var liste = typeof generalChatIgnoredIds === 'undefined' ? [] : generalChatIgnoredIds;
