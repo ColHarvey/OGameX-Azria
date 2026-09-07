@@ -314,6 +314,14 @@
                          effet, et un retour en arriere ne demande que de retirer la classe gtReplaced. --}}
                     <div id="galaxyTactical" role="application"
                          aria-label="{{ __('t_ingame.galaxy.tactical_map') }}"></div>
+                    {{-- Le detail de la position choisie. La ligne du tableau y est **deplacee**,
+                         jamais recopiee : le meme noeud garde les gestionnaires que le rendu
+                         herite lui a attaches, donc infobulles, overlay de missile, ami et ignore
+                         continuent de fonctionner tels quels. La regle qui masque les lignes vise
+                         un enfant direct de .galaxyTable : deplacee ici, la ligne redevient
+                         visible sans qu'aucune regle ne la force. --}}
+                    <div id="galaxyTacticalDetail" class="gtDetail" hidden aria-live="polite"
+                         aria-label="{{ __('t_ingame.galaxy.tactical_detail') }}"></div>
                     <div class="galaxyRow ctGalaxyHead headBold">
                         <div class="galaxyCell span1-2">{{ __('t_ingame.galaxy.planet_col') }}</div>
                         <div class="galaxyCell cellPlanetName">{{ __('t_ingame.galaxy.name_col') }}</div>

@@ -272,7 +272,35 @@
  * recevait deja.
  */
 .galaxyTable.gtReplaced > .ctContentRow,
-.galaxyTable.gtReplaced > .headBold,
-.galaxyTable.gtReplaced > .expeditionDebrisSlotBoxRow {
+.galaxyTable.gtReplaced > .headBold {
+    display: none;
+}
+
+/*
+ * **Le creneau d'espace profond reste visible.** Il portait la meme regle de masquage, et il
+ * la portait a tort : ce n'est pas une position en orbite mais un panneau a part — debris
+ * d'expedition et modele de flotte d'expedition. La carte ne le dessine pas et ne le
+ * remplace pas ; le masquer supprimait purement et simplement deux fonctions du jeu.
+ */
+
+/*
+ * Le bandeau de detail : la ligne choisie, sous la carte.
+ *
+ * Il ne met en forme **que le contenant**. La ligne deplacee garde l'apparence que le jeu lui
+ * donne — toutes ses regles sont en descendant de `#galaxyContent`, pas de `.galaxyTable` —
+ * et c'est voulu : le joueur retrouve exactement les icones et les infobulles qu'il connait.
+ */
+#galaxyContent .gtDetail {
+    margin-top: 2px;
+    border-top: 1px solid #1b2b3a;
+    background: rgba(10, 18, 26, 0.55);
+}
+
+/*
+ * `hidden` n'agit que par la regle `[hidden] { display: none }` du navigateur, de specificite
+ * minuscule : n'importe quelle regle d'identite la battrait. Celle-ci la retablit — le panneau
+ * d'emoji du chat general a coute exactement cette lecon.
+ */
+#galaxyContent .gtDetail[hidden] {
     display: none;
 }

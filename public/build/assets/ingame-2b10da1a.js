@@ -76287,6 +76287,451 @@ ogame.chat = {
 })();
 ;
 /*
+ * La Galaxie tactique — carte du systeme solaire, en remplacement du tableau.
+ *
+ * ## Ou ce module se branche, et pourquoi la
+ *
+ * Toute la Galaxie passe par une seule fonction : `renderContentGalaxy(json)`, appelee par
+ * `$.post(galaxyContentLink, ..., renderContentGalaxy)` a chaque changement de systeme. Ce module
+ * l'**enveloppe** au lieu de la remplacer :
+ *
+ *   - la fonction historique continue de tenir les compteurs du bandeau (sondes, recycleurs,
+ *     missiles, emplacements, colonies) — ils vivent hors de la carte et restent justes ;
+ *   - ses ecritures de lignes visent `#galaxyRow{N} .cellX`. **Ces lignes existent toujours** —
+ *     seize identifiants dans le Blade — et le rendu herite les remplit entierement, liens
+ *     d'action compris. Ce n'est pas le document qui les retire, c'est une regle CSS qui les
+ *     masque (`.galaxyTable.gtReplaced > .ctContentRow`). C'est ce qui permet de neutraliser
+ *     l'ancien rendu **sans toucher au bloc herite de 1,4 Mo**, et de revenir en arriere en
+ *     retirant une seule classe ;
+ *   - la carte se dessine ensuite depuis exactement le meme JSON.
+ *
+ * ## Ce que ce module ne fait pas, et ne doit pas faire
+ *
+ * Il ne decide **aucune autorisation**, et il n'en presente encore aucune : cliquer un corps ne
+ * fait rien. Les actions permises sont calculees par le serveur
+ * (`GalaxyController::getPlanetActions()`), voyagent dans la charge utile et sont deja rendues
+ * dans les lignes masquees ; les presenter sur la carte est l'etape suivante, et **la carte
+ * n'est pas utilisable avant**. Une carte qui recalculerait un droit cote client serait une
+ * regression de securite, pas une refonte d'interface.
+ *
+ * Il n'affiche **aucune flotte** : la Galaxie n'en a jamais envoye au client (`'fleet' => []` sans
+ * exception), et les montrer est une fonction neuve qui exigera son autorisation serveur.
+ */
+(function () {
+    'use strict';
+
+    /*
+     * La geometrie, derivee de la mesure du panneau reel (670 x 720 hors tout, table 656 x 678,
+     * viewport 1365 x 951) et non du 654 x 610 annonce par le README, dont la hauteur etait fausse
+     * de 68 px.
+     */
+    var LARGEUR = 656;
+    var HAUTEUR = 610;
+    var PIED = 22;
+
+    /*
+     * L'angle d'or. Deux positions consecutives sont separees de 137,5 degres : elles ne se
+     * groupent jamais, quel que soit leur nombre, et deux orbites voisines ne superposent pas
+     * leurs corps. Le tirage est **deterministe** — le meme systeme se dessine toujours pareil.
+     */
+    var ANGLE_OR = 137.508;
+
+    var POSITIONS = 15;
+    var RAYON_MIN = 46;
+    var RAYON_MAX = 310;
+    var APLATISSEMENT = 0.58;
+
+    /* Les trois genres de corps que la charge utile distingue. */
+    var PLANETE = 1;
+    var DEBRIS = 2;
+    var LUNE = 3;
+
+    function centre() {
+        return { x: LARGEUR / 2, y: (HAUTEUR - PIED) / 2 };
+    }
+
+    /* Le demi-grand axe de l'orbite d'une position : il croit avec l'eloignement de l'etoile. */
+    function rayonDe(position) {
+        return RAYON_MIN + ((position - 1) * (RAYON_MAX - RAYON_MIN)) / (POSITIONS - 1);
+    }
+
+    function pointDe(position) {
+        var c = centre();
+        var rx = rayonDe(position);
+        var angle = ((position * ANGLE_OR - 90) * Math.PI) / 180;
+
+        return {
+            x: c.x + rx * Math.cos(angle),
+            y: c.y + rx * APLATISSEMENT * Math.sin(angle),
+            aDroite: Math.cos(angle) > 0
+        };
+    }
+
+    function element(balise, classe) {
+        var e = document.createElement(balise);
+
+        if (classe) {
+            e.className = classe;
+        }
+
+        return e;
+    }
+
+    /* Le corps d'un genre donne dans une ligne, ou `null` : la charge utile ne les ordonne pas. */
+    function corpsDeGenre(ligne, genre) {
+        var liste = (ligne && ligne.planets) || [];
+
+        for (var i = 0; i < liste.length; i++) {
+            if (Number(liste[i].planetType) === genre) {
+                return liste[i];
+            }
+        }
+
+        return null;
+    }
+
+    /*
+     * La vignette d'un corps, rendue **par le mecanisme du jeu** : la classe `microplanet` porte la
+     * planche de sprites et sa decoupe 38 x 33, la classe de variante porte seulement la position
+     * de fond. Reprendre ce couple garantit qu'une planete garde exactement l'apparence que le
+     * serveur lui a attribuee.
+     */
+    function vignette(classeDeBase, corps) {
+        var e = element('div', classeDeBase);
+
+        if (corps && corps.imageInformation) {
+            e.className += ' ' + corps.imageInformation;
+        }
+
+        return e;
+    }
+
+    /*
+     * Le verdict du serveur sur la colonisation d'une position libre, lu dans la charge utile.
+     *
+     * `GalaxyController::createEmptySpaceRow()` place la mission 7 avec un lien reel quand elle est
+     * permise, et le seul caractere `#` quand elle ne l'est pas. C'est ce verdict qu'on lit — la
+     * carte ne connait ni le niveau d'astrophysique, ni les positions reservees, et n'a pas a les
+     * connaitre.
+     */
+    function colonisationPermise(ligne) {
+        var missions = (ligne && ligne.availableMissions) || [];
+
+        for (var i = 0; i < missions.length; i++) {
+            if (Number(missions[i].missionType) === 7) {
+                return typeof missions[i].link === 'string' && missions[i].link !== '#';
+            }
+        }
+
+        return false;
+    }
+
+    /* Le libelle traduit d'une position libre, publie par la page. */
+    function libelleDePositionLibre() {
+        var loca = window.jsloca || {};
+
+        return loca.LOCA_GALAXY_EMPTY_SLOT || 'position libre';
+    }
+
+    function libelle(texte) {
+        var e = element('span', 'gtName');
+        e.textContent = texte;
+
+        return e;
+    }
+
+    function numero(position) {
+        var e = element('span', 'gtIndex');
+        e.textContent = String(position);
+
+        return e;
+    }
+
+    /*
+     * Un corps place sur son orbite. Le bloc est ancre par son centre : la position exprime une
+     * coordonnee d'orbite, pas un coin de boite.
+     *
+     * Le nom passe **a gauche** de la vignette quand le corps est dans la moitie droite, sinon il
+     * deborderait du panneau — un debordement horizontal que le cahier des charges interdit.
+     */
+    function poser(carte, position, contenu, options) {
+        var p = pointDe(position);
+        var bloc = element('div', 'gtBody' + (options && options.classe ? ' ' + options.classe : ''));
+
+        bloc.style.left = Math.round(p.x) + 'px';
+        bloc.style.top = Math.round(p.y) + 'px';
+        bloc.setAttribute('data-position', String(position));
+        bloc.setAttribute('tabindex', '0');
+        bloc.setAttribute('role', 'button');
+
+        if (options && options.intitule) {
+            bloc.setAttribute('aria-label', options.intitule);
+        }
+
+        if (p.aDroite) {
+            bloc.style.flexDirection = 'row-reverse';
+        }
+
+        contenu.forEach(function (n) {
+            bloc.appendChild(n);
+        });
+
+        carte.appendChild(bloc);
+
+        return bloc;
+    }
+
+    function dessinerOrbites(carte) {
+        for (var i = 1; i <= POSITIONS; i++) {
+            var rx = rayonDe(i);
+            var o = element('div', 'gtOrbit');
+            o.style.width = Math.round(rx * 2) + 'px';
+            o.style.height = Math.round(rx * APLATISSEMENT * 2) + 'px';
+            carte.appendChild(o);
+        }
+    }
+
+    /*
+     * ## La position choisie, et la ligne qu'elle montre
+     *
+     * **La ligne du tableau est deplacee, jamais recopiee.** `renderContentGalaxy` accroche ses
+     * gestionnaires sur ces noeuds a chaque rendu — infobulles, overlay de missile, demande d'ami,
+     * mise a l'ignore. Un `cloneNode` les perdrait tous, et il les perdrait *en silence* : la ligne
+     * s'afficherait, les liens seraient la, et rien ne se passerait au clic. Le meme noeud garde
+     * tout ce que le jeu lui a attache.
+     *
+     * **Aucun droit n'est recalcule ici.** Ce que la ligne contient, c'est ce que le serveur a
+     * decide dans `GalaxyController::getPlanetActions()` et `getAvailableMissions()`. La carte
+     * choisit *quelle* ligne montrer, jamais *ce qu'elle a le droit* de contenir.
+     */
+    var deplacee = null;
+
+    function bandeau() {
+        return document.getElementById('galaxyTacticalDetail');
+    }
+
+    /* La ligne retourne exactement d'ou elle venait — meme parent, meme rang. */
+    function rendreLaLigne() {
+        if (!deplacee) {
+            return;
+        }
+
+        deplacee.parent.insertBefore(deplacee.noeud, deplacee.suivant);
+        deplacee = null;
+    }
+
+    function deselectionner() {
+        rendreLaLigne();
+
+        var b = bandeau();
+
+        if (b) {
+            b.hidden = true;
+        }
+
+        var carte = document.getElementById('galaxyTactical');
+
+        if (!carte) {
+            return;
+        }
+
+        var choisis = carte.querySelectorAll('.gtBody.gtSelected');
+
+        for (var i = 0; i < choisis.length; i++) {
+            choisis[i].classList.remove('gtSelected');
+        }
+    }
+
+    function choisir(bloc) {
+        var position = Number(bloc.getAttribute('data-position'));
+        var ligne = document.getElementById('galaxyRow' + position);
+        var b = bandeau();
+
+        if (!ligne || !b) {
+            return;
+        }
+
+        /* Recliquer la position deja ouverte la referme : le meme geste dans les deux sens. */
+        if (deplacee && deplacee.noeud === ligne) {
+            deselectionner();
+
+            return;
+        }
+
+        deselectionner();
+
+        deplacee = { noeud: ligne, parent: ligne.parentNode, suivant: ligne.nextSibling };
+        b.appendChild(ligne);
+        b.hidden = false;
+        bloc.classList.add('gtSelected');
+    }
+
+    /*
+     * Les gestionnaires vivent sur la carte, pas sur les corps : `dessiner()` vide la carte a chaque
+     * rendu, et des gestionnaires poses sur les corps disparaitraient avec eux. Poses une fois sur
+     * le contenant, ils survivent a tous les rendus.
+     */
+    function armerLaSelection(carte) {
+        if (carte.gtArmee) {
+            return;
+        }
+
+        carte.gtArmee = true;
+
+        carte.addEventListener('click', function (evenement) {
+            var bloc = evenement.target.closest ? evenement.target.closest('.gtBody') : null;
+
+            if (bloc) {
+                choisir(bloc);
+            }
+        });
+
+        carte.addEventListener('keydown', function (evenement) {
+            var bloc = evenement.target.closest ? evenement.target.closest('.gtBody') : null;
+
+            if (!bloc) {
+                return;
+            }
+
+            /* Un element qui annonce `role="button"` doit repondre a Entree et a Espace. */
+            if (evenement.key === 'Enter' || evenement.key === ' ' || evenement.key === 'Spacebar') {
+                evenement.preventDefault();
+                choisir(bloc);
+
+                return;
+            }
+
+            if (evenement.key === 'Escape' || evenement.key === 'Esc') {
+                deselectionner();
+                bloc.focus();
+            }
+        });
+    }
+
+    /*
+     * Le systeme entier, redessine a neuf.
+     *
+     * Vider puis reconstruire est volontaire : une carte qui se met a jour par differences devrait
+     * savoir ce qui a change, et un changement de systeme change tout. Quinze positions ne coutent
+     * rien a reconstruire, et l'etat affiche ne peut pas deriver de la charge utile.
+     */
+    function dessiner(json) {
+        var carte = document.getElementById('galaxyTactical');
+
+        if (!carte || !json || !json.galaxy) {
+            return;
+        }
+
+        /*
+         * La ligne rentre **avant** que la carte soit videe. Le systeme a change : la position
+         * choisie n'a plus de sens, et une ligne laissee dans le bandeau y afficherait les
+         * donnees du nouveau systeme sous l'ancienne selection.
+         */
+        deselectionner();
+        armerLaSelection(carte);
+
+        carte.innerHTML = '';
+        dessinerOrbites(carte);
+        carte.appendChild(element('div', 'gtStar'));
+
+        var parPosition = {};
+
+        json.galaxy.forEach(function (ligne) {
+            parPosition[Number(ligne.position)] = ligne;
+        });
+
+        for (var position = 1; position <= POSITIONS; position++) {
+            var ligne = parPosition[position];
+            var planete = corpsDeGenre(ligne, PLANETE);
+
+            if (!planete) {
+                /*
+                 * **Le droit de coloniser se lit, il ne se recalcule pas.** Le serveur a deja
+                 * tranche : il envoie un vrai lien quand la colonisation est permise, et `#` sinon
+                 * (astrophysique, vaisseau disponible, position reservee, portee). Rederiver la
+                 * regle ici en ferait une seconde source de verite, qui divergerait un jour.
+                 */
+                var silhouette = element('div', 'gtEmpty' + (colonisationPermise(ligne) ? '' : ' gtUnavailable'));
+
+                poser(carte, position, [silhouette, numero(position)], {
+                    classe: 'gtFree',
+                    intitule: position + ' — ' + libelleDePositionLibre()
+                });
+
+                continue;
+            }
+
+            var contenu = [vignette('microplanet', planete)];
+            var lune = corpsDeGenre(ligne, LUNE);
+            var debris = corpsDeGenre(ligne, DEBRIS);
+
+            /*
+             * La lune et les debris prennent les visuels du pack tactique, la ou les planetes
+             * gardent la planche du jeu : une lune n'a que deux etats et un champ de debris une
+             * seule variante, donc aucune identite par corps ne se perd.
+             */
+            if (lune) {
+                var creneau = element('span', 'gtMoonSlot');
+                creneau.appendChild(element('span', 'gtMoon' + (lune.isDestroyed ? ' gtDestroyed' : '')));
+                contenu.push(creneau);
+            }
+
+            if (debris) {
+                contenu.push(element('span', 'gtDebris'));
+            }
+
+            contenu.push(libelle(planete.planetName || ''));
+            contenu.push(numero(position));
+
+            poser(carte, position, contenu, {
+                classe: ligne.playerId && window.playerId && Number(ligne.playerId) === Number(window.playerId) ? 'gtOwn' : '',
+                intitule: position + ' — ' + (planete.planetName || '') + (ligne.playerName ? ' (' + ligne.playerName + ')' : '')
+            });
+        }
+
+        var pied = element('div', 'gtFooter');
+        pied.id = 'galaxyTacticalFooter';
+        carte.appendChild(pied);
+    }
+
+    /*
+     * Le branchement. Il attend que la fonction historique existe : ce module est concatene apres
+     * le bloc herite, mais l'ordre d'un bundle n'est pas une garantie qu'on veut supposer.
+     */
+    function brancher() {
+        if (typeof window.renderContentGalaxy !== 'function' || window.renderContentGalaxy.gtEnveloppee) {
+            return;
+        }
+
+        var historique = window.renderContentGalaxy;
+
+        var enveloppe = function (json) {
+            var issue = historique.apply(this, arguments);
+
+            try {
+                dessiner(json);
+            } catch (e) {
+                // Le rendu de la carte ne doit jamais empecher le reste de la page de fonctionner.
+                if (window.console && window.console.error) {
+                    window.console.error('Galaxie tactique : rendu impossible', e);
+                }
+            }
+
+            return issue;
+        };
+
+        enveloppe.gtEnveloppee = true;
+        window.renderContentGalaxy = enveloppe;
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', brancher);
+    } else {
+        brancher();
+    }
+})();
+;
+/*
  * La pastille de courrier, en direct.
  *
  * ## Ce qu'elle corrige

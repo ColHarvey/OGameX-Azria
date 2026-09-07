@@ -426,6 +426,7 @@ return [
 
         // Table header columns
         'tactical_map'          => 'Tactical system map',
+        'tactical_detail'       => 'Details of the selected slot',
         'planet_col'                   => 'Planet',
         'name_col'                     => 'Name',
         'moon_col'                     => 'Moon',

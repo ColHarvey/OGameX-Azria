@@ -312,6 +312,7 @@ return [
         'ipm_short' => 'IPM.',
         'used_slots' => 'Emplacements utilisés',
         'tactical_map' => 'Carte tactique du système',
+        'tactical_detail' => 'Détail de la position choisie',
         'planet_col' => 'Planète',
         'name_col' => 'Nom',
         'moon_col' => 'Lune',

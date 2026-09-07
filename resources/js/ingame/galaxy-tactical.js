@@ -204,6 +204,123 @@
     }
 
     /*
+     * ## La position choisie, et la ligne qu'elle montre
+     *
+     * **La ligne du tableau est deplacee, jamais recopiee.** `renderContentGalaxy` accroche ses
+     * gestionnaires sur ces noeuds a chaque rendu — infobulles, overlay de missile, demande d'ami,
+     * mise a l'ignore. Un `cloneNode` les perdrait tous, et il les perdrait *en silence* : la ligne
+     * s'afficherait, les liens seraient la, et rien ne se passerait au clic. Le meme noeud garde
+     * tout ce que le jeu lui a attache.
+     *
+     * **Aucun droit n'est recalcule ici.** Ce que la ligne contient, c'est ce que le serveur a
+     * decide dans `GalaxyController::getPlanetActions()` et `getAvailableMissions()`. La carte
+     * choisit *quelle* ligne montrer, jamais *ce qu'elle a le droit* de contenir.
+     */
+    var deplacee = null;
+
+    function bandeau() {
+        return document.getElementById('galaxyTacticalDetail');
+    }
+
+    /* La ligne retourne exactement d'ou elle venait — meme parent, meme rang. */
+    function rendreLaLigne() {
+        if (!deplacee) {
+            return;
+        }
+
+        deplacee.parent.insertBefore(deplacee.noeud, deplacee.suivant);
+        deplacee = null;
+    }
+
+    function deselectionner() {
+        rendreLaLigne();
+
+        var b = bandeau();
+
+        if (b) {
+            b.hidden = true;
+        }
+
+        var carte = document.getElementById('galaxyTactical');
+
+        if (!carte) {
+            return;
+        }
+
+        var choisis = carte.querySelectorAll('.gtBody.gtSelected');
+
+        for (var i = 0; i < choisis.length; i++) {
+            choisis[i].classList.remove('gtSelected');
+        }
+    }
+
+    function choisir(bloc) {
+        var position = Number(bloc.getAttribute('data-position'));
+        var ligne = document.getElementById('galaxyRow' + position);
+        var b = bandeau();
+
+        if (!ligne || !b) {
+            return;
+        }
+
+        /* Recliquer la position deja ouverte la referme : le meme geste dans les deux sens. */
+        if (deplacee && deplacee.noeud === ligne) {
+            deselectionner();
+
+            return;
+        }
+
+        deselectionner();
+
+        deplacee = { noeud: ligne, parent: ligne.parentNode, suivant: ligne.nextSibling };
+        b.appendChild(ligne);
+        b.hidden = false;
+        bloc.classList.add('gtSelected');
+    }
+
+    /*
+     * Les gestionnaires vivent sur la carte, pas sur les corps : `dessiner()` vide la carte a chaque
+     * rendu, et des gestionnaires poses sur les corps disparaitraient avec eux. Poses une fois sur
+     * le contenant, ils survivent a tous les rendus.
+     */
+    function armerLaSelection(carte) {
+        if (carte.gtArmee) {
+            return;
+        }
+
+        carte.gtArmee = true;
+
+        carte.addEventListener('click', function (evenement) {
+            var bloc = evenement.target.closest ? evenement.target.closest('.gtBody') : null;
+
+            if (bloc) {
+                choisir(bloc);
+            }
+        });
+
+        carte.addEventListener('keydown', function (evenement) {
+            var bloc = evenement.target.closest ? evenement.target.closest('.gtBody') : null;
+
+            if (!bloc) {
+                return;
+            }
+
+            /* Un element qui annonce `role="button"` doit repondre a Entree et a Espace. */
+            if (evenement.key === 'Enter' || evenement.key === ' ' || evenement.key === 'Spacebar') {
+                evenement.preventDefault();
+                choisir(bloc);
+
+                return;
+            }
+
+            if (evenement.key === 'Escape' || evenement.key === 'Esc') {
+                deselectionner();
+                bloc.focus();
+            }
+        });
+    }
+
+    /*
      * Le systeme entier, redessine a neuf.
      *
      * Vider puis reconstruire est volontaire : une carte qui se met a jour par differences devrait
@@ -216,6 +333,14 @@
         if (!carte || !json || !json.galaxy) {
             return;
         }
+
+        /*
+         * La ligne rentre **avant** que la carte soit videe. Le systeme a change : la position
+         * choisie n'a plus de sens, et une ligne laissee dans le bandeau y afficherait les
+         * donnees du nouveau systeme sous l'ancienne selection.
+         */
+        deselectionner();
+        armerLaSelection(carte);
 
         carte.innerHTML = '';
         dessinerOrbites(carte);
