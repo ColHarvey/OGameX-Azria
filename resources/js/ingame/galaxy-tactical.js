@@ -9,17 +9,21 @@
  *
  *   - la fonction historique continue de tenir les compteurs du bandeau (sondes, recycleurs,
  *     missiles, emplacements, colonies) — ils vivent hors de la carte et restent justes ;
- *   - ses trente-deux ecritures de lignes visent `#galaxyRow{N} .cellX`, qui n'existent plus dans
- *     le Blade. Ce sont des methodes jQuery sur une collection vide : elles ne font rien, sans
- *     lever. C'est ce qui permet de debrancher l'ancien rendu **sans toucher au bloc herite de
- *     1,4 Mo** ;
+ *   - ses ecritures de lignes visent `#galaxyRow{N} .cellX`. **Ces lignes existent toujours** —
+ *     seize identifiants dans le Blade — et le rendu herite les remplit entierement, liens
+ *     d'action compris. Ce n'est pas le document qui les retire, c'est une regle CSS qui les
+ *     masque (`.galaxyTable.gtReplaced > .ctContentRow`). C'est ce qui permet de neutraliser
+ *     l'ancien rendu **sans toucher au bloc herite de 1,4 Mo**, et de revenir en arriere en
+ *     retirant une seule classe ;
  *   - la carte se dessine ensuite depuis exactement le meme JSON.
  *
  * ## Ce que ce module ne fait pas, et ne doit pas faire
  *
- * Il ne decide **aucune autorisation**. Les actions permises sur un corps sont calculees par le
- * serveur (`GalaxyController::getPlanetActions()`) et voyagent dans la charge utile ; les
- * raccorder est l'etape suivante. Une carte qui recalculerait un droit cote client serait une
+ * Il ne decide **aucune autorisation**, et il n'en presente encore aucune : cliquer un corps ne
+ * fait rien. Les actions permises sont calculees par le serveur
+ * (`GalaxyController::getPlanetActions()`), voyagent dans la charge utile et sont deja rendues
+ * dans les lignes masquees ; les presenter sur la carte est l'etape suivante, et **la carte
+ * n'est pas utilisable avant**. Une carte qui recalculerait un droit cote client serait une
  * regression de securite, pas une refonte d'interface.
  *
  * Il n'affiche **aucune flotte** : la Galaxie n'en a jamais envoye au client (`'fleet' => []` sans
