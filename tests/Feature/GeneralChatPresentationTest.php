@@ -202,6 +202,41 @@ class GeneralChatPresentationTest extends AccountTestCase
     }
 
     /**
+     * Le compteur de messages non lus porte le jeton que le code remplace.
+     *
+     * `ogame.messagecounter` fait `loca.replace('#+#', compte)` — une recherche **litterale**.
+     * La traduction francaise portait `#++#`, qui ne contient pas cette suite : rien n'etait
+     * remplace, et le joueur lisait « #++# message(s) non lu(s) » dans son infobulle. Les quatre
+     * autres langues etaient justes, ce qui rendait la faute invisible depuis le code.
+     */
+    public function testTheUnreadCounterCarriesTheTokenTheCodeReplaces(): void
+    {
+        $sansJeton = [];
+
+        foreach (['fr', 'en', 'it', 'nl', 'zh-TW'] as $langue) {
+            $chemin = base_path('resources/lang/' . $langue . '/t_ingame.php');
+
+            if (!file_exists($chemin)) {
+                continue;
+            }
+
+            $textes = include $chemin;
+            $phrase = $textes['layout']['chat_new_chats'] ?? null;
+
+            if (!is_string($phrase) || !str_contains($phrase, '#+#')) {
+                $sansJeton[] = $langue . ' : ' . (is_string($phrase) ? $phrase : 'absente');
+            }
+        }
+
+        $this->assertSame(
+            [],
+            $sansJeton,
+            'These translations do not carry the literal token the counter replaces, so the raw text is shown: '
+            . implode(' | ', $sansJeton)
+        );
+    }
+
+    /**
      * Les valeurs publiees par la page sont lues quand la page existe.
      *
      * ## Le defaut, vu en jeu
@@ -375,13 +410,20 @@ class GeneralChatPresentationTest extends AccountTestCase
             'The translate link has no styling: it would render as a full-size link, not a discreet one.'
         );
 
-        // **La marge va a droite.** Le lien et la date flottent tous deux a droite et le lien vient
-        // apres dans le document : il se place a gauche de la date. Une marge gauche l ecarte de ce
-        // qui le precede — rien — et il reste colle a l heure.
+        // **Le lien copie la boite de la date.** Les deux flottent a droite cote a cote ; une
+        // taille ou une marge differente les decale verticalement. `margin: 2px 10px 0 0` reprend
+        // le retrait haut de `.msg_date` — mesure faite sur elle — et ajoute l ecart a droite, du
+        // cote ou se trouve l heure, le lien venant apres elle dans le document.
         $this->assertMatchesRegularExpression(
-            '/#generalChat \.js_generalChatTranslate\s*\{(?:[^}]*)margin-right:/s',
+            '/#generalChat \.js_generalChatTranslate\s*\{(?:[^}]*)margin: 2px 10px 0 0/s',
             $feuille,
-            'The link has no right margin: it renders glued to the timestamp.'
+            'The link no longer copies the timestamp box: it renders glued to it, or offset below it.'
+        );
+
+        $this->assertMatchesRegularExpression(
+            '/#generalChat \.js_generalChatTranslate\s*\{(?:[^}]*)font-size: 9px/s',
+            $feuille,
+            'The link does not share the timestamp font size: the two would not sit on the same line.'
         );
     }
 

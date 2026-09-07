@@ -1045,7 +1045,7 @@ return [
         'chat_same_user' => 'Vous ne pouvez pas vous écrire.',
         'chat_ignored_user' => 'Vous avez ignoré ce joueur.',
         'chat_not_activated' => 'Cette fonction n\'est disponible qu\'après l\'activation de votre compte.',
-        'chat_new_chats' => '#++# message(s) non lu(s)',
+        'chat_new_chats' => '#+# message(s) non lu(s)',
         'chat_more_users' => 'afficher plus',
         'eventbox_mission' => 'Mission',
         'eventbox_missions' => 'Missions',

@@ -142,10 +142,20 @@ services:
   # disque. La liste par defaut couvre les langues que le jeu sert et celles qu'on croise le plus
   # en jeu ; l'elargir se fait dans le `.env`, sans toucher a ce fichier.
   #
-  # **Pas de `LT_UPDATE_MODELS: "false"` ici.** Il evitait une verification au demarrage, mais il
-  # empechait surtout d'installer un modele **manquant** : ajouter `tr` a la liste ne telechargeait
-  # rien, et le journal ne mentionnait meme pas la tentative. Le cout de son absence est une
-  # verification reseau a chaque demarrage du conteneur, ce qui arrive rarement.
+  # **Ajouter une langue demande de vider le volume.** Mesure faite : l'etape « Updating language
+  # models » ne s'execute que sur un volume vide. Une fois les modeles installes, le conteneur
+  # charge ce qu'il trouve et filtre selon `LT_LOAD_ONLY` — il ne va jamais en chercher un
+  # nouveau, et son journal ne mentionne meme pas la tentative. Changer la liste dans le `.env`
+  # puis recreer le conteneur **ne suffit pas** :
+  #
+  #   ogamex stop ogamex-libretranslate && ogamex rm -f ogamex-libretranslate
+  #   docker volume rm ogamex_libretranslate-models
+  #   ogamex up -d ogamex-libretranslate
+  #
+  # `LT_UPDATE_MODELS: "false"` a ete retire au passage. Il evitait une verification reseau au
+  # demarrage ; **rien ne prouve qu'il bloquait l'installation** — le vidage du volume a eu lieu
+  # en meme temps et suffit a expliquer ce qu'on a vu. Il reste dehors parce que l'etape qu'il
+  # supprime porte precisement le nom de celle qui installe les modeles.
   #
   # Les modeles vivent dans un volume nomme : sans lui, chaque redemarrage les retelecharge.
   #

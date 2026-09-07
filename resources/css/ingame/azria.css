@@ -471,12 +471,17 @@
      * le lien vient apres dans le document : il se place donc **a gauche** de la date. Une marge
      * gauche l ecartait de ce qui le precede — c est-a-dire de rien — et il restait colle a
      * l heure, illisible.
+     *
+     * **La boite est celle de la date, mesuree sur elle** : `display: inline-block`,
+     * `font-size: 9px`, `margin-top: 2px`. Les deux flottent cote a cote — une taille ou une
+     * marge differente les decale verticalement l un par rapport a l autre, et le lien pendait
+     * sous l heure. Seule la marge droite s ecarte de son modele, pour les separer.
      */
     float: right;
-    margin-right: 10px;
-    font-size: 10px;
+    display: inline-block;
+    font-size: 9px;
     font-weight: normal;
-    line-height: 14px;
+    margin: 2px 10px 0 0;
     color: #6f7f95;
     text-decoration: none;
 }
