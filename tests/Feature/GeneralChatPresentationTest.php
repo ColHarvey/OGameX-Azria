@@ -202,6 +202,50 @@ class GeneralChatPresentationTest extends AccountTestCase
     }
 
     /**
+     * Les valeurs publiees par la page sont lues quand la page existe.
+     *
+     * ## Le defaut, vu en jeu
+     *
+     * Le module est concatene dans un bundle que `@vite` charge **dans l'en-tete** ; les valeurs
+     * que la page publie vivent dans le **corps** du document. Lues au chargement du fichier,
+     * elles n'existent pas encore.
+     *
+     * `var loca = ... generalChatLoca ...` s'executait donc sur une variable absente et gardait un
+     * objet vide. Les douze libelles qui en dependent devenaient des chaines vides — et le lien de
+     * traduction s'affichait **sans texte**, donc invisible. Tout etait juste par ailleurs : le
+     * serveur repondait `true`, l'adresse etait bonne, le bundle etait le bon.
+     *
+     * **Meme famille que le defaut des reglages Reverb** : le code etait juste, seule sa place
+     * dans la page etait fausse.
+     */
+    public function testThePageValuesAreReadOnceThePageExists(): void
+    {
+        $module = (string)file_get_contents(base_path('resources/js/ingame/chat-general.js'));
+
+        $this->assertStringNotContainsString(
+            'var loca = typeof generalChatLoca',
+            $module,
+            'The labels are read at bundle time, before the page declares them: every label would be empty.'
+        );
+
+        $this->assertStringContainsString(
+            'loca = generalChatLoca;',
+            $module,
+            'Nothing fills the labels once the page exists: they would stay empty for good.'
+        );
+
+        // Et l'affectation vit bien apres l'attente de la page, pas avant.
+        $demarrage = (int)strpos($module, 'function demarrer()');
+        $affectation = (int)strpos($module, 'loca = generalChatLoca;');
+
+        $this->assertGreaterThan(
+            $demarrage,
+            $affectation,
+            'The labels are filled outside the start function, which runs only once the page exists.'
+        );
+    }
+
+    /**
      * Le script d'une conversation ne sort jamais de sa boite.
      *
      * ## Le defaut, et pourquoi il n'etait pas visible
