@@ -6,6 +6,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\View\View;
+use OGame\Chat\PresentedAuthor;
 use OGame\Models\Alliance;
 use OGame\Models\ChatMessage;
 use OGame\Models\Enums\PlanetType;
@@ -159,6 +160,16 @@ class ChatController extends OGameController
             $viewData['chatAllianceMessages'] = $allianceMessages;
         }
 
+        // **Le general est une salle, pas une conversation de plus.** Il vit dans son propre
+        // panneau, et **un seul gabarit le rend** : celui du navigateur, nourri par le mode 6.
+        // Rendre l'historique ici et les arrivees ailleurs, c'est deux gabarits pour une meme
+        // ligne — le defaut qui, dans le combat, faisait lire un nom d'unite en anglais en direct
+        // et en francais au rechargement.
+        //
+        // La liste d'ignores, elle, doit accompagner la page : le canal general est unique, donc
+        // la diffusion ne peut pas filtrer par lecteur.
+        $viewData['generalIgnoredPlayerIds'] = $chatService->playersIgnoredBy($userId);
+
         return view('ingame.chat.index', $viewData);
     }
 
@@ -273,6 +284,11 @@ class ChatController extends OGameController
                 'targetGeneral' => true,
                 'text' => e($message->message),
                 'date' => $createdAt !== null ? (int) $createdAt->timestamp : 0,
+                // **L'auteur ne recoit pas sa propre diffusion** (`toOthers()`) : sa ligne est posee
+                // par le navigateur depuis cette reponse. Elle doit donc porter les memes marques,
+                // composees par la meme classe — sinon son propre message serait le seul sans tag,
+                // sans badge et sans honneur.
+                'author' => PresentedAuthor::of($message->sender)->forTheBrowser(),
             ];
 
             if ($message->replyTo) {

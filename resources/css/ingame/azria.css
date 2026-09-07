@@ -284,3 +284,28 @@
     /* Le badge decore, il ne se clique pas : il ne doit pas capter le curseur du lien voisin. */
     pointer-events: none;
 }
+
+/*
+ * Le chat general porte les marques du classement.
+ *
+ * `.ally-tag` et `.honorScore` ne sont definies que sous `#highscoreContent` : hors du classement
+ * elles n'ont aucun effet, et le tag comme les points d'honneur s'affichaient sans style. Les deux
+ * regles sont reprises telles quelles pour ce panneau — meme couleur, meme disposition —, pas
+ * reinventees : la consigne est d'employer le style existant, pas d'en creer un.
+ */
+#generalChat .ally-tag a:link,
+#generalChat .ally-tag a:visited,
+#generalChat .ally-tag a:active,
+.no-touch #generalChat .ally-tag a:hover {
+    color: #6f9fc8;
+}
+
+#generalChat .honorScore {
+    display: inline-block;
+}
+
+/* L'avis de debit ou de panne, sous la salle et au-dessus de la zone de saisie. */
+#generalChatNotice {
+    margin: 4px 0;
+    text-align: center;
+}

@@ -4,6 +4,7 @@ namespace OGame\Services;
 
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection;
+use OGame\Chat\PresentedAuthor;
 use OGame\Events\ChatMessageSent;
 use OGame\Models\ChatMessage;
 use OGame\Models\IgnoredPlayer;
@@ -302,6 +303,10 @@ class ChatService
                     'text' => e($message->replyTo->message),
                 ];
             }
+
+            // Les marques du classement — tag d'alliance, badge, honneur — composees par la meme
+            // classe que la diffusion. Les deux chemins disent donc la meme chose.
+            $item['author'] = PresentedAuthor::of($message->sender)->forTheBrowser();
 
             $chatItems[$key] = $item;
             $chatItemsByDateAsc[] = $key;

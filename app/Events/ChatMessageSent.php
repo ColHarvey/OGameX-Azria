@@ -8,6 +8,7 @@ use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
+use OGame\Chat\PresentedAuthor;
 use OGame\Models\ChatMessage;
 
 class ChatMessageSent implements ShouldBroadcast
@@ -89,6 +90,9 @@ class ChatMessageSent implements ShouldBroadcast
         // tomberait donc dans la branche qui ouvre une conversation privee avec son auteur.
         if (!$this->message->recipient_id && !$this->message->alliance_id) {
             $data['general'] = true;
+            // **Les memes marques que l'historique**, composees au meme endroit : sans cela le
+            // joueur lirait un nom nu en direct et un nom decore au rechargement.
+            $data['author'] = PresentedAuthor::of($this->message->sender)->forTheBrowser();
         }
 
         if ($this->message->replyTo) {
