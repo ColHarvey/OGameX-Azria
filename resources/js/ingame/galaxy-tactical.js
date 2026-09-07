@@ -735,6 +735,43 @@
         return detail ? base + ' \u00b7 ' + detail : base;
     }
 
+    /*
+     * La liste des flottes d'expedition de la fiche : **un miroir de la vraie**, jamais une liste
+     * inventee. Le rendu herite remplace `#expeditionFleetTemplateSelect` par son propre menu et
+     * cache la liste (`ogameDropDown`, `select.hide()`) ; ni l'un ni l'autre ne se placent dans la
+     * grille de la fiche. La fiche montre donc sa liste, avec exactement les options et l'etat de
+     * la vraie, et reporte chaque choix sur la vraie avec son evenement `change` : c'est le parcours
+     * du jeu qui verifie la cible et active le bouton d'envoi, pas la fiche.
+     */
+    function listeMiroir() {
+        var source = document.getElementById('expeditionFleetTemplateSelect');
+        var liste = element('select', 'gtSelect');
+
+        liste.id = 'gtExpeditionSelect';
+
+        if (!source) {
+            liste.disabled = true;
+
+            return liste;
+        }
+
+        Array.prototype.forEach.call(source.options, function (option) {
+            var copie = document.createElement('option');
+            copie.value = option.value;
+            copie.textContent = option.textContent;
+            copie.selected = option.selected;
+            liste.appendChild(copie);
+        });
+
+        liste.disabled = source.disabled;
+        liste.addEventListener('change', function () {
+            source.value = liste.value;
+            source.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+
+        return liste;
+    }
+
     function imageDeFiche(chemin, classe) {
         var img = element('img', classe);
         img.src = chemin;
@@ -808,12 +845,16 @@
         } else {
             avant.push(imageDeFiche('/img/galaxy-tactical/deep-space-nebula-v2.png', 'gtCardNebula'));
             var etiquette = element('label', 'gtCardLabel');
-            etiquette.setAttribute('for', 'expeditionFleetTemplateSelect');
+            etiquette.setAttribute('for', 'gtExpeditionSelect');
             etiquette.textContent = locaFiche('expeditionFleet', 'Flotte d\'expedition');
             nature = etiquette;
         }
 
         avant.push(nature);
+
+        if (genre === 'profond') {
+            avant.push(listeMiroir());
+        }
 
         /* Les cibles d'une meme position : la planete, sa lune, son champ de debris — celles qui existent. */
         if (genre === 'planete' || genre === 'lune' || genre === 'debris') {
@@ -901,12 +942,26 @@
         f.appendChild(tete);
         f.appendChild(element('div', 'gtCardBody'));
 
-        /* Le choix d'une flotte d'expedition montre ou cache le bouton d'envoi herite : la grille suit. */
+        /*
+         * Le choix d'une flotte d'expedition montre ou cache le bouton d'envoi herite, et le parcours
+         * du jeu l'active apres un aller-retour serveur (`galaxyCheckTarget`) : la grille suit les
+         * deux — l'evenement `change` de la liste heritee, et les attributs du bouton d'envoi.
+         */
         f.addEventListener('change', function (evenement) {
             if (evenement.target && evenement.target.id === 'expeditionFleetTemplateSelect') {
                 composerLesActions(f);
             }
         });
+
+        var envoi = document.getElementById('sendExpeditionFleetTemplateFleet');
+
+        if (envoi && typeof window.MutationObserver === 'function') {
+            new window.MutationObserver(function () {
+                if (f.gtContexte && f.gtContexte.genre === 'profond') {
+                    composerLesActions(f);
+                }
+            }).observe(envoi, { attributes: true, attributeFilter: ['disabled', 'style'] });
+        }
 
         carte.appendChild(f);
 

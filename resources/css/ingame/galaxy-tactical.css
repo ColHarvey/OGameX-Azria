@@ -700,9 +700,9 @@
     line-height: 28px;
 }
 
+/* Au survol, la luminosite seule : Keven ne veut aucun eclat cyan sur la fiche. */
 #galaxyTactical .gtCardClose:hover {
     filter: brightness(1.35);
-    box-shadow: 0 0 8px rgba(90, 195, 255, 0.33);
 }
 
 #galaxyTactical .gtCard :focus-visible {
@@ -736,9 +736,7 @@
 }
 
 #galaxyContent #galaxyTactical .gtCardBody .galaxyRow,
-#galaxyContent #galaxyTactical .gtCardBody .expeditionDebrisSlotBox,
-#galaxyContent #galaxyTactical .gtCardBody #expeditionDebrisSlotActions,
-#galaxyContent #galaxyTactical .gtCardBody #galaxyExpeditionFleetTemplateContainer {
+#galaxyContent #galaxyTactical .gtCardBody .expeditionDebrisSlotBox {
     display: contents;
 }
 
@@ -817,7 +815,6 @@
 
 #galaxyTactical .gtTarget:hover {
     filter: brightness(1.35);
-    box-shadow: 0 0 8px rgba(90, 195, 255, 0.33);
 }
 
 #galaxyTactical .gtTarget[aria-pressed="true"] {
@@ -954,7 +951,6 @@
 
 #galaxyTactical .gtAction:not(:disabled):hover {
     filter: brightness(1.35);
-    box-shadow: 0 0 8px rgba(90, 195, 255, 0.33);
 }
 
 /* L'etat grise commun de Codex (`planet-card-clean.css`) : desature, sans survol, curseur qui refuse. */
@@ -986,10 +982,18 @@
 /*
  * ## La fiche de l'espace profond
  *
- * La nebuleuse en pleine largeur, le libelle horizontal « Flotte d'expedition », la liste des
- * compositions du jeu en pleine largeur, la note, puis le bouton Expedition (et Recycler quand des
- * debris d'expedition existent). La boite historique `#galaxyRow16` est en `display: contents` avec
- * ses deux conteneurs : sa liste se place dans la grille, ses deux boutons sont delegues et masques.
+ * La nebuleuse en pleine largeur, le libelle horizontal « Flotte d'expedition », la liste miroir
+ * du module en pleine largeur (`.gtSelect`, voir `listeMiroir()`), la note, les debris
+ * d'expedition, puis le bouton Expedition (et Recyclage quand des debris existent).
+ *
+ * **La boite historique `#galaxyRow16` ne montre que ses debris.** Ses regles dans la feuille du
+ * jeu sont des chaines d'identifiants — `#galaxyContent .expeditionDebrisSlotBox >
+ * div#expeditionDebrisSlotActions > div#galaxyExpeditionFleetTemplateContainer > select`, soit
+ * (3,1,4) — qu'une regle ordinaire de la fiche ne bat pas ; et le rendu herite remplace la liste
+ * par son menu a lui. Plutot que de surencherir regle par regle, tout `#expeditionDebrisSlotActions`
+ * est masque par une regle a trois identifiants (3,1,0), qui bat les (2,1,1) du jeu : la liste
+ * heritee, son menu, son bouton-icone et les deux boutons d'envoi — tous delegues par le module —
+ * n'ont plus de boite, et un `.show()` en ligne sur un enfant ne peut rien contre un parent masque.
  */
 #galaxyTactical .gtCardNebula {
     grid-column: 1 / span 4;
@@ -1007,7 +1011,7 @@
     color: #c9dce8;
 }
 
-#galaxyContent #galaxyTactical .gtCardBody #expeditionFleetTemplateSelect {
+#galaxyTactical .gtSelect {
     grid-column: 1 / span 4;
     grid-row: 3;
     width: 100%;
@@ -1021,7 +1025,7 @@
     font: inherit;
 }
 
-#galaxyContent #galaxyTactical .gtCardBody #expeditionFleetTemplateSelect:disabled {
+#galaxyTactical .gtSelect:disabled {
     opacity: 0.65;
     cursor: not-allowed;
 }
@@ -1034,21 +1038,22 @@
     justify-content: flex-start;
 }
 
-/*
- * Ce que la boite historique montrait et que la fiche dit autrement : son titre (la tete de fiche
- * le porte), le bouton-icone de la liste (le libelle le remplace), et ses deux boutons d'envoi, que
- * le bouton Expedition de la grille actionne. `!important` sur le second : le rendu herite le
- * montre par `.show()`, un style en ligne que la feuille ne battrait pas autrement.
- */
-#galaxyContent #galaxyTactical .gtCardBody .expeditionDebrisSlotBox > div:has(> h3.title),
-#galaxyContent #galaxyTactical .gtCardBody .expeditionDebrisSlotBox h3.title,
-#galaxyContent #galaxyTactical .gtCardBody #expeditionFleetTemplateBtn,
-#galaxyContent #galaxyTactical .gtCardBody #expeditionbutton {
+#galaxyContent #galaxyTactical .gtCardBody #expeditionDebrisSlotActions {
     display: none;
 }
 
-#galaxyContent #galaxyTactical .gtCardBody #sendExpeditionFleetTemplateFleet {
-    display: none !important;
+/*
+ * Le titre de la boite : la tete de fiche le porte. Le bloc qui le contient est le premier enfant
+ * de la boite ; `:has()` le dit aussi, dans sa propre regle — une liste de selecteurs ou `:has()`
+ * ne serait pas compris tomberait entiere.
+ */
+#galaxyContent #galaxyTactical .gtCardBody .expeditionDebrisSlotBox > div:first-child,
+#galaxyContent #galaxyTactical .gtCardBody .expeditionDebrisSlotBox h3.title {
+    display: none;
+}
+
+#galaxyContent #galaxyTactical .gtCardBody .expeditionDebrisSlotBox > div:has(> h3.title) {
+    display: none;
 }
 
 /* Sans debris, le conteneur est un vide de la hauteur d'une ligne : il disparait. */

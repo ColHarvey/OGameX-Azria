@@ -966,15 +966,37 @@ class GalaxyTacticalMapTest extends UnitTestCase
         $feuille = $this->feuille();
 
         $this->assertMatchesRegularExpression(
-            '/\.gtCardBody \.expeditionDebrisSlotBox,\s*[^{]*\{\s*display: contents;/',
+            '/\.gtCardBody \.expeditionDebrisSlotBox\s*(,[^{]*)?\{\s*display: contents;/',
             $feuille,
             'The historical box is a box again inside the card: its percentage widths crush its blocks, and the blank of Keven\'s capture is back.'
         );
 
+        /*
+         * La liste de la fiche est un miroir de la vraie : le rendu herite cache la sienne derriere son
+         * propre menu, et ses regles a chaines d'identifiants ne se laissent pas placer dans la grille.
+         * Chaque choix est reporte sur la vraie liste avec son `change` : le parcours du jeu decide.
+         */
+        $module = $this->module();
+        $this->assertStringContainsString('avant.push(listeMiroir());', $module, 'The deep-space card no longer shows the expedition fleet list.');
+        $this->assertStringContainsString('copie.value = option.value;', $module, 'The mirrored list no longer copies the real options: an invented list.');
+        $this->assertStringContainsString("source.dispatchEvent(new Event('change', { bubbles: true }));", $module, 'A choice in the mirrored list no longer reaches the real list: the game flow never checks the target.');
+        $this->assertStringContainsString("attributeFilter: ['disabled', 'style']", $module, 'The card no longer follows the legacy send button the game flow enables after its server round-trip.');
+
         $this->assertMatchesRegularExpression(
-            '/\.gtCardBody #expeditionFleetTemplateSelect \{[^}]*grid-row: 3;[^}]*width: 100%;/s',
+            '/#galaxyTactical \.gtSelect \{[^}]*grid-row: 3;[^}]*width: 100%;/s',
             $feuille,
             'The expedition fleet list is no longer placed full width in the card grid.'
+        );
+
+        /*
+         * La boite heritee ne montre que ses debris : ses actions sont masquees entieres. Une regle par
+         * enfant perdait contre les chaines d'identifiants du jeu et contre le `.show()` en ligne du
+         * rendu herite — c'est le bouton Expedition en double que Keven a vu.
+         */
+        $this->assertMatchesRegularExpression(
+            '/\.gtCardBody #expeditionDebrisSlotActions \{\s*display: none;/',
+            $feuille,
+            'The legacy actions box is visible in the deep-space card: two Expedition buttons, the legacy list widget in the middle of the grid.'
         );
 
         $this->assertStringContainsString(
@@ -1086,9 +1108,11 @@ class GalaxyTacticalMapTest extends UnitTestCase
         $this->assertNotSame('', $largeurDuModule, 'The module no longer declares the card width.');
         $this->assertMatchesRegularExpression('/#galaxyTactical \.gtCard \{[^}]*width: ' . $largeurDuModule . 'px;/', $feuille, 'The card is not as wide in the stylesheet as the module believes: it can leave the map.');
 
-        /* La ligne prete ses cellules a la grille ; le bouton d'envoi herite est masque malgre son style en ligne. */
+        /* La ligne prete ses cellules a la grille. */
         $this->assertMatchesRegularExpression('/\.gtCardBody \.galaxyRow,\s*[^{]*\{\s*display: contents;/', $feuille, 'The moved row is a box again: its cells cannot take their place in the card grid.');
-        $this->assertMatchesRegularExpression('/#sendExpeditionFleetTemplateFleet \{\s*display: none !important;/', $feuille, 'The legacy send button is shown by an inline style the stylesheet no longer beats: two Expedition buttons.');
+
+        /* Keven : aucun eclat cyan au survol de la fiche. La luminosite seule. */
+        $this->assertDoesNotMatchRegularExpression('/:hover \{[^}]*box-shadow: 0 0 8px rgba\(90, 195, 255/', $feuille, 'A cyan glow is back on hover: Keven asked for none.');
 
         /* Les deux ressources de Codex copiees pour ces fiches. */
         $this->assertFileExists(public_path('img/galaxy-tactical/empty-position-preview.svg'), 'The translucent sphere of a free position is missing.');
