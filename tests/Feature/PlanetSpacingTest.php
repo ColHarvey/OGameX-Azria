@@ -35,6 +35,42 @@ class PlanetSpacingTest extends TestCase
     /**
      * Aucune planete ne se pose sur la case voisine d'une autre.
      */
+    /**
+     * Le systeme que ces essais emploient est vide avant qu'ils le remplissent.
+     *
+     * ## Le defaut ferme
+     *
+     * Les trois essais posent leurs planetes a des coordonnees **ecrites en dur** dans le systeme
+     * 1:1, en supposant qu'il ne contient qu'Arakis. La base est partagee entre les classes d'un
+     * meme processus, et l'ordre de repartition change des qu'on ajoute un fichier d'essais : en
+     * integration continue, une planete occupait deja 1:1:8, et l'insertion violait la contrainte
+     * d'unicite des coordonnees.
+     *
+     * **Un essai etablit ce qu'il exige.** Le systeme est donc vide ici, plutot que suppose vide.
+     * `RefreshDatabase` annule ce nettoyage a la fin du test, comme le reste.
+     */
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // **Arakis reste, le reste part.** La planete du compte systeme est posee par une
+        // migration et referencee ailleurs : la supprimer bute sur une clef etrangere — deux
+        // premiers jets s'y sont casses. Les essais la connaissent deja et comparent avant/apres.
+        //
+        // Ce qui doit partir, ce sont les planetes laissees par les classes voisines du meme
+        // processus : leurs coordonnees sont ecrites en dur ici, et une seule collision fait
+        // echouer l'insertion. `planet_moves` d'abord, seule table qui les reference.
+        $systeme = User::where('username', User::SYSTEM_ACCOUNT_USERNAME)->value('id');
+
+        $etrangeres = Planet::where('galaxy', 1)
+            ->where('system', 1)
+            ->when($systeme !== null, fn ($requete) => $requete->where('user_id', '!=', $systeme))
+            ->pluck('id');
+
+        DB::table('planet_moves')->whereIn('planet_id', $etrangeres)->delete();
+        Planet::whereIn('id', $etrangeres)->delete();
+    }
+
     public function testAucunePlaneteNeSePoseSurLaCaseVoisineDUneAutre(): void
     {
         $this->registerAccounts(15);

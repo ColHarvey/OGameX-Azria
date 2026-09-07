@@ -209,6 +209,39 @@ class HomePagePresentationTest extends TestCase
     }
 
     /**
+     * Les langues du pied de page changent vraiment la page.
+     *
+     * **Un lien qui pointe quelque part ne prouve pas qu'il agit.** Ce temoin suit le lien puis
+     * relit l'accueil, et compare le texte rendu a la traduction attendue : c'est la seule facon
+     * de distinguer un lien qui traduit d'un lien qui ne fait rien.
+     */
+    public function testTheFooterLanguagesActuallyTranslateThePage(): void
+    {
+        foreach (['fr', 'en'] as $langue) {
+            $this->get(route('language.switch', ['lang' => $langue]))->assertStatus(302);
+
+            $page = $this->get('/login');
+            $page->assertStatus(200);
+
+            $attendu = trans('t_home.join', [], $langue);
+
+            $page->assertSee($attendu, false);
+            $page->assertSee('lang="' . $langue . '"', false);
+        }
+
+        // Les cinq langues offertes par le pied sont toutes servies par une route qui existe.
+        $accueil = (string)$this->get('/login')->getContent();
+
+        foreach (['fr', 'en', 'it', 'nl', 'zh-TW'] as $langue) {
+            $this->assertStringContainsString(
+                route('language.switch', ['lang' => $langue]),
+                $accueil,
+                'The footer no longer offers ' . $langue . ', or points somewhere else.'
+            );
+        }
+    }
+
+    /**
      * La page de demande de mot de passe s'affiche et vise la bonne route.
      */
     public function testTheForgotPasswordPageIsWiredToFortify(): void
