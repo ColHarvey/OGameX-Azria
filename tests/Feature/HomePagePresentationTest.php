@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
 use OGame\Models\Planet;
 use OGame\Models\User;
@@ -323,5 +324,126 @@ class HomePagePresentationTest extends TestCase
         $this->get('/reset-password/' . $jeton . '?email=oubli%40exemple.test')
             ->assertStatus(200)
             ->assertSee('value="' . $jeton . '"', false);
+    }
+
+    /**
+     * Le mot de passe change vraiment, l'ancien cesse de fonctionner, et le jeton ne resservira pas.
+     *
+     * **Le temoin precedent s'arretait a la page.** Il etablissait que le jeton y arrive, pas que le
+     * parcours aboutit — et c'est exactement l'endroit ou une route manquante se cache derriere un
+     * « c'est fait ». Trois faits sont mesures ici, pas supposes : le nouveau mot de passe ouvre la
+     * session, l'ancien ne l'ouvre plus, et le jeton employe est mort.
+     */
+    public function testTheNewPasswordWorksTheOldOneStopsAndTheTokenDies(): void
+    {
+        $joueur = User::factory()->create([
+            'email' => 'change@exemple.test',
+            'password' => Hash::make('AncienMotDePasse123'),
+        ]);
+
+        $jeton = Password::broker()->createToken($joueur);
+
+        $this->post(route('password.update'), [
+            'token' => $jeton,
+            'email' => 'change@exemple.test',
+            'password' => 'NouveauMotDePasse456',
+            'password_confirmation' => 'NouveauMotDePasse456',
+        ])->assertSessionHasNoErrors();
+
+        $this->post('/logout');
+        $this->assertGuest();
+
+        // L'ancien n'ouvre plus rien.
+        $this->post(route('login'), ['email' => 'change@exemple.test', 'password' => 'AncienMotDePasse123']);
+        // `assertGuest()` ne prend pas de message : le passer etait accepte et **silencieusement
+        // ignore**. On lit donc le garde directement, pour qu'un echec dise ce qu'il signifie.
+        $this->assertFalse(auth()->check(), 'The old password still opens the account after a reset.');
+
+        // Le nouveau, si.
+        $this->post(route('login'), ['email' => 'change@exemple.test', 'password' => 'NouveauMotDePasse456']);
+        $this->assertAuthenticated();
+
+        // **Un jeton sert une fois.** Rejoue, il doit etre refuse — sinon un lien intercepte resterait
+        // une clef pour qui le retrouve, longtemps apres.
+        $this->post('/logout');
+
+        $this->post(route('password.update'), [
+            'token' => $jeton,
+            'email' => 'change@exemple.test',
+            'password' => 'TroisiemeMotDePasse789',
+            'password_confirmation' => 'TroisiemeMotDePasse789',
+        ])->assertSessionHasErrors();
+
+        $this->post(route('login'), ['email' => 'change@exemple.test', 'password' => 'TroisiemeMotDePasse789']);
+        $this->assertFalse(auth()->check(), 'A used token still changes the password: the link stays a key for good.');
+    }
+
+    /**
+     * Un jeton altere ne change rien.
+     */
+    public function testATamperedTokenChangesNothing(): void
+    {
+        User::factory()->create([
+            'email' => 'intact@exemple.test',
+            'password' => Hash::make('MotDePasseIntact123'),
+        ]);
+
+        $this->post(route('password.update'), [
+            'token' => 'un-jeton-invente-de-toutes-pieces',
+            'email' => 'intact@exemple.test',
+            'password' => 'MotDePasseVole456',
+            'password_confirmation' => 'MotDePasseVole456',
+        ])->assertSessionHasErrors();
+
+        $this->post('/logout');
+        $this->post(route('login'), ['email' => 'intact@exemple.test', 'password' => 'MotDePasseVole456']);
+        $this->assertFalse(auth()->check(), 'An invented token changed the password.');
+    }
+
+    /**
+     * Une adresse inconnue **se distingue** aujourd'hui d'une adresse connue.
+     *
+     * ## Ce temoin decrit l'etat des lieux, il ne le valide pas
+     *
+     * Codex signalait qu'un message neutre dans la vue ne protege pas, a lui seul, contre
+     * l'enumeration des comptes. **Mesure faite : la protection n'existe pas.** Une adresse
+     * inconnue recoit « We can't find a user with that email address. » ; une adresse connue ne
+     * recoit aucune erreur. N'importe qui peut donc savoir si un compte existe.
+     *
+     * J'avais d'abord annonce l'inverse, sur la foi d'un essai qui employait la mauvaise API et ne
+     * verifiait rien. Ce temoin-ci mesure vraiment.
+     *
+     * **Pourquoi il epingle l'ecart au lieu de le combler** : uniformiser la reponse change le
+     * comportement du backend, et le perimetre fixe par Keven pour ce chantier est « les pages
+     * d'avant-jeu, rien d'autre ». Le jour ou l'ecart sera comble, cet essai tombera — et son
+     * message dira quoi en faire.
+     *
+     * Il ne dit rien du temps de reponse, un canal distinct qu'aucun essai d'ici ne mesure
+     * serieusement.
+     */
+    public function testAnUnknownAddressIsStillDistinguishableFromAKnownOne(): void
+    {
+        User::factory()->create(['email' => 'connu@exemple.test']);
+
+        // **Chaque reponse est jugee avant la suivante.** La session est partagee : asserter sur
+        // la premiere apres avoir envoye la seconde revient a lire les erreurs de la seconde.
+        $connue = $this->post(route('password.email'), ['email' => 'connu@exemple.test']);
+        $connue->assertSessionHasNoErrors();
+        $codeConnue = $connue->getStatusCode();
+
+        $inconnue = $this->post(route('password.email'), ['email' => 'jamais-vu@exemple.test']);
+
+        $this->assertSame(
+            $codeConnue,
+            $inconnue->getStatusCode(),
+            'The two answers now differ by status code as well: the leak got wider, not narrower.'
+        );
+
+        $inconnue->assertSessionHasErrors(
+            [],
+            null,
+            'The unknown address no longer draws an error — the enumeration gap is closed. Good news:'
+            . ' delete this test and say so, rather than keeping a guard that describes a past state.'
+        );
     }
 }
