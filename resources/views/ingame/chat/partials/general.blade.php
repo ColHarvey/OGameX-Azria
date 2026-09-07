@@ -62,6 +62,15 @@
     {{-- Les valeurs que le module lit. Declarees avant lui, comme le veut le contrat : le bundle
          est charge dans l'en-tete et s'execute avant le corps de la page. --}}
     var generalChatIgnoredIds = @json($generalIgnoredPlayerIds ?? []);
+    {{-- **La langue cible, en etiquette BCP-47.** Le jeu stocke `zh-TW` ; l'interface de
+         traduction attend l'ecriture, pas le pays. Les quatre autres coincident. --}}
+    @php
+        // **Calcule ici, pas dans @json.** La directive ne survit pas a une indexation de tableau
+        // litteral : la vue compilee levait « Unclosed [ does not match ) » et la page rendait 500.
+        $languesDeTraduction = ['fr' => 'fr', 'en' => 'en', 'it' => 'it', 'nl' => 'nl', 'zh-TW' => 'zh-Hant'];
+        $langueDeTraduction = $languesDeTraduction[app()->getLocale()] ?? 'en';
+    @endphp
+    var generalChatLangue = @json($langueDeTraduction);
     var generalChatLoca = {
         empty: @json(__('t_ingame.chat.general_empty')),
         tooMany: @json(__('t_ingame.chat.general_too_many')),
@@ -69,5 +78,10 @@
         disconnected: @json(__('t_ingame.chat.general_disconnected')),
         adminBadge: @json(__('t_ingame.highscore.badge_admin')),
         honourPoints: @json(__('t_ingame.highscore.honour_points')),
+        translate: @json(__('t_ingame.chat.translate')),
+        translateOriginal: @json(__('t_ingame.chat.translate_original')),
+        translateWorking: @json(__('t_ingame.chat.translate_working')),
+        translateFailed: @json(__('t_ingame.chat.translate_failed')),
+        translateSame: @json(__('t_ingame.chat.translate_same')),
     };
 </script>

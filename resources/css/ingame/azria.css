@@ -454,3 +454,29 @@
     outline: none;
 }
 
+
+/*
+ * Le bouton de traduction d'un message du chat general.
+ *
+ * **Discret par construction** (demande de Keven) : c'est un lien minuscule pose a cote de la date,
+ * pas un bouton. Il ne doit pas concurrencer le message qu'il accompagne — on le remarque quand on
+ * le cherche, et on l'oublie le reste du temps.
+ *
+ * Il n'apparait que chez les joueurs dont le navigateur sait traduire : le module ne l'ecrit pas du
+ * tout ailleurs, plutot que de l'afficher inerte.
+ */
+#generalChat .js_generalChatTranslate {
+    float: right;
+    margin-left: 8px;
+    font-size: 10px;
+    font-weight: normal;
+    line-height: 14px;
+    color: #6f7f95;
+    text-decoration: none;
+}
+
+#generalChat .js_generalChatTranslate:hover,
+#generalChat .js_generalChatTranslate:focus {
+    color: #8fa0bd;
+    text-decoration: underline;
+}

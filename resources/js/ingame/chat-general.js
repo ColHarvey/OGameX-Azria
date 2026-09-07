@@ -30,6 +30,11 @@
     var ignores = {};
     var affiches = {};
 
+    // Un traducteur par langue source, garde d'un message a l'autre : les creer coute, et le
+    // premier peut demander le telechargement d'un modele.
+    var traducteurs = {};
+    var langueCible = typeof generalChatLangue === 'string' ? generalChatLangue : 'en';
+
     /**
      * Le texte, rendu inoffensif.
      *
@@ -98,10 +103,124 @@
             + '<div class="msg_head">'
             + '<span class="msg_title blue_txt">' + decorations(auteur) + '</span>'
             + '<span class="msg_date fright">' + dateLisible(horodatage) + '</span>'
+            + (traductionDisponible()
+                ? '<a href="javascript:void(0);" class="js_generalChatTranslate">' + echapper(loca.translate || '') + '</a>'
+                : '')
             + '</div>'
             + '<span class="msg_content">' + String(contenu).replace(/\n/g, '<br>') + '</span>'
             + '<div class="speechbubble_arrow"></div>'
             + '</li>';
+    }
+
+    /**
+     * Le navigateur sait-il traduire ?
+     *
+     * **Les deux interfaces sont necessaires** : il faut reconnaitre la langue du message avant de
+     * pouvoir le traduire, et `Translator.create()` exige une langue source explicite. Sans l'une
+     * ou l'autre, le bouton n'apparait pas — mieux vaut pas de bouton qu'un bouton qui echoue.
+     */
+    function traductionDisponible() {
+        return typeof window.Translator !== 'undefined'
+            && typeof window.Translator.create === 'function'
+            && typeof window.LanguageDetector !== 'undefined'
+            && typeof window.LanguageDetector.create === 'function';
+    }
+
+    /**
+     * Le texte traduit, ou un motif de refus.
+     *
+     * Rend `{ texte }` en cas de succes, `{ meme: true }` si le message est deja dans la langue du
+     * joueur, et `null` si rien n'a pu etre fait. Trois issues distinctes : « deja dans ta langue »
+     * n'est pas un echec, et l'annoncer comme tel serait faux.
+     */
+    async function traduireTexte(texte) {
+        var detecteur = await window.LanguageDetector.create();
+        var trouves = await detecteur.detect(texte);
+        var source = trouves && trouves.length > 0 ? trouves[0].detectedLanguage : null;
+
+        if (!source || source === 'und') {
+            return null;
+        }
+
+        // Comparaison sur la langue seule : « fr-CA » et « fr » sont la meme langue pour un lecteur.
+        if (String(source).split('-')[0] === String(langueCible).split('-')[0]) {
+            return { meme: true };
+        }
+
+        if (!traducteurs[source]) {
+            traducteurs[source] = await window.Translator.create({
+                sourceLanguage: source,
+                targetLanguage: langueCible,
+            });
+        }
+
+        return { texte: await traducteurs[source].translate(texte) };
+    }
+
+    /**
+     * Le texte brut d'un contenu de message, sauts de ligne compris.
+     *
+     * Le contenu arrive du serveur deja echappe, avec des `<br>` : on le rend a sa forme lisible
+     * pour le traducteur, puis on refera le chemin inverse.
+     */
+    function texteBrut(element) {
+        var boite = document.createElement('div');
+        boite.innerHTML = String(element.innerHTML).replace(/<br\s*\/?>/gi, '\n');
+
+        return boite.textContent;
+    }
+
+    /**
+     * Arme le bouton de traduction, sur la liste plutot que sur chaque ligne.
+     *
+     * Les lignes arrivent en direct : un ecouteur pose ligne par ligne oublierait toutes celles qui
+     * viennent apres. La delegation ne connait pas ce probleme.
+     */
+    function armerLaTraduction() {
+        if (!traductionDisponible()) {
+            return;
+        }
+
+        jQuery(listeSelecteur).on('click', '.js_generalChatTranslate', function () {
+            var bouton = jQuery(this);
+            var contenu = bouton.closest('.chat_msg').find('.msg_content').get(0);
+
+            if (!contenu) {
+                return;
+            }
+
+            // Deja traduit : on rend l'original, sans rien redemander.
+            if (bouton.data('original') !== undefined) {
+                contenu.innerHTML = bouton.data('original');
+                bouton.removeData('original').text(loca.translate || '');
+
+                return;
+            }
+
+            var original = contenu.innerHTML;
+            bouton.text(loca.translateWorking || '');
+
+            traduireTexte(texteBrut(contenu)).then(function (issue) {
+                if (issue === null) {
+                    bouton.text(loca.translateFailed || '');
+
+                    return;
+                }
+
+                if (issue.meme) {
+                    bouton.text(loca.translateSame || '');
+
+                    return;
+                }
+
+                // **Seul le contenu change.** Le pseudo, le tag, le badge, l'honneur et la date sont
+                // des donnees, pas du texte a traduire.
+                contenu.innerHTML = echapper(issue.texte).replace(/\n/g, '<br>');
+                bouton.data('original', original).text(loca.translateOriginal || '');
+            }).catch(function () {
+                bouton.text(loca.translateFailed || '');
+            });
+        });
     }
 
     function liste() {
@@ -347,6 +466,7 @@
         });
 
         armerLesEmoji();
+        armerLaTraduction();
         chargerHistorique();
         ecouter();
     }

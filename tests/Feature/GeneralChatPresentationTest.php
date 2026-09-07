@@ -202,6 +202,74 @@ class GeneralChatPresentationTest extends AccountTestCase
     }
 
     /**
+     * Un message se traduit, et lui seul.
+     *
+     * ## Le moteur est celui du navigateur
+     *
+     * Decision de Keven : ni service a heberger, ni cle d'API, ni facturation — et **le message
+     * ne quitte jamais la machine du joueur**. Les deux interfaces sont necessaires : reconnaitre
+     * la langue, puis traduire. Sans elles, le bouton **n'est pas ecrit du tout** : mieux vaut pas
+     * de bouton qu'un bouton inerte.
+     *
+     * ## Ce que le bouton ne touche pas
+     *
+     * Le pseudo, le tag d'alliance, le badge et les points d'honneur sont des donnees, pas du
+     * texte a traduire. Seul `.msg_content` change.
+     */
+    public function testAMessageCanBeTranslatedAndNothingElseIs(): void
+    {
+        $module = (string)file_get_contents(base_path('resources/js/ingame/chat-general.js'));
+
+        $this->assertStringContainsString(
+            "typeof window.Translator !== 'undefined'",
+            $module,
+            'Nothing checks the browser can translate: the button would appear and do nothing.'
+        );
+
+        $this->assertStringContainsString(
+            "typeof window.LanguageDetector !== 'undefined'",
+            $module,
+            'The source language is never detected, yet Translator.create() requires one.'
+        );
+
+        // **Rien ne sort du navigateur.** Aucune requete vers un service de traduction.
+        foreach (['translate.googleapis', 'deepl', 'libretranslate', 'translate.google'] as $service) {
+            $this->assertStringNotContainsString(
+                $service,
+                $module,
+                'The chat sends player messages to ' . $service . ': that was not the engine that was chosen.'
+            );
+        }
+
+        // Seul le contenu est reecrit ; la ligne d'en-tete n'est jamais touchee.
+        $this->assertStringContainsString(
+            "find('.msg_content')",
+            $module,
+            'The translation targets something other than the message body.'
+        );
+
+        $this->assertStringNotContainsString(
+            "find('.msg_title')",
+            $module,
+            'The translation reaches the author line: names and badges are data, not prose.'
+        );
+
+        $reponse = $this->get('/chat');
+        $reponse->assertSee('var generalChatLangue =', false);
+
+        foreach (['translate', 'translateOriginal', 'translateWorking', 'translateFailed', 'translateSame'] as $cle) {
+            $reponse->assertSee($cle . ':', false);
+        }
+
+        $feuille = (string)file_get_contents(base_path('resources/css/ingame/azria.css'));
+        $this->assertStringContainsString(
+            '#generalChat .js_generalChatTranslate',
+            $feuille,
+            'The translate link has no styling: it would render as a full-size link, not a discreet one.'
+        );
+    }
+
+    /**
      * Le panneau emploie les classes existantes, sans direction graphique nouvelle.
      *
      * Decision de Keven : le general reprend le style actuel. Ces classes sont celles des
