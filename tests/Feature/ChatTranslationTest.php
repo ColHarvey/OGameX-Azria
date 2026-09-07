@@ -190,6 +190,63 @@ class ChatTranslationTest extends AccountTestCase
     }
 
     /**
+     * Le traducteur n'est joignable que de l'interieur, et son volume est ecrivable.
+     *
+     * ## Deux faits mesures sur le serveur, epingles ici
+     *
+     * **Aucun port publie.** En publier un ferait du traducteur une API de traduction gratuite
+     * pour qui trouverait l'adresse. Le jeu est le seul chemin, et sa route exige une session.
+     *
+     * **Le volume est monte sur `.local`, pas sur le dossier des modeles.** Docker n'initialise
+     * un volume neuf avec le contenu et les droits de l'image que si le chemin monte existe
+     * dedans. Mesure faite : `/home/libretranslate/.local` existe et appartient a l'utilisateur
+     * du conteneur ; `.local/share/argos-translate` n'existe pas. Monte la-bas, le volume
+     * naissait vide et appartenant a root — le conteneur redemarrait en boucle sur
+     * « PermissionError : /packages ».
+     */
+    public function testTheTranslatorStaysInternalAndCanWriteItsModels(): void
+    {
+        foreach (['docker-compose.yml', 'docker-compose.prod.yml'] as $fichier) {
+            // **Les fins de ligne sont normalisees avant tout decoupage.** Le fichier est en CRLF ;
+            // chercher une ligne vide par deux sauts simples ne trouvait rien, et le decoupage
+            // rendait une chaine vide — un essai qui passait alors sur du neant.
+            $compose = str_replace("\r\n", "\n", (string)file_get_contents(base_path($fichier)));
+
+            $this->assertStringContainsString(
+                'ogamex-libretranslate:',
+                $compose,
+                $fichier . ' no longer declares the translator: the two files must describe the same stack.'
+            );
+
+            $service = substr($compose, (int)strpos($compose, 'ogamex-libretranslate:'));
+            $fin = strpos($service, "
+
+");
+            $service = $fin === false ? $service : substr($service, 0, $fin);
+
+            $this->assertNotSame('', trim($service), $fichier . ' : le bloc du service est vide, ce temoin ne mesurerait rien.');
+
+            $this->assertStringNotContainsString(
+                'ports:',
+                $service,
+                $fichier . ' publishes a port for the translator: it would become a free translation API.'
+            );
+
+            $this->assertStringContainsString(
+                'libretranslate-models:/home/libretranslate/.local',
+                $service,
+                $fichier . ' mounts the volume where the image has nothing: Docker would create it root-owned and the container would loop on PermissionError.'
+            );
+
+            $this->assertStringNotContainsString(
+                '.local/share/argos-translate',
+                $service,
+                $fichier . ' mounts a path the image does not contain: that is exactly the layout that failed.'
+            );
+        }
+    }
+
+    /**
      * Un texte vide ne part pas sur le reseau.
      */
     public function testAnEmptyTextNeverReachesTheService(): void

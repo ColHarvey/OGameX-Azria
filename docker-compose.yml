@@ -143,6 +143,13 @@ services:
   # en jeu ; l'elargir se fait dans le `.env`, sans toucher a ce fichier.
   #
   # Les modeles vivent dans un volume nomme : sans lui, chaque redemarrage les retelecharge.
+  #
+  # **Le montage vise `.local`, pas le dossier des modeles.** Docker n initialise un volume neuf
+  # avec le contenu ET les droits de l image que si le chemin monte existe dedans. Mesure faite
+  # sur l image : l utilisateur est `libretranslate` (1032:65534), `/home/libretranslate/.local`
+  # existe et lui appartient, mais `.local/share/argos-translate` n existe pas. Monte la-bas, le
+  # volume naissait vide et appartenant a root, et le conteneur redemarrait en boucle sur
+  # « PermissionError ... /packages ». Monte sur `.local`, il herite des bons droits.
   ogamex-libretranslate:
     image: libretranslate/libretranslate:latest
     restart: unless-stopped
@@ -151,7 +158,7 @@ services:
       LT_DISABLE_WEB_UI: "true"
       LT_UPDATE_MODELS: "false"
     volumes:
-      - libretranslate-models:/home/libretranslate/.local/share/argos-translate
+      - libretranslate-models:/home/libretranslate/.local
     networks:
       - app-network
 
