@@ -29,6 +29,7 @@ use OGame\Http\Controllers\MessagesController;
 use OGame\Http\Controllers\NotesController;
 use OGame\Http\Controllers\OptionsController;
 use OGame\Http\Controllers\OverviewController;
+use OGame\Http\Controllers\PatrolController;
 use OGame\Http\Controllers\PaymentController;
 use OGame\Http\Controllers\PhalanxController;
 use OGame\Http\Controllers\PlanetAbandonController;
@@ -154,6 +155,12 @@ Route::middleware(['auth', 'banned', 'globalgame', 'locale', 'firstlogin'])->gro
     Route::get('/ajax/galaxy/fleets', [GalaxyFleetsController::class, 'index'])->name('galaxy.fleets');
     Route::get('/overlay/galaxy/missile-attack', [GalaxyController::class, 'missileAttackOverlay'])->name('galaxy.missile-attack.overlay');
     Route::post('/ajax/galaxy/missile-attack', [GalaxyController::class, 'missileAttack'])->name('galaxy.missile-attack');
+    // Les patrouilles, depuis la carte : devis, deplacement, rappel, lancement. Positions, couts et
+    // autorisations viennent du serveur ; le navigateur rapporte la version du devis qu il a lu.
+    Route::post('/ajax/galaxy/patrol/quote', [PatrolController::class, 'quote'])->name('galaxy.patrol.quote');
+    Route::post('/ajax/galaxy/patrol/launch', [PatrolController::class, 'launch'])->name('galaxy.patrol.launch');
+    Route::post('/ajax/galaxy/patrol/{patrol}/move', [PatrolController::class, 'move'])->name('galaxy.patrol.move');
+    Route::post('/ajax/galaxy/patrol/{patrol}/recall', [PatrolController::class, 'recall'])->name('galaxy.patrol.recall');
 
     // Phalanx
     Route::post('/ajax/phalanx/scan', [PhalanxController::class, 'scan'])->name('phalanx.scan');

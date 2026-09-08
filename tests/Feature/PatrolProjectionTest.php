@@ -478,14 +478,16 @@ class PatrolProjectionTest extends AccountTestCase
         $fichiers = array_merge(
             glob(base_path('app/Patrol/*.php')) ?: [],
             glob(base_path('app/Patrol/*/*.php')) ?: [],
-            [base_path('app/GameMissions/PatrolMission.php')]
+            [base_path('app/GameMissions/PatrolMission.php'), base_path('app/Http/Controllers/PatrolController.php')]
         );
 
         $raisons = [];
 
+        // Trois formes : l exception levee, le devis refuse, et la raison rendue par un decideur
+        // (`return 'x';`) — celle que la carte lit sous un bouton et que le controleur traduit.
         foreach ($fichiers as $fichier) {
             $source = (string)file_get_contents($fichier);
-            foreach (["/PatrolOrderRefused\\('([a-z_]+)'\\)/", "/refusedBecause\\('([a-z_]+)'\\)/"] as $motif) {
+            foreach (["/PatrolOrderRefused\\('([a-z_]+)'\\)/", "/refusedBecause\\('([a-z_]+)'\\)/", "/return '([a-z_]+)';/"] as $motif) {
                 preg_match_all($motif, $source, $trouves);
                 array_push($raisons, ...$trouves[1]);
             }
@@ -494,7 +496,7 @@ class PatrolProjectionTest extends AccountTestCase
         $raisons = array_values(array_unique($raisons));
         sort($raisons);
 
-        $this->assertGreaterThanOrEqual(10, count($raisons), 'The scan found too few reasons: the pattern no longer matches the code.');
+        $this->assertGreaterThanOrEqual(15, count($raisons), 'The scan found too few reasons: the pattern no longer matches the code.');
 
         foreach ($raisons as $raison) {
             foreach (['fr', 'en'] as $langue) {

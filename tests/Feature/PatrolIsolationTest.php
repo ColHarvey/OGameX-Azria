@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Facades\DB;
 use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Services\AccountCombatWithdrawal;
@@ -423,6 +424,46 @@ class PatrolIsolationTest extends AccountTestCase
 
         $this->assertContains($apres->asString(), $identifiants, 'The fallback is not one of the player own planets.');
 
+        Date::setTestNow();
+    }
+
+    /**
+     * Une base marquee detruite, mais dont la ligne existe encore, n est pas une base.
+     *
+     * Les deux temoins voisins mettent le lien a vide ; celui-ci garde le lien et pose l horodatage
+     * de destruction. Le compte du banc a une seconde planete : c est elle, et jamais la base
+     * detruite, que `homeOf()` doit rendre. Une mutation l a montre : `homeOf()` pouvait rendre la
+     * base sans regarder si elle existait encore, et aucun temoin ne le voyait.
+     */
+    public function testADestroyedHomeIsNoHomeAtAll(): void
+    {
+        [$patrouille] = $this->aParkedPatrol();
+        $orders = resolve(PatrolOrders::class);
+        $base = $this->planetService->getPlanetId();
+
+        $intacte = $orders->homeOf($patrouille);
+        $this->assertNotNull($intacte, 'The home is not found while it is intact.');
+        $this->assertSame($base, $intacte->getPlanetId(), 'The home is not the base while the base is intact.');
+
+        // **L horodatage, pas la valeur 1** : c est ainsi qu un corps detruit se reconnait.
+        DB::table('planets')->where('id', $base)->update(['destroyed' => (int)Date::now()->timestamp]);
+
+        // Le joueur du banc est l instance partagee du conteneur : sa liste de planetes date d avant
+        // la destruction. La recharger est ce que la requete suivante ferait d elle-meme.
+        $this->player()->load($this->currentUserId);
+
+        $patrouille = $patrouille->refresh();
+        $patrouille->unsetRelation('homePlanet');
+
+        $repli = $orders->homeOf($patrouille);
+
+        $this->assertNotNull($repli, 'A patrol whose base is destroyed has nowhere to go while another planet exists.');
+        $this->assertNotSame($base, $repli->getPlanetId(), 'A destroyed planet is still offered as the home of the patrol.');
+        $this->assertSame(0, (int)DB::table('planets')->where('id', $repli->getPlanetId())->value('destroyed'), 'The fallback is a destroyed body.');
+        $this->assertSame($this->currentUserId, (int)DB::table('planets')->where('id', $repli->getPlanetId())->value('user_id'), 'The fallback belongs to someone else.');
+        $this->assertNull($orders->whyRecallIsRefused($patrouille, (int)Date::now()->timestamp), 'A recall toward the fallback is refused.');
+
+        DB::table('planets')->where('id', $base)->update(['destroyed' => 0]);
         Date::setTestNow();
     }
 }

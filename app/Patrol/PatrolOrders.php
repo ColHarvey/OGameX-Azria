@@ -4,6 +4,7 @@ namespace OGame\Patrol;
 
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Services\EngagedFleetCheck;
+use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Enums\PlanetType;
@@ -80,55 +81,28 @@ final class PatrolOrders
         float $speedPercent,
         int $now,
     ): Patrol {
-        $this->refuseIfDisabled();
+        $refus = $this->whyLaunchIsRefused($from, $units, $cargo, $reserve);
+
+        if ($refus !== null) {
+            throw new PatrolOrderRefused($refus);
+        }
 
         $player = $from->getPlayer();
 
         if ($player === null) {
+            // Deja exclu par `whyLaunchIsRefused()` ; redit pour l analyse statique.
             throw new PatrolOrderRefused('no_owner');
         }
 
         $depart = $from->getPlanetCoordinates();
-        $geometrie = $this->pricing->geometry();
-
-        $devis = $this->pricing->quote(
-            $player,
-            $units,
-            (float)$reserve,
-            $depart->galaxy,
-            $depart->system,
-            $geometrie->bodyPoint($depart->position),
-            $to,
-            $speedPercent,
-            1,
-            $depart
-        );
+        $devis = $this->quoteForLaunch($from, $units, $reserve, $to, $speedPercent);
 
         if (!$devis->isPossible()) {
             throw new PatrolOrderRefused((string)$devis->refusal);
         }
 
-        // **Le creneau se verifie avant le debit**, comme pour toute mission : la porte du jeu est
-        // le nombre de missions non traitees, et une patrouille en occupe une pour toute sa vie.
-        if ($player->getFleetSlotsInUse() >= $player->getFleetSlotsMax()) {
-            throw new PatrolOrderRefused('no_fleet_slot');
-        }
-
-        $soute = $units->getTotalCargoCapacity($player);
-
-        // **La reserve occupe du fret et se compte a part de la cargaison** (revue 117) : les deux
-        // ensemble doivent tenir, et aucune des deux ne se compte deux fois.
-        if ($cargo->sum() + $reserve > $soute) {
-            throw new PatrolOrderRefused('cargo_exceeds_hold');
-        }
-
-        return DB::transaction(function () use ($from, $player, $units, $cargo, $reserve, $to, $devis, $depart, $now, $geometrie): Patrol {
-            $aRetirer = new Resources(
-                $cargo->metal->get(),
-                $cargo->crystal->get(),
-                $cargo->deuterium->get() + $reserve,
-                0
-            );
+        return DB::transaction(function () use ($from, $player, $units, $cargo, $reserve, $to, $devis, $depart, $now): Patrol {
+            $aRetirer = self::takenFromThePlanet($cargo, $reserve);
 
             if (!$from->deductResourcesAndUnitsAtomic($aRetirer, $units)) {
                 throw new PatrolOrderRefused('not_enough_on_planet');
@@ -164,10 +138,116 @@ final class PatrolOrders
 
             $patrouille->forceFill(['current_mission_id' => $segment->id])->save();
 
-            unset($geometrie);
-
             return $patrouille;
         });
+    }
+
+    /**
+     * Pourquoi un lancement serait refuse avant tout devis — ou `null` s il passerait.
+     *
+     * Le meme decideur pour la carte, qui grise et explique, et pour `launch()`, qui refuse. Le devis
+     * vient apres, avec ses propres refus chiffres (carburant du trajet, reserve de retour) : ceux-ci
+     * ne se disent pas sans nombres.
+     */
+    public function whyLaunchIsRefused(PlanetService $from, UnitCollection $units, Resources $cargo, int $reserve): string|null
+    {
+        if (!$this->settings->patrolsEnabled()) {
+            return 'disabled';
+        }
+
+        $player = $from->getPlayer();
+
+        if ($player === null) {
+            return 'no_owner';
+        }
+
+        if ($units->getAmount() === 0) {
+            return 'no_units';
+        }
+
+        if (self::hasImmobileUnit($player, $units)) {
+            return 'immobile_unit';
+        }
+
+        // **Le creneau se verifie avant le debit**, comme pour toute mission : la porte du jeu est
+        // le nombre de missions non traitees, et une patrouille en occupe une pour toute sa vie.
+        if ($player->getFleetSlotsInUse() >= $player->getFleetSlotsMax()) {
+            return 'no_fleet_slot';
+        }
+
+        // **La reserve occupe du fret et se compte a part de la cargaison** (revue 117) : les deux
+        // ensemble doivent tenir, et aucune des deux ne se compte deux fois.
+        if ($reserve < 0 || $cargo->sum() + $reserve > $units->getTotalCargoCapacity($player)) {
+            return 'cargo_exceeds_hold';
+        }
+
+        if (!$from->hasUnits($units) || !$from->hasResources(self::takenFromThePlanet($cargo, $reserve))) {
+            return 'not_enough_on_planet';
+        }
+
+        return null;
+    }
+
+    /**
+     * Une unite sans vitesse — satellite solaire, foreur — rendrait la duree d un vol infinie.
+     *
+     * Partagee avec `PatrolMission::isMissionPossible()` : la page Flotte et la carte refusent par
+     * la meme regle, ecrite une fois.
+     */
+    public static function hasImmobileUnit(PlayerService $player, UnitCollection $units): bool
+    {
+        foreach ($units->units as $unit) {
+            if ($unit->unitObject->properties->speed->calculate($player)->totalValue <= 0) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Ce qu un lancement retire a la planete : la cargaison, et la reserve comptee en deuterium.
+     */
+    private static function takenFromThePlanet(Resources $cargo, int $reserve): Resources
+    {
+        return new Resources(
+            $cargo->metal->get(),
+            $cargo->crystal->get(),
+            $cargo->deuterium->get() + $reserve,
+            0
+        );
+    }
+
+    /**
+     * Le devis d un lancement depuis un corps du joueur, tel que la carte le montre avant de confirmer.
+     *
+     * Le depart est le corps lui-meme, la version d ordre vaut 1 — celle que la patrouille aura en
+     * naissant —, et la base d attache est ce corps.
+     *
+     * @throws PatrolOrderRefused
+     */
+    public function quoteForLaunch(PlanetService $from, UnitCollection $units, int $reserve, PatrolDestination $to, float $speedPercent): PatrolQuote
+    {
+        $player = $from->getPlayer();
+
+        if ($player === null) {
+            throw new PatrolOrderRefused('no_owner');
+        }
+
+        $depart = $from->getPlanetCoordinates();
+
+        return $this->pricing->quote(
+            $player,
+            $units,
+            (float)$reserve,
+            $depart->galaxy,
+            $depart->system,
+            $this->pricing->geometry()->bodyPoint($depart->position),
+            $to,
+            $speedPercent,
+            1,
+            $depart
+        );
     }
 
     /**
@@ -318,6 +398,20 @@ final class PatrolOrders
      */
     public function orderMove(Patrol $patrol, PatrolDestination $to, float $speedPercent, int $orderVersion, int $now): FleetMission
     {
+        return $this->dispatchOrder($patrol, $to, $speedPercent, $orderVersion, $now, PatrolState::EnRoute);
+    }
+
+    /**
+     * Le corps commun d un ordre : les refus, le devis, puis le nouveau segment sous verrou.
+     *
+     * L etat de depart est la seule chose qui distingue un deplacement d un rappel : « en vol »,
+     * l arrivee se pose ; « en retour », l arrivee atterrit. C est `PatrolMission::processArrival()`
+     * qui lit cet etat, et rien d autre ne dit a l arrivee ce qu elle doit faire.
+     *
+     * @throws PatrolOrderRefused
+     */
+    private function dispatchOrder(Patrol $patrol, PatrolDestination $to, float $speedPercent, int $orderVersion, int $now, PatrolState $departureState): FleetMission
+    {
         $refus = $this->whyMoveIsRefused($patrol, $now);
 
         if ($refus !== null) {
@@ -369,7 +463,7 @@ final class PatrolOrders
             throw new PatrolOrderRefused((string)$devis->refusal);
         }
 
-        return DB::transaction(function () use ($patrol, $segment, $units, $to, $devis, $depart, $now, $delai): FleetMission {
+        return DB::transaction(function () use ($patrol, $segment, $units, $to, $devis, $depart, $now, $delai, $departureState): FleetMission {
             // La meme porte que partout : la ligne relue sous verrou decide.
             $tenu = FleetMission::query()->whereKey($segment->id)->lockForUpdate()->first();
 
@@ -396,7 +490,7 @@ final class PatrolOrders
             );
 
             $patrol->forceFill([
-                'state' => PatrolState::EnRoute,
+                'state' => $departureState,
                 'current_mission_id' => $nouveau->id,
                 'galaxy' => $to->galaxy,
                 'system' => $to->system,
@@ -429,28 +523,42 @@ final class PatrolOrders
             throw new PatrolOrderRefused($refus);
         }
 
-        $base = $this->homeCoordinateOf($patrol);
+        $base = $this->homeOf($patrol);
 
         if ($base === null) {
             // Deja exclu par `whyRecallIsRefused()` ; redit pour l analyse statique.
             throw new PatrolOrderRefused('no_home_left');
         }
 
-        $geometrie = $this->pricing->geometry();
-
-        return $this->orderMove(
+        // **Le rappel rentre, il ne se pose pas.** Le segment part « en retour », et c est cet etat
+        // que l arrivee lit pour atterrir. Parti « en vol », il se posait a cote de la planete au
+        // lieu d y rendre ses vaisseaux : le temoin du rappel jusqu au sol l a montre. Et la cible
+        // porte l identite de la base **qui existe** — le repli si la base a disparu —, jamais
+        // l identifiant d une planete detruite a cote des coordonnees d une autre.
+        return $this->dispatchOrder(
             $patrol,
-            PatrolDestination::nearBody(
-                $geometrie,
-                $base->galaxy,
-                $base->system,
-                $base->position,
-                PlanetType::Planet,
-                $patrol->home_planet_id === null ? null : (int)$patrol->home_planet_id
-            ),
+            $this->destinationOnto($base),
             $this->settings->patrolSafetyReturnSpeed(),
             (int)$patrol->order_version,
-            $now
+            $now,
+            PatrolState::Returning
+        );
+    }
+
+    /**
+     * La destination « rentrer sur ce corps » : son voisinage, avec son identite et son genre.
+     */
+    private function destinationOnto(PlanetService $body): PatrolDestination
+    {
+        $coordonnees = $body->getPlanetCoordinates();
+
+        return PatrolDestination::nearBody(
+            $this->pricing->geometry(),
+            $coordonnees->galaxy,
+            $coordonnees->system,
+            $coordonnees->position,
+            $body->getPlanetType(),
+            $body->getPlanetId()
         );
     }
 
@@ -619,17 +727,34 @@ final class PatrolOrders
     }
 
     /**
+     * La base d attache si elle existe encore, sinon le repli : la planete du joueur la plus proche.
+     *
+     * **C est elle, et pas seulement ses coordonnees, que tout retour vise.** Le segment porte son
+     * identifiant et l atterrissage la lit. Ecrire l identifiant de la base a cote des coordonnees
+     * du repli — ce que faisaient le rappel et le retour de securite — envoyait la flotte atterrir
+     * sur une planete detruite, ou sur aucune quand le lien etait tombe a vide.
+     */
+    public function homeOf(Patrol $patrol): PlanetService|null
+    {
+        $base = $patrol->homePlanet;
+
+        if ($base !== null && !$base->isDestroyed()) {
+            $service = resolve(PlanetServiceFactory::class)->make((int)$base->id, true);
+
+            if ($service instanceof PlanetService) {
+                return $service;
+            }
+        }
+
+        return $this->nearestOwnPlanetOf($patrol);
+    }
+
+    /**
      * Les coordonnees de la base d attache, ou celles du repli si elle a disparu.
      */
     public function homeCoordinateOf(Patrol $patrol): Coordinate|null
     {
-        $base = $patrol->homePlanet;
-
-        if ($base !== null && (int)$base->destroyed === 0) {
-            return new Coordinate((int)$base->galaxy, (int)$base->system, (int)$base->planet);
-        }
-
-        return $this->nearestOwnPlanetOf($patrol);
+        return $this->homeOf($patrol)?->getPlanetCoordinates();
     }
 
     /**
@@ -638,7 +763,7 @@ final class PatrolOrders
      * Deterministe et rejouable : c est ce que le protocole de retour du combat exige deja de ses
      * propres recours, et la meme discipline s applique ici.
      */
-    private function nearestOwnPlanetOf(Patrol $patrol): Coordinate|null
+    private function nearestOwnPlanetOf(Patrol $patrol): PlanetService|null
     {
         $joueur = $this->playerOf($patrol);
 
@@ -669,7 +794,7 @@ final class PatrolOrders
             if ($meilleurCout === null || $cout < $meilleurCout || ($cout === $meilleurCout && $identifiant < $meilleurId)) {
                 $meilleurCout = $cout;
                 $meilleurId = $identifiant;
-                $meilleure = $coordonnees;
+                $meilleure = $planete;
             }
         }
 
@@ -735,7 +860,7 @@ final class PatrolOrders
         $units = $this->unitsOf($parked);
         $this->bill($patrol, $units, $now);
 
-        $base = $this->homeCoordinateOf($patrol);
+        $base = $this->homeOf($patrol);
         $proprietaire = $this->playerOf($patrol);
 
         if ($base === null || $proprietaire === null) {
@@ -745,11 +870,12 @@ final class PatrolOrders
         }
 
         $geometrie = $this->pricing->geometry();
+        $coordonneesBase = $base->getPlanetCoordinates();
         $vers = PatrolDestination::spatialPoint(
             $geometrie,
-            $base->galaxy,
-            $base->system,
-            $geometrie->stationingPointNear($base->position)
+            $coordonneesBase->galaxy,
+            $coordonneesBase->system,
+            $geometrie->stationingPointNear($coordonneesBase->position)
         );
 
         $depart = $patrol->point() ?? $geometrie->stationingPointNear((int)$parked->position_to);
@@ -781,14 +907,8 @@ final class PatrolOrders
                 PlanetType::SpatialPoint,
                 null,
                 $depart,
-                PatrolDestination::nearBody(
-                    $this->pricing->geometry(),
-                    $base->galaxy,
-                    $base->system,
-                    $base->position,
-                    PlanetType::Planet,
-                    (int)$patrol->home_planet_id
-                ),
+                // La base **qui existe**, identite comprise : c est elle que l atterrissage lira.
+                $this->destinationOnto($base),
                 $units,
                 new Resources((float)$parked->metal, (float)$parked->crystal, (float)$parked->deuterium, 0),
                 $now,
@@ -834,10 +954,15 @@ final class PatrolOrders
 
             $home->addUnits($this->unitsOf($segment));
 
+            // **La reserve rentre en unites entieres.** Le stationnement se facture au prorata de la
+            // seconde et laisse une fraction de deuterium ; la frontiere economique refuse de la
+            // crediter, a raison. Le plancher est un fait dit ici : la fraction reste dans l espace.
+            // Le retour de securite passait par coincidence — sa reserve tombait juste — et c est le
+            // temoin du rappel jusqu au sol qui a vu le refus.
             $home->addResourcesAtomic(new Resources(
                 (float)$segment->metal,
                 (float)$segment->crystal,
-                (float)$segment->deuterium + max(0.0, (float)$patrol->fuel_reserve),
+                (float)$segment->deuterium + floor(max(0.0, (float)$patrol->fuel_reserve)),
                 0
             ));
 
@@ -881,7 +1006,17 @@ final class PatrolOrders
         $segment->patrol_id = (int)$patrol->id;
         $segment->mission_type = 11;
 
-        $segment->planet_id_from = (int)($patrol->home_planet_id ?? $bodyFrom);
+        // **L ancre administrative est une planete vivante.** Le travailleur des pages cherche les
+        // missions par les planetes du joueur, et cette liste exclut les corps detruits : un segment
+        // ancre sur une base detruite — ou sur `0`, quand le lien etait tombe a vide — n etait plus
+        // jamais repris. Le corps de depart quand il y en a un, sinon la base qui existe.
+        $ancre = $bodyFrom ?? $this->homeOf($patrol)?->getPlanetId();
+
+        if ($ancre === null) {
+            throw new PatrolOrderRefused('no_home_left');
+        }
+
+        $segment->planet_id_from = $ancre;
         $segment->type_from = $typeFrom->value;
         $segment->galaxy_from = $galaxyFrom;
         $segment->system_from = $systemFrom;
@@ -918,15 +1053,5 @@ final class PatrolOrders
         $segment->save();
 
         return $segment;
-    }
-
-    /**
-     * @throws PatrolOrderRefused
-     */
-    private function refuseIfDisabled(): void
-    {
-        if (!$this->settings->patrolsEnabled()) {
-            throw new PatrolOrderRefused('disabled');
-        }
     }
 }

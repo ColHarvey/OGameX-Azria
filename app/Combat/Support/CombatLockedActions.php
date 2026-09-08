@@ -57,6 +57,15 @@ class CombatLockedActions
             // La porte de saut deplace une flotte sans la faire voyager : c'est precisement le
             // genre de sortie qu'un verrou naif laisserait passer.
             'jumpgate.execute' => 'La porte de saut ne peut pas evacuer une flotte engagee.',
+
+            // Une patrouille part d'un corps celeste comme toute flotte : meme regle que l'envoi.
+            'galaxy.patrol.launch' => 'Une patrouille ne peut pas quitter un corps celeste en combat, comme toute flotte.',
+
+            // Les ordres a une patrouille deja partie : refuses par la regle « une flotte engagee ne
+            // bouge plus » — `PatrolOrders::whyMoveIsRefused()`, par `EngagedFleetCheck` —, pas par
+            // le verrou d'un corps : une patrouille est dans l'espace, pas sur un corps.
+            'galaxy.patrol.move' => 'Une patrouille engagee dans un combat ne recoit aucun ordre de mouvement.',
+            'galaxy.patrol.recall' => 'Une patrouille engagee dans un combat ne se rappelle plus.',
         ];
     }
 
@@ -79,6 +88,7 @@ class CombatLockedActions
             'jumpgate.index' => 'Ouvrir la porte de saut ne fait rien partir.',
             'fleet.union.create' => 'Creer une union ne fait pas decoller de flotte.',
             'fleet.union.join' => 'Rejoindre une union non plus : c\'est l\'envoi qui suivra qui sera refuse.',
+            'galaxy.patrol.quote' => 'Un devis de patrouille ne fait rien partir. Le refus vient a l\'ordre.',
         ];
     }
 

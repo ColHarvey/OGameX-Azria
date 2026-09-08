@@ -73,10 +73,8 @@ class PatrolMission extends GameMission
             return new MissionPossibleStatus(false);
         }
 
-        foreach ($units->units as $unit) {
-            if ($unit->unitObject->properties->speed->calculate($player)->totalValue <= 0) {
-                return new MissionPossibleStatus(false, __('t_ingame.patrol.refusal_immobile_unit'));
-            }
+        if (PatrolOrders::hasImmobileUnit($player, $units)) {
+            return new MissionPossibleStatus(false, __('t_ingame.patrol.refusal_immobile_unit'));
         }
 
         return new MissionPossibleStatus(true);
