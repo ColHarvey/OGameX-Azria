@@ -10,6 +10,7 @@ use Log;
 use OGame\Combat\Services\HeldTargetCheck;
 use OGame\Facades\AppUtil;
 use OGame\Factories\PlanetServiceFactory;
+use OGame\Galaxy\GalaxyHeaderCounters;
 use OGame\Models\Alliance;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
@@ -818,8 +819,11 @@ class GalaxyController extends OGameController
             $can_system_phalanx = $phalanx_level > 0;
         }
 
-        $usedFleetSlots = $player->getFleetSlotsInUse();
-        $maximumFleetSlots = $player->getFleetSlotsMax();
+        // **Les compteurs du bandeau viennent d'une seule source**, la meme que la couche des flottes
+        // et l'envoi rapide : ce que le joueur lit ici ne diverge jamais de ce qu'il lit apres un envoi.
+        $compteurs = GalaxyHeaderCounters::of($player);
+        $usedFleetSlots = $compteurs['slotsUsed'];
+        $maximumFleetSlots = $compteurs['slotsMax'];
 
         return response()->json([
             'components' => [],
@@ -829,10 +833,10 @@ class GalaxyController extends OGameController
             'reservedPositions' => $this->getReservedPositions($galaxy, $system),
             'success' => true,
             'system' => [
-                'availableMissiles' => $planet->getObjectAmount('interplanetary_missile'),
+                'availableMissiles' => $compteurs['missiles'],
                 'availablePathfinders' => $planet->getObjectAmount('pathfinder'),
-                'availableProbes' => $planet->getObjectAmount('espionage_probe'),
-                'availableRecyclers' => $planet->getObjectAmount('recycler'),
+                'availableProbes' => $compteurs['probes'],
+                'availableRecyclers' => $compteurs['recyclers'],
                 'canColonize' => $player->getResearchLevel('astrophysics') > 0,
                 'canExpedition' => true,
                 'canFly' => $usedFleetSlots < $maximumFleetSlots,

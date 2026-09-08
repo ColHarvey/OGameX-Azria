@@ -970,6 +970,45 @@ class GalaxyTacticalMapTest extends UnitTestCase
     }
 
     /**
+     * **Les compteurs du bandeau suivent les flottes.** « Esp.Sonde : 2 » ne bougeait qu'au chargement
+     * du systeme (Keven). Ils viennent d'une seule source (`GalaxyHeaderCounters`), rendue par la
+     * photographie, par l'envoi rapide — qui ecrivait onze sondes de demonstration dans le bandeau —
+     * et par la couche des flottes, que la carte redemande a chaque mouvement du joueur, ou qu'il
+     * aille, puis en veille : le chantier spatial n'annonce rien.
+     */
+    public function testTheHeaderCountersFollowTheFleetPayload(): void
+    {
+        $module = str_replace("\r\n", "\n", $this->module());
+        $vue = $this->vue();
+
+        foreach ([
+            "                mettreAJourLesCompteurs(reponse.counters);\n                decalageHorloge = " => 'the counters written with every fleet payload',
+            "                } else {\n                    rafraichirLesCompteurs(carte);\n                }\n" => 'the counters refreshed for a movement elsewhere',
+            'var VEILLE_DES_COMPTEURS = 30000;' => 'the watch for shipyard deliveries',
+            "            arreterLaVeilleDesCompteurs();\n" => 'the watch stopped with the tab',
+            "        demarrerLaVeilleDesCompteurs(carte);\n    }\n" => 'the watch started with the system',
+        ] as $motif => $quoi) {
+            $this->assertStringContainsString($motif, $module, 'The header counters lost ' . $quoi . '.');
+        }
+
+        foreach ([['probeValue', 'probes'], ['recyclerValue', 'recyclers'], ['missileValue', 'missiles'], ['slotUsed', 'slotsUsed'], ['slotValue', 'slotsMax']] as [$id, $clef]) {
+            $this->assertStringContainsString("['" . $id . "', '" . $clef . "']", $module, 'The module no longer writes ' . $clef . ' into #' . $id . '.');
+            $this->assertStringContainsString('id="' . $id . '"', $vue, 'The view lost the counter #' . $id . '.');
+        }
+
+        /* Une seule source, lue par les trois reponses. */
+        foreach (['GalaxyController', 'GalaxyFleetsController', 'FleetController'] as $controleur) {
+            $source = file_get_contents(app_path('Http/Controllers/' . $controleur . '.php'));
+            $this->assertIsString($source);
+            $this->assertStringContainsString('GalaxyHeaderCounters::of($player)', $source, $controleur . ' no longer reads the header counters from the single source.');
+        }
+
+        $flotte = file_get_contents(app_path('Http/Controllers/FleetController.php'));
+        $this->assertIsString($flotte);
+        $this->assertStringNotContainsString("'probes' => 11,", $flotte, 'The quick dispatch reports eleven demonstration probes again.');
+    }
+
+    /**
      * La nebuleuse n'a pas le halo rond des planetes, et la boite historique s'y range proprement.
      */
     public function testTheNebulaAndItsCardLookLikeThemselves(): void

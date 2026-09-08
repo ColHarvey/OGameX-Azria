@@ -1957,6 +1957,61 @@
     }
 
     /*
+     * ## Les compteurs du bandeau
+     *
+     * « Esp.Sonde », « Recy. », « IPM » et « Emplacements utilises » ne se mettaient a jour qu'au
+     * chargement du systeme (retour de Keven). Le point d'entree des flottes porte desormais ces
+     * compteurs (`counters`, meme source que la photographie : `GalaxyHeaderCounters`), et la carte
+     * les ecrit a chaque reponse — a chaque mouvement annonce sur le canal du joueur, qu'il touche
+     * ou non le systeme affiche —, puis en veille toutes les VEILLE_DES_COMPTEURS millisecondes : le
+     * chantier spatial n'annonce rien, et c'est la requete qui fait avancer sa file.
+     */
+    var VEILLE_DES_COMPTEURS = 30000;
+    var veilleDesCompteurs = null;
+
+    function mettreAJourLesCompteurs(compteurs) {
+        if (!compteurs) {
+            return;
+        }
+
+        [['probeValue', 'probes'], ['recyclerValue', 'recyclers'], ['missileValue', 'missiles'], ['slotUsed', 'slotsUsed'], ['slotValue', 'slotsMax']].forEach(function (paire) {
+            var cible = document.getElementById(paire[0]);
+
+            if (cible && typeof compteurs[paire[1]] === 'number') {
+                cible.textContent = String(compteurs[paire[1]]);
+            }
+        });
+    }
+
+    /* Les compteurs seuls, sans redessiner la couche : la reponse du systeme affiche, quel qu'il soit. */
+    function rafraichirLesCompteurs(carte) {
+        if (!carte.gtSysteme || typeof galaxyFleetsUrl === 'undefined' || !galaxyFleetsUrl || !window.jQuery) {
+            return;
+        }
+
+        window.jQuery.getJSON(galaxyFleetsUrl, { galaxy: carte.gtSysteme.galaxie, system: carte.gtSysteme.systeme })
+            .done(function (reponse) {
+                if (reponse && reponse.success) {
+                    mettreAJourLesCompteurs(reponse.counters);
+                }
+            });
+    }
+
+    function arreterLaVeilleDesCompteurs() {
+        if (veilleDesCompteurs !== null) {
+            window.clearInterval(veilleDesCompteurs);
+            veilleDesCompteurs = null;
+        }
+    }
+
+    function demarrerLaVeilleDesCompteurs(carte) {
+        arreterLaVeilleDesCompteurs();
+        veilleDesCompteurs = window.setInterval(function () {
+            rafraichirLesCompteurs(carte);
+        }, VEILLE_DES_COMPTEURS);
+    }
+
+    /*
      * La demande, marquee d'un jeton : une reponse tardive de l'ancien systeme n'ecrase jamais le
      * nouveau. Le serveur seul dit quels mouvements existent ; la reponse remplace tout.
      */
@@ -1973,6 +2028,7 @@
                     return;
                 }
 
+                mettreAJourLesCompteurs(reponse.counters);
                 decalageHorloge = Number(reponse.server_now) * 1000 - Date.now();
                 mouvements = Array.isArray(reponse.movements) ? reponse.movements : [];
                 dessinerLesMouvements(carte, galaxie, systeme);
@@ -2068,6 +2124,8 @@
 
                 if (concerne) {
                     chargerLesFlottes(carte, g, s);
+                } else {
+                    rafraichirLesCompteurs(carte);
                 }
             });
         } catch (e) {
@@ -2087,6 +2145,7 @@
         chargerLesFlottes(carte, galaxie, systeme);
         ecouterLeSysteme(carte, galaxie, systeme);
         ecouterLeJoueur(carte);
+        demarrerLaVeilleDesCompteurs(carte);
     }
 
     /*
@@ -2199,6 +2258,7 @@
         if (document.hidden) {
             arreterLAnimation();
             arreterLesOrbites();
+            arreterLaVeilleDesCompteurs();
 
             return;
         }
@@ -2207,6 +2267,8 @@
 
         if (carte && carte.gtSysteme) {
             demarrerLesOrbites(carte);
+            demarrerLaVeilleDesCompteurs(carte);
+            rafraichirLesCompteurs(carte);
         }
     });
 

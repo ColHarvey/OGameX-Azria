@@ -13,6 +13,7 @@ use Illuminate\View\View;
 use OGame\Combat\Services\EngagedFleetCheck;
 use OGame\Factories\GameMissionFactory;
 use OGame\Factories\PlanetServiceFactory;
+use OGame\Galaxy\GalaxyHeaderCounters;
 use OGame\GameConstants\UniverseConstants;
 use OGame\GameMessages\FleetUnionInvite as FleetUnionInviteMessage;
 use OGame\GameMissions\BattleEngine\Services\TacticalRetreatService;
@@ -841,15 +842,22 @@ class FleetController extends OGameController
             // Calculate the actual amount of units sent.
             $fleetUnitCount = $fleetMissionService->getFleetUnitCount($fleetMission);
 
+            // **Ce que le bandeau de la Galaxie ecrit apres cet envoi** : le rendu herite recopie ces
+            // nombres dans « Esp.Sonde », « Recy. », « IPM » et « Emplacements utilises ». Ils valaient
+            // onze sondes et un emplacement, en dur — des valeurs de demonstration que chaque joueur
+            // lisait apres chaque sonde. Ils sont lus apres la creation de la mission, a la meme
+            // source que la photographie du systeme.
+            $compteurs = GalaxyHeaderCounters::of($player);
+
             return response()->json([
                 'response' => [
                     'message' => $responseMessage,
                     'type' => 1,
-                    'slots' => 1,
-                    'probes' => 11,
-                    'recyclers' => 0,
-                    'explorers' => 9,
-                    'missiles' => 0,
+                    'slots' => $compteurs['slotsUsed'],
+                    'probes' => $compteurs['probes'],
+                    'recyclers' => $compteurs['recyclers'],
+                    'explorers' => $planet->getObjectAmount('pathfinder'),
+                    'missiles' => $compteurs['missiles'],
                     'shipsSent' => $fleetUnitCount,
                     'coordinates' => [
                         'galaxy' => $galaxy,

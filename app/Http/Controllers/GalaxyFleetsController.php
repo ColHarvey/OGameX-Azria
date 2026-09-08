@@ -5,6 +5,7 @@ namespace OGame\Http\Controllers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use OGame\Galaxy\FleetMovementProjection;
+use OGame\Galaxy\GalaxyHeaderCounters;
 use OGame\Services\FleetMissionService;
 use OGame\Services\PlayerService;
 
@@ -40,6 +41,9 @@ class GalaxyFleetsController extends OGameController
             'system' => $system,
             'server_now' => $projection->serverNow(),
             'movements' => $projection->inSystem($galaxy, $system),
+            // Les compteurs du bandeau, a jour a chaque mouvement : la carte redemande cette couche
+            // sur le canal du joueur, la ou la photographie ne se relit qu'au changement de systeme.
+            'counters' => GalaxyHeaderCounters::of($player),
         ]);
     }
 }

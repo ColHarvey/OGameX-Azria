@@ -15,6 +15,7 @@ use OGame\Models\Resources;
 use OGame\Models\User;
 use OGame\Services\DebrisFieldService;
 use OGame\Services\ObjectService;
+use OGame\Services\PlanetService;
 use OGame\Services\SettingsService;
 use ReflectionProperty;
 use Tests\FleetDispatchTestCase;
@@ -55,10 +56,59 @@ class GalaxyFleetLayerTest extends FleetDispatchTestCase
     }
 
     /**
+     * **Les compteurs du bandeau sont dans la charge des flottes, et ils sont vrais.** Cinq sondes,
+     * une envoyee : la couche rend quatre sondes et un emplacement ; la photographie du systeme dit
+     * la meme chose (une seule source) ; et l'envoi rapide depuis la Galaxie rend ce qui reste
+     * **apres** lui — plus les onze sondes et l'emplacement unique de demonstration que le rendu
+     * herite ecrivait dans le bandeau apres chaque sonde.
+     */
+    public function testTheFleetPayloadCarriesTheHeaderCountersAndTheQuickDispatchReportsThem(): void
+    {
+        $cible = $this->envoyerUneSonde();
+        $coordonnees = $cible->getPlanetCoordinates();
+        $joueur = $this->planetService->getPlayer();
+        $this->assertNotNull($joueur, 'The bench planet has no owner.');
+
+        $couche = $this->getJson(route('galaxy.fleets', ['galaxy' => $coordonnees->galaxy, 'system' => $coordonnees->system]))
+            ->assertStatus(200)
+            ->json();
+
+        $this->assertSame(4, $couche['counters']['probes'] ?? null, 'The fleet payload does not carry the probes left on the planet.');
+        $this->assertSame(0, $couche['counters']['recyclers'] ?? null);
+        $this->assertSame(0, $couche['counters']['missiles'] ?? null);
+        $this->assertSame(1, $couche['counters']['slotsUsed'] ?? null, 'The fleet payload does not count the mission just sent.');
+        $this->assertSame($joueur->getFleetSlotsMax(), $couche['counters']['slotsMax'] ?? null);
+
+        $photographie = $this->post(route('galaxy.ajax'), ['galaxy' => $coordonnees->galaxy, 'system' => $coordonnees->system, '_token' => csrf_token()])
+            ->assertStatus(200)
+            ->json();
+
+        $this->assertSame(4, $photographie['system']['availableProbes'] ?? null, 'The system photograph and the fleet payload disagree on the probes: two sources.');
+        $this->assertSame(1, $photographie['system']['usedFleetSlots'] ?? null);
+
+        $sondesParEnvoi = $joueur->getEspionageProbesAmount() ?? 1;
+        $rapide = $this->post(route('fleet.dispatch.sendminifleet'), [
+            'galaxy' => $coordonnees->galaxy,
+            'system' => $coordonnees->system,
+            'position' => $coordonnees->position,
+            'type' => PlanetType::Planet->value,
+            'mission' => 6,
+            'shipCount' => 1,
+            '_token' => csrf_token(),
+        ])->assertStatus(200)->json();
+
+        $this->assertTrue($rapide['response']['success'] ?? false, 'The quick espionage was refused: ' . json_encode($rapide));
+        $this->assertSame(2, $rapide['response']['slots'] ?? null, 'The quick dispatch reports a demonstration slot count instead of the real one.');
+        $this->assertSame(4 - $sondesParEnvoi, $rapide['response']['probes'] ?? null, 'The quick dispatch reports demonstration probes instead of what is left after it.');
+        $this->assertSame(0, $rapide['response']['recyclers'] ?? null);
+        $this->assertSame(0, $rapide['response']['missiles'] ?? null);
+    }
+
+    /**
      * L'identifiant du proprietaire d'un corps — etabli, pas suppose : un corps sans joueur ne
      * peut pas servir de tiers dans ces scenarios, et le dire vaut mieux qu'un `null` qui explose.
      */
-    private function proprietaireDe(\OGame\Services\PlanetService $corps): int
+    private function proprietaireDe(PlanetService $corps): int
     {
         $joueur = $corps->getPlayer();
         $this->assertNotNull($joueur, 'The scenario needs an owned planet and got an orphan one.');
@@ -69,7 +119,7 @@ class GalaxyFleetLayerTest extends FleetDispatchTestCase
     /**
      * Une sonde envoyee vers la planete etrangere voisine.
      */
-    private function envoyerUneSonde(): \OGame\Services\PlanetService
+    private function envoyerUneSonde(): PlanetService
     {
         $this->basicSetup();
 
