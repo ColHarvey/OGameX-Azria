@@ -10,6 +10,7 @@ use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\FleetMission;
 use OGame\Models\Patrol;
 use OGame\Models\Resources;
+use OGame\Models\User;
 use OGame\Patrol\Enums\PatrolState;
 use OGame\Patrol\Exceptions\PatrolOrderRefused;
 use OGame\Patrol\Geometry\SpatialPoint;
@@ -36,7 +37,9 @@ use Tests\AccountTestCase;
  *   compte, qui serialise les departs d un meme joueur.
  * - **Le corps qui change de mains** : `homecomingBase()` dit oui, puis la planete change de
  *   proprietaire avant que `land()` ne prenne son verrou. La relecture `for update` decide, et le
- *   credit n a pas lieu.
+ *   credit n a pas lieu. **Cette course emprunte le chemin de l administration**, seul appelant qui
+ *   atteigne cette fenetre : le travailleur des pages tient deja la ligne du corps de bout en bout,
+ *   et une course montee sur lui ne discrimine rien.
  */
 #[Group('mariadb')]
 final class PatrolRaceTest extends AccountTestCase
@@ -137,21 +140,50 @@ final class PatrolRaceTest extends AccountTestCase
         $utilisateur = (int)$this->currentUserId;
         $arrivee = (int)$retour->time_arrival;
 
+        // **Celui qui prononce l arrivee est un tiers, et ce n est pas un detail de montage.** La
+        // route d administration traverse `auth`, `globalgame`, `locale` et `admin` : si le compte
+        // connecte etait le proprietaire de la patrouille, `globalgame` reglerait la mission par
+        // `updateFleetMissions()` — donc **sous l enveloppe** qui verrouille tous ses corps — avant
+        // meme que le controleur ne soit atteint, et la fenetre visee se refermerait sans qu on le
+        // voie. Le compte systeme porte le role par migration et possede sa propre planete : il
+        // traverse les quatre couches sans toucher a un seul corps de la patrouille.
+        $administrateur = User::query()->where('username', User::SYSTEM_ACCOUNT_USERNAME)->firstOrFail();
+        $this->assertNotSame($utilisateur, (int)$administrateur->id, 'The administrator is the patrol owner: the page envelope would settle the arrival before the controller.');
+        $this->assertNotSame((int)$proprietaire->getId(), (int)$administrateur->id, 'The administrator is the new owner of the base: his own page worker could settle the arrival.');
+        $this->assertTrue($administrateur->hasRole('admin'), 'The system account does not carry the admin role: the request would be refused for the wrong reason.');
+
         $issues = $this->inParallel(
             1,
-            static fn (int $rang): string => self::settleTheArrival($utilisateur, $arrivee),
+            function (int $rang) use ($administrateur, $retour, $arrivee): string {
+                Date::setTestNow(Date::createFromTimestamp($arrivee + 1));
+
+                $reponse = $this->actingAs($administrateur)->post(
+                    route('admin.server-administration.stuck-missions.process'),
+                    ['mission_id' => (int)$retour->id]
+                );
+
+                // Le message de session dit ce que le controleur a conclu : le parent le remonte
+                // dans ses assertions, pour qu un echec nomme la cause au lieu de la faire deviner.
+                return 'http:' . $reponse->getStatusCode() . ' '
+                    . (string)(session('status') ?? session('error') ?? 'sans message');
+            },
             function () use ($temoin): void {
-                // **L attente doit viser la bonne table.** Le travailleur prend plusieurs verrous avant
-                // d arriver au corps — la mission, la ligne du compte. Attendre « un verrou
-                // quelconque » liberait le parent trop tot : l enfant lisait alors le corps deja
-                // passe en d autres mains, prenait le repli des la premiere question, et la mutation
-                // devenait invisible. Mesure faite : elle a survecu deux fois a ce temoin.
-                //
-                // Ici on attend que l enfant bute sur la ligne des **planetes**, c est-a-dire qu il
-                // ait deja lu le corps « a lui » sans verrou. Le changement de mains devient alors
-                // visible entre les deux lectures, ce qui est exactement la course visee.
-                $this->waitUntilAProcessWaitsOnALockOn('planets');
+                // **L attente vise un processus bloque sur la ligne du corps, et rien d autre.**
+                // L enfant a deja lu la base « a lui » sans verrou dans `homecomingBase()` ; il bute
+                // maintenant sur la relecture `for update` de `land()`, que le parent tient. Rendre
+                // la main ici place le changement de mains **entre les deux lectures** : c est
+                // exactement la course visee, et le seul instant ou elle existe.
+                $attendue = $this->waitUntilAProcessWaitsOnALockOn('planets');
                 $temoin->commit();
+
+                // **L epreuve refuse de conclure d un autre verrou que le sien.** Le travailleur des
+                // pages ouvre sa transaction en verrouillant tous les corps du joueur d un coup
+                // (`where id in (...)`) : attendre celui-la relachait le parent avant meme le
+                // decideur, l enfant lisait le corps deja passe en d autres mains, et les deux
+                // versions prenaient le meme repli. Mesure faite trois fois. Ici l instruction
+                // attendue doit etre la relecture **d un seul** corps, celle de `land()`.
+                $this->assertStringContainsString('planets', $attendue, 'The wait did not see a planets lock at all: ' . $attendue);
+                $this->assertStringNotContainsString(' in (', $attendue, 'The child blocked on a page envelope, not on the landing re-read: ' . $attendue);
             }
         );
 
@@ -322,16 +354,5 @@ final class PatrolRaceTest extends AccountTestCase
         unset($joueur);
 
         return 'ok:' . $patrouille->id;
-    }
-
-    /**
-     * L essai d un enfant : faire arriver ce qui est du, a cet instant.
-     */
-    private static function settleTheArrival(int $userId, int $arrivee): string
-    {
-        Date::setTestNow(Date::createFromTimestamp($arrivee + 1));
-        resolve(PlayerServiceFactory::class)->make($userId, true)->updateFleetMissions();
-
-        return 'traite';
     }
 }

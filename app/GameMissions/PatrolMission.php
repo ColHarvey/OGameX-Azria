@@ -117,10 +117,20 @@ class PatrolMission extends GameMission
             // de mains entre les deux lectures ; `land()` rend alors `false` sans rien marquer ni
             // crediter, et la patrouille prend le meme chemin que si le corps etait deja perdu.
             //
-            // **Cette branche-la n est pas prouvee ici, et c est dit.** Elle ne s atteint que si la
-            // ligne change entre le decideur et le verrou : un seul processus ne peut pas l ouvrir,
-            // et une mutation qui la supprime survit a toute la suite. Sa preuve appartient au bac
-            // MariaDB, avec les autres courses, et elle y est due.
+            // **Elle n est pas atteignable par tous les chemins, et lesquels se disent.** Le
+            // travailleur des pages ouvre sa transaction en verrouillant d un coup toutes les
+            // planetes et lunes du joueur, puis traite les missions : la ligne du corps y est tenue
+            // avant `homecomingBase()` et jusqu apres le credit, donc personne ne peut la faire
+            // changer de mains entre les deux lectures et `land()` ne peut pas refuser. Sur ce
+            // chemin le refus est une profondeur sans effet observable — trois courses successives
+            // l ont montre, la derniere en nommant l instruction sur laquelle l enfant butait :
+            // `select * from planets where id in (...) for update`, l enveloppe, jamais la
+            // relecture d un seul corps.
+            //
+            // `ServerAdministrationController::processStuckMission()` ne prend, lui, que le verrou
+            // de la mission avant d appeler `updateMission()`. Le corps n y est pas tenu, la fenetre
+            // y est ouverte, et c est ce chemin que `PatrolRaceTest` emprunte pour en faire la
+            // preuve. Ne pas retirer ce refus : il n est mort que sous l enveloppe.
             if ($base !== null && $orders->land($patrouille, $mission, $maintenant, $base)) {
                 return;
             }
