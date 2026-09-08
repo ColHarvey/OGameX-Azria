@@ -3,6 +3,7 @@
 namespace OGame\Patrol;
 
 use Illuminate\Support\Facades\DB;
+use OGame\Combat\Services\EngagedFleetCheck;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Enums\PlanetType;
@@ -164,6 +165,228 @@ final class PatrolOrders
 
             return $patrouille;
         });
+    }
+
+    /**
+     * Le devis d un nouvel ordre, tel que le joueur le lira avant de confirmer.
+     *
+     * Il part de l endroit ou la patrouille **sera** quand l ordre prendra effet : son point actuel
+     * si elle est posee, la position atteinte a la fin du delai de manoeuvre si elle vole. Le devis
+     * porte la version d ordre courante, que la confirmation devra rapporter.
+     */
+    public function quoteFor(Patrol $patrol, PatrolDestination $to, float $speedPercent, int $now): PatrolQuote
+    {
+        $proprietaire = $this->playerOf($patrol);
+        $segment = $patrol->currentMission;
+
+        if ($proprietaire === null || !$segment instanceof FleetMission) {
+            throw new PatrolOrderRefused('no_current_segment');
+        }
+
+        $depart = $this->departurePointFor($patrol, $segment, $now);
+        $base = $this->homeCoordinateOf($patrol);
+
+        return $this->pricing->quote(
+            $proprietaire,
+            $this->unitsOf($segment),
+            (float)$patrol->fuel_reserve - $this->upkeep->dueBetween($this->unitsOf($segment), (int)($patrol->upkeep_paid_at ?? $now), $patrol->state->isParked() ? $now : (int)($patrol->upkeep_paid_at ?? $now)),
+            (int)$patrol->galaxy,
+            (int)$patrol->system,
+            $depart,
+            $to,
+            $speedPercent,
+            (int)$patrol->order_version,
+            $base ?? $to->coordinate()
+        );
+    }
+
+    /**
+     * D ou le prochain segment partira.
+     *
+     * ## La position reelle, jamais « la plus proche »
+     *
+     * Posee, la patrouille part de son point. En vol, elle part de la position qu elle aura **a la
+     * fin du delai de manoeuvre**, interpolee sur le segment en cours : la revue 120 interdit
+     * explicitement de la teleporter vers un point commode, et la revue 121 fait courir ce delai
+     * depuis la confirmation du serveur, pas depuis l ouverture du devis.
+     */
+    public function departurePointFor(Patrol $patrol, FleetMission $segment, int $now): SpatialPoint
+    {
+        $geometrie = $this->pricing->geometry();
+
+        if ($patrol->state->isParked()) {
+            return $patrol->point() ?? $geometrie->stationingPointNear((int)$segment->position_to);
+        }
+
+        $debut = (int)$segment->time_departure;
+        $fin = (int)$segment->time_arrival;
+        $instant = $now + $this->settings->patrolManoeuvreDelaySeconds();
+
+        $de = $segment->x_from !== null && $segment->y_from !== null
+            ? new SpatialPoint((int)$segment->x_from, (int)$segment->y_from)
+            : $geometrie->stationingPointNear((int)$segment->position_from);
+
+        $vers = $segment->x_to !== null && $segment->y_to !== null
+            ? new SpatialPoint((int)$segment->x_to, (int)$segment->y_to)
+            : $geometrie->stationingPointNear((int)$segment->position_to);
+
+        $fraction = $fin <= $debut ? 1.0 : ($instant - $debut) / ($fin - $debut);
+
+        return $geometrie->along($de, $vers, $fraction);
+    }
+
+    /**
+     * Donne un nouvel ordre a une patrouille : elle repart, posee ou en vol.
+     *
+     * ## Ce qui est revalide a la confirmation, et pourquoi chacun
+     *
+     * La **version d ordre** : entre l affichage du devis et sa confirmation, un autre ordre a pu
+     * passer. Le devis decrivait alors un autre monde, et l accepter debiterait autre chose que ce
+     * que le joueur a lu (revue 121, R2).
+     *
+     * L **engagement** : une patrouille prise dans un combat ne bouge plus, par la meme regle que
+     * toute flotte engagee.
+     *
+     * L **arrivee imminente** : une manoeuvre dont le segment se termine avant la fin du delai
+     * n aurait pas de point de depart — la patrouille serait deja posee. L ordre est refuse, et le
+     * joueur le redonne une fois qu elle l est.
+     *
+     * @throws PatrolOrderRefused
+     */
+    public function orderMove(Patrol $patrol, PatrolDestination $to, float $speedPercent, int $orderVersion, int $now): FleetMission
+    {
+        $this->refuseIfDisabled();
+
+        $segment = $patrol->currentMission;
+        $proprietaire = $this->playerOf($patrol);
+
+        if (!$segment instanceof FleetMission || $proprietaire === null) {
+            throw new PatrolOrderRefused('no_current_segment');
+        }
+
+        if (!$patrol->state->acceptsMovementOrders()) {
+            throw new PatrolOrderRefused('state_refuses_orders');
+        }
+
+        if ((int)$patrol->order_version !== $orderVersion) {
+            throw new PatrolOrderRefused('stale_quote');
+        }
+
+        if (resolve(EngagedFleetCheck::class)->isEngaged($segment)) {
+            throw new PatrolOrderRefused('engaged_in_combat');
+        }
+
+        $delai = $patrol->state->isParked() ? 0 : $this->settings->patrolManoeuvreDelaySeconds();
+
+        if (!$patrol->state->isParked() && (int)$segment->time_arrival <= $now + $delai) {
+            throw new PatrolOrderRefused('arriving_before_the_manoeuvre_ends');
+        }
+
+        $units = $this->unitsOf($segment);
+
+        // **Ce qui est du se paie avant que le devis soit refait.** Sans cela, un ordre donne juste
+        // avant l heure effacerait la periode ecoulee : c est l heure gratuite que la revue 120
+        // interdit, recreee a chaque deplacement.
+        if ($patrol->state->isParked()) {
+            $this->bill($patrol, $units, $now);
+        }
+
+        $depart = $this->departurePointFor($patrol, $segment, $now);
+        $base = $this->homeCoordinateOf($patrol);
+
+        $devis = $this->pricing->quote(
+            $proprietaire,
+            $units,
+            (float)$patrol->fuel_reserve,
+            (int)$patrol->galaxy,
+            (int)$patrol->system,
+            $depart,
+            $to,
+            $speedPercent,
+            (int)$patrol->order_version,
+            $base ?? $to->coordinate()
+        );
+
+        if (!$devis->isPossible()) {
+            throw new PatrolOrderRefused((string)$devis->refusal);
+        }
+
+        return DB::transaction(function () use ($patrol, $segment, $units, $to, $devis, $depart, $now, $delai): FleetMission {
+            // La meme porte que partout : la ligne relue sous verrou decide.
+            $tenu = FleetMission::query()->whereKey($segment->id)->lockForUpdate()->first();
+
+            if (!$tenu instanceof FleetMission || (int)$tenu->processed === 1) {
+                throw new PatrolOrderRefused('segment_already_settled');
+            }
+
+            $tenu->forceFill(['processed' => 1])->save();
+            $segment->forceFill(['processed' => 1])->syncOriginal();
+
+            $nouveau = $this->createSegment(
+                $patrol,
+                (int)$patrol->galaxy,
+                (int)$patrol->system,
+                $this->pricing->geometry()->orbitIndexOf($depart),
+                PlanetType::SpatialPoint,
+                null,
+                $depart,
+                $to,
+                $units,
+                new Resources((float)$tenu->metal, (float)$tenu->crystal, (float)$tenu->deuterium, 0),
+                $now + $delai,
+                $now + $delai + $devis->durationSeconds
+            );
+
+            $patrol->forceFill([
+                'state' => PatrolState::EnRoute,
+                'current_mission_id' => $nouveau->id,
+                'galaxy' => $to->galaxy,
+                'system' => $to->system,
+                'x' => null,
+                'y' => null,
+                'fuel_reserve' => max(0.0, (float)$patrol->fuel_reserve - $devis->fuelCost),
+                // **La version augmente a chaque ordre accepte** : tout devis plus ancien devient
+                // caduc, et sa confirmation sera refusee au lieu de debiter autre chose.
+                'order_version' => (int)$patrol->order_version + 1,
+                'stationed_since' => null,
+            ])->save();
+
+            return $nouveau;
+        });
+    }
+
+    /**
+     * Rappelle la patrouille : elle rentre chez elle par le meme chemin qu un retour de securite.
+     *
+     * Le rappel n est pas un privilege : il paie son segment comme un autre, et il est refuse aux
+     * memes conditions. Ce qu il ajoute, c est de pouvoir partir sans attendre l echeance.
+     *
+     * @throws PatrolOrderRefused
+     */
+    public function recall(Patrol $patrol, int $now): FleetMission
+    {
+        $base = $this->homeCoordinateOf($patrol);
+
+        if ($base === null) {
+            throw new PatrolOrderRefused('no_home_left');
+        }
+
+        $geometrie = $this->pricing->geometry();
+
+        return $this->orderMove(
+            $patrol,
+            PatrolDestination::nearBody(
+                $geometrie,
+                $base->galaxy,
+                $base->system,
+                $base->position,
+                PlanetType::Planet,
+                $patrol->home_planet_id === null ? null : (int)$patrol->home_planet_id
+            ),
+            $this->settings->patrolSafetyReturnSpeed(),
+            (int)$patrol->order_version,
+            $now
+        );
     }
 
     /**
