@@ -23,7 +23,6 @@ use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\FlightLeg;
 use OGame\Combat\Enums\SnapshotObligation;
-use OGame\Combat\Enums\TargetScope;
 use OGame\Combat\Support\CombatRallyWindow;
 use OGame\Combat\Support\ReturnPlan;
 use OGame\Models\Planet\Coordinate;
@@ -590,7 +589,7 @@ class RallyArrivalCoverageTest extends UnitTestCase
         $examinees = 0;
 
         foreach (CombatSituation::all() as $situation) {
-            if (!$situation->isPossible() || $situation->scope() === TargetScope::DeepSpace) {
+            if (!$situation->isPossible() || $situation->scope()->isOutsideTheBodyMatrix()) {
                 continue;
             }
 
@@ -639,7 +638,8 @@ class RallyArrivalCoverageTest extends UnitTestCase
             }
         }
 
-        $this->assertSame(360, $examinees, 'The exhaustive sweep no longer covers every celestial-body situation.');
+        // Onze genres donnaient 360 situations de corps celeste ; le retour d une patrouille en ajoute dix-huit.
+        $this->assertSame(378, $examinees, 'The exhaustive sweep no longer covers every celestial-body situation.');
     }
 
     /**

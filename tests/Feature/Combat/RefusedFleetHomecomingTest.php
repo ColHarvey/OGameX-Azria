@@ -24,14 +24,18 @@ use OGame\Combat\Support\ResourceDiagnosticsJournal;
 use OGame\Combat\Support\ResourceNormalizationDiagnostics;
 use OGame\Combat\Support\ReturnOrder;
 use OGame\Combat\Support\SealedResourceDiagnostics;
+use OGame\Factories\GameMissionFactory;
 use OGame\GameMissions\Models\ResolvedReturnDestination;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatOutboxMessage;
 use OGame\Models\FleetMission;
 use OGame\Models\FleetUnion;
+use OGame\Models\Patrol;
 use OGame\Models\Planet;
 use OGame\Models\User;
+use OGame\Patrol\Enums\PatrolState;
 use OGame\Services\FleetMissionService;
+use OGame\Services\MessageService;
 use ReflectionClass;
 use Tests\TestCase;
 
@@ -697,6 +701,218 @@ class RefusedFleetHomecomingTest extends TestCase
             substr_count($source, 'ResourceDiagnosticsJournal::report('),
             'The homecoming writes its journal line somewhere else as well.'
         );
+    }
+
+    /**
+     * Un segment de patrouille rentre, meme quand ses coordonnees sont negatives.
+     *
+     * ## Le defaut que ce temoin ferme
+     *
+     * `differenceOn()` refusait **tout** nombre negatif : vrai de chaque colonne de la table jusqu au
+     * jour ou quatre coordonnees signees s y sont ajoutees. Centrees sur l etoile, elles sont
+     * negatives dans trois quadrants sur quatre — l orbite 2 vaut deja x = -199. La projection
+     * imposait donc une valeur que sa propre comparaison rejetait : le protocole levait
+     * `ReturnDoesNotMatchTheOrder`, la transaction reculait, la disposition n etait jamais consommee,
+     * et la flotte restait en l air a chaque passage du travailleur.
+     *
+     * Le temoin part d une valeur reellement produite par la geometrie, pas d un nombre negatif
+     * quelconque : c est cette valeur-la que l etape 3 ecrira.
+     */
+    public function testASegmentThatCarriesNegativeCoordinatesComesHome(): void
+    {
+        [$combat, $mission] = $this->aCombatAndAFleet();
+        $patrouille = $this->aPatrolFor($mission);
+
+        // Une manoeuvre d un point spatial vers un autre : le point de stationnement pres de
+        // l orbite 9, puis le point de reference de l orbite 2 — que `SystemGeometry` rend a -199.
+        // **Les deux bouts sont poses**, sans quoi la mutation qui reimposerait un bout spatial au
+        // retour n aurait rien a changer.
+        $mission->forceFill([
+            'patrol_id' => $patrouille->id,
+            'x_from' => 340,
+            'y_from' => 830,
+            'x_to' => -199,
+            'y_to' => -17,
+        ])->save();
+
+        $registre = new FleetDispositionRegistry();
+        $registre->record($combat, $mission->id, CombatReasonCode::RallyClosed, 1_700_000_600, FleetDispositionKind::ReturnToOrigin);
+
+        (new RefusedFleetHomecoming())->sendHome($mission, 1_700_000_900, function (FleetMission $tenue, ReturnOrder $ordre) use ($patrouille): void {
+            $this->aReturnOf($tenue, $ordre, [
+                'patrol_id' => $patrouille->id,
+                'x_from' => -199,
+                'y_from' => -17,
+                'x_to' => null,
+                'y_to' => null,
+            ]);
+        });
+
+        $this->assertSame(1, (int)$mission->refresh()->processed, 'The outbound leg was not marked.');
+        $this->assertNull($registre->pendingFor($mission), 'The decision was not consumed.');
+
+        $retour = FleetMission::query()->where('parent_id', $mission->id)->sole();
+        $this->assertSame((int)$patrouille->id, (int)$retour->patrol_id, 'The return lost its patrol.');
+        $this->assertSame(-199, (int)$retour->x_from, 'The return did not depart from where the outbound leg presented itself.');
+        $this->assertSame(-17, (int)$retour->y_from);
+        $this->assertNull($retour->x_to, 'A return towards a celestial body kept a spatial end point.');
+        $this->assertNull($retour->y_to);
+    }
+
+    /**
+     * Un retour vers un corps celeste qui garderait un bout spatial est refuse.
+     *
+     * La destination d un retour orchestre est toujours un corps : sa fin de segment n a pas de
+     * coordonnees de reference. Une ligne qui porterait les deux dirait deux endroits differents, et
+     * tout lecteur qui interpole entre les bouts placerait la flotte ailleurs qu ou elle se pose.
+     */
+    public function testAReturnThatKeepsASpatialEndPointIsRefused(): void
+    {
+        [$combat, $mission] = $this->aCombatAndAFleet();
+        $patrouille = $this->aPatrolFor($mission);
+        $mission->forceFill(['patrol_id' => $patrouille->id, 'x_from' => 340, 'y_from' => 830, 'x_to' => -199, 'y_to' => -17])->save();
+
+        $registre = new FleetDispositionRegistry();
+        $registre->record($combat, $mission->id, CombatReasonCode::RallyClosed, 1_700_000_600, FleetDispositionKind::ReturnToOrigin);
+
+        try {
+            (new RefusedFleetHomecoming())->sendHome($mission, 1_700_000_900, function (FleetMission $tenue, ReturnOrder $ordre) use ($patrouille): void {
+                $this->aReturnOf($tenue, $ordre, [
+                    'patrol_id' => $patrouille->id,
+                    'x_from' => -199,
+                    'y_from' => -17,
+                    'x_to' => 500,
+                    'y_to' => null,
+                ]);
+            });
+            $this->fail('A return towards a body kept a spatial end point and was accepted.');
+        } catch (ReturnDoesNotMatchTheOrder $refus) {
+            $this->assertStringStartsWith('x_to ', $refus->ecart, 'The refusal did not name x_to.');
+        }
+
+        $this->assertSame(0, (int)$mission->refresh()->processed);
+        $this->assertNotNull($registre->pendingFor($mission));
+        $this->assertSame(0, FleetMission::query()->where('parent_id', $mission->id)->count());
+    }
+
+    /**
+     * Le signe reste refuse partout ailleurs.
+     *
+     * **La moitie de la garde qui compte.** Nommer quatre colonnes signees ne doit pas ouvrir la
+     * porte aux autres : un effectif, une ressource ou un horodatage negatif est une donnee abimee,
+     * et un retour qui en porterait un doit rester refuse. Sans ce temoin, elargir l exception a
+     * toute la table passerait inapercu.
+     */
+    public function testTheProjectionStillRefusesANegativeNumberOutsideTheCoordinates(): void
+    {
+        // Trois colonnes que la projection impose **non vides** : le signe y est donc la seule
+        // chose qui distingue. Une colonne imposee a vide (`time_holding`) sort par la branche
+        // du vide avant d atteindre la garde, et ne prouverait rien ici.
+        foreach (['light_fighter' => -1, 'metal' => -1, 'time_arrival' => -1] as $champ => $valeur) {
+            [$combat, $mission] = $this->aCombatAndAFleet();
+            $mission->forceFill(['x_from' => 340, 'y_from' => 830, 'x_to' => -199, 'y_to' => -17])->save();
+
+            $registre = new FleetDispositionRegistry();
+            $registre->record($combat, $mission->id, CombatReasonCode::RallyClosed, 1_700_000_600, FleetDispositionKind::ReturnToOrigin);
+
+            try {
+                (new RefusedFleetHomecoming())->sendHome($mission, 1_700_000_900, function (FleetMission $tenue, ReturnOrder $ordre) use ($champ, $valeur): void {
+                    $this->aReturnOf($tenue, $ordre, [
+                        'x_from' => -199,
+                        'y_from' => -17,
+                        'x_to' => null,
+                        'y_to' => null,
+                        $champ => $valeur,
+                    ]);
+                });
+                $this->fail("A return carrying a negative {$champ} was accepted.");
+            } catch (ReturnDoesNotMatchTheOrder $refus) {
+                // **Le motif, pas seulement le nom de la colonne.** Un compte negatif differe de
+                // toute facon de l effectif attendu : la comparaison ordinaire l aurait refuse aussi,
+                // et epingler le seul nom laissait survivre l elargissement de l exception a toute la
+                // table. Ce qui distingue, c est que la valeur est refusee **comme donnee abimee**.
+                $this->assertStringStartsWith($champ . ' vaut ', $refus->ecart, "The refusal did not name {$champ}.");
+                $this->assertStringEndsWith(
+                    ' : ni fini, ni positif, ni entier',
+                    $refus->ecart,
+                    "A negative {$champ} was refused as a mismatch instead of as malformed data."
+                );
+            }
+
+            $this->assertSame(0, FleetMission::query()->where('parent_id', $mission->id)->count());
+        }
+    }
+
+    /**
+     * Le vrai createur de retour ecrit les colonnes de segment que la projection impose.
+     *
+     * ## Pourquoi ce temoin existe a cote des trois autres
+     *
+     * Les temoins qui precedent fabriquent le retour eux-memes, pour eprouver la projection contre
+     * un enfant fautif. Aucun n appelle donc `startReturn()`, et trois mutations sur lui — ne plus
+     * transmettre le lien a la patrouille, ne plus inverser les bouts, ne plus vider le bout spatial
+     * sous une destination resolue — survivaient a toute la batterie. Celui-ci prend le chemin du
+     * jeu : `carryOutTheMovementAlreadyDecided()`, que le rappel d une flotte porteuse d une
+     * disposition emprunte, et qui delegue a `returnOfARefusedFleet()` donc a `startReturn()`.
+     *
+     * Le protocole comparant l enfant a la projection, toute divergence leve : ce temoin etablit que
+     * les deux moities disent la meme chose, et il tombe des que l une bouge sans l autre.
+     */
+    public function testTheRealReturnCreatorWritesTheSegmentColumnsTheProjectionImposes(): void
+    {
+        [$combat, $mission] = $this->aCombatAndAFleet();
+        $patrouille = $this->aPatrolFor($mission);
+        $mission->forceFill([
+            'patrol_id' => $patrouille->id,
+            'x_from' => 340,
+            'y_from' => 830,
+            'x_to' => -199,
+            'y_to' => -17,
+        ])->save();
+
+        $registre = new FleetDispositionRegistry();
+        $registre->record($combat, $mission->id, CombatReasonCode::RallyClosed, 1_700_000_600, FleetDispositionKind::ReturnToOrigin);
+
+        $parti = GameMissionFactory::getMissionById((int)$mission->mission_type, [
+            'fleetMissionService' => resolve(FleetMissionService::class),
+            'messageService' => resolve(MessageService::class),
+        ])->carryOutTheMovementAlreadyDecided($mission, 1_700_000_900);
+
+        $this->assertTrue($parti, 'The fleet did not leave by the decision already taken.');
+
+        $retour = FleetMission::query()->where('parent_id', $mission->id)->sole();
+
+        // Le lien se conserve : c est lui qui dit a qui rendre les vaisseaux.
+        $this->assertSame((int)$patrouille->id, (int)$retour->patrol_id);
+        // Les bouts s inversent : le retour part de la ou l aller s est presente.
+        $this->assertSame(-199, (int)$retour->x_from);
+        $this->assertSame(-17, (int)$retour->y_from);
+        // Et il se pose sur un corps celeste, qui n a pas de coordonnees de reference.
+        $this->assertNull($retour->x_to);
+        $this->assertNull($retour->y_to);
+        // La cible patrouille ne suit jamais un retour.
+        $this->assertNull($retour->target_patrol_id);
+    }
+
+    /**
+     * Une patrouille minimale, a qui rattacher un segment.
+     *
+     * `fleet_missions.patrol_id` ne porte pas de cle etrangere — la colonne est posee par
+     * `ALTER TABLE`, que SQLite ne contraint pas — mais un identifiant en l air masquerait le jour
+     * ou l integrite sera resserree. La ligne est donc reelle.
+     */
+    private function aPatrolFor(FleetMission $mission): Patrol
+    {
+        return Patrol::forceCreate([
+            'user_id' => $mission->user_id,
+            'home_planet_id' => $mission->planet_id_from,
+            'state' => PatrolState::EnRoute,
+            'galaxy' => $mission->galaxy_to,
+            'system' => $mission->system_to,
+            'current_mission_id' => $mission->id,
+            'fuel_reserve' => 0,
+            'order_version' => 1,
+        ]);
     }
 
     private function theOriginAsDestinationOf(FleetMission $mission): ResolvedReturnDestination

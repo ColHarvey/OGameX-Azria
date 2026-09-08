@@ -25,4 +25,11 @@ enum PlanetType: int
      * Represents expeditions.
      */
     case DeepSpace = 4;
+
+    /**
+     * Un point libre de l espace, en coordonnees de reference du systeme (`x`, `y`), vise par une
+     * patrouille. Ni planete, ni lune, ni debris, ni espace profond : aucun corps, aucune regle de
+     * la position 16. Le point porte ses propres debris et sa propre barriere de combat.
+     */
+    case SpatialPoint = 5;
 }

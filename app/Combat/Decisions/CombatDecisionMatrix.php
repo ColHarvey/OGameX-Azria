@@ -122,7 +122,9 @@ final class CombatDecisionMatrix
 
         // L'espace profond ne porte aucun corps celeste, donc aucun verrou. Un combat d'expedition
         // peut durer et retenir la flotte ; il ne releve pas de cette matrice-ci.
-        if ($situation->scope() === TargetScope::DeepSpace) {
+        // Un point spatial ne porte pas davantage de corps : la barriere de la patrouille qui s y
+        // trouve releve du combat en espace libre, pas de cette matrice-ci.
+        if ($situation->scope()->isOutsideTheBodyMatrix()) {
             return ArrivalDecision::outsideMatrixDomain(InvariantCode::NotACelestialBodyTarget);
         }
 
@@ -268,6 +270,12 @@ final class CombatDecisionMatrix
             CombatMissionKind::Expedition => throw new LogicException(
                 'Une expedition vise l espace profond : elle est ecartee par la portee avant d arriver ici.'
             ),
+
+            // Un segment de patrouille vise un point spatial : ecarte par la portee, comme l expedition.
+            // Le combat en espace libre a sa propre barriere et son propre chemin (journal §114).
+            CombatMissionKind::Patrol => throw new LogicException(
+                'Un segment de patrouille vise un point spatial : il est ecarte par la portee avant d arriver ici.'
+            ),
         };
     }
 
@@ -324,6 +332,10 @@ final class CombatDecisionMatrix
 
             CombatMissionKind::Expedition => throw new LogicException(
                 'Une expedition vise l espace profond : elle est ecartee par la portee avant d arriver ici.'
+            ),
+
+            CombatMissionKind::Patrol => throw new LogicException(
+                'Un segment de patrouille vise un point spatial : il est ecarte par la portee avant d arriver ici.'
             ),
         };
     }

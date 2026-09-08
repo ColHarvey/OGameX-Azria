@@ -115,6 +115,24 @@ class CombatDecisionMatrixTest extends UnitTestCase
         'StructurallyNotApplicable | missile / return / system / rallying',
         'StructurallyNotApplicable | missile / return / system / resolved',
         'StructurallyNotApplicable | missile / return / system / resolving',
+        'StructurallyNotApplicable | patrol / outbound / npc / active',
+        'StructurallyNotApplicable | patrol / outbound / npc / aucun combat',
+        'StructurallyNotApplicable | patrol / outbound / npc / cancelled',
+        'StructurallyNotApplicable | patrol / outbound / npc / rallying',
+        'StructurallyNotApplicable | patrol / outbound / npc / resolved',
+        'StructurallyNotApplicable | patrol / outbound / npc / resolving',
+        'StructurallyNotApplicable | patrol / outbound / player / active',
+        'StructurallyNotApplicable | patrol / outbound / player / aucun combat',
+        'StructurallyNotApplicable | patrol / outbound / player / cancelled',
+        'StructurallyNotApplicable | patrol / outbound / player / rallying',
+        'StructurallyNotApplicable | patrol / outbound / player / resolved',
+        'StructurallyNotApplicable | patrol / outbound / player / resolving',
+        'StructurallyNotApplicable | patrol / outbound / system / active',
+        'StructurallyNotApplicable | patrol / outbound / system / aucun combat',
+        'StructurallyNotApplicable | patrol / outbound / system / cancelled',
+        'StructurallyNotApplicable | patrol / outbound / system / rallying',
+        'StructurallyNotApplicable | patrol / outbound / system / resolved',
+        'StructurallyNotApplicable | patrol / outbound / system / resolving',
     ];
 
     /**
@@ -124,7 +142,8 @@ class CombatDecisionMatrixTest extends UnitTestCase
     {
         $situations = CombatSituation::all();
 
-        $this->assertCount(396, $situations);
+        // Douze genres depuis la patrouille (journal §114) : 12 × 2 etapes × 3 acteurs × 6 etats.
+        $this->assertCount(432, $situations);
 
         $identites = [];
 
@@ -132,7 +151,7 @@ class CombatDecisionMatrixTest extends UnitTestCase
             $identites[$situation->describe()] = true;
         }
 
-        $this->assertCount(396, $identites, 'Two situations describe themselves identically.');
+        $this->assertCount(432, $identites, 'Two situations describe themselves identically.');
     }
 
     /**
@@ -196,7 +215,7 @@ class CombatDecisionMatrixTest extends UnitTestCase
                 foreach (FlightLeg::cases() as $etape) {
                     $situation = new CombatSituation($mission, $etape, ActorKind::Player, $etat);
 
-                    if (!$situation->isPossible() || $situation->scope() === TargetScope::DeepSpace) {
+                    if (!$situation->isPossible() || $situation->scope()->isOutsideTheBodyMatrix()) {
                         continue;
                     }
 
@@ -226,7 +245,7 @@ class CombatDecisionMatrixTest extends UnitTestCase
                 continue;
             }
 
-            if ($situation->scope() === TargetScope::DeepSpace) {
+            if ($situation->scope()->isOutsideTheBodyMatrix()) {
                 continue;
             }
 
@@ -395,11 +414,11 @@ class CombatDecisionMatrixTest extends UnitTestCase
                 continue;
             }
 
-            if ($situation->scope() === TargetScope::DeepSpace) {
+            if ($situation->scope()->isOutsideTheBodyMatrix()) {
                 $this->assertSame(
                     CombatMissionAction::OutsideMatrixDomain,
                     $this->arrivalOf($situation)->action(),
-                    'Deep space was treated as a celestial body: ' . $situation->describe()
+                    'A target without a body was treated as a celestial body: ' . $situation->describe()
                 );
 
                 continue;
@@ -620,7 +639,9 @@ class CombatDecisionMatrixTest extends UnitTestCase
             }
         }
 
-        $this->assertSame(57, $delegantes, 'The number of delegating cells changed.');
+        // 57 pour onze genres ; les dix-huit allers de patrouille sont hors domaine, comme ceux de
+        // l expedition, et portent chacun leur invariant.
+        $this->assertSame(75, $delegantes, 'The number of delegating cells changed.');
     }
 
     /**
@@ -680,7 +701,7 @@ class CombatDecisionMatrixTest extends UnitTestCase
                 continue;
             }
 
-            if ($situation->scope() === TargetScope::DeepSpace) {
+            if ($situation->scope()->isOutsideTheBodyMatrix()) {
                 continue;
             }
 
@@ -860,7 +881,7 @@ class CombatDecisionMatrixTest extends UnitTestCase
 
         // Les 57 delegations, plus les reports : un report n'est pas un resultat, ce qui sera montre
         // au joueur est sa continuation.
-        $this->assertGreaterThan(57, $refusees, 'Deferred decisions were accepted as final results.');
+        $this->assertGreaterThan(75, $refusees, 'Deferred decisions were accepted as final results.');
     }
 
     /**
@@ -965,6 +986,8 @@ class CombatDecisionMatrixTest extends UnitTestCase
             CombatMissionKind::Colonisation,
             CombatMissionKind::Recycle,
             CombatMissionKind::Expedition,
+            // L aller d une patrouille vise un point spatial : hors portee du corps, comme l expedition.
+            CombatMissionKind::Patrol,
         ];
 
         foreach (CombatMissionKind::cases() as $mission) {

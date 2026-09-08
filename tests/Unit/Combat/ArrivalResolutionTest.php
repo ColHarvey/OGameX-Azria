@@ -20,7 +20,6 @@ use OGame\Combat\Enums\FlightLeg;
 use OGame\Combat\Enums\InvariantCode;
 use OGame\Combat\Enums\SnapshotContribution;
 use OGame\Combat\Enums\SnapshotObligation;
-use OGame\Combat\Enums\TargetScope;
 use OGame\Combat\Exceptions\ArrivalOutsideMatrixDomain;
 use OGame\Combat\Exceptions\ContradictoryDelegatedOutcome;
 use OGame\Combat\Exceptions\ImpossibleCombatSituation;
@@ -76,18 +75,19 @@ class ArrivalResolutionTest extends UnitTestCase
      * @var array<string, int>
      */
     private const array CENSUS = [
-        'allow_normally | no_combat_effect | hors photo' => 171,
+        'allow_normally | no_combat_effect | hors photo' => 180,
         'allow_normally | no_combat_effect | photo : delivered_cargo' => 3,
-        'allow_normally | no_combat_effect | photo : delivered_fleet, delivered_cargo' => 33,
+        'allow_normally | no_combat_effect | photo : delivered_fleet, delivered_cargo' => 36,
         'defer_impact | rally_closed | hors photo' => 6,
         'join_attack | no_combat_effect | hors photo' => 27,
         'join_attack | no_combat_effect | photo : attacking_fleet' => 9,
         'join_defence | no_combat_effect | photo : defending_fleet' => 3,
-        'land_outside_snapshot | own_fleet_coming_home | hors photo' => 66,
+        'land_outside_snapshot | own_fleet_coming_home | hors photo' => 72,
         'return_to_origin | position_no_longer_free | hors photo' => 9,
         'return_to_origin | rally_closed | hors photo' => 24,
         'return_to_origin | target_combat_locked | hors photo' => 9,
-        'sont hors domaine' => 36,
+        // Les dix-huit allers d expedition et les dix-huit segments de patrouille : aucun corps.
+        'sont hors domaine' => 54,
     ];
 
     /**
@@ -115,7 +115,7 @@ class ArrivalResolutionTest extends UnitTestCase
                 continue;
             }
 
-            if ($situation->scope() === TargetScope::DeepSpace) {
+            if ($situation->scope()->isOutsideTheBodyMatrix()) {
                 $this->assertResolutionThrows(
                     ArrivalOutsideMatrixDomain::class,
                     $situation,
@@ -145,7 +145,8 @@ class ArrivalResolutionTest extends UnitTestCase
             }
         }
 
-        $this->assertSame(396, $examinees, 'The sweep no longer covers every situation.');
+        // Douze genres depuis la patrouille (journal §114) : 12 × 2 etapes × 3 acteurs × 6 etats.
+        $this->assertSame(432, $examinees, 'The sweep no longer covers every situation.');
         $this->assertGreaterThan(400, $fermees, 'The sweep stopped exercising the delegated answers.');
     }
 
@@ -194,7 +195,9 @@ class ArrivalResolutionTest extends UnitTestCase
 
         $this->assertSame(
             [
-                'ordre causal des evenements' => 48,
+                // 48 pour onze genres ; le retour d une patrouille pendant un ralliement ajoute ses trois
+                // acteurs, comme celui d une expedition.
+                'ordre causal des evenements' => 51,
                 'selecteur d admission' => 12,
             ],
             $comptes,
@@ -464,7 +467,7 @@ class ArrivalResolutionTest extends UnitTestCase
         $recensement = ['sont hors domaine' => 0];
 
         foreach (CombatSituation::all() as $situation) {
-            if (!$situation->isPossible() || $situation->scope() === TargetScope::DeepSpace) {
+            if (!$situation->isPossible() || $situation->scope()->isOutsideTheBodyMatrix()) {
                 $recensement['sont hors domaine']++;
 
                 continue;
@@ -479,7 +482,7 @@ class ArrivalResolutionTest extends UnitTestCase
         ksort($recensement);
 
         $this->assertSame(self::CENSUS, $recensement, 'The census of outcomes changed.');
-        $this->assertSame(396, array_sum($recensement), 'The census no longer covers every situation.');
+        $this->assertSame(432, array_sum($recensement), 'The census no longer covers every situation.');
     }
 
     /**
@@ -510,7 +513,7 @@ class ArrivalResolutionTest extends UnitTestCase
     {
         return array_values(array_filter(
             CombatSituation::all(),
-            static fn (CombatSituation $s): bool => $s->isPossible() && $s->scope() !== TargetScope::DeepSpace
+            static fn (CombatSituation $s): bool => $s->isPossible() && !$s->scope()->isOutsideTheBodyMatrix()
         ));
     }
 

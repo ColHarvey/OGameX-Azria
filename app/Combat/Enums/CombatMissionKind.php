@@ -76,6 +76,14 @@ enum CombatMissionKind: string
     case Expedition = 'expedition';
 
     /**
+     * Segment de patrouille vers un point libre de l espace. `mission_type` 11.
+     *
+     * Propre au jeu d Azria (chantier patrouilles, journal §114). Le retour d une patrouille se
+     * pose sur un corps celeste comme tout retour ; son aller vise un point spatial.
+     */
+    case Patrol = 'patrol';
+
+    /**
      * La correspondance avec les types de `GameMissionFactory`.
      *
      * @return array<int, self>
@@ -93,6 +101,7 @@ enum CombatMissionKind: string
             8 => self::Recycle,
             9 => self::MoonDestruction,
             10 => self::Missile,
+            11 => self::Patrol,
             15 => self::Expedition,
         ];
     }
@@ -126,7 +135,7 @@ enum CombatMissionKind: string
         return match ($this) {
             self::Attack, self::AcsAttack, self::MoonDestruction => true,
             self::Transport, self::Deployment, self::AcsDefend, self::Espionage,
-            self::Colonisation, self::Recycle, self::Missile, self::Expedition => false,
+            self::Colonisation, self::Recycle, self::Missile, self::Expedition, self::Patrol => false,
         };
     }
 
@@ -147,7 +156,7 @@ enum CombatMissionKind: string
         return match ($this) {
             self::AcsDefend => true,
             self::Attack, self::AcsAttack, self::MoonDestruction, self::Transport, self::Deployment,
-            self::Espionage, self::Colonisation, self::Recycle, self::Missile, self::Expedition => false,
+            self::Espionage, self::Colonisation, self::Recycle, self::Missile, self::Expedition, self::Patrol => false,
         };
     }
 
@@ -171,6 +180,7 @@ enum CombatMissionKind: string
             self::Recycle => TargetScope::DebrisField,
             self::Colonisation => TargetScope::EmptyPosition,
             self::Expedition => TargetScope::DeepSpace,
+            self::Patrol => TargetScope::SpatialPoint,
         };
     }
 }

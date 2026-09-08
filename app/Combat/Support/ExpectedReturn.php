@@ -111,6 +111,22 @@ final readonly class ExpectedReturn
             'combat_instance_id' => null,
             'union_id' => null,
             'union_slot' => null,
+
+            // **Les colonnes de segment de patrouille suivent la flotte** (journal §114). Le lien a la
+            // patrouille se conserve : c est lui qui dit a qui rendre les vaisseaux. Les deux bouts
+            // s inversent : le retour part de la ou l aller s est presente, son point spatial s il en
+            // avait un. La cible patrouille, elle, ne suit jamais un retour.
+            'patrol_id' => $aller->patrol_id === null ? null : (int)$aller->patrol_id,
+            'target_patrol_id' => null,
+            'x_from' => $aller->x_to === null ? null : (int)$aller->x_to,
+            'y_from' => $aller->y_to === null ? null : (int)$aller->y_to,
+
+            // **Un retour orchestre se pose toujours sur un corps celeste**, jamais sur un point de
+            // l espace : `ResolvedReturnDestination` en porte l identifiant et le genre. Sa fin de
+            // segment n a donc pas de coordonnees de reference. Les recopier depuis le depart de
+            // l aller faisait dire deux endroits a la meme ligne.
+            'x_to' => null,
+            'y_to' => null,
             // **Un retour orchestre nait non traite, quelle que soit l'heure.** Le drapeau etait
             // impose selon l'horloge, et cela avait deux defauts : il dependait de deux lectures —
             // ici avant l'appel, dans `startReturn()` apres l'insertion — donc un retour pose sur la
@@ -244,6 +260,22 @@ final readonly class ExpectedReturn
         return null;
     }
 
+    /**
+     * Les colonnes dont la valeur peut etre negative.
+     *
+     * Toutes les autres portent un identifiant, un horodatage, un effectif ou une ressource : le
+     * negatif y est une donnee abimee, et le refuser est la moitie de la garde. Les coordonnees de
+     * reference d un segment de patrouille, elles, sont centrees sur l etoile — l orbite 2 vaut
+     * x = -199 — et le signe y porte du sens. L exception est nommee, plutot que la garde affaiblie
+     * partout.
+     */
+    private const array SIGNED = [
+        'x_from',
+        'y_from',
+        'x_to',
+        'y_to',
+    ];
+
     private static function differenceOn(string $colonne, mixed $valeur, int|null $attendu): string|null
     {
         if ($attendu === null) {
@@ -264,8 +296,12 @@ final readonly class ExpectedReturn
 
         $nombre = (float)$valeur;
 
-        if (!is_finite($nombre) || $nombre < 0 || floor($nombre) !== $nombre) {
-            return $colonne . ' vaut ' . var_export($valeur, true) . ' : ni fini, ni positif, ni entier';
+        $signee = in_array($colonne, self::SIGNED, true);
+
+        if (!is_finite($nombre) || floor($nombre) !== $nombre || (!$signee && $nombre < 0)) {
+            return $colonne . ' vaut ' . var_export($valeur, true) . ($signee
+                ? ' : ni fini, ni entier'
+                : ' : ni fini, ni positif, ni entier');
         }
 
         if ((int)$nombre !== $attendu) {

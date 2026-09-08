@@ -58,6 +58,22 @@ class ServerSettingsController extends OGameController
             'bonus_expedition_slots' => $settingsService->bonusExpeditionSlots(),
             'expedition_reward_multiplier_resources' => $settingsService->expeditionRewardMultiplierResources(),
             'expedition_reward_multiplier_ships' => $settingsService->expeditionRewardMultiplierShips(),
+            'patrols_enabled' => $settingsService->patrolsEnabled(),
+            'patrol_manoeuvre_delay_seconds' => $settingsService->patrolManoeuvreDelaySeconds(),
+            'patrol_upkeep_divisor' => $settingsService->patrolUpkeepDivisor(),
+            'patrol_safety_return_speed' => $settingsService->patrolSafetyReturnSpeed(),
+            'patrol_acquisition_delays' => [
+                1 => $settingsService->patrolAcquisitionDelayMinutes(1),
+                2 => $settingsService->patrolAcquisitionDelayMinutes(2),
+                3 => $settingsService->patrolAcquisitionDelayMinutes(3),
+                4 => $settingsService->patrolAcquisitionDelayMinutes(4),
+                5 => $settingsService->patrolAcquisitionDelayMinutes(5),
+            ],
+            'patrol_attack_min_duration_seconds' => $settingsService->patrolAttackMinDurationSeconds(),
+            'patrol_grid_units' => $settingsService->patrolGridUnits(),
+            'patrol_system_radius_units' => $settingsService->patrolSystemRadiusUnits(),
+            'patrol_star_exclusion_units' => $settingsService->patrolStarExclusionUnits(),
+            'patrol_internal_distance_divisor' => $settingsService->patrolInternalDistanceDivisor(),
             'expedition_reward_multiplier_dark_matter' => $settingsService->expeditionRewardMultiplierDarkMatter(),
             'expedition_reward_multiplier_items' => $settingsService->expeditionRewardMultiplierItems(),
             'expedition_weight_ships' => $settingsService->expeditionWeightShips(),
@@ -122,6 +138,22 @@ class ServerSettingsController extends OGameController
         $settingsService->set('dark_matter_regen_period', request('dark_matter_regen_period', 604800));
         $settingsService->set('planet_relocation_cost', request('planet_relocation_cost', 240000));
         $settingsService->set('planet_relocation_duration', request('planet_relocation_duration', 86400));
+
+        // Chantier patrouilles (journal §114) : l interrupteur et les valeurs encore ouvertes.
+        $settingsService->set('patrols_enabled', request('patrols_enabled', 0));
+        $settingsService->set('patrol_manoeuvre_delay_seconds', request('patrol_manoeuvre_delay_seconds', 60));
+        $settingsService->set('patrol_upkeep_divisor', request('patrol_upkeep_divisor', 20));
+        $settingsService->set('patrol_safety_return_speed', request('patrol_safety_return_speed', 3));
+        $settingsService->set('patrol_acquisition_delay_n1', request('patrol_acquisition_delay_n1', 15));
+        $settingsService->set('patrol_acquisition_delay_n2', request('patrol_acquisition_delay_n2', 10));
+        $settingsService->set('patrol_acquisition_delay_n3', request('patrol_acquisition_delay_n3', 5));
+        $settingsService->set('patrol_acquisition_delay_n4', request('patrol_acquisition_delay_n4', 2));
+        $settingsService->set('patrol_acquisition_delay_n5', request('patrol_acquisition_delay_n5', 0));
+        $settingsService->set('patrol_attack_min_duration_seconds', request('patrol_attack_min_duration_seconds', 300));
+        $settingsService->set('patrol_grid_units', request('patrol_grid_units', 10));
+        $settingsService->set('patrol_system_radius_units', request('patrol_system_radius_units', 1800));
+        $settingsService->set('patrol_star_exclusion_units', request('patrol_star_exclusion_units', 60));
+        $settingsService->set('patrol_internal_distance_divisor', request('patrol_internal_distance_divisor', 3));
 
         $settingsService->set('bonus_expedition_slots', request('bonus_expedition_slots', 0));
         $settingsService->set('expedition_reward_multiplier_resources', request('expedition_reward_multiplier_resources', 1.0));

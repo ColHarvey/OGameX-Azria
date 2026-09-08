@@ -255,6 +255,7 @@ class FleetMissionService
         8 => 't_ingame.fleet.mission_recycle',
         9 => 't_ingame.fleet.mission_destroy_moon',
         10 => 't_ingame.galaxy.missile_attack',
+        11 => 't_ingame.fleet.mission_patrol',
         15 => 't_ingame.fleet.mission_expedition',
     ];
 

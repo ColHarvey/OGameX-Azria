@@ -863,6 +863,7 @@ class ServerAdministrationController extends OGameController
             PlanetType::Moon->value => 'Moon',
             PlanetType::DebrisField->value => 'Debris',
             PlanetType::DeepSpace->value => 'Deep Space',
+            PlanetType::SpatialPoint->value => 'Spatial point',
             default => 'Unknown',
         };
     }

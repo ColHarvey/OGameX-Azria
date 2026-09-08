@@ -46,6 +46,12 @@ enum TargetScope: string
     case DeepSpace = 'deep_space';
 
     /**
+     * Un point libre de l espace, vise par une patrouille. Aucun corps celeste, donc aucune barriere
+     * de corps ; le point porte sa propre barriere, tenue par la patrouille qui s y trouve.
+     */
+    case SpatialPoint = 'spatial_point';
+
+    /**
      * Le plan de retour resolu ne designe aucun corps.
      *
      * `FlightLeg::Return` ne suffit pas a garantir qu'une flotte se pose quelque part : le corps
@@ -55,4 +61,14 @@ enum TargetScope: string
      * mission ni l'etape de vol.
      */
     case NoDestination = 'no_destination';
+
+    /**
+     * Cette portee ne designe aucun corps celeste : l espace profond de l expedition, le point
+     * spatial d une patrouille. La matrice des corps ne s y applique pas ; un combat qui s y
+     * deroule a sa propre barriere et son propre chemin.
+     */
+    public function isOutsideTheBodyMatrix(): bool
+    {
+        return $this === self::DeepSpace || $this === self::SpatialPoint;
+    }
 }

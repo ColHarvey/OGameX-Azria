@@ -468,6 +468,108 @@
                                     </square-checkbox>
                                 </div>
                             </div>
+                            {{-- Chantier patrouilles (journal §114) : interrupteur et valeurs encore ouvertes. --}}
+                            <div class="fieldwrapper">
+                                <label class="styled textBeefy">{{ __('t_ingame.admin.patrols_enabled') }}</label>
+                                <div class="thefield">
+                                    <square-checkbox class="square-checkbox">
+                                        <input type="checkbox" id="square-checkBoxPatrolsEnabled" name="patrols_enabled" value="1" {{ $patrols_enabled ? 'checked' : '' }}>
+                                        <label for="square-checkBoxPatrolsEnabled"></label>
+                                    </square-checkbox>
+                                </div>
+                                <div class="smallFont">{{ __('t_ingame.admin.patrols_enabled_desc') }}</div>
+                            </div>
+                            <div class="fieldwrapper">
+                                <label class="styled textBeefy">{{ __('t_ingame.admin.patrol_manoeuvre_delay') }}</label>
+                                <div class="thefield">
+                                    <input type="text" pattern="[0-9.]*" class="textInput w50 textCenter textBeefy" value="{{ $patrol_manoeuvre_delay_seconds }}" size="5" maxlength="5" name="patrol_manoeuvre_delay_seconds">
+                                </div>
+                                <div class="smallFont">{{ __('t_ingame.admin.patrol_manoeuvre_delay_desc') }}</div>
+                            </div>
+                            <div class="fieldwrapper">
+                                <label class="styled textBeefy">{{ __('t_ingame.admin.patrol_upkeep_divisor') }}</label>
+                                <div class="thefield">
+                                    <input type="text" pattern="[0-9.]*" class="textInput w50 textCenter textBeefy" value="{{ $patrol_upkeep_divisor }}" size="3" maxlength="3" name="patrol_upkeep_divisor">
+                                </div>
+                                <div class="smallFont">{{ __('t_ingame.admin.patrol_upkeep_divisor_desc') }}</div>
+                            </div>
+                            <div class="fieldwrapper">
+                                <label class="styled textBeefy">{{ __('t_ingame.admin.patrol_safety_return_speed') }}</label>
+                                <div class="thefield">
+                                    <input type="text" pattern="[0-9.]*" class="textInput w50 textCenter textBeefy" value="{{ $patrol_safety_return_speed }}" size="4" maxlength="4" name="patrol_safety_return_speed">
+                                </div>
+                                <div class="smallFont">{{ __('t_ingame.admin.patrol_safety_return_speed_desc') }}</div>
+                            </div>
+                            <div class="fieldwrapper">
+                                <label class="styled textBeefy">{{ __('t_ingame.admin.patrol_acquisition_delay', ['level' => 1]) }}</label>
+                                <div class="thefield">
+                                    <input type="text" pattern="[0-9]*" class="textInput w50 textCenter textBeefy" value="{{ $patrol_acquisition_delays[1] }}" size="3" maxlength="3" name="patrol_acquisition_delay_n1">
+                                </div>
+                                <div class="smallFont">{{ __('t_ingame.admin.patrol_acquisition_delay_desc') }}</div>
+                            </div>
+                            <div class="fieldwrapper">
+                                <label class="styled textBeefy">{{ __('t_ingame.admin.patrol_acquisition_delay', ['level' => 2]) }}</label>
+                                <div class="thefield">
+                                    <input type="text" pattern="[0-9]*" class="textInput w50 textCenter textBeefy" value="{{ $patrol_acquisition_delays[2] }}" size="3" maxlength="3" name="patrol_acquisition_delay_n2">
+                                </div>
+                                <div class="smallFont">{{ __('t_ingame.admin.patrol_acquisition_delay_desc') }}</div>
+                            </div>
+                            <div class="fieldwrapper">
+                                <label class="styled textBeefy">{{ __('t_ingame.admin.patrol_acquisition_delay', ['level' => 3]) }}</label>
+                                <div class="thefield">
+                                    <input type="text" pattern="[0-9]*" class="textInput w50 textCenter textBeefy" value="{{ $patrol_acquisition_delays[3] }}" size="3" maxlength="3" name="patrol_acquisition_delay_n3">
+                                </div>
+                                <div class="smallFont">{{ __('t_ingame.admin.patrol_acquisition_delay_desc') }}</div>
+                            </div>
+                            <div class="fieldwrapper">
+                                <label class="styled textBeefy">{{ __('t_ingame.admin.patrol_acquisition_delay', ['level' => 4]) }}</label>
+                                <div class="thefield">
+                                    <input type="text" pattern="[0-9]*" class="textInput w50 textCenter textBeefy" value="{{ $patrol_acquisition_delays[4] }}" size="3" maxlength="3" name="patrol_acquisition_delay_n4">
+                                </div>
+                                <div class="smallFont">{{ __('t_ingame.admin.patrol_acquisition_delay_desc') }}</div>
+                            </div>
+                            <div class="fieldwrapper">
+                                <label class="styled textBeefy">{{ __('t_ingame.admin.patrol_acquisition_delay', ['level' => 5]) }}</label>
+                                <div class="thefield">
+                                    <input type="text" pattern="[0-9]*" class="textInput w50 textCenter textBeefy" value="{{ $patrol_acquisition_delays[5] }}" size="3" maxlength="3" name="patrol_acquisition_delay_n5">
+                                </div>
+                                <div class="smallFont">{{ __('t_ingame.admin.patrol_acquisition_delay_desc') }}</div>
+                            </div>
+                            <div class="fieldwrapper">
+                                <label class="styled textBeefy">{{ __('t_ingame.admin.patrol_attack_min_duration') }}</label>
+                                <div class="thefield">
+                                    <input type="text" pattern="[0-9.]*" class="textInput w50 textCenter textBeefy" value="{{ $patrol_attack_min_duration_seconds }}" size="5" maxlength="5" name="patrol_attack_min_duration_seconds">
+                                </div>
+                                <div class="smallFont">{{ __('t_ingame.admin.patrol_attack_min_duration_desc') }}</div>
+                            </div>
+                            <div class="fieldwrapper">
+                                <label class="styled textBeefy">{{ __('t_ingame.admin.patrol_grid_units') }}</label>
+                                <div class="thefield">
+                                    <input type="text" pattern="[0-9.]*" class="textInput w50 textCenter textBeefy" value="{{ $patrol_grid_units }}" size="3" maxlength="3" name="patrol_grid_units">
+                                </div>
+                                <div class="smallFont">{{ __('t_ingame.admin.patrol_grid_units_desc') }}</div>
+                            </div>
+                            <div class="fieldwrapper">
+                                <label class="styled textBeefy">{{ __('t_ingame.admin.patrol_system_radius_units') }}</label>
+                                <div class="thefield">
+                                    <input type="text" pattern="[0-9.]*" class="textInput w50 textCenter textBeefy" value="{{ $patrol_system_radius_units }}" size="4" maxlength="4" name="patrol_system_radius_units">
+                                </div>
+                                <div class="smallFont">{{ __('t_ingame.admin.patrol_system_radius_units_desc') }}</div>
+                            </div>
+                            <div class="fieldwrapper">
+                                <label class="styled textBeefy">{{ __('t_ingame.admin.patrol_star_exclusion_units') }}</label>
+                                <div class="thefield">
+                                    <input type="text" pattern="[0-9.]*" class="textInput w50 textCenter textBeefy" value="{{ $patrol_star_exclusion_units }}" size="4" maxlength="4" name="patrol_star_exclusion_units">
+                                </div>
+                                <div class="smallFont">{{ __('t_ingame.admin.patrol_star_exclusion_units_desc') }}</div>
+                            </div>
+                            <div class="fieldwrapper">
+                                <label class="styled textBeefy">{{ __('t_ingame.admin.patrol_internal_distance_divisor') }}</label>
+                                <div class="thefield">
+                                    <input type="text" pattern="[0-9.]*" class="textInput w50 textCenter textBeefy" value="{{ $patrol_internal_distance_divisor }}" size="3" maxlength="3" name="patrol_internal_distance_divisor">
+                                </div>
+                                <div class="smallFont">{{ __('t_ingame.admin.patrol_internal_distance_divisor_desc') }}</div>
+                            </div>
                             <div class="fieldwrapper" style="margin-bottom: 50px;">
                                 <label class="styled textBeefy">{{ __('t_ingame.admin.galaxy_count') }}</label>
                                 <div class="thefield">

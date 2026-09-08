@@ -204,6 +204,9 @@ final readonly class CombatSituation
 
             // L'aller vise l'espace profond : hors portee du corps.
             CombatMissionKind::Expedition => [],
+
+            // L aller d une patrouille vise un point spatial : hors portee du corps, comme l expedition.
+            CombatMissionKind::Patrol => [],
         };
     }
 
@@ -236,7 +239,7 @@ final readonly class CombatSituation
             return false;
         }
 
-        return !($this->scope() === TargetScope::DeepSpace && $this->targetState !== null);
+        return !($this->scope()->isOutsideTheBodyMatrix() && $this->targetState !== null);
     }
 
     /**
@@ -256,7 +259,7 @@ final readonly class CombatSituation
 
         throw new ImpossibleCombatSituation(
             'La situation « ' . $this->describe() . ' » ne peut pas se produire : un missile n a pas d etape '
-            . 'de retour, et une expedition ne rencontre pas l etat de combat d un corps celeste. La traiter '
+            . 'de retour, et une expedition ou un segment de patrouille ne rencontre pas l etat de combat d un corps celeste. La traiter '
             . 'comme une arrivee ordinaire laisserait invisible le defaut qui l a produite.'
         );
     }

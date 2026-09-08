@@ -296,7 +296,8 @@ final class ArrivalResolver
             CombatMissionKind::Deployment,
             CombatMissionKind::Espionage,
             CombatMissionKind::Colonisation,
-            CombatMissionKind::Expedition => throw new LogicException(
+            CombatMissionKind::Expedition,
+            CombatMissionKind::Patrol => throw new LogicException(
                 'Aucune case ne delegue « ' . $situation->mission->value . ' » a l ordre des evenements : '
                 . $situation->describe()
             ),

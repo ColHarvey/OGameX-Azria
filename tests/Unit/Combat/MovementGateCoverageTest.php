@@ -51,6 +51,8 @@ class MovementGateCoverageTest extends UnitTestCase
             'recycle' => [false, true],
             'colonisation' => [false, true],
             'expedition' => [false, true],
+            // Le segment d une patrouille vise un point libre ; son retour se pose chez elle.
+            'patrol' => [false, true],
         ];
 
         foreach (CombatMissionKind::byMissionType() as $type => $genre) {

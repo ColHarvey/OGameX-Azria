@@ -866,6 +866,98 @@ class SettingsService
     }
 
     /**
+     * L interrupteur du chantier « patrouilles, stationnement attaquable et surveillance »
+     * (journal §114). Eteint par defaut : tant qu il vaut non, aucune mission de patrouille n est
+     * proposee, aucun Reseau de surveillance n est constructible, et aucune ligne des tables du
+     * chantier n est ecrite.
+     */
+    public function patrolsEnabled(): bool
+    {
+        return $this->get('patrols_enabled', '0') === '1';
+    }
+
+    /**
+     * Delai d une manoeuvre en vol, en secondes, compte a partir de la confirmation serveur
+     * (revue 121, R2). Le nouveau segment part de la position reellement atteinte a la fin du delai.
+     */
+    public function patrolManoeuvreDelaySeconds(): int
+    {
+        return max(0, (int)$this->get('patrol_manoeuvre_delay_seconds', 60));
+    }
+
+    /**
+     * Diviseur de la consommation au stationnement : Σ(carburant × unites) ÷ diviseur par heure,
+     * au prorata de la seconde (revue 121, R3 : 20).
+     */
+    public function patrolUpkeepDivisor(): int
+    {
+        return max(1, (int)$this->get('patrol_upkeep_divisor', 20));
+    }
+
+    /**
+     * Vitesse du retour de securite, en dixiemes : 3 = 30 % (revue 121, R3). Bornee a [0,5 ; 10].
+     */
+    public function patrolSafetyReturnSpeed(): float
+    {
+        return min(10.0, max(0.5, (float)$this->get('patrol_safety_return_speed', 3)));
+    }
+
+    /**
+     * Delai d acquisition d un contact par un Reseau de surveillance de ce niveau, en minutes,
+     * compte depuis l entree de la patrouille dans le systeme. **Valeurs proposees, non choisies**
+     * (revue 121, R5) : 15, 10, 5, 2 puis 0.
+     */
+    public function patrolAcquisitionDelayMinutes(int $level): int
+    {
+        $defaults = [1 => 15, 2 => 10, 3 => 5, 4 => 2, 5 => 0];
+        $level = max(1, min(5, $level));
+
+        return max(0, (int)$this->get('patrol_acquisition_delay_n' . $level, $defaults[$level]));
+    }
+
+    /**
+     * Duree minimale d une attaque lancee depuis une patrouille, en secondes : la borne contre la
+     * frappe instantanee par prepositionnement (revue 121, garde-fous). **Proposee, non choisie.**
+     */
+    public function patrolAttackMinDurationSeconds(): int
+    {
+        return max(0, (int)$this->get('patrol_attack_min_duration_seconds', 300));
+    }
+
+    /**
+     * Grille des points libres de la geometrie de reference, en unites spatiales (revue 121, R1).
+     */
+    public function patrolGridUnits(): int
+    {
+        return max(1, (int)$this->get('patrol_grid_units', 10));
+    }
+
+    /**
+     * Rayon d un systeme dans la geometrie de reference, en unites spatiales.
+     */
+    public function patrolSystemRadiusUnits(): int
+    {
+        return max(1, (int)$this->get('patrol_system_radius_units', 1800));
+    }
+
+    /**
+     * Rayon d exclusion autour de l etoile, en unites spatiales.
+     */
+    public function patrolStarExclusionUnits(): int
+    {
+        return max(0, (int)$this->get('patrol_star_exclusion_units', 60));
+    }
+
+    /**
+     * Diviseur de la distance interne d un segment de patrouille : distance de jeu = unites ÷ diviseur.
+     * **Courbe a choisir sur simulations** (revue 121, R1) ; 3 propose.
+     */
+    public function patrolInternalDistanceDivisor(): int
+    {
+        return max(1, (int)$this->get('patrol_internal_distance_divisor', 3));
+    }
+
+    /**
      * Returns whether the hostile faction system is switched on at all.
      */
     public function npcEnabled(): bool

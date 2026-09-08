@@ -408,8 +408,8 @@ abstract class GameMission
         if (empty($mission->parent_id)) {
             // Target planet was relocated — return fleet (or cancel if no return trip).
             // Only applies to mission types that normally target an existing planet/moon.
-            // Colonize (7), recycle (8), and expedition (15) legitimately have null planet_id_to.
-            if ($mission->planet_id_to === null && !in_array($mission->mission_type, [7, 8, 15], true)) {
+            // Colonize (7), recycle (8), patrol (11) and expedition (15) legitimately have null planet_id_to.
+            if ($mission->planet_id_to === null && !in_array($mission->mission_type, [7, 8, 11, 15], true)) {
                 $mission->processed = 1;
                 $mission->save();
                 if (static::$hasReturnMission) {
@@ -664,6 +664,15 @@ abstract class GameMission
         $mission->system_to = $parentMission->system_from;
         $mission->position_to = $parentMission->position_from;
 
+        // Les colonnes de segment de patrouille (journal §114) : le lien se conserve, les deux bouts
+        // en coordonnees de reference s inversent comme les coordonnees ordinaires. Nulles pour toute
+        // mission ordinaire. `ExpectedReturn` impose exactement ces valeurs.
+        $mission->patrol_id = $parentMission->patrol_id;
+        $mission->x_from = $parentMission->x_to;
+        $mission->y_from = $parentMission->y_to;
+        $mission->x_to = $parentMission->x_from;
+        $mission->y_to = $parentMission->y_from;
+
         // **Une destination resolue l'emporte sur le corps de depart, et elle s'ecrit telle quelle.**
         // Le corps d'origine peut avoir disparu depuis le lancement — une lune rasee, une planete
         // abandonnee. L'appelant a decide sous verrou ou la flotte se pose ; **relire ce corps ici**
@@ -675,6 +684,13 @@ abstract class GameMission
             $mission->galaxy_to = $destination->coordinate->galaxy;
             $mission->system_to = $destination->coordinate->system;
             $mission->position_to = $destination->coordinate->position;
+
+            // **Une destination resolue est un corps celeste**, jamais un point de l espace : sa fin
+            // de segment n a pas de coordonnees de reference. Sans cette remise a vide, la ligne
+            // aurait dit « destination = ce corps » et « fin de segment = ce point », deux endroits
+            // differents. `ExpectedReturn` impose la meme chose.
+            $mission->x_to = null;
+            $mission->y_to = null;
         }
 
         // Fill in the units

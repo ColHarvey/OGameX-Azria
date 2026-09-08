@@ -197,6 +197,7 @@ return [
     // -------------------------------------------------------------------------
 
     'fleet' => [
+        'mission_patrol' => 'Patrol',
         // Page / step headers
         'dispatch_1_title'         => 'Fleet Dispatch I',
         'dispatch_2_title'         => 'Fleet Dispatch II',
@@ -1674,7 +1675,35 @@ Improved fleet escape rate',
     ],
 
     // ── Admin: server settings and developer shortcuts pages ──
+    'patrol' => [
+        'name' => 'Patrol',
+        'refusal_disabled' => 'Patrols are not enabled on this server.',
+        'refusal_immobile_unit' => 'An immobile ship cannot patrol.',
+        'point_off_grid' => 'This point is not on the system grid.',
+        'point_in_star' => 'Too close to the star.',
+        'point_outside_system' => 'Outside the limits of the system.',
+    ],
     'admin' => [
+        'patrols_enabled' => 'Patrols enabled:',
+        'patrols_enabled_desc' => 'Switch for the patrols, stationing and surveillance project. Off, nothing changes in game.',
+        'patrol_manoeuvre_delay' => 'In-flight manoeuvre delay (seconds):',
+        'patrol_manoeuvre_delay_desc' => 'Counted from the confirmation; the new leg departs from the position reached at the end of the delay.',
+        'patrol_upkeep_divisor' => 'Stationing consumption divisor:',
+        'patrol_upkeep_divisor_desc' => 'Σ(fuel × units) ÷ divisor per hour, prorated to the second.',
+        'patrol_safety_return_speed' => 'Safety return speed (tenths):',
+        'patrol_safety_return_speed_desc' => '3 = 30%. The return departs before the indispensable fuel is touched.',
+        'patrol_acquisition_delay' => 'Contact acquisition delay, level :level (minutes):',
+        'patrol_acquisition_delay_desc' => 'Proposed value, not decided: counted from the patrol entering the system.',
+        'patrol_attack_min_duration' => 'Minimum duration of an attack launched from a patrol (seconds):',
+        'patrol_attack_min_duration_desc' => 'Bound against instant strikes by pre-positioning. Proposed, not decided.',
+        'patrol_grid_units' => 'Free point grid (spatial units):',
+        'patrol_grid_units_desc' => 'A free point is rounded to this grid. One orbit is 100 units.',
+        'patrol_system_radius_units' => 'System radius (spatial units):',
+        'patrol_system_radius_units_desc' => 'Beyond it, no stationing.',
+        'patrol_star_exclusion_units' => 'Exclusion around the star (spatial units):',
+        'patrol_star_exclusion_units_desc' => 'Within it, no stationing.',
+        'patrol_internal_distance_divisor' => 'Internal distance divisor:',
+        'patrol_internal_distance_divisor_desc' => 'Game distance of an internal leg = distance in units ÷ divisor. With 3, a crossing equals a planet-to-planet trip of today.',
         'acs'                          => 'Alliance Combat System:',
         'alliance_cooldown'            => 'Alliance cooldown (days):',
         'alliance_cooldown_desc'       => 'Days a player must wait after leaving an alliance before joining/creating another',
