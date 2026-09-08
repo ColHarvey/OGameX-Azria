@@ -721,12 +721,18 @@ final class PatrolOrders
     }
 
     /**
-     * Cent ans : le rendez-vous d une patrouille qui ne brule rien.
+     * Dix ans : le rendez-vous d une patrouille qui ne brule rien, ou que rien ne peut faire partir.
      *
      * Une valeur finie plutot qu un nul, pour que `time_arrival + time_holding` reste une somme
      * d entiers que la base compare sans cas particulier.
+     *
+     * **Elle doit tenir dans la colonne, et cent ans n y tenaient pas.** `time_holding` est un
+     * entier signe de quatre octets : au-dela de 2 147 483 647, MariaDB refuse l ecriture (erreur
+     * 1264) tandis que SQLite l accepte sans rien dire. Cent ans valent 3 153 600 000, et le defaut
+     * ne s est vu qu au bac, sur la premiere patrouille immobilisee. Dix ans tiennent, et disent la
+     * meme chose : aucun rendez-vous que ce jeu verra.
      */
-    private const int HOLD_WITHOUT_END = 100 * 365 * 24 * 3600;
+    private const int HOLD_WITHOUT_END = 10 * 365 * 24 * 3600;
 
     /**
      * Facture le stationnement du curseur jusqu a cet instant, et avance le curseur.
