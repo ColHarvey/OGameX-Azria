@@ -135,31 +135,44 @@ trait RunsInParallelProcesses
      *
      * Une table ne suffit pas non plus : un meme chemin peut la verrouiller deux fois, a deux
      * profondeurs, et attendre « la table » relache encore au mauvais moment. L attente rend donc
-     * **l instruction qu elle a vue**, pour que l epreuve exige la bonne et refuse de conclure d une
-     * autre. Une course qui ne dit pas sur quoi elle a attendu ne prouve pas sur quoi elle a porte.
+     * **le processus et l instruction qu elle a vus**, pour que l epreuve exige les bons et refuse
+     * de conclure d un autre. Une course qui ne dit pas sur quoi elle a attendu ne prouve pas sur
+     * quoi elle a porte.
      *
-     * @return string L instruction en attente, vide quand seule `INNODB_TRX` a repondu.
+     * ## Pourquoi `PROCESSLIST` et une duree, et non `INNODB_TRX`
+     *
+     * Distinguer « execute cette instruction » de « bloque sur cette instruction » demandait
+     * `information_schema.INNODB_TRX`, en `LOCK WAIT`. Mesure faite sur le coureur : la vue n y a
+     * **jamais** expose la transaction de l enfant — une seule ligne, `RUNNING`, requete vide,
+     * celle du parent — pendant que `PROCESSLIST` montrait l enfant arrete quatorze secondes sur
+     * l instruction exacte. Une detection plus elegante qui ne remonte rien est une detection
+     * fausse ; celle-ci s appuie donc sur ce que la base montre reellement.
+     *
+     * La duree fait le reste du travail : une lecture verrouillante qui n attend personne se
+     * termine en millisecondes. Une seconde ecoulee sur la meme instruction ne se confond pas avec
+     * un chemin voisin qui prend le meme verrou sans etre gene.
+     *
+     * @return string Le processus et son instruction, vides quand seule une attente sans requete
+     *                a repondu.
      */
     protected function waitUntilAProcessWaitsOnALockOn(string|null $table = null, int $timeoutMs = 15_000): string
     {
         $limite = microtime(true) + $timeoutMs / 1000;
-        $attenteBloquee = "SELECT LEFT(trx_query, 400) AS instruction FROM information_schema.INNODB_TRX"
-            . " WHERE trx_state = 'LOCK WAIT' AND trx_query LIKE ? LIMIT 1";
+        $arretee = 'SELECT CONCAT(ID, ' . "' | '" . ', LEFT(INFO, 360)) AS instruction'
+            . ' FROM information_schema.PROCESSLIST'
+            . ' WHERE ID <> CONNECTION_ID() AND INFO LIKE ? AND TIME >= 1 LIMIT 1';
 
         do {
             $motif = $table === null ? '%for update%' : '%' . $table . '%for update%';
 
             if ($table !== null) {
-                // **Un processus qui attend, et ce qu il attend.** `PROCESSLIST` montre
-                // l instruction **en cours**, pas celle qui bloque : un chemin voisin qui
-                // verrouille la meme table sans etre gene y ressemble trait pour trait, et le
-                // parent relacherait alors sur le verrou d un autre. Une transaction en
-                // `LOCK WAIT` dont la requete vise cette table nomme les deux a la fois — le
-                // processus, et le verrou qu il ne peut pas prendre.
-                $bloquee = DB::selectOne($attenteBloquee, [$motif]);
+                // **Un processus arrete sur cette instruction, nomme avec elle.** La duree separe
+                // l attente du simple passage : une lecture verrouillante libre se termine en
+                // millisecondes.
+                $bloque = DB::selectOne($arretee, [$motif]);
 
-                if ($bloquee !== null && $bloquee->instruction !== null) {
-                    return (string)$bloquee->instruction;
+                if ($bloque !== null && $bloque->instruction !== null) {
+                    return (string)$bloque->instruction;
                 }
 
                 usleep(20_000);

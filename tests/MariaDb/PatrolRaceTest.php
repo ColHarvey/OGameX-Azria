@@ -180,8 +180,9 @@ final class PatrolRaceTest extends AccountTestCase
                 // pages ouvre sa transaction en verrouillant tous les corps du joueur d un coup
                 // (`where id in (...)`) : attendre celui-la relachait le parent avant meme le
                 // decideur, l enfant lisait le corps deja passe en d autres mains, et les deux
-                // versions prenaient le meme repli. Mesure faite trois fois. Ici l instruction
-                // attendue doit etre la relecture **d un seul** corps, celle de `land()`.
+                // versions prenaient le meme repli. Mesure faite trois fois. L attente rend le
+                // processus et son instruction : celle-ci doit etre la relecture **d un seul**
+                // corps, celle de `land()`.
                 $this->assertStringContainsString('planets', $attendue, 'The wait did not see a planets lock at all: ' . $attendue);
                 $this->assertStringNotContainsString(' in (', $attendue, 'The child blocked on a page envelope, not on the landing re-read: ' . $attendue);
             }
