@@ -76871,7 +76871,13 @@ window.playOGameXWormhole = function (canvas) {
         alliance: 'action-alliance.svg',
         coloniser: 'action-colonize.svg',
         demenager: 'action-relocate.svg',
-        expedition: 'action-expedition.svg'
+        expedition: 'action-expedition.svg',
+        /* Les patrouilles : les icones du pack `patrols-v1` de Codex, prefixees `patrol-`. */
+        patrouiller: 'patrol-patrol.svg',
+        deplacer: 'patrol-move.svg',
+        rappeler: 'patrol-return.svg',
+        confirmer: 'patrol-confirm.svg',
+        annuler: 'patrol-cancel.svg'
     };
 
     /*
@@ -76879,11 +76885,12 @@ window.playOGameXWormhole = function (canvas) {
      * Une action absente de la ligne n'est pas cachee : elle est grisee avec sa raison.
      */
     var ACTIONS_PAR_GENRE = {
-        planete: ['espionner', 'attaquer', 'transporter', 'deployer', 'acs', 'missiles', 'phalange', 'message', 'ami', 'ignorer', 'classement', 'alliance'],
+        planete: ['espionner', 'attaquer', 'transporter', 'deployer', 'acs', 'missiles', 'phalange', 'message', 'ami', 'ignorer', 'classement', 'alliance', 'patrouiller'],
         lune: ['espionner', 'attaquer', 'transporter', 'deployer', 'acs', 'detruireLune', 'message', 'ami', 'classement', 'alliance'],
         debris: ['recycler'],
         libre: ['coloniser', 'demenager'],
-        profond: ['expedition']
+        profond: ['expedition'],
+        patrouille: ['deplacer', 'rappeler']
     };
 
     /*
@@ -77147,6 +77154,81 @@ window.playOGameXWormhole = function (canvas) {
 
                 return inactif(m ? raison('move') : raison('unavailable'));
             },
+            /*
+             * ## Les actions de patrouille : le serveur a deja decide
+             *
+             * `commands.move` et `commands.recall` viennent de la charge des patrouilles, avec la
+             * raison du refus traduite : c est la meme methode que la confirmation lira. Le bouton
+             * ne fait que la montrer. Le lancement depuis une planete demande trois choses que la
+             * fiche verifie sans rien decider : la planete est la mienne, c est la planete active
+             * (le serveur lance depuis elle, comme tout envoi de flotte), et le droit d employer une
+             * flotte standard depuis la Galaxie est celui de l expedition (`hasAdmiral`).
+             */
+            patrouiller: function () {
+                if (f.gtOrdre) {
+                    return inactif(locaFiche('patrolOrderPending', ''));
+                }
+
+                if (detruit) {
+                    return inactif(raison('destroyed'));
+                }
+
+                if (!mienne) {
+                    return inactif(raison('patrolFromOwn'));
+                }
+
+                if (typeof window.galaxyCurrentPlanetId === 'undefined' || Number(objet.planetId) !== Number(window.galaxyCurrentPlanetId)) {
+                    return inactif(raison('patrolCurrentOnly'));
+                }
+
+                /*
+                 * Employer une flotte standard depuis la carte demande un Amiral, comme
+                 * l'expedition — et **le serveur l'applique** (`PatrolController::originFrom()`) :
+                 * ce grisement montre un fait qu'il publie (`hasAdmiral`), il ne le decide pas, et
+                 * il dit la raison des patrouilles, plus celle de l'expedition.
+                 */
+                if (!systeme.hasAdmiral) {
+                    return inactif(raison('patrolAdmiral'));
+                }
+
+                return actif(function () {
+                    commencerUnLancement(contexte.carte, f, objet);
+                });
+            },
+            deplacer: function () {
+                return decisionDeCommande(f, contexte.patrouille, 'move', function () {
+                    commencerUnDeplacement(contexte.carte, f, contexte.patrouille);
+                });
+            },
+            rappeler: function () {
+                return decisionDeCommande(f, contexte.patrouille, 'recall', function () {
+                    commencerUnRappel(contexte.carte, f, contexte.patrouille);
+                }, 'patrol-danger');
+            },
+            confirmer: function () {
+                var o = f.gtOrdre;
+
+                if (!o || !o.devis) {
+                    return inactif(raison('patrolNoDestination'));
+                }
+
+                if (o.enCours) {
+                    return inactif(locaFiche('patrolOrderPending', ''));
+                }
+
+                if (!o.devis.possible) {
+                    return inactif(o.devis.refusal_reason || raison('unavailable'));
+                }
+
+                return actif(function () {
+                    envoyerLOrdre(contexte.carte, f);
+                }, 'patrol-primary');
+            },
+            annuler: function () {
+                return actif(function () {
+                    annulerLOrdre(contexte.carte, f);
+                });
+            },
             expedition: function () {
                 var e = f.gtExpedition;
 
@@ -77226,6 +77308,11 @@ window.playOGameXWormhole = function (canvas) {
 
         if (contexte.genre === 'profond' && contexte.objet) {
             noms = noms.concat(['recycler']);
+        }
+
+        /* Un ordre en cours remplace les actions du corps par celles de l ordre : annuler, puis confirmer. */
+        if (f.gtOrdre) {
+            noms = f.gtOrdre.etape === 'devis' ? ['confirmer', 'annuler'] : ['annuler'];
         }
 
         grille.innerHTML = '';
@@ -77715,9 +77802,12 @@ window.playOGameXWormhole = function (canvas) {
             f.gtBloc = null;
             f.gtContexte = null;
             f.gtExpedition = null;
+            f.gtPatrouille = null;
         }
 
-        var choisis = carte.querySelectorAll('.gtBody.gtSelected');
+        finirLOrdre(carte, f);
+
+        var choisis = carte.querySelectorAll('.gtBody.gtSelected, .gtPatrolMarker.gtSelected');
 
         for (var i = 0; i < choisis.length; i++) {
             choisis[i].classList.remove('gtSelected');
@@ -77841,6 +77931,14 @@ window.playOGameXWormhole = function (canvas) {
 
             var bloc = evenement.target.closest ? evenement.target.closest('.gtBody') : null;
 
+            /* En choix de destination, le clic designe la cible d un ordre : un corps, ou un point de l espace. */
+            if (carte.gtChoix) {
+                evenement.preventDefault();
+                choisirLaDestination(carte, bloc ? destinationDuCorps(carte, bloc, corpsClique(evenement.target)) : destinationDuClic(carte, evenement));
+
+                return;
+            }
+
             if (bloc) {
                 choisir(carte, bloc, corpsClique(evenement.target));
             }
@@ -77862,6 +77960,13 @@ window.playOGameXWormhole = function (canvas) {
             /* Un element qui annonce `role="button"` doit repondre a Entree et a Espace. */
             if (evenement.key === 'Enter' || evenement.key === ' ' || evenement.key === 'Spacebar') {
                 evenement.preventDefault();
+
+                if (carte.gtChoix) {
+                    choisirLaDestination(carte, destinationDuCorps(carte, bloc, corpsClique(evenement.target)));
+
+                    return;
+                }
+
                 choisir(carte, bloc, corpsClique(evenement.target));
             }
         });
@@ -78007,6 +78112,74 @@ window.playOGameXWormhole = function (canvas) {
     var POSITION_ESPACE_PROFOND = 16;
 
     /*
+     * ## Les points de l'espace : du repere du serveur a l'ecran, et retour
+     *
+     * Le serveur mesure un systeme en **unites de reference** : l'orbite d'une position vaut cent
+     * unites de rayon (`SystemGeometry::ORBIT_STEP`) et l'angle de base d'un corps est l'angle d'or
+     * moins 90 degres — exactement `anglesDeBase()` avant la rotation decorative. Un point libre
+     * (x, y) du serveur se projette donc a l'ecran par les transformations des corps : le rayon en
+     * unites devient le rayon en pixels de l'orbite equivalente (`rayonDe`, lineaire, prolongee
+     * au-dela de la quinzieme orbite), l'angle est tourne de la phase orbitale du moment, et
+     * l'ellipse aplatit la verticale. Sans l'ecartement, qui est propre a chaque corps : un point
+     * n'est pas un corps, et une destination « pres d'un corps » est dessinee **sur le corps**
+     * (`pointDeBout`), la ou le joueur le voit.
+     *
+     * L'inverse rend un clic en unites du serveur, **arrondi a la grille que le serveur impose**
+     * (PATROUILLE_GRILLE = `patrol_grid_units`) : le serveur refuse un point hors grille au lieu de
+     * l'arrondir, pour que la carte ne puisse pas envoyer une flotte ailleurs que la ou le joueur
+     * a clique. Rien ici ne decide d'une distance, d'un cout ni d'un droit : ce sont des pixels.
+     */
+    var TYPE_POINT_SPATIAL = 5;
+    var UNITES_PAR_ORBITE = 100;
+
+    /*
+     * **La grille est un reglage d'administration, pas une constante.** Le serveur refuse un point
+     * hors grille au lieu de l'arrondir — c'est la bonne regle —, donc une carte qui arrondirait a
+     * une autre valeur que la sienne ferait refuser presque tous les clics. La vue la publie ; le
+     * repli a dix ne sert que si la page est servie par un rendu qui ne la porte pas encore.
+     */
+    var PATROUILLE_GRILLE = typeof galaxyPatrolGridUnits !== 'undefined' && Number(galaxyPatrolGridUnits) > 0
+        ? Number(galaxyPatrolGridUnits)
+        : 10;
+
+    /* La phase du moment, quantifiee comme celle des corps : un point tourne avec eux, jamais a cote. */
+    function phaseDuMoment() {
+        return phaseOrbitale(Math.floor(maintenantServeur() / PAS_ORBITAL) * PAS_ORBITAL);
+    }
+
+    function pointSpatial(x, y) {
+        var c = centre();
+        var unites = Math.sqrt(x * x + y * y);
+        var angle = Math.atan2(y, x) + phaseDuMoment();
+        var rx = rayonDe(unites / UNITES_PAR_ORBITE);
+
+        return { x: c.x + rx * Math.cos(angle), y: c.y + rx * APLATISSEMENT * Math.sin(angle), aDroite: Math.cos(angle) > 0 };
+    }
+
+    function pointServeur(sx, sy) {
+        var c = centre();
+        var dx = sx - c.x;
+        var dy = (sy - c.y) / APLATISSEMENT;
+        var rx = Math.sqrt(dx * dx + dy * dy);
+        var angle = Math.atan2(dy, dx) - phaseDuMoment();
+        var unites = (1 + ((rx - RAYON_MIN) * (POSITIONS - 1)) / (RAYON_MAX - RAYON_MIN)) * UNITES_PAR_ORBITE;
+
+        return {
+            x: Math.round((unites * Math.cos(angle)) / PATROUILLE_GRILLE) * PATROUILLE_GRILLE,
+            y: Math.round((unites * Math.sin(angle)) / PATROUILLE_GRILLE) * PATROUILLE_GRILLE
+        };
+    }
+
+    /* Le point d'un bout de mouvement : un point libre par ses coordonnees du serveur, sinon un corps. */
+    function pointDeBout(bout) {
+        if (Number(bout.type) === TYPE_POINT_SPATIAL && bout.x !== null && bout.x !== undefined && bout.y !== null && bout.y !== undefined) {
+            return pointSpatial(Number(bout.x), Number(bout.y));
+        }
+
+        return pointDeCorps(bout.position, bout.type);
+    }
+
+    /*
      * La nebuleuse d'espace profond : coin inferieur droit, au-dela des orbites, sans chevaucher la
      * position 15 (rayon maximal 310 x 0,58 = 180 px sous le centre, soit y = 474 au plus bas).
      * Ces deux nombres sont son centre ; les trajectoires d'expedition y aboutissent.
@@ -78046,8 +78219,8 @@ window.playOGameXWormhole = function (canvas) {
         var partIci = Number(mouvement.from.galaxy) === galaxie && Number(mouvement.from.system) === systeme;
         var arriveIci = Number(mouvement.to.galaxy) === galaxie && Number(mouvement.to.system) === systeme;
 
-        var depart = partIci ? pointDeCorps(mouvement.from.position, mouvement.from.type) : porteDeBord(mouvement.to.position);
-        var arrivee = arriveIci ? pointDeCorps(mouvement.to.position, mouvement.to.type) : porteDeBord(mouvement.from.position);
+        var depart = partIci ? pointDeBout(mouvement.from) : porteDeBord(mouvement.to.position);
+        var arrivee = arriveIci ? pointDeBout(mouvement.to) : porteDeBord(mouvement.from.position);
 
         return { depart: depart, arrivee: arrivee, partIci: partIci, arriveIci: arriveIci };
     }
@@ -78393,16 +78566,898 @@ window.playOGameXWormhole = function (canvas) {
     function animer() {
         arreterLAnimation();
 
-        if (mouvements.length === 0 || document.hidden) {
+        if ((mouvements.length === 0 && patrouilles.length === 0) || document.hidden) {
             return;
         }
 
         var boucle = function () {
+            placerLesPatrouilles();
             placerLesMarqueurs();
             animation = window.requestAnimationFrame(boucle);
         };
 
         animation = window.requestAnimationFrame(boucle);
+    }
+
+    /*
+     * ## La couche des patrouilles
+     *
+     * Les patrouilles du joueur, telles que le serveur les rend sous `patrols` — **les siennes
+     * seulement** ; une patrouille etrangere n'est pas dans la reponse (les reseaux de surveillance
+     * viendront a l'etape 5). Chacune porte un marqueur du pack de Codex : un anneau, cliquable et
+     * focusable, pose sur son point — celui ou elle est posee, ou la position que son segment lui
+     * donne a chaque image. Le vaisseau blanc de la couche des flottes reste dessous : l'anneau dit
+     * « c'est une patrouille, elle se commande », le vaisseau dit ou elle va.
+     *
+     * Tout ce que le marqueur et la fiche montrent vient du serveur : l'etat, la reserve de
+     * maintenant, l'echeance du retour de securite, les commandes avec leur raison. Rien n'est
+     * calcule ici — pas un cout, pas une autorisation, pas une distance. Un ordre est un devis du
+     * serveur, puis une confirmation qui rapporte la version du devis ; le serveur refuse un devis
+     * perime au lieu de debiter autre chose (revue 121). Le glisser-deposer n'existe pas : le clic
+     * designe, le serveur chiffre, le joueur confirme — et le clavier fait la meme chose par X et Y.
+     */
+    var ICONES_DE_PATROUILLE = {
+        stationed: 'patrol-station.svg',
+        en_route: 'patrol-move.svg',
+        returning: 'patrol-return.svg',
+        attacking: 'patrol-locked.svg',
+        immobilised: 'patrol-fuel.svg'
+    };
+    var VITESSE_DE_PATROUILLE = 10;
+    var patrouilles = [];
+
+    function coucheDesPatrouilles(carte) {
+        var couche = carte.querySelector('.gtPatrolLayer');
+
+        if (couche) {
+            return couche;
+        }
+
+        couche = element('div', 'gtPatrolLayer');
+        couche.setAttribute('role', 'group');
+        couche.setAttribute('aria-label', locaFiche('patrolLayer', 'Patrouilles'));
+        carte.appendChild(couche);
+
+        return couche;
+    }
+
+    function adresseDePatrouille(modele, id) {
+        return String(modele).replace('/patrol/0/', '/patrol/' + Number(id) + '/');
+    }
+
+    /* Une duree en h:mm:ss — un format que toute langue lit, sans mot a traduire. */
+    function dureeLisible(secondes) {
+        var s = Math.max(0, Math.floor(Number(secondes) || 0));
+        var h = Math.floor(s / 3600);
+        var m = Math.floor((s % 3600) / 60);
+        var r = s % 60;
+
+        return h + ':' + (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r;
+    }
+
+    function dessinerLesPatrouilles(carte, galaxie, systeme) {
+        var couche = coucheDesPatrouilles(carte);
+        var aRouvrir = carte.gtPatrouilleARestaurer;
+
+        carte.gtPatrouilleARestaurer = null;
+        couche.innerHTML = '';
+
+        patrouilles.forEach(function (p) {
+            var b = element('button', 'patrol-marker gtPatrolMarker gtPatrol--' + String(p.state || ''));
+            var icone = element('img', '');
+            var intitule = locaFiche('patrolTitle', 'Patrouille') + ' ' + p.id + ' — ' + (p.state_label || p.state);
+
+            b.type = 'button';
+            b.setAttribute('data-patrol-id', String(p.id));
+            b.setAttribute('aria-label', intitule);
+            b.title = intitule;
+            icone.src = '/img/galaxy-tactical/' + (ICONES_DE_PATROUILLE[p.state] || 'patrol-patrol.svg');
+            icone.alt = '';
+            icone.setAttribute('aria-hidden', 'true');
+            b.appendChild(icone);
+
+            b.addEventListener('click', function (evenement) {
+                evenement.preventDefault();
+                evenement.stopPropagation();
+
+                /* En choix de destination, une patrouille n'est pas une cible : le clic ne fait rien. */
+                if (!carte.gtChoix) {
+                    choisirLaPatrouille(carte, p);
+                }
+            });
+
+            couche.appendChild(b);
+            p._marqueur = b;
+            p._bouts = p.segment ? extremites(p.segment, galaxie, systeme) : null;
+        });
+
+        placerLesPatrouilles();
+
+        /* La fiche d'une patrouille ouverte suit sa patrouille d'un chargement a l'autre. */
+        var f = carte.querySelector('.gtCard');
+        var ouverte = f && !f.hidden && f.gtPatrouille && !f.gtOrdre ? Number(f.gtPatrouille.id) : aRouvrir;
+
+        if (ouverte !== null && ouverte !== undefined) {
+            patrouilles.forEach(function (p) {
+                if (Number(p.id) === ouverte) {
+                    choisirLaPatrouille(carte, p, true);
+                }
+            });
+        }
+    }
+
+    /* La position d'un marqueur de patrouille : son point si elle est posee, sinon celle de son segment. */
+    function pointDePatrouille(p, maintenant) {
+        if (p.point) {
+            return { point: pointSpatial(Number(p.point.x), Number(p.point.y)), enTransit: false };
+        }
+
+        if (!p.segment || !p._bouts) {
+            return null;
+        }
+
+        var duree = Math.max(1, p.segment.time_arrival - p.segment.time_departure);
+        var global = Math.min(1, Math.max(0, (maintenant - p.segment.time_departure) / duree));
+        var local = progressionLocale(global, p._bouts);
+
+        return {
+            point: {
+                x: p._bouts.depart.x + (p._bouts.arrivee.x - p._bouts.depart.x) * local.avancement,
+                y: p._bouts.depart.y + (p._bouts.arrivee.y - p._bouts.depart.y) * local.avancement
+            },
+            enTransit: local.enTransit
+        };
+    }
+
+    function placerLesPatrouilles() {
+        var maintenant = maintenantServeur() / 1000;
+
+        patrouilles.forEach(function (p) {
+            if (!p._marqueur) {
+                return;
+            }
+
+            var ou = pointDePatrouille(p, maintenant);
+
+            if (!ou) {
+                p._marqueur.hidden = true;
+
+                return;
+            }
+
+            p._marqueur.hidden = ou.enTransit;
+            p._marqueur.style.left = ou.point.x.toFixed(1) + 'px';
+            p._marqueur.style.top = ou.point.y.toFixed(1) + 'px';
+
+            /* Le compte a rebours du retour de securite, sur la fiche ouverte, a la seconde. */
+            if (p._compte) {
+                var reste = dureeLisible(Number(p.safety_return_at) - maintenant);
+
+                if (p._compte.textContent !== reste) {
+                    p._compte.textContent = reste;
+                }
+            }
+        });
+
+        var d = document.querySelector('#galaxyTactical .patrol-destination');
+
+        if (d && d.gtDestination) {
+            var pd = pointDeDestination(d.gtDestination);
+            d.style.left = pd.x.toFixed(1) + 'px';
+            d.style.top = pd.y.toFixed(1) + 'px';
+        }
+    }
+
+    /*
+     * ## La fiche d'une patrouille
+     *
+     * Le meme cadre que les fiches des corps, sans ligne de tableau a deplacer : etat, base,
+     * reserve de maintenant, consommation horaire, cout et echeance du retour de securite,
+     * composition, et la jauge du pack — la part de la reserve encore libre avant le retour de
+     * securite. Puis la grille des actions, grisees par le serveur avec sa raison.
+     */
+    function ligneDeStat(dl, intitule, valeur) {
+        var dt = element('dt', '');
+        var dd = element('dd', '');
+
+        dt.textContent = intitule;
+        dd.textContent = valeur;
+        dl.appendChild(dt);
+        dl.appendChild(dd);
+
+        return dd;
+    }
+
+    function composerLaFichePatrouille(carte, f, p) {
+        var pageLoca = window.loca || {};
+        var deut = pageLoca.LOCA_ALL_DEUTERIUM || 'D';
+        var avant = [];
+        var apres = [];
+
+        avant.push(imageDeFiche('/img/galaxy-tactical/patrol-patrol.svg', 'gtCardArt patrol-art'));
+
+        var nature = element('div', 'gtCardKind');
+        nature.textContent = avecDetail(
+            p.state_label || p.state,
+            p.home ? locaFiche('patrolHome', 'Base') + ' [' + p.home.galaxy + ':' + p.home.system + ':' + p.home.position + ']' : ''
+        );
+        avant.push(nature);
+
+        var resume = element('div', 'patrol-summary');
+        var stats = element('dl', 'patrol-stats');
+
+        ligneDeStat(stats, locaFiche('patrolReserve', 'Reserve'), nombre(p.fuel_reserve) + ' ' + deut);
+        ligneDeStat(stats, locaFiche('patrolUpkeep', 'Consommation'), nombre(p.upkeep_per_hour) + ' ' + deut + '/h');
+        ligneDeStat(stats, locaFiche('patrolSafetyReturn', 'Retour de securite'), nombre(p.safety_return_cost) + ' ' + deut);
+
+        p._compte = null;
+
+        if (p.safety_return_at) {
+            p._compte = ligneDeStat(stats, locaFiche('patrolSafetyReturnAt', 'Depart du retour dans'), dureeLisible(Number(p.safety_return_at) - maintenantServeur() / 1000));
+            p._compte.setAttribute('data-patrol-deadline', String(p.safety_return_at));
+        } else if (p.state === 'stationed') {
+            ligneDeStat(stats, locaFiche('patrolSafetyReturnAt', 'Depart du retour dans'), locaFiche('patrolNoEnd', 'sans terme'));
+        }
+
+        ligneDeStat(stats, locaFiche('patrolShips', 'Vaisseaux'), (p.units || []).map(function (u) {
+            return nombre(u.amount) + ' \u00d7 ' + u.label;
+        }).join(', '));
+
+        resume.appendChild(stats);
+
+        /* La jauge : ce qui reste au-dessus du cout du retour, rapporte a la reserve. Ses deux nombres sont ceux du serveur. */
+        var reserve = Number(p.fuel_reserve) || 0;
+        var part = reserve > 0 ? Math.max(0, Math.min(1, (reserve - (Number(p.safety_return_cost) || 0)) / reserve)) : 0;
+        var jauge = element('div', 'patrol-gauge');
+        var niveau = element('span', '');
+
+        jauge.setAttribute('role', 'img');
+        jauge.setAttribute('aria-label', locaFiche('patrolGauge', 'Reserve disponible') + ' ' + Math.round(part * 100) + ' %');
+        niveau.style.width = Math.round(part * 100) + '%';
+        jauge.appendChild(niveau);
+        resume.appendChild(jauge);
+        avant.push(resume);
+
+        var grille = element('div', 'gtCardActions');
+        grille.setAttribute('role', 'group');
+        grille.setAttribute('aria-label', locaFiche('actions', 'Actions'));
+        apres.push(grille);
+
+        return { avant: avant, apres: apres, titre: locaFiche('patrolTitle', 'Patrouille') + ' ' + p.id };
+    }
+
+    function choisirLaPatrouille(carte, p, sansBasculer) {
+        var f = fiche(carte);
+
+        /* Recliquer la patrouille ouverte la referme. */
+        if (!sansBasculer && !f.hidden && f.gtPatrouille && Number(f.gtPatrouille.id) === Number(p.id)) {
+            deselectionner(carte, true);
+
+            return;
+        }
+
+        deselectionner(carte, false);
+
+        var titre = f.querySelector('.gtCardTitle');
+        var coords = f.querySelector('.gtCardCoords');
+        var contenant = f.querySelector('.gtCardBody');
+
+        f.setAttribute('data-corps', 'patrol');
+
+        if (coords) {
+            coords.textContent = '[' + p.galaxy + ':' + p.system + ']' + (p.point ? ' \u00b7 X ' + p.point.x + ' \u00b7 Y ' + p.point.y : '');
+        }
+
+        contenant.innerHTML = '';
+
+        var composition = composerLaFichePatrouille(carte, f, p);
+
+        composition.avant.forEach(function (n) {
+            contenant.appendChild(n);
+        });
+        composition.apres.forEach(function (n) {
+            contenant.appendChild(n);
+        });
+
+        if (titre) {
+            titre.textContent = composition.titre;
+        }
+
+        f.gtPatrouille = p;
+        f.gtContexte = { carte: carte, fiche: f, ligne: {}, objet: null, systeme: carte.gtSystemeJson || {}, position: null, genre: 'patrouille', patrouille: p };
+        composerLesActions(f);
+
+        f.hidden = false;
+        f.gtBloc = p._marqueur || null;
+
+        if (p._marqueur) {
+            p._marqueur.classList.add('gtSelected');
+            placer(f, p._marqueur);
+        }
+    }
+
+    /* Une commande de patrouille : permise ou refusee par le serveur, avec sa raison telle quelle. */
+    function decisionDeCommande(f, p, nom, executer, classe) {
+        if (!p) {
+            return inactif(locaFiche('reasons.unavailable', ''));
+        }
+
+        var commande = (p.commands && p.commands[nom]) || {};
+
+        if (!commande.allowed) {
+            return inactif(commande.reason || locaFiche('reasons.unavailable', ''));
+        }
+
+        if (f.gtOrdre) {
+            return inactif(locaFiche('patrolOrderPending', ''));
+        }
+
+        return actif(executer, classe);
+    }
+
+    /*
+     * ## Un ordre, en trois etapes
+     *
+     *   flotte      — lancement seulement : la flotte standard et la reserve a embarquer ;
+     *   destination — un clic sur la carte ou un corps, ou X et Y saisis, puis le devis ;
+     *   devis       — ce que le serveur a chiffre : destination, duree, cout, reserve a l'arrivee,
+     *                 retour de securite, autonomie ; Confirmer rapporte la version du devis.
+     *
+     * L'ordre vit sur la fiche (`f.gtOrdre`) ; la carte sait seulement qu'un choix est en cours
+     * (`carte.gtChoix`) pour rediriger les clics. Fermer la fiche annule tout.
+     */
+    function panneauDOrdre(f) {
+        var panneau = f.querySelector('.patrol-order');
+
+        if (!panneau) {
+            panneau = element('div', 'patrol-order');
+            panneau.setAttribute('role', 'group');
+            var grille = f.querySelector('.gtCardActions');
+            var contenant = f.querySelector('.gtCardBody');
+
+            if (grille && contenant) {
+                contenant.insertBefore(panneau, grille);
+            } else if (contenant) {
+                contenant.appendChild(panneau);
+            }
+        }
+
+        return panneau;
+    }
+
+    function noteDOrdre(f, texte, erreur) {
+        var panneau = panneauDOrdre(f);
+        var note = panneau.querySelector('.patrol-note');
+
+        if (!note) {
+            note = element('p', 'patrol-note');
+            note.setAttribute('role', 'status');
+            panneau.appendChild(note);
+        }
+
+        note.textContent = texte || '';
+        note.classList.toggle('patrol-error', !!erreur);
+    }
+
+    function champNumerique(intitule, nom, valeur, pas) {
+        var etiquette = element('label', 'patrol-field');
+        var texte = element('span', '');
+        var champ = element('input', 'patrol-input');
+
+        texte.textContent = intitule;
+        champ.type = 'number';
+        champ.name = nom;
+        champ.step = String(pas);
+        champ.value = valeur === null || valeur === undefined ? '' : String(valeur);
+        etiquette.appendChild(texte);
+        etiquette.appendChild(champ);
+
+        return { etiquette: etiquette, champ: champ };
+    }
+
+    function boutonDePanneau(intitule, clef, executer) {
+        var b = element('button', 'gtAction patrol-button');
+        var icone = element('img', '');
+        var libelle = element('span', 'gtActionLabel');
+
+        b.type = 'button';
+        icone.src = '/img/galaxy-tactical/' + ICONES_D_ACTION[clef];
+        icone.alt = '';
+        icone.setAttribute('aria-hidden', 'true');
+        libelle.textContent = intitule;
+        b.appendChild(icone);
+        b.appendChild(libelle);
+        b.addEventListener('click', function (evenement) {
+            evenement.preventDefault();
+            executer();
+        });
+
+        return b;
+    }
+
+    function composerLePanneau(carte, f) {
+        var o = f.gtOrdre;
+        var panneau = panneauDOrdre(f);
+        var pageLoca = window.loca || {};
+        var deut = pageLoca.LOCA_ALL_DEUTERIUM || 'D';
+
+        panneau.innerHTML = '';
+
+        if (!o) {
+            panneau.remove();
+
+            return;
+        }
+
+        if (o.etape === 'flotte') {
+            var liste = element('select', 'gtSelect');
+            var vide = document.createElement('option');
+
+            vide.value = '';
+            vide.textContent = locaFiche('expeditionChoose', '');
+            liste.appendChild(vide);
+            liste.setAttribute('aria-label', locaFiche('patrolFleet', 'Flotte standard'));
+            (o.modeles || []).forEach(function (m) {
+                var option = document.createElement('option');
+                option.value = String(m.id);
+                option.textContent = String(m.name);
+                liste.appendChild(option);
+            });
+            liste.value = o.modele ? String(o.modele.id) : '';
+            liste.addEventListener('change', function () {
+                o.modele = null;
+                (o.modeles || []).forEach(function (m) {
+                    if (String(m.id) === liste.value) {
+                        o.modele = m;
+                    }
+                });
+                composerLePanneau(carte, f);
+            });
+            panneau.appendChild(liste);
+
+            var reserve = champNumerique(locaFiche('patrolReserveInput', 'Reserve de deuterium'), 'reserve', o.reserve, 100);
+            reserve.champ.min = '0';
+            reserve.champ.addEventListener('change', function () {
+                o.reserve = Math.max(0, Math.floor(Number(reserve.champ.value) || 0));
+            });
+            panneau.appendChild(reserve.etiquette);
+
+            var suivant = boutonDePanneau(locaFiche('patrolChooseDestination', 'Choisir la destination'), 'deplacer', function () {
+                o.reserve = Math.max(0, Math.floor(Number(reserve.champ.value) || 0));
+                commencerLeChoixDeDestination(carte, f);
+            });
+            suivant.disabled = !o.modele;
+            panneau.appendChild(suivant);
+            noteDOrdre(f, o.modele ? '' : locaFiche('reasons.patrolNoFleet', ''), false);
+
+            return;
+        }
+
+        if (o.etape === 'destination') {
+            var x = champNumerique('X', 'x', o.destination && o.destination.x !== undefined ? o.destination.x : '', PATROUILLE_GRILLE);
+            var y = champNumerique('Y', 'y', o.destination && o.destination.y !== undefined ? o.destination.y : '', PATROUILLE_GRILLE);
+            var demander = boutonDePanneau(locaFiche('patrolQuote', 'Devis'), 'confirmer', function () {
+                var s = carte.gtSysteme || {};
+
+                choisirLaDestination(carte, {
+                    galaxy: s.galaxie,
+                    system: s.systeme,
+                    x: Math.round(Number(x.champ.value) / PATROUILLE_GRILLE) * PATROUILLE_GRILLE,
+                    y: Math.round(Number(y.champ.value) / PATROUILLE_GRILLE) * PATROUILLE_GRILLE
+                });
+            });
+
+            panneau.appendChild(x.etiquette);
+            panneau.appendChild(y.etiquette);
+            panneau.appendChild(demander);
+            noteDOrdre(f, o.erreur || locaFiche('patrolChoose', ''), !!o.erreur);
+
+            return;
+        }
+
+        if (o.etape === 'attente') {
+            noteDOrdre(f, locaFiche('patrolQuoteWaiting', ''), false);
+
+            return;
+        }
+
+        if (o.etape === 'devis' && o.devis) {
+            var q = o.devis;
+            var stats = element('dl', 'patrol-stats');
+            var destination = q.destination || {};
+            var cible = Number(destination.type) === TYPE_POINT_SPATIAL
+                ? '[' + destination.galaxy + ':' + destination.system + '] \u00b7 X ' + destination.x + ' \u00b7 Y ' + destination.y
+                : locaFiche('patrolNear', 'pres de') + ' [' + destination.galaxy + ':' + destination.system + ':' + destination.orbit + ']';
+
+            ligneDeStat(stats, locaFiche('patrolDestination', 'Destination'), cible);
+            ligneDeStat(stats, locaFiche('patrolDuration', 'Duree'), dureeLisible(q.duration_seconds));
+            ligneDeStat(stats, locaFiche('patrolCost', 'Cout'), nombre(q.fuel_cost) + ' ' + deut);
+            ligneDeStat(stats, locaFiche('patrolReserveOnArrival', 'Reserve a l\'arrivee'), nombre(q.reserve_on_arrival) + ' ' + deut);
+            ligneDeStat(stats, locaFiche('patrolSafetyReturn', 'Retour de securite'), nombre(q.safety_return_cost) + ' ' + deut + ' \u00b7 ' + dureeLisible(q.safety_return_seconds));
+            ligneDeStat(stats, locaFiche('patrolAutonomy', 'Autonomie'), q.autonomy_seconds === null || q.autonomy_seconds === undefined ? locaFiche('patrolNoEnd', 'sans terme') : dureeLisible(q.autonomy_seconds));
+            panneau.appendChild(stats);
+            noteDOrdre(f, q.possible ? (o.genre === 'recall' ? locaFiche('patrolRecallAsk', '') : '') : q.refusal_reason || '', !q.possible);
+        }
+    }
+
+    function poserLOrdre(carte, f, ordre) {
+        f.gtOrdre = ordre;
+        composerLePanneau(carte, f);
+        composerLesActions(f);
+
+        if (f.gtBloc) {
+            placer(f, f.gtBloc);
+        }
+    }
+
+    function commencerUnDeplacement(carte, f, p) {
+        poserLOrdre(carte, f, { genre: 'move', patrouille: p, etape: 'destination', destination: null, devis: null, erreur: null, enCours: false });
+        commencerLeChoixDeDestination(carte, f);
+    }
+
+    /*
+     * Le rappel ne compose rien : ni destination, ni vitesse.
+     *
+     * Il volait ici vers `p.home` — de simples coordonnees, dont le genre etait suppose planete —
+     * et le devis etait chiffre a 100 %, alors que l'ordre confirme vole a la vitesse du retour de
+     * securite vers la base que le serveur resout, planete **ou lune**. Le joueur lisait une duree
+     * et un cout qui n'etaient pas les siens. La demande ne porte donc plus que `kind: 'recall'`.
+     */
+    function commencerUnRappel(carte, f, p) {
+        poserLOrdre(carte, f, { genre: 'recall', patrouille: p, etape: 'attente', destination: null, devis: null, erreur: null, enCours: false });
+        choisirLaDestination(carte, null);
+    }
+
+    function commencerUnLancement(carte, f, objet) {
+        poserLOrdre(carte, f, { genre: 'launch', planete: objet, etape: 'flotte', modeles: [], modele: null, reserve: 0, destination: null, devis: null, erreur: null, enCours: false });
+
+        chargerLesFlottesStandard(carte, function (modeles) {
+            if (f.gtOrdre && f.gtOrdre.genre === 'launch') {
+                f.gtOrdre.modeles = modeles;
+                composerLePanneau(carte, f);
+            }
+        });
+    }
+
+    function commencerLeChoixDeDestination(carte, f) {
+        var o = f.gtOrdre;
+
+        if (!o) {
+            return;
+        }
+
+        o.etape = 'destination';
+        o.devis = null;
+        carte.gtChoix = { fiche: f };
+        carte.classList.add('gtChoosingDestination');
+        composerLePanneau(carte, f);
+        composerLesActions(f);
+    }
+
+    function finirLeChoixDeDestination(carte) {
+        carte.gtChoix = null;
+        carte.classList.remove('gtChoosingDestination');
+    }
+
+    function finirLOrdre(carte, f) {
+        finirLeChoixDeDestination(carte);
+        retirerLeMarqueurDeDestination(carte);
+
+        if (f) {
+            f.gtOrdre = null;
+
+            var panneau = f.querySelector('.patrol-order');
+
+            if (panneau) {
+                panneau.remove();
+            }
+        }
+    }
+
+    function annulerLOrdre(carte, f) {
+        finirLOrdre(carte, f);
+        composerLesActions(f);
+
+        if (f.gtBloc) {
+            placer(f, f.gtBloc);
+        }
+    }
+
+    /* Le corps clique en choix de destination : sa position et son genre ; le serveur retrouvera son identite. */
+    function destinationDuCorps(carte, bloc, corps) {
+        var s = carte.gtSysteme || {};
+        var position = Number(bloc.getAttribute('data-position'));
+
+        if (position === POSITION_ESPACE_PROFOND || position < 1) {
+            return null;
+        }
+
+        var ligne = (carte.gtLignes || {})[position];
+        var genre = corps === 'moon' ? corpsDeGenre(ligne, LUNE) : corpsDeGenre(ligne, PLANETE);
+
+        if (!genre) {
+            /* Une position libre : un point de l'espace a la place du corps, sur l'orbite. */
+            var p = pointServeur(bloc.offsetLeft, bloc.offsetTop);
+
+            return { galaxy: s.galaxie, system: s.systeme, x: p.x, y: p.y };
+        }
+
+        return { galaxy: s.galaxie, system: s.systeme, position: position, type: corps === 'moon' ? TYPE_LUNE : 1 };
+    }
+
+    /* Le point clique, en unites du serveur, arrondi a sa grille. La carte peut etre mise a l'echelle : les pixels sont ramenes a son repere. */
+    function destinationDuClic(carte, evenement) {
+        var s = carte.gtSysteme || {};
+        var r = carte.getBoundingClientRect();
+        var echelle = r.width > 0 ? LARGEUR / r.width : 1;
+        var p = pointServeur((evenement.clientX - r.left) * echelle, (evenement.clientY - r.top) * echelle);
+
+        return { galaxy: s.galaxie, system: s.systeme, x: p.x, y: p.y };
+    }
+
+    /*
+     * Le point d'une destination a l'ecran, qu'elle vienne d'un clic (`x`/`y` seuls, ou
+     * `position`/`type`) ou du devis du serveur (`orbit`, `type`, `x`, `y`).
+     *
+     * **Un corps se dessine sur le corps**, jamais sur le point de reference de son orbite : ce
+     * point-la ne tourne pas avec lui, et le marqueur se poserait a cote de la planete.
+     */
+    function pointDeDestination(destination) {
+        var genre = Number(destination.type);
+
+        if (destination.type !== undefined && destination.type !== null && genre !== TYPE_POINT_SPATIAL) {
+            return pointDeCorps(destination.position !== undefined ? destination.position : destination.orbit, genre);
+        }
+
+        return pointSpatial(Number(destination.x), Number(destination.y));
+    }
+
+    function poserLeMarqueurDeDestination(carte, destination) {
+        retirerLeMarqueurDeDestination(carte);
+
+        var couche = coucheDesPatrouilles(carte);
+        var d = element('div', 'patrol-marker patrol-destination');
+        var icone = element('img', '');
+        var pd = pointDeDestination(destination);
+
+        icone.src = '/img/galaxy-tactical/patrol-move.svg';
+        icone.alt = '';
+        d.setAttribute('aria-hidden', 'true');
+        d.appendChild(icone);
+        d.style.left = pd.x.toFixed(1) + 'px';
+        d.style.top = pd.y.toFixed(1) + 'px';
+        d.gtDestination = destination;
+        couche.appendChild(d);
+    }
+
+    function retirerLeMarqueurDeDestination(carte) {
+        var d = carte.querySelector('.patrol-destination');
+
+        if (d) {
+            d.remove();
+        }
+    }
+
+    function chargeDeDestination(destination) {
+        var charge = { galaxy: destination.galaxy, system: destination.system };
+
+        if (destination.x !== undefined) {
+            charge.x = destination.x;
+            charge.y = destination.y;
+        } else {
+            charge.position = destination.position;
+            charge.type = destination.type;
+        }
+
+        return charge;
+    }
+
+    /*
+     * La charge d'un ordre.
+     *
+     * Un **rappel** ne porte que son genre : le serveur en compose la destination et la vitesse, et
+     * la carte ne pourrait donc pas en decrire un autre que celui qu'il executera. Un **lancement**
+     * nomme le corps d'ou il part, au lieu de laisser le serveur lire la planete courante de la
+     * session — partagee par tous les onglets, elle pouvait avoir change entre le devis et la
+     * confirmation, et un autre corps aurait ete debite.
+     */
+    function chargeDOrdre(o, destination) {
+        var charge = { _token: jetonCsrf() };
+
+        if (o.genre === 'recall') {
+            charge.kind = 'recall';
+            charge.patrol_id = o.patrouille.id;
+
+            return charge;
+        }
+
+        charge = chargeDeDestination(destination);
+        charge.speed = VITESSE_DE_PATROUILLE;
+        charge._token = jetonCsrf();
+
+        if (o.genre === 'launch') {
+            charge.reserve = o.reserve;
+            charge.planet_id = o.planete && o.planete.planetId;
+            Object.keys((o.modele && o.modele.ships) || {}).forEach(function (id) {
+                if (Number(o.modele.ships[id]) > 0) {
+                    charge['am' + id] = Number(o.modele.ships[id]);
+                }
+            });
+        } else if (o.patrouille) {
+            charge.patrol_id = o.patrouille.id;
+        }
+
+        return charge;
+    }
+
+    function raisonDeLaReponse(reponse) {
+        if (reponse && typeof reponse.reason === 'string' && reponse.reason !== '') {
+            return reponse.reason;
+        }
+
+        if (reponse && reponse.errors && reponse.errors.length) {
+            return String(reponse.errors[0].message || '');
+        }
+
+        return locaFiche('reasons.unavailable', '');
+    }
+
+    /* La destination est choisie : le serveur la chiffre. Le devis qui revient est le seul qui compte. */
+    function choisirLaDestination(carte, destination) {
+        var f = carte.querySelector('.gtCard');
+        var o = f ? f.gtOrdre : null;
+
+        /* Une destination nulle n'a de sens que pour un rappel : c'est le serveur qui la compose. */
+        if (!o || (!destination && o.genre !== 'recall') || typeof galaxyPatrolQuoteUrl === 'undefined' || !galaxyPatrolQuoteUrl || !window.jQuery) {
+            return;
+        }
+
+        finirLeChoixDeDestination(carte);
+        o.destination = destination;
+        o.devis = null;
+        o.erreur = null;
+        o.etape = 'attente';
+        o.jeton = (o.jeton || 0) + 1;
+
+        var demande = o.jeton;
+
+        composerLePanneau(carte, f);
+        composerLesActions(f);
+
+        /* Le point clique se marque tout de suite ; la reponse du serveur le remplacera par le sien. */
+        if (destination) {
+            poserLeMarqueurDeDestination(carte, destination);
+        }
+
+        window.jQuery.post(galaxyPatrolQuoteUrl, chargeDOrdre(o, destination), null, 'json')
+            .done(function (reponse) {
+                if (f.gtOrdre !== o || demande !== o.jeton) {
+                    return;
+                }
+
+                if (reponse && reponse.success && reponse.quote) {
+                    o.devis = reponse.quote;
+                    o.depart = reponse.departure || null;
+                    o.etape = 'devis';
+                    /*
+                     * **Le marqueur se pose sur la destination du serveur**, jamais sur celle que la
+                     * carte croyait : c'est la seule qui soit celle de l'ordre — et pour un rappel,
+                     * la seule qui existe.
+                     */
+                    if (o.devis.destination) {
+                        poserLeMarqueurDeDestination(carte, o.devis.destination);
+                    }
+                } else {
+                    o.erreur = raisonDeLaReponse(reponse);
+                    o.etape = 'destination';
+                    retirerLeMarqueurDeDestination(carte);
+                    carte.gtChoix = { fiche: f };
+                    carte.classList.add('gtChoosingDestination');
+                }
+
+                composerLePanneau(carte, f);
+                composerLesActions(f);
+
+                if (f.gtBloc) {
+                    placer(f, f.gtBloc);
+                }
+            })
+            .fail(function (xhr) {
+                if (f.gtOrdre !== o || demande !== o.jeton) {
+                    return;
+                }
+
+                o.erreur = raisonDeLaReponse(xhr && xhr.responseJSON ? xhr.responseJSON : null);
+                o.etape = 'destination';
+                retirerLeMarqueurDeDestination(carte);
+                carte.gtChoix = { fiche: f };
+                carte.classList.add('gtChoosingDestination');
+                composerLePanneau(carte, f);
+                composerLesActions(f);
+            });
+    }
+
+    /* La confirmation : la version du devis part avec l'ordre ; un devis perime revient en refus, et le joueur en redemande un. */
+    function envoyerLOrdre(carte, f) {
+        var o = f.gtOrdre;
+
+        if (!o || !o.devis || o.enCours || !window.jQuery) {
+            return;
+        }
+
+        var adresse = null;
+
+        if (o.genre === 'move' && typeof galaxyPatrolMoveUrl !== 'undefined') {
+            adresse = adresseDePatrouille(galaxyPatrolMoveUrl, o.patrouille.id);
+        } else if (o.genre === 'recall' && typeof galaxyPatrolRecallUrl !== 'undefined') {
+            adresse = adresseDePatrouille(galaxyPatrolRecallUrl, o.patrouille.id);
+        } else if (o.genre === 'launch' && typeof galaxyPatrolLaunchUrl !== 'undefined') {
+            adresse = galaxyPatrolLaunchUrl;
+        }
+
+        if (!adresse) {
+            return;
+        }
+
+        var charge = chargeDOrdre(o, o.destination);
+        charge.order_version = o.devis.order_version;
+        /*
+         * **Le cout lu voyage avec la confirmation.** La version d'ordre ne bouge pas avec le temps,
+         * et une patrouille en vol se deplace : le point de depart d'une manoeuvre est interpole a
+         * l'instant de la confirmation, donc la distance et le cout peuvent avoir change depuis
+         * l'affichage. Le serveur refuse alors de debiter plus que ce que le joueur a lu.
+         */
+        charge.quoted_fuel_cost = o.devis.fuel_cost;
+
+        o.enCours = true;
+        composerLesActions(f);
+
+        var dire = function (message, erreur) {
+            if (typeof window.fadeBox === 'function' && message) {
+                window.fadeBox(message, erreur);
+            }
+        };
+
+        var refuse = function (reponse) {
+            o.enCours = false;
+            o.devis = null;
+            o.erreur = raisonDeLaReponse(reponse);
+            o.etape = 'destination';
+            retirerLeMarqueurDeDestination(carte);
+            carte.gtChoix = { fiche: f };
+            carte.classList.add('gtChoosingDestination');
+            composerLePanneau(carte, f);
+            composerLesActions(f);
+            dire(o.erreur, true);
+        };
+
+        window.jQuery.post(adresse, charge, null, 'json')
+            .done(function (reponse) {
+                if (f.gtOrdre !== o) {
+                    return;
+                }
+
+                if (!reponse || !reponse.success) {
+                    refuse(reponse);
+
+                    return;
+                }
+
+                o.enCours = false;
+                dire(reponse.message || '', false);
+                deselectionner(carte, false);
+
+                if (carte.gtSysteme) {
+                    chargerLesFlottes(carte, carte.gtSysteme.galaxie, carte.gtSysteme.systeme);
+                }
+            })
+            .fail(function (xhr) {
+                if (f.gtOrdre !== o) {
+                    return;
+                }
+
+                refuse(xhr && xhr.responseJSON ? xhr.responseJSON : null);
+            });
     }
 
     /*
@@ -78480,7 +79535,9 @@ window.playOGameXWormhole = function (canvas) {
                 mettreAJourLesCompteurs(reponse.counters);
                 decalageHorloge = Number(reponse.server_now) * 1000 - Date.now();
                 mouvements = Array.isArray(reponse.movements) ? reponse.movements : [];
+                patrouilles = Array.isArray(reponse.patrols) ? reponse.patrols : [];
                 dessinerLesMouvements(carte, galaxie, systeme);
+                dessinerLesPatrouilles(carte, galaxie, systeme);
                 animer();
             });
     }
@@ -78589,6 +79646,7 @@ window.playOGameXWormhole = function (canvas) {
 
         carte.gtSysteme = { galaxie: galaxie, systeme: systeme };
         mouvements = [];
+        patrouilles = [];
         arreterLAnimation();
         annulerLesFenetres();
         chargerLesFlottes(carte, galaxie, systeme);
@@ -78682,6 +79740,12 @@ window.playOGameXWormhole = function (canvas) {
 
             mouvement._bouts = extremites(mouvement, carte.gtSysteme.galaxie, carte.gtSysteme.systeme);
             rafraichirLeTrace(mouvement, mouvement._bouts);
+        });
+
+        patrouilles.forEach(function (p) {
+            if (p._marqueur && p.segment) {
+                p._bouts = extremites(p.segment, carte.gtSysteme.galaxie, carte.gtSysteme.systeme);
+            }
         });
     }
 
@@ -78844,6 +79908,11 @@ window.playOGameXWormhole = function (canvas) {
             && carte.gtSysteme.galaxie === Number(systeme.galaxy)
             && carte.gtSysteme.systeme === Number(systeme.system);
         var aRestaurer = memeSysteme && deplacee ? { position: deplacee.position, corps: deplacee.corps } : null;
+        var ficheOuverte = carte.querySelector('.gtCard');
+
+        carte.gtPatrouilleARestaurer = memeSysteme && ficheOuverte && !ficheOuverte.hidden && ficheOuverte.gtPatrouille && !ficheOuverte.gtOrdre
+            ? Number(ficheOuverte.gtPatrouille.id)
+            : null;
 
         deselectionner(carte);
 
