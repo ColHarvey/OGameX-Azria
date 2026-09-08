@@ -78032,11 +78032,11 @@ window.playOGameXWormhole = function (canvas) {
 
         /* Les memes points que la feuille : la lune en haut a gauche, les debris a gauche, a la meme distance. */
         if (Number(type) === TYPE_LUNE) {
-            return { x: p.x - 20, y: p.y - 20, aDroite: p.aDroite };
+            return { x: p.x - 24, y: p.y - 24, aDroite: p.aDroite };
         }
 
         if (Number(type) === TYPE_DEBRIS) {
-            return { x: p.x - 28, y: p.y, aDroite: p.aDroite };
+            return { x: p.x - 34, y: p.y, aDroite: p.aDroite };
         }
 
         return p;
