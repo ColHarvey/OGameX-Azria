@@ -77181,15 +77181,6 @@ window.playOGameXWormhole = function (canvas) {
                     return inactif(raison('patrolCurrentOnly'));
                 }
 
-                /*
-                 * Employer une flotte standard depuis la carte demande un Amiral, comme
-                 * l'expedition — et **le serveur l'applique** (`PatrolController::originFrom()`) :
-                 * ce grisement montre un fait qu'il publie (`hasAdmiral`), il ne le decide pas, et
-                 * il dit la raison des patrouilles, plus celle de l'expedition.
-                 */
-                if (!systeme.hasAdmiral) {
-                    return inactif(raison('patrolAdmiral'));
-                }
 
                 return actif(function () {
                     commencerUnLancement(contexte.carte, f, objet);
@@ -77944,6 +77935,36 @@ window.playOGameXWormhole = function (canvas) {
             }
         });
 
+        /*
+         * Le depot : la ou la flotte glissee est relachee. Il designe, il ne deplace pas — le
+         * panneau du devis s'ouvre, et rien ne part avant la confirmation.
+         */
+        carte.addEventListener('dragover', function (evenement) {
+            if (!carte.gtChoix || (evenement.target.closest && evenement.target.closest('.gtCard'))) {
+                return;
+            }
+
+            evenement.preventDefault();
+
+            if (evenement.dataTransfer) {
+                evenement.dataTransfer.dropEffect = 'move';
+            }
+        });
+
+        carte.addEventListener('drop', function (evenement) {
+            if (!carte.gtChoix || (evenement.target.closest && evenement.target.closest('.gtCard'))) {
+                return;
+            }
+
+            evenement.preventDefault();
+
+            var cible = evenement.target.closest ? evenement.target.closest('.gtBody') : null;
+
+            choisirLaDestination(carte, cible
+                ? destinationDuCorps(carte, cible, corpsClique(evenement.target))
+                : destinationDuClic(carte, evenement));
+        });
+
         carte.addEventListener('keydown', function (evenement) {
             if (evenement.key === 'Escape' || evenement.key === 'Esc') {
                 deselectionner(carte, true);
@@ -78666,6 +78687,48 @@ window.playOGameXWormhole = function (canvas) {
                 }
             });
 
+            /*
+             * ## Prendre la flotte a la souris et la poser ou on veut l'envoyer
+             *
+             * Le geste demande par Keven : on saisit la patrouille, on la glisse, et en relachant un
+             * panneau montre le trajet, sa duree et son cout ; on confirme, et **elle voyage
+             * vraiment** jusque-la avant d'y stationner. Elle ne se teleporte pas : le relachement
+             * ne fait que designer une destination, et c'est le serveur qui chiffre puis execute.
+             *
+             * Le glisser n'a aucun pouvoir propre : il ouvre exactement l'ordre que le bouton
+             * « Deplacer » ouvre, et il est refuse pour les memes raisons — une patrouille engagee
+             * dans un combat ou dont le segment se pose avant la fin du delai ne se saisit pas, et
+             * la fiche dit pourquoi. Les champs X et Y restent l'alternative au clavier ; le clic
+             * reste celle du tactile, ou le glisser HTML5 n'existe pas.
+             */
+            b.draggable = true;
+
+            b.addEventListener('dragstart', function (evenement) {
+                var commande = (p.commands && p.commands.move) || {};
+
+                if (!commande.allowed) {
+                    evenement.preventDefault();
+
+                    /* Refuse : la fiche s'ouvre quand meme, et le bouton grise porte la raison. */
+                    choisirLaPatrouille(carte, p, true);
+
+                    return;
+                }
+
+                if (evenement.dataTransfer) {
+                    evenement.dataTransfer.effectAllowed = 'move';
+
+                    try {
+                        evenement.dataTransfer.setData('text/plain', 'patrol:' + p.id);
+                    } catch (e) {
+                        /* Certains navigateurs refusent setData hors interaction : sans effet ici. */
+                    }
+                }
+
+                choisirLaPatrouille(carte, p, true);
+                commencerUnDeplacement(carte, fiche(carte), p);
+            });
+
             couche.appendChild(b);
             p._marqueur = b;
             p._bouts = p.segment ? extremites(p.segment, galaxie, systeme) : null;
@@ -78873,7 +78936,16 @@ window.playOGameXWormhole = function (canvas) {
         if (p._marqueur) {
             p._marqueur.classList.add('gtSelected');
             placer(f, p._marqueur);
+
+            return;
         }
+
+        /*
+         * Sans marqueur — une patrouille d'un autre systeme, dont l'ordre est en cours — la fiche
+         * n'a rien a quoi se coller : elle se pose en haut a gauche, dans la carte.
+         */
+        f.style.left = FICHE_MARGE + 'px';
+        f.style.top = FICHE_MARGE + 'px';
     }
 
     /* Une commande de patrouille : permise ou refusee par le serveur, avec sa raison telle quelle. */
@@ -78906,6 +78978,27 @@ window.playOGameXWormhole = function (canvas) {
      * L'ordre vit sur la fiche (`f.gtOrdre`) ; la carte sait seulement qu'un choix est en cours
      * (`carte.gtChoix`) pour rediriger les clics. Fermer la fiche annule tout.
      */
+    /*
+     * Les vaisseaux de la planete active, tels que la vue les publie. Le nombre date du chargement
+     * de la page : le serveur refuse (`not_enough_on_planet`) si la planete ne les porte plus, et
+     * c'est lui qui a raison — une valeur affichee n'autorise rien.
+     */
+    function vaisseauxDeLaPlanete() {
+        return typeof galaxyPatrolShips !== 'undefined' && Array.isArray(galaxyPatrolShips) ? galaxyPatrolShips : [];
+    }
+
+    function vaisseauParId(flotte, id) {
+        var trouve = null;
+
+        flotte.forEach(function (v) {
+            if (Number(v.id) === id) {
+                trouve = v;
+            }
+        });
+
+        return trouve;
+    }
+
     function panneauDOrdre(f) {
         var panneau = f.querySelector('.patrol-order');
 
@@ -78990,30 +79083,104 @@ window.playOGameXWormhole = function (canvas) {
         }
 
         if (o.etape === 'flotte') {
-            var liste = element('select', 'gtSelect');
-            var vide = document.createElement('option');
+            /*
+             * ## La composition, vaisseau par vaisseau
+             *
+             * **Aucun officier n'est demande pour patrouiller** (decision de Keven, 8 septembre
+             * 2026) : la carte est l'interface centrale du systeme. La flotte standard reste ce
+             * qu'elle a toujours ete, un raccourci reserve a l'Amiral ; sans lui, le joueur compose
+             * ici comme il le fait sur la page Flotte. Choisir un modele **remplit** la composition,
+             * il ne la remplace pas — et elle reste modifiable ensuite.
+             *
+             * Les vaisseaux et leur nombre viennent du serveur (`galaxyPatrolShips`), le fait « ce
+             * vaisseau ne peut pas voler » compris : un satellite solaire a une vitesse nulle, et
+             * c'est le joueur qui la determine. La carte grise, elle ne decide pas.
+             */
+            var flotte = vaisseauxDeLaPlanete();
 
-            vide.value = '';
-            vide.textContent = locaFiche('expeditionChoose', '');
-            liste.appendChild(vide);
-            liste.setAttribute('aria-label', locaFiche('patrolFleet', 'Flotte standard'));
-            (o.modeles || []).forEach(function (m) {
-                var option = document.createElement('option');
-                option.value = String(m.id);
-                option.textContent = String(m.name);
-                liste.appendChild(option);
-            });
-            liste.value = o.modele ? String(o.modele.id) : '';
-            liste.addEventListener('change', function () {
-                o.modele = null;
-                (o.modeles || []).forEach(function (m) {
-                    if (String(m.id) === liste.value) {
-                        o.modele = m;
-                    }
+            if (flotte.length === 0) {
+                noteDOrdre(f, locaFiche('patrolNoShips', ''), true);
+                panneau.appendChild(boutonDePanneau(locaFiche('labels.annuler', 'Annuler'), 'annuler', function () {
+                    annulerLOrdre(carte, f);
+                }));
+
+                return;
+            }
+
+            /*
+             * Le raccourci « flotte standard » garde la restriction qui a toujours ete la sienne :
+             * l employer depuis la Galaxie demande un Amiral, comme pour l expedition (decision de
+             * Keven, 8 septembre 2026 : « aucun Amiral requis pour creer ou commander une patrouille
+             * […] les autres avantages existants de l Amiral restent inchanges »). La composition a
+             * la main, elle, est ouverte a tous — c est elle qui rend la carte utilisable sans lui.
+             */
+            if ((o.modeles || []).length > 0 && (carte.gtSystemeJson || {}).hasAdmiral) {
+                var liste = element('select', 'gtSelect');
+                var vide = document.createElement('option');
+
+                vide.value = '';
+                vide.textContent = locaFiche('patrolTemplate', '');
+                liste.appendChild(vide);
+                liste.setAttribute('aria-label', locaFiche('patrolFleet', 'Flotte standard'));
+                o.modeles.forEach(function (m) {
+                    var option = document.createElement('option');
+                    option.value = String(m.id);
+                    option.textContent = String(m.name);
+                    liste.appendChild(option);
                 });
-                composerLePanneau(carte, f);
+                liste.addEventListener('change', function () {
+                    o.modeles.forEach(function (m) {
+                        if (String(m.id) !== liste.value) {
+                            return;
+                        }
+
+                        /* Le modele remplit ce que la planete porte vraiment, jamais plus. */
+                        o.composition = {};
+                        Object.keys(m.ships || {}).forEach(function (id) {
+                            var v = vaisseauParId(flotte, Number(id));
+
+                            if (v && v.mobile) {
+                                o.composition[v.id] = Math.max(0, Math.min(v.amount, Number(m.ships[id]) || 0));
+                            }
+                        });
+                    });
+                    composerLePanneau(carte, f);
+                });
+                panneau.appendChild(liste);
+            }
+
+            var titre = element('p', 'patrol-note');
+            titre.textContent = locaFiche('patrolCompose', '');
+            panneau.appendChild(titre);
+
+            flotte.forEach(function (v) {
+                var ligne = champNumerique(v.label + ' (' + nombre(v.amount) + ')', 'am' + v.id, o.composition[v.id] || '', 1);
+
+                ligne.champ.min = '0';
+                ligne.champ.max = String(v.amount);
+                ligne.champ.disabled = !v.mobile;
+
+                if (!v.mobile) {
+                    ligne.etiquette.title = locaFiche('patrolImmobile', '');
+                    ligne.etiquette.classList.add('patrol-immobile');
+                } else {
+                    ligne.champ.addEventListener('change', function () {
+                        var voulu = Math.max(0, Math.min(v.amount, Math.floor(Number(ligne.champ.value) || 0)));
+
+                        if (voulu > 0) {
+                            o.composition[v.id] = voulu;
+                        } else {
+                            delete o.composition[v.id];
+                        }
+
+                        ligne.champ.value = voulu > 0 ? String(voulu) : '';
+                        composerLesActions(f);
+                        majDuBoutonSuivant();
+                    });
+                }
+
+                panneau.appendChild(ligne.etiquette);
             });
-            panneau.appendChild(liste);
 
             var reserve = champNumerique(locaFiche('patrolReserveInput', 'Reserve de deuterium'), 'reserve', o.reserve, 100);
             reserve.champ.min = '0';
@@ -79026,9 +79193,14 @@ window.playOGameXWormhole = function (canvas) {
                 o.reserve = Math.max(0, Math.floor(Number(reserve.champ.value) || 0));
                 commencerLeChoixDeDestination(carte, f);
             });
-            suivant.disabled = !o.modele;
+
+            var majDuBoutonSuivant = function () {
+                suivant.disabled = Object.keys(o.composition).length === 0;
+                noteDOrdre(f, suivant.disabled ? locaFiche('reasons.patrolNoFleet', '') : '', false);
+            };
+
             panneau.appendChild(suivant);
-            noteDOrdre(f, o.modele ? '' : locaFiche('reasons.patrolNoFleet', ''), false);
+            majDuBoutonSuivant();
 
             return;
         }
@@ -79050,7 +79222,9 @@ window.playOGameXWormhole = function (canvas) {
             panneau.appendChild(x.etiquette);
             panneau.appendChild(y.etiquette);
             panneau.appendChild(demander);
-            noteDOrdre(f, o.erreur || locaFiche('patrolChoose', ''), !!o.erreur);
+            noteDOrdre(f, o.erreur || (o.genre === 'move'
+                ? locaFiche('patrolDrag', '') + ' ' + locaFiche('patrolOtherSystem', '')
+                : locaFiche('patrolChoose', '')), !!o.erreur);
 
             return;
         }
@@ -79109,7 +79283,7 @@ window.playOGameXWormhole = function (canvas) {
     }
 
     function commencerUnLancement(carte, f, objet) {
-        poserLOrdre(carte, f, { genre: 'launch', planete: objet, etape: 'flotte', modeles: [], modele: null, reserve: 0, destination: null, devis: null, erreur: null, enCours: false });
+        poserLOrdre(carte, f, { genre: 'launch', planete: objet, etape: 'flotte', modeles: [], composition: {}, reserve: 0, destination: null, devis: null, erreur: null, enCours: false });
 
         chargerLesFlottesStandard(carte, function (modeles) {
             if (f.gtOrdre && f.gtOrdre.genre === 'launch') {
@@ -79278,9 +79452,9 @@ window.playOGameXWormhole = function (canvas) {
         if (o.genre === 'launch') {
             charge.reserve = o.reserve;
             charge.planet_id = o.planete && o.planete.planetId;
-            Object.keys((o.modele && o.modele.ships) || {}).forEach(function (id) {
-                if (Number(o.modele.ships[id]) > 0) {
-                    charge['am' + id] = Number(o.modele.ships[id]);
+            Object.keys(o.composition || {}).forEach(function (id) {
+                if (Number(o.composition[id]) > 0) {
+                    charge['am' + id] = Number(o.composition[id]);
                 }
             });
         } else if (o.patrouille) {
@@ -79816,6 +79990,46 @@ window.playOGameXWormhole = function (canvas) {
     }
 
     /* La fiche rouvre sur le meme corps apres un redessin du meme systeme, avec la ligne rafraichie. */
+    /*
+     * Rouvre l'ordre que le redessin a interrompu, dans le systeme desormais affiche.
+     *
+     * La patrouille n'est plus forcement dans la charge utile — c'est meme le cas courant : on a
+     * change de systeme pour l'envoyer ailleurs. La fiche se rouvre donc sur la photographie que
+     * l'ordre porte, et le devis qui suivra viendra du serveur comme toujours.
+     */
+    function restaurerLOrdre(carte) {
+        var ordre = carte.gtOrdreARestaurer;
+
+        carte.gtOrdreARestaurer = null;
+
+        if (!ordre || !ordre.patrouille) {
+            return;
+        }
+
+        var vivante = null;
+
+        patrouilles.forEach(function (p) {
+            if (Number(p.id) === Number(ordre.patrouille.id)) {
+                vivante = p;
+            }
+        });
+
+        choisirLaPatrouille(carte, vivante || ordre.patrouille, true);
+
+        var f = carte.querySelector('.gtCard');
+
+        if (!f) {
+            return;
+        }
+
+        ordre.patrouille = vivante || ordre.patrouille;
+        ordre.destination = null;
+        ordre.devis = null;
+        poserLOrdre(carte, f, ordre);
+        commencerLeChoixDeDestination(carte, f);
+        noteDOrdre(f, locaFiche('patrolOtherSystem', ''), false);
+    }
+
     function restaurerLaSelection(carte, memoire) {
         if (!memoire) {
             return;
@@ -79912,6 +80126,18 @@ window.playOGameXWormhole = function (canvas) {
 
         carte.gtPatrouilleARestaurer = memeSysteme && ficheOuverte && !ficheOuverte.hidden && ficheOuverte.gtPatrouille && !ficheOuverte.gtOrdre
             ? Number(ficheOuverte.gtPatrouille.id)
+            : null;
+
+        /*
+         * **Un ordre en attente de destination survit au changement de systeme.**
+         *
+         * C'est ce qui permet d'envoyer une patrouille ailleurs : on prend l'ordre ici, on navigue,
+         * et on designe la-bas — la destination portera le systeme affiche au moment du choix. Sans
+         * cela, changer de systeme annulait l'ordre et un envoi inter-systemes etait impossible
+         * autrement qu'en saisissant des coordonnees.
+         */
+        carte.gtOrdreARestaurer = ficheOuverte && ficheOuverte.gtOrdre && ficheOuverte.gtOrdre.etape === 'destination'
+            ? ficheOuverte.gtOrdre
             : null;
 
         deselectionner(carte);
@@ -80022,6 +80248,7 @@ window.playOGameXWormhole = function (canvas) {
         poserLaNebuleuse(carte, Number(systeme.galaxy), Number(systeme.system));
         appliquerLesFiltres(carte);
         restaurerLaSelection(carte, aRestaurer);
+        restaurerLOrdre(carte);
         demarrerLaCoucheFlottes(carte, Number(systeme.galaxy), Number(systeme.system));
         demarrerLesOrbites(carte);
     }
