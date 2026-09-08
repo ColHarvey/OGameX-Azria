@@ -53,12 +53,15 @@ use Throwable;
  * **resolu ici** par ses coordonnees et son genre ; l identifiant que le navigateur croirait
  * connaitre n est pas lu.
  *
- * ## Ce que ce point d entree ajoute aux regles du service
+ * ## Ce que ce point d entree n ajoute PAS aux regles du service
  *
- * Une seule chose, et c est une regle du **raccourci de la Galaxie**, pas des patrouilles : employer
- * une flotte standard depuis la carte demande un Amiral, exactement comme l expedition. La page
- * Flotte, ou le joueur compose lui-meme, reste ouverte a tous. La carte grisait deja ce bouton, mais
- * avec la raison de l expedition et sans que rien ne l applique : un appel direct passait.
+ * Rien. **Les patrouilles ne sont reservees a aucun officier** (decision de Keven, relayee par Codex
+ * le 8 septembre 2026) : la carte est l interface centrale du systeme, et la reserver a l Amiral
+ * l aurait fermee a la plupart des joueurs. Une version precedente exigeait l Amiral ici, par
+ * analogie avec l expedition ; l analogie etait mauvaise. Ce qui reste reserve, c est **le modele de
+ * flotte** — la liste des flottes standard depuis la Galaxie —, et cette restriction-la vit deja ou
+ * elle a toujours vecu. Sans Amiral, le joueur compose sa flotte vaisseau par vaisseau sur la carte,
+ * comme il le fait sur la page Flotte.
  */
 class PatrolController extends OGameController
 {
@@ -257,16 +260,10 @@ class PatrolController extends OGameController
      * pour que le devis et l ordre ne dependent pas d un etat de session partage par tous les
      * onglets.
      *
-     * Et la regle du raccourci : employer une flotte standard depuis la Galaxie demande un Amiral,
-     * comme l expedition. C est ce point d entree qui la porte, pas le service : la page Flotte, ou
-     * le joueur compose lui-meme, n a jamais rien demande de tel.
+     * Aucun officier n est demande : une patrouille se lance comme une flotte s envoie.
      */
     private function originFrom(Request $request, PlayerService $player): PlanetService|string
     {
-        if (!$player->hasAdmiral()) {
-            return 'admiral_required';
-        }
-
         $demande = $request->input('planet_id');
 
         if ($demande === null || $demande === '') {

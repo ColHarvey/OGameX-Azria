@@ -1222,6 +1222,20 @@
     font-variant-numeric: tabular-nums;
 }
 
+/*
+ * Un vaisseau que le serveur dit immobile : le champ est un vrai `disabled`, et la ligne se
+ * desature comme un bouton grise. La raison est dans son `title` — le serveur l a traduite.
+ */
+#galaxyTactical .patrol-field.patrol-immobile {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+#galaxyTactical .patrol-input:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+
 #galaxyTactical .patrol-note {
     margin: 0;
     font-size: 12px;

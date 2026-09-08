@@ -49,6 +49,7 @@
             var galaxyPatrolRecallUrl = "{{ route('galaxy.patrol.recall', ['patrol' => 0]) }}";
             var galaxyCurrentPlanetId = {{ $current_planet_id }};
             var galaxyPatrolGridUnits = {{ $patrol_grid_units }};
+            var galaxyPatrolShips = @json($patrol_ships);
             var preserveSystemOnPlanetChange = false;
             @php
                 $galaxyLocaData = [
@@ -193,6 +194,12 @@
                     'patrolReserveInput' => __('t_ingame.galaxy.tactical_patrol_reserve_input'),
                     'patrolChooseDestination' => __('t_ingame.galaxy.tactical_patrol_choose_destination'),
                     'patrolRecallAsk' => __('t_ingame.galaxy.tactical_patrol_recall_ask'),
+                    'patrolCompose' => __('t_ingame.galaxy.tactical_patrol_compose'),
+                    'patrolTemplate' => __('t_ingame.galaxy.tactical_patrol_template'),
+                    'patrolNoShips' => __('t_ingame.galaxy.tactical_patrol_no_ships'),
+                    'patrolImmobile' => __('t_ingame.patrol.refusal_immobile_unit'),
+                    'patrolDrag' => __('t_ingame.galaxy.tactical_patrol_drag'),
+                    'patrolOtherSystem' => __('t_ingame.galaxy.tactical_patrol_other_system'),
                     'labels' => [
                         'espionner' => __('t_ingame.fleet.mission_espionage'),
                         'attaquer' => __('t_ingame.fleet.mission_attack'),
@@ -238,7 +245,6 @@
                         'patrolCurrentOnly' => __('t_ingame.galaxy.tactical_reason_patrol_current'),
                         'patrolNoFleet' => __('t_ingame.galaxy.tactical_reason_patrol_no_fleet'),
                         'patrolNoDestination' => __('t_ingame.galaxy.tactical_reason_patrol_no_destination'),
-                        'patrolAdmiral' => __('t_ingame.patrol.refusal_admiral_required'),
                     ],
                 ];
             @endphp

@@ -22,6 +22,7 @@ use OGame\Services\BuddyService;
 use OGame\Services\CharacterClassService;
 use OGame\Services\DebrisFieldService;
 use OGame\Services\HonorService;
+use OGame\Services\ObjectService;
 use OGame\Services\PhalanxService;
 use OGame\Services\PlanetMoveService;
 use OGame\Services\PlanetService;
@@ -95,7 +96,45 @@ class GalaxyController extends OGameController
             // serait refuse des que l administrateur la change : le serveur refuse un point hors
             // grille au lieu de l arrondir, et il a raison.
             'patrol_grid_units' => $settingsService->patrolGridUnits(),
+            // Les vaisseaux de la planete active, pour composer une patrouille sans flotte standard.
+            'patrol_ships' => $this->patrolShipsOf($player, $planet),
         ]);
+    }
+
+    /**
+     * Les vaisseaux presents sur la planete active, tels que la carte les proposera pour une patrouille.
+     *
+     * **Le fait « ce vaisseau ne peut pas voler » vient du serveur.** Un satellite solaire et un
+     * foreur ont une vitesse nulle, et c est le joueur — ses technologies, sa classe — qui la
+     * determine : une liste ecrite dans la carte serait une seconde source de verite. La carte grise,
+     * elle ne decide pas, et le serveur refuse de toute facon (`refusal_immobile_unit`).
+     *
+     * Le nombre est celui du chargement de la page et peut vieillir. Le serveur refuse alors avec
+     * `not_enough_on_planet`, et le joueur lit pourquoi : une valeur affichee n autorise rien.
+     *
+     * @return array<int, array{id: int, name: string, label: string, amount: int, mobile: bool}>
+     */
+    private function patrolShipsOf(PlayerService $player, PlanetService $planet): array
+    {
+        $vaisseaux = [];
+
+        foreach (ObjectService::getShipObjects() as $objet) {
+            $nombre = $planet->getObjectAmount($objet->machine_name);
+
+            if ($nombre <= 0) {
+                continue;
+            }
+
+            $vaisseaux[] = [
+                'id' => $objet->id,
+                'name' => $objet->machine_name,
+                'label' => $objet->title,
+                'amount' => $nombre,
+                'mobile' => $objet->properties->speed->calculate($player)->totalValue > 0,
+            ];
+        }
+
+        return $vaisseaux;
     }
 
     /**

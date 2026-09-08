@@ -1516,8 +1516,6 @@ class GalaxyTacticalMapTest extends UnitTestCase
 
         /* La version du devis part avec la confirmation ; pas de glisser-deposer. */
         $this->assertStringContainsString('charge.order_version = o.devis.order_version;', $module, 'The confirmation no longer carries the version of the quote it confirms.');
-        $this->assertStringNotContainsString('dragstart', $module, 'A drag and drop appeared: a movement decided by an animation.');
-        $this->assertStringNotContainsString("addEventListener('drop'", $module);
 
         /* Le marqueur est un vrai bouton ; la raison grisee est celle du serveur. */
         $this->assertStringContainsString("element('button', 'patrol-marker gtPatrolMarker gtPatrol--'", $module, 'The patrol marker is not a button: keyboard users cannot open it.');
@@ -1541,6 +1539,110 @@ class GalaxyTacticalMapTest extends UnitTestCase
         $this->assertMatchesRegularExpression('/#galaxyTactical \.patrol-destination \{[^}]*pointer-events: none;/', $feuille, 'The destination marker catches the click meant for the map.');
         $this->assertMatchesRegularExpression('/prefers-reduced-motion: reduce\) \{\s*#galaxyTactical \.patrol-destination \{\s*animation: none;/', $feuille, 'The destination pulse ignores the reduced-motion preference.');
         $this->assertStringContainsString('#galaxyTactical .gtPatrolMarker[hidden] {', $feuille, 'A patrol in hyperspace would still show its ring.');
+    }
+
+    /**
+     * **On prend la patrouille a la souris, on la pose ou on veut l'envoyer, et elle y va vraiment.**
+     *
+     * Le geste que Keven a demande (relaye par Codex le 8 septembre 2026) : saisir la flotte, la
+     * glisser, lire en relachant le trajet, sa duree et son cout, puis confirmer — et **elle ne se
+     * teleporte pas**. Le relachement ne fait que designer : il ouvre le meme ordre que le bouton
+     * « Deplacer », donc le devis vient du serveur et rien ne part avant la confirmation. Les champs
+     * X et Y restent l'alternative au clavier, le clic celle du tactile.
+     */
+    public function testAPatrolIsDraggedToWhereItShouldGo(): void
+    {
+        $module = $this->module();
+        $feuille = $this->feuille();
+
+        /* Le marqueur se saisit, et la saisie ouvre l'ordre de deplacement — pas un envoi. */
+        $this->assertStringContainsString('b.draggable = true;', $module, 'The patrol marker cannot be grabbed with the mouse.');
+        $this->assertStringContainsString("b.addEventListener('dragstart', function (evenement) {", $module, 'Grabbing the patrol does nothing.');
+        $this->assertStringContainsString('commencerUnDeplacement(carte, fiche(carte), p);', $module, 'Grabbing the patrol no longer opens the movement order.');
+
+        /* Une patrouille que le serveur refuse de deplacer ne se saisit pas, et la fiche dit pourquoi. */
+        $this->assertStringContainsString(
+            "var commande = (p.commands && p.commands.move) || {};\n\n                if (!commande.allowed) {\n                    evenement.preventDefault();",
+            str_replace("\r\n", "\n", $module),
+            'A patrol the server refuses to move can still be dragged: the refusal would come only after the drop.'
+        );
+
+        /* Le depot designe, il ne deplace pas : il passe par le devis, jamais par l'ordre. */
+        /*
+         * Le corps du gestionnaire, isole : chercher `envoyerLOrdre` dans tout le module le
+         * trouverait ailleurs et ne dirait rien de ce que le depot fait.
+         */
+        $lignes = str_replace("\r\n", "\n", $module);
+        $debut = strpos($lignes, "carte.addEventListener('drop', function (evenement) {");
+        $this->assertNotFalse($debut, 'Releasing the patrol on the map does nothing.');
+        $fin = strpos($lignes, "\n        });", $debut);
+        $this->assertNotFalse($fin);
+        $depot = substr($lignes, $debut, $fin - $debut);
+
+        $this->assertStringContainsString('choisirLaDestination(carte, cible', $depot, 'The drop no longer goes through the quote: a movement decided by the browser.');
+        $this->assertStringNotContainsString('envoyerLOrdre', $depot, 'The drop sends the order straight away: the fleet would leave without the player confirming a quote.');
+        $this->assertStringNotContainsString('galaxyPatrolMoveUrl', $depot, 'The drop posts the movement itself: the quote would be skipped.');
+
+        /*
+         * La garde du **depot**, lue dans son propre corps : la meme ligne vit aussi dans le
+         * gestionnaire de survol, et une mutation qui ne touchait que le depot survivait a une
+         * assertion qui cherchait la ligne dans tout le module.
+         */
+        $this->assertStringContainsString(
+            "if (!carte.gtChoix || (evenement.target.closest && evenement.target.closest('.gtCard'))) {",
+            $depot,
+            'The card is a drop target: releasing on the quote panel would designate a point under it.'
+        );
+
+        /* Le survol pendant le glisser n'est accepte que sur la carte, jamais sur la fiche. */
+        $this->assertStringContainsString("carte.addEventListener('dragover', function (evenement) {", $module, 'The map refuses every drop: dragover never prevents the default.');
+
+        /* Vers un autre systeme : l'ordre survit au redessin, et la destination porte le systeme affiche. */
+        $this->assertStringContainsString('carte.gtOrdreARestaurer = ficheOuverte && ficheOuverte.gtOrdre && ficheOuverte.gtOrdre.etape === \'destination\'', $module, 'A pending order dies on a system change: an inter-system send would be impossible by hand.');
+        $this->assertStringContainsString('restaurerLOrdre(carte);', $module, 'The pending order is saved but never restored.');
+        $this->assertStringContainsString('galaxy: s.galaxie,', $module, 'A clicked destination no longer carries the system on screen.');
+
+        /* Le curseur dit que la carte attend une destination. */
+        $this->assertMatchesRegularExpression('/#galaxyTactical\.gtChoosingDestination,\s*#galaxyTactical\.gtChoosingDestination \.gtBody \{\s*cursor: crosshair;/s', $feuille, 'Nothing tells the player the map is waiting for a destination.');
+    }
+
+    /**
+     * **Patrouiller ne demande aucun officier ; le raccourci « flotte standard » garde le sien.**
+     *
+     * Décision de Keven du 8 septembre 2026, relayée par Codex : la carte est l'interface centrale
+     * du système, les patrouilles y sont ouvertes à tous, aux mêmes contraintes de vaisseaux, de
+     * carburant et de créneaux — et les autres avantages de l'Amiral ne bougent pas. Le joueur
+     * compose donc sa flotte vaisseau par vaisseau, et la liste des flottes standard reste ce
+     * qu'elle a toujours été.
+     */
+    public function testPatrollingNeedsNoOfficerButTheStandardFleetShortcutKeepsIts(): void
+    {
+        $module = $this->module();
+        $vue = $this->vue();
+
+        /* Plus aucune trace d'un refus par l'Amiral, ni dans la carte, ni dans les traductions. */
+        $this->assertStringNotContainsString('patrolAdmiral', $module, 'The map still greys the patrol button on the Admiral.');
+        $this->assertStringNotContainsString('admiral_required', (string)file_get_contents(app_path('Http/Controllers/PatrolController.php')), 'The server still refuses a patrol without an Admiral.');
+
+        foreach (['fr', 'en'] as $langue) {
+            $lignes = require resource_path('lang/' . $langue . '/t_ingame.php');
+            $this->assertArrayNotHasKey('refusal_admiral_required', $lignes['patrol'], 'A translation still describes a rule that no longer exists (' . $langue . ').');
+        }
+
+        /* La composition vient du serveur, le fait « ne peut pas voler » compris. */
+        $this->assertStringContainsString('var galaxyPatrolShips = @json($patrol_ships);', $vue, 'The view no longer publishes the ships of the active planet: nothing to compose with.');
+        $this->assertStringContainsString("'patrol_ships' => \$this->patrolShipsOf(\$player, \$planet),", (string)file_get_contents(app_path('Http/Controllers/GalaxyController.php')), 'The controller no longer computes the ships of the active planet.');
+        $this->assertStringContainsString("'mobile' => \$objet->properties->speed->calculate(\$player)->totalValue > 0,", (string)file_get_contents(app_path('Http/Controllers/GalaxyController.php')), 'Whether a ship can fly is no longer measured on the player: the map would decide it.');
+        $this->assertStringContainsString('ligne.champ.disabled = !v.mobile;', $module, 'An immobile ship can be typed into the composition.');
+        $this->assertStringContainsString('charge[\'am\' + id] = Number(o.composition[id]);', $module, 'The launch no longer sends the composition the player typed.');
+
+        /* Le raccourci reste reserve, et la composition ne l'est pas. */
+        $this->assertStringContainsString("if ((o.modeles || []).length > 0 && (carte.gtSystemeJson || {}).hasAdmiral) {", $module, 'The standard fleet shortcut lost the restriction it has always had.');
+        $this->assertMatchesRegularExpression(
+            "/flotte\.forEach\(function \(v\) \{/s",
+            str_replace("\r\n", "\n", $module),
+            'The manual composition is gone: without an Admiral nothing could be launched from the map.'
+        );
     }
 
     public function testTheModuleIsPartOfTheBundle(): void

@@ -53,14 +53,6 @@ class PatrolEndpointsTest extends AccountTestCase
     }
 
     /**
-     * L Amiral : employer une flotte standard depuis la Galaxie le demande, comme l expedition.
-     */
-    private function hireAdmiral(): void
-    {
-        DB::table('users')->where('id', $this->currentUserId)->update(['admiral_until' => Date::now()->addDay()]);
-    }
-
-    /**
      * La charge d un lancement depuis la planete du banc.
      *
      * @return array<string, int>
@@ -433,8 +425,6 @@ class PatrolEndpointsTest extends AccountTestCase
         $croiseursAvant = $this->planetService->getObjectAmount('cruiser');
         $deuteriumAvant = $this->planetService->deuterium()->get();
 
-        $this->hireAdmiral();
-
         $devis = $this->postJson(route('galaxy.patrol.quote'), $this->launchPayload())
             ->assertStatus(200)
             ->json();
@@ -466,7 +456,6 @@ class PatrolEndpointsTest extends AccountTestCase
     public function testALaunchQuoteRefusesAnImmobileShipBeforeAnyNumber(): void
     {
         $this->arm();
-        $this->hireAdmiral();
         $this->planetAddResources(new Resources(0, 0, 60000, 0));
         $this->planetAddUnit('cruiser', 20);
         $this->planetAddUnit('solar_satellite', 1);
@@ -633,25 +622,20 @@ class PatrolEndpointsTest extends AccountTestCase
     }
 
     /**
-     * Un lancement nomme le corps d ou il part ; celui d un autre joueur est refuse, et sans Amiral
-     * le raccourci de la Galaxie l est aussi.
+     * Un lancement nomme le corps d ou il part ; celui d un autre joueur est refuse.
+     *
+     * **Aucun officier n est demande** (decision de Keven, 8 septembre 2026, relayee par Codex : la
+     * carte est l interface centrale du systeme, et les patrouilles y sont ouvertes a tous, aux
+     * memes contraintes de vaisseaux, de carburant et de creneaux). Le compte du banc n a pas
+     * d Amiral, et c est justement ce qui rend ce temoin utile.
      */
-    public function testALaunchNamesItsOriginAndTheMapShortcutNeedsAnAdmiral(): void
+    public function testALaunchNamesItsOriginAndNeedsNoOfficer(): void
     {
         $this->arm();
         $this->planetAddResources(new Resources(0, 0, 60000, 0));
         $this->planetAddUnit('cruiser', 20);
 
-        // Sans Amiral : le raccourci est refuse **par le serveur**, pas seulement grise par la carte.
-        $sansAmiral = $this->postJson(route('galaxy.patrol.quote'), $this->launchPayload())
-            ->assertStatus(409)
-            ->json();
-
-        $this->assertSame('admiral_required', $sansAmiral['reason_key']);
-        $this->postJson(route('galaxy.patrol.launch'), $this->launchPayload())->assertStatus(409);
-        $this->assertSame(0, Patrol::query()->where('user_id', $this->currentUserId)->count(), 'A launch without an Admiral created a patrol.');
-
-        $this->hireAdmiral();
+        $this->assertFalse($this->player()->hasAdmiral(), 'The witness needs an account without an Admiral to prove anything.');
 
         // Le corps d un autre joueur n est pas une origine.
         $etrangere = $this->getNearbyForeignPlanet();
@@ -663,11 +647,18 @@ class PatrolEndpointsTest extends AccountTestCase
         $this->assertSame('bad_origin', $refus['reason_key']);
         $this->assertSame(0, Patrol::query()->where('user_id', $this->currentUserId)->count(), 'A launch from a foreign body created a patrol.');
 
-        // Le sien, oui.
+        // Le sien, oui — sans Amiral, et la patrouille part.
         $reponse = $this->postJson(route('galaxy.patrol.launch'), $this->launchPayload())->assertStatus(200)->json();
         $patrouille = Patrol::query()->whereKey((int)$reponse['patrol_id'])->firstOrFail();
 
         $this->assertSame((int)$this->planetService->getPlanetId(), (int)$patrouille->home_planet_id, 'The patrol was not launched from the named body.');
+
+        // **Les contraintes ordinaires tiennent toujours** : les vaisseaux qu on n a pas sont refuses.
+        $trop = $this->launchPayload();
+        $trop['am' . self::CRUISER] = 999;
+
+        $refusFlotte = $this->postJson(route('galaxy.patrol.quote'), $trop)->assertStatus(409)->json();
+        $this->assertSame('not_enough_on_planet', $refusFlotte['reason_key'], 'Without an Admiral the ordinary constraints were dropped too.');
     }
 
     /**
