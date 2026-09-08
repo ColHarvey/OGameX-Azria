@@ -262,20 +262,96 @@ class PatrolIsolationTest extends AccountTestCase
     }
 
     /**
-     * Une patrouille engagee dans un combat retient la suppression jusqu au reglement.
+     * Une patrouille engagee fait ATTENDRE la suppression ; sa bataille va a son terme.
      *
-     * ## Le critere est l engagement, pas le genre
+     * ## Le defaut que ce temoin ferme, et pourquoi il etait invisible
      *
-     * Codex l a demande ainsi, et le depot le fait deja : ce qui protege un participant n est pas
-     * une liste de genres de mission, mais le lien de combat que porte sa ligne. `CombatsInvolvingPlayer`
-     * cherche par trois liens, dont `fleet_missions.combat_instance_id` — que **toute** mission peut
-     * porter, patrouille comprise. Le retrait ne supprime donc pas le participant : il **annule sa
-     * bataille**, ce qui est le reglement sur, et la flotte rentre par le chemin ordinaire.
+     * Le retrait d un compte lit le camp d une flotte retenue a son **genre** : ne pas renforcer la
+     * defense d un corps, c est l attaquer. L inference vaut pour tous les genres qui visent un corps
+     * celeste — on est d un cote ou de l autre du meme corps. Elle ne vaut pas pour une patrouille,
+     * qui ne vise aucun corps et peut etre **la cible**. Une patrouille attaquee en espace libre etait
+     * donc classee « attaquante retiree », et sa bataille annulee.
      *
-     * Ce temoin l etablit avec un combat monte a la main, avant meme que le combat en espace libre
-     * existe : le jour ou une patrouille sera attaquable, la protection sera deja la et prouvee.
+     * Cela offrait une esquive : demander la suppression de son compte pendant qu on perd, et voir la
+     * bataille disparaitre. La regle du jeu l interdisait deja — annuler la bataille d un tiers est
+     * une decision de jeu, et personne ne l a prise — mais un genre lui echappait.
+     *
+     * Le comportement attendu, et celui que ce temoin etablit : la demande est enregistree, la
+     * bataille continue jusqu a son reglement, et la suppression effective attend.
      */
-    public function testAnEngagedPatrolIsSettledNotSilentlyRemoved(): void
+    public function testAnEngagedPatrolDefersTheDeletionInsteadOfCancellingItsBattle(): void
+    {
+        [$patrouille, $segment] = $this->aParkedPatrol();
+
+        $planetes = $this->player()->planets->allIds();
+        $base = $this->planetService;
+
+        // Un combat en espace libre : aucun corps celeste vise, et la patrouille y est retenue.
+        $combat = CombatInstance::create([
+            'status' => CombatState::Active,
+            'mission_id' => $segment->id,
+            'target_planet_id' => null,
+            'target_type' => 5,
+            'galaxy' => $base->getPlanetCoordinates()->galaxy,
+            'system' => $base->getPlanetCoordinates()->system,
+            'position' => 9,
+            'started_at' => 1_700_000_000,
+        ]);
+
+        $segment->forceFill(['combat_instance_id' => $combat->id])->save();
+
+        resolve(SettingsService::class)->set('persistent_combat_enabled', 1);
+
+        try {
+            $this->assertTrue(
+                CombatsInvolvingPlayer::isPartyTo($combat, $this->currentUserId, $planetes),
+                'An engaged patrol is not recognised as a party to its own battle.'
+            );
+
+            $plan = resolve(AccountCombatWithdrawal::class)->planFor($this->currentUserId, $planetes);
+
+            // **La bataille n est PAS annulee.** C est le point que Codex a releve : une suppression
+            // ne doit pas effacer un combat engage, sinon elle sert d esquive.
+            $this->assertArrayNotHasKey(
+                (int)$combat->id,
+                $plan->aAnnuler,
+                'Requesting an account deletion cancelled a battle already under way: a defeat could be dodged.'
+            );
+
+            // Elle retient la suppression, et le motif le dit.
+            $this->assertArrayHasKey(
+                (int)$combat->id,
+                $plan->empechements,
+                'The battle an engaged patrol is fighting holds nothing back.'
+            );
+            // **Le motif dit la bonne raison.** Une patrouille attaquee n est pas un renfort pose
+            // chez un allie : ecrire le meme motif pour les deux ferait lire l inverse a qui vient
+            // comprendre l attente.
+            $this->assertStringContainsString(
+                'la cible d une bataille qu il n a pas ouverte',
+                $plan->empechements[(int)$combat->id],
+                'The wait blames a reinforcement the account never sent.'
+            );
+            $this->assertTrue($plan->deferred(), 'The deletion was not deferred while a battle is under way.');
+
+            // **Un empechement suffit a n en annuler aucun** : la regle existe deja, et elle protege
+            // ici tout ce que le compte pourrait avoir d autre en cours.
+            $this->assertSame([], $plan->aAnnuler, 'One impediment did not stop every cancellation.');
+        } finally {
+            resolve(SettingsService::class)->set('persistent_combat_enabled', 0);
+            $segment->forceFill(['combat_instance_id' => null])->save();
+        }
+
+        unset($patrouille);
+        Date::setTestNow();
+    }
+
+    /**
+     * Une fois la bataille finale, plus rien ne retient la suppression.
+     *
+     * C est l autre moitie de la regle : attendre n est acceptable que si l attente finit.
+     */
+    public function testOnceTheBattleIsSettledNothingHoldsTheDeletionBack(): void
     {
         [$patrouille, $segment] = $this->aParkedPatrol();
 
@@ -285,45 +361,34 @@ class PatrolIsolationTest extends AccountTestCase
         $combat = CombatInstance::create([
             'status' => CombatState::Active,
             'mission_id' => $segment->id,
-            'target_planet_id' => $base->getPlanetId(),
-            'target_type' => 1,
+            'target_planet_id' => null,
+            'target_type' => 5,
             'galaxy' => $base->getPlanetCoordinates()->galaxy,
             'system' => $base->getPlanetCoordinates()->system,
-            'position' => $base->getPlanetCoordinates()->position,
+            'position' => 9,
             'started_at' => 1_700_000_000,
         ]);
 
-        // Le segment porte le lien, comme le porterait une patrouille attaquee en espace libre.
         $segment->forceFill(['combat_instance_id' => $combat->id])->save();
-
         resolve(SettingsService::class)->set('persistent_combat_enabled', 1);
 
         try {
-            // **Elle est bien tenue pour partie au combat**, par le lien que porte sa ligne.
             $this->assertTrue(
-                CombatsInvolvingPlayer::isPartyTo($combat, $this->currentUserId, $planetes),
-                'An engaged patrol is not recognised as a party to its own battle.'
+                resolve(AccountCombatWithdrawal::class)->planFor($this->currentUserId, $planetes)->deferred(),
+                'The deletion was not deferred while the battle was under way.'
             );
 
-            $plan = resolve(AccountCombatWithdrawal::class)->planFor($this->currentUserId, $planetes);
+            // La bataille se regle : le combat devient final, et le segment cesse de le nommer.
+            $combat->forceFill(['status' => CombatState::Resolved])->save();
+            $segment->forceFill(['combat_instance_id' => null, 'processed' => 1])->save();
 
-            // **Le retrait la regle au lieu de l effacer** : la bataille est annulee, et c est par
-            // cette annulation que la flotte rentre. Aucun participant ne disparait avant.
-            $this->assertContains(
-                (int)$combat->id,
-                array_map(static fn (mixed $id): int => (int)$id, array_keys($plan->aAnnuler)),
-                'The withdrawal ignored the battle an engaged patrol is fighting.'
-            );
+            $apres = resolve(AccountCombatWithdrawal::class)->planFor($this->currentUserId, $planetes);
 
-            // Et elle ne figure pas parmi celles qui bloquent : bloquer et regler sont exclusifs.
-            $this->assertNotContains(
-                (int)$segment->id,
-                $plan->flottesQuiPeuventEncoreEngager,
-                'An engaged patrol both blocks the deletion and has its battle cancelled.'
-            );
+            $this->assertSame([], $apres->empechements, 'A settled battle still holds the deletion back: the wait would never end.');
+            $this->assertSame([], $apres->aAnnuler, 'A settled battle was queued for cancellation.');
+            $this->assertFalse($apres->deferred(), 'Nothing should hold the deletion once the battle is settled.');
         } finally {
             resolve(SettingsService::class)->set('persistent_combat_enabled', 0);
-            $segment->forceFill(['combat_instance_id' => null])->save();
         }
 
         unset($patrouille);

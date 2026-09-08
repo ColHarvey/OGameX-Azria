@@ -76,7 +76,7 @@ final class AccountCombatWithdrawal
             $cause = $this->causeFor($combat, $userId, $planetIds);
 
             if ($cause === null) {
-                $empechements[$identifiant] = 'le compte y renforce la defense d un autre joueur';
+                $empechements[$identifiant] = $this->whyItHoldsBack($combat, $userId);
 
                 continue;
             }
@@ -195,6 +195,31 @@ final class AccountCombatWithdrawal
         return CombatsInvolvingPlayer::stillRunning($userId, $planetIds);
     }
 
+    /**
+     * Pourquoi ce combat retient la suppression, en une phrase lisible par un administrateur.
+     *
+     * ## Deux raisons, et il faut les distinguer
+     *
+     * Le compte peut retenir la suppression parce qu il **renforce la defense d un autre joueur** —
+     * une Defense ACS posee chez un allie —, ou parce qu il est lui-meme **la cible** d une bataille
+     * qu il n a pas ouverte : une patrouille attaquee en espace libre. Les deux se traitent de la
+     * meme facon — la bataille va a son terme, la suppression attend —, mais un seul motif pour les
+     * deux en rendrait un faux, et un administrateur venu comprendre une attente lirait l inverse
+     * de ce qui se passe.
+     */
+    private function whyItHoldsBack(CombatInstance $combat, int $userId): string
+    {
+        $cible = FleetMission::query()
+            ->where('combat_instance_id', $combat->id)
+            ->where('user_id', $userId)
+            ->pluck('mission_type')
+            ->contains(static fn (mixed $type): bool => !CombatMissionKind::fromMissionType((int)$type)->sideFollowsFromKindAlone());
+
+        return $cible
+            ? 'le compte y est la cible d une bataille qu il n a pas ouverte'
+            : 'le compte y renforce la defense d un autre joueur';
+    }
+
     private function causeFor(CombatInstance $combat, int $userId, array $planetIds): CombatCancellationCause|null
     {
         if (in_array((int)$combat->target_planet_id, $planetIds, true)) {
@@ -220,7 +245,14 @@ final class AccountCombatWithdrawal
             ->pluck('mission_type')
             ->map(static fn (mixed $type): CombatMissionKind => CombatMissionKind::fromMissionType((int)$type));
 
-        if ($retenues->isNotEmpty() && $retenues->every(static fn (CombatMissionKind $genre): bool => !$genre->reinforcesTheDefence())) {
+        // **L inference ne vaut que pour les genres qui visent un corps celeste.** Une patrouille ne
+        // vise aucun corps : un combat qui la retient est un combat dont elle est la **cible**, et en
+        // conclure « attaquante » ferait annuler la bataille d un tiers — ce que la regle interdit,
+        // et ce qui offrirait une esquive a qui demande la suppression de son compte en train de
+        // perdre. Le genre porte lui-meme cette limite.
+        $deductibles = $retenues->every(static fn (CombatMissionKind $genre): bool => $genre->sideFollowsFromKindAlone());
+
+        if ($retenues->isNotEmpty() && $deductibles && $retenues->every(static fn (CombatMissionKind $genre): bool => !$genre->reinforcesTheDefence())) {
             return CombatCancellationCause::AttackerRemoved;
         }
 

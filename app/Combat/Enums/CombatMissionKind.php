@@ -161,6 +161,34 @@ enum CombatMissionKind: string
     }
 
     /**
+     * Si le camp d une flotte de ce genre se deduit du genre seul, pendant le ralliement.
+     *
+     * ## L inference, et l endroit exact ou elle cesse d etre vraie
+     *
+     * Avant la photographie, le retrait d un compte lit le camp d une flotte retenue a son genre :
+     * ne pas renforcer la defense d un corps, c est l attaquer. L inference tient pour tous les
+     * genres qui **visent un corps celeste** — on est d un cote ou de l autre du meme corps.
+     *
+     * Elle ne tient pas pour une patrouille. Une patrouille ne vise aucun corps : elle se pose dans
+     * l espace, et un combat qui la retient est un combat **dont elle est la cible**. En deduire
+     * « attaquante » faisait annuler la bataille d un tiers quand son proprietaire demandait la
+     * suppression de son compte — ce que la regle du jeu interdit deja, et ce qui aurait permis
+     * d esquiver une defaite. Le genre le dit donc lui-meme, plutot que de laisser l appelant
+     * enumerer les exceptions.
+     *
+     * @return bool
+     */
+    public function sideFollowsFromKindAlone(): bool
+    {
+        return match ($this) {
+            self::Attack, self::AcsAttack, self::MoonDestruction, self::AcsDefend, self::Transport,
+            self::Deployment, self::Espionage, self::Missile, self::Colonisation, self::Recycle,
+            self::Expedition => true,
+            self::Patrol => false,
+        };
+    }
+
+    /**
      * Ce que l'aller de cette mission vise reellement.
      *
      * **Le retour n'est pas concerne** : une flotte qui rentre se pose toujours sur un corps
