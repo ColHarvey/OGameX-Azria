@@ -649,6 +649,25 @@ final class PatrolOrders
      * interdit qu un deplacement interne la remette a zero.
      *
      * Le segment reste non traite, avec un `time_holding` qui porte jusqu au retour de securite.
+     *
+     * ## Ce que l appelant doit garantir, parce que cette methode ne le verifie pas
+     *
+     * L ecriture est **inconditionnelle** : aucun controle d etat, aucun verrou pris ici. Deux
+     * obligations pesent donc sur qui appelle, et elles se tiennent toutes deux en amont.
+     *
+     *  - **La ligne de la mission est tenue `for update`.** Sans elle, deux traitements du meme
+     *    segment reposeraient la patrouille deux fois. Le jeton de traitement
+     *    (`FleetMissionService::claimForProcessing()`) ne suffit pas a l affirmer : il se reprend
+     *    passe son delai, et c est le verrou de ligne qui reste. Les deux chemins qui menent ici le
+     *    prennent — le travailleur des pages avant `updateMission()`, et le traitement d une mission
+     *    bloquee par l administration avant le sien.
+     *  - **L etat admet le stationnement.** Une patrouille `Finished` reposee ici repartirait
+     *    stationnee, avec un rendez-vous arme. Le garde est en amont : `updateMission()` refuse un
+     *    segment deja traite, et l atterrissage marque `processed` sous verrou avant tout credit.
+     *
+     * Ces deux garanties sont aujourd hui tenues par les appelants, pas par cette methode. Les
+     * deplacer ici demanderait de lui donner sa propre transaction, ce qui n a pas ete fait : c est
+     * une obligation documentee, pas une protection en place.
      */
     public function park(Patrol $patrol, FleetMission $segment): void
     {
