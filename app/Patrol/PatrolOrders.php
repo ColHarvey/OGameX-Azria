@@ -4,6 +4,7 @@ namespace OGame\Patrol;
 
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Services\EngagedFleetCheck;
+use OGame\Enums\AccountDeletionState;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameObjects\Models\Units\UnitCollection;
@@ -15,6 +16,7 @@ use OGame\Models\Resources;
 use OGame\Patrol\Enums\PatrolState;
 use OGame\Patrol\Exceptions\PatrolOrderRefused;
 use OGame\Patrol\Geometry\SpatialPoint;
+use OGame\Services\AccountDeletionBarrier;
 use OGame\Services\FleetMissionService;
 use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
@@ -102,6 +104,27 @@ final class PatrolOrders
         }
 
         return DB::transaction(function () use ($from, $player, $units, $cargo, $reserve, $to, $devis, $depart, $now): Patrol {
+            // **La meme protection que pour une flotte ordinaire, pas une regle inventee.** Le
+            // lancement de flotte prend la barriere de suppression de compte ; une patrouille est une
+            // flotte, et rien ne justifie qu elle naisse pendant que son proprietaire et ses biens
+            // sont effaces — la mission resterait orpheline, ou le debit sans mission. L etat type est
+            // celui du jeu, lu sur la ligne tenue.
+            //
+            // **Et c est le meme verrou qui reserve le creneau.** Le controle d avant la transaction
+            // lit un etat que rien ne tient : deux lancements simultanes y voient tous deux la
+            // derniere place libre, puis partent tous les deux. La ligne du compte serialise les
+            // departs du meme joueur, et le compte est refait une fois qu elle est tenue.
+            //
+            // Sous SQLite `lockForUpdate()` ne compile a rien : la serialisation est decrite ici et
+            // **prouvee au bac MariaDB**, comme toutes les courses de ce depot.
+            if (AccountDeletionBarrier::heldState($player->getId()) === AccountDeletionState::Pending) {
+                throw new PatrolOrderRefused('account_being_deleted');
+            }
+
+            if ($player->getFleetSlotsInUse() >= $player->getFleetSlotsMax()) {
+                throw new PatrolOrderRefused('no_fleet_slot');
+            }
+
             $aRetirer = self::takenFromThePlanet($cargo, $reserve);
 
             if (!$from->deductResourcesAndUnitsAtomic($aRetirer, $units)) {
@@ -631,7 +654,14 @@ final class PatrolOrders
     {
         $arrivee = (int)$segment->time_arrival;
         $point = $this->pointOf($segment);
-        $memeSysteme = (int)$patrol->galaxy === (int)$segment->galaxy_to && (int)$patrol->system === (int)$segment->system_to;
+        // **Le trajet dit s il a change de systeme, jamais la ligne de la patrouille.** Le depart
+        // ecrit deja le systeme de destination sur cette ligne : la comparer a l arrivee la trouvait
+        // toujours egale, et l instant d entree n etait jamais remis. Une patrouille venue d ailleurs
+        // aurait alors porte la date de son ancien systeme, et l horloge d acquisition des reseaux de
+        // surveillance — qui part de cet instant — aurait compte un sejour qui n a pas eu lieu.
+        // Les deux bouts du segment, eux, sont des faits du trajet que rien ne reecrit.
+        $memeSysteme = (int)$segment->galaxy_from === (int)$segment->galaxy_to
+            && (int)$segment->system_from === (int)$segment->system_to;
 
         $patrol->forceFill([
             'state' => PatrolState::Stationed,
@@ -793,7 +823,12 @@ final class PatrolOrders
         if ($base !== null && !$base->isDestroyed()) {
             $service = resolve(PlanetServiceFactory::class)->make((int)$base->id, true);
 
-            if ($service instanceof PlanetService) {
+            // **Vivante ne suffit pas : encore faut-il qu elle soit la sienne.** Une base abandonnee
+            // puis colonisee par un autre existe toujours et n est pas detruite, et elle etait rendue
+            // ici comme si de rien n etait : les devis, les ancres et les retours de securite
+            // visaient alors la planete d un tiers. Le repli sur la planete la plus proche du joueur
+            // est exactement ce que ce cas demande.
+            if ($service instanceof PlanetService && $this->belongsToTheSameOwner($patrol, $service)) {
                 return $service;
             }
         }
@@ -910,7 +945,16 @@ final class PatrolOrders
     public function launchSafetyReturn(Patrol $patrol, FleetMission $parked, int $now): FleetMission|null
     {
         $units = $this->unitsOf($parked);
-        $this->bill($patrol, $units, $now);
+
+        // **Le stationnement s arrete au rendez-vous, pas au passage du travailleur.** L autonomie
+        // est arrondie a la seconde inferieure : a l instant du rendez-vous, la reserve couvre
+        // exactement le cout du retour — c est la garantie « avant d entamer l indispensable ». Le
+        // travailleur, lui, passe quand il passe ; facturer les secondes de son retard **avant** de
+        // decider du depart mangeait dans la reserve reservee et rendait ce depart impayable de
+        // quelques centiemes. Mesure : 133,9167 pour un cout de 134, soit une seconde de retard.
+        // Le curseur ne recule jamais : quand il n y a pas de rendez-vous, l instant courant fait foi.
+        $rendezVous = $this->nextEventAt($parked);
+        $this->bill($patrol, $units, $rendezVous === null ? $now : min($now, $rendezVous));
 
         $base = $this->homeOf($patrol);
         $proprietaire = $this->playerOf($patrol);
@@ -935,6 +979,25 @@ final class PatrolOrders
         $vitesse = $this->settings->patrolSafetyReturnSpeed();
         $duree = $this->fleetMissionsFor($proprietaire)->durationOverDistance($proprietaire, $units, $distance, null, $vitesse);
         $cout = $this->fleetMissionsFor($proprietaire)->consumptionOverDistance($proprietaire, $units, $distance, 0, $vitesse);
+
+        // **Le retour se paie, il ne se donne pas.** La reserve relue apres la facturation du
+        // stationnement est ce qui reste vraiment ; celle que l appelant tient decrit un passe.
+        // Quand ce trajet coute plus que ce reste, la patrouille ne part pas : elle s immobilise la
+        // ou elle est, posee et attaquable, et le secours borne est le seul chemin qui la remette en
+        // route — c est ce que l etat `Immobilised` decrit depuis le premier jour sans que rien ne
+        // le pose. Le rendez-vous est repousse sans terme : sans cela le travailleur reprendrait le
+        // segment a chaque passage pour refuser le meme depart.
+        $patrol->refresh();
+
+        // **La comparaison est exacte, sans tolerance.** Le stationnement ayant cesse d etre facture
+        // au rendez-vous, la reserve couvre le cout des que le socle l a promis : un manque, ici,
+        // est un vrai manque. Le cas vise est le repli, ou le trajet est recalcule vers une base plus
+        // lointaine que celle pour laquelle la reserve avait ete dimensionnee.
+        if ($cout > (float)$patrol->fuel_reserve) {
+            $this->immobilise($patrol, $parked);
+
+            return null;
+        }
 
         return DB::transaction(function () use ($patrol, $parked, $units, $base, $depart, $now, $duree, $cout): FleetMission|null {
             // **Le segment pose est la porte, et la base l arbitre.** Deux passages simultanes
@@ -983,22 +1046,120 @@ final class PatrolOrders
     }
 
     /**
+     * Le corps sur lequel cette patrouille a le droit de se poser, ou `null` s il n en est plus un.
+     *
+     * ## Pourquoi cette question se pose a l arrivee, et pas seulement au depart
+     *
+     * Un retour vise le corps qu il a nomme en partant. Entre le depart et l arrivee, ce corps peut
+     * avoir ete **detruit** ou avoir **change de mains** : une lune abattue, une planete abandonnee
+     * puis colonisee par un autre. Se poser dessus quand meme livrerait la flotte, la cargaison et
+     * la reserve au **proprietaire du moment** — un cadeau a un tiers, et une perte seche pour le
+     * joueur. La destination gardee sur le segment dit ou la patrouille se rendait ; elle
+     * n autorise pas la livraison.
+     *
+     * Ce que la patrouille fait alors est ce que le socle prevoit deja : elle **stationne sur
+     * place** — elle y est physiquement — et le retour de securite la ramene vers la base qui lui
+     * reste. Rien n est perdu : unites, cargaison et reserve restent a bord.
+     *
+     * @param Patrol $patrol
+     * @param FleetMission $segment
+     * @return PlanetService|null
+     */
+    public function homecomingBase(Patrol $patrol, FleetMission $segment): PlanetService|null
+    {
+        if ($segment->planet_id_to === null) {
+            return null;
+        }
+
+        try {
+            $base = resolve(PlanetServiceFactory::class)->make((int)$segment->planet_id_to, true);
+        } catch (Throwable) {
+            return null;
+        }
+
+        if (!$base instanceof PlanetService || $base->isDestroyed()) {
+            return null;
+        }
+
+        return $this->belongsToTheSameOwner($patrol, $base) ? $base : null;
+    }
+
+    /**
+     * Ce corps appartient-il au proprietaire de cette patrouille ?
+     *
+     * @param Patrol $patrol
+     * @param PlanetService $body
+     * @return bool
+     */
+    private function belongsToTheSameOwner(Patrol $patrol, PlanetService $body): bool
+    {
+        $proprietaire = $body->getPlayer();
+
+        return $proprietaire !== null && $proprietaire->getId() === (int)$patrol->user_id;
+    }
+
+    /**
+     * La patrouille reste posee, sans carburant pour rentrer.
+     *
+     * Le segment pose n est pas marque traite : il porte toujours le creneau, la presence dans la
+     * boite d evenements et l inscription au combat. Seul son rendez-vous est repousse, pour que le
+     * travailleur cesse de proposer un depart que la reserve ne paie pas.
+     *
+     * @param Patrol $patrol
+     * @param FleetMission $parked
+     * @return void
+     */
+    private function immobilise(Patrol $patrol, FleetMission $parked): void
+    {
+        DB::transaction(function () use ($patrol, $parked): void {
+            $tenu = FleetMission::query()->whereKey($parked->id)->lockForUpdate()->first();
+
+            if (!$tenu instanceof FleetMission || (int)$tenu->processed === 1) {
+                return;
+            }
+
+            $tenu->forceFill(['time_holding' => self::HOLD_WITHOUT_END])->save();
+            $parked->forceFill(['time_holding' => self::HOLD_WITHOUT_END])->syncOriginal();
+
+            $patrol->forceFill(['state' => PatrolState::Immobilised])->save();
+        });
+    }
+
+    /**
      * La patrouille se pose chez elle : tout revient, et elle cesse d exister.
      *
      * Unites, cargaison **et reserve restante** rejoignent la planete. La reserve n a jamais ete
      * consommee que par les segments et le stationnement ; ce qui reste appartient au joueur, et le
      * lui rendre est la seule ecriture qui ferme le compte du carburant.
+     *
+     * **La propriete se verifie la ou le credit s ecrit, sous le meme verrou.** Un controle fait
+     * avant la transaction decrit un passe : entre lui et l ecriture, la planete peut changer de
+     * mains ou etre detruite, et la flotte partirait au proprietaire du moment. La ligne du corps
+     * est donc relue `for update` **dans** cette transaction, et rien n est marque ni credite si
+     * elle ne repond plus.
+     *
+     * Rend `true` si la patrouille s est posee. **`false` n est pas un detail** : le segment reste
+     * non traite et la patrouille intacte, et l appelant doit alors la poser sur place et reprendre
+     * le retour de securite. L ignorer laisserait une flotte en vol perpetuel.
      */
-    public function land(Patrol $patrol, FleetMission $segment, int $now, PlanetService $home): void
+    public function land(Patrol $patrol, FleetMission $segment, int $now, PlanetService $home): bool
     {
-        DB::transaction(function () use ($patrol, $segment, $now, $home): void {
+        return DB::transaction(function () use ($patrol, $segment, $now, $home): bool {
             // **La meme porte que le depart, pour la meme raison** : deux passages simultanes
             // rendraient les vaisseaux deux fois, et le carburant avec. Le marquage vient donc avant
             // tout credit, sous verrou, et le perdant de la course ne credite rien.
             $tenu = FleetMission::query()->whereKey($segment->id)->lockForUpdate()->first();
 
             if (!$tenu instanceof FleetMission || (int)$tenu->processed === 1) {
-                return;
+                return false;
+            }
+
+            // **Le corps decide ici, relu sous verrou.** Ni le service que l appelant tient, ni un
+            // controle fait avant la transaction : tous deux decrivent un instant revolu.
+            $corps = DB::table('planets')->where('id', $home->getPlanetId())->lockForUpdate()->first();
+
+            if ($corps === null || (int)$corps->user_id !== (int)$patrol->user_id || (int)$corps->destroyed > 0) {
+                return false;
             }
 
             $tenu->forceFill(['processed' => 1])->save();
@@ -1027,6 +1188,8 @@ final class PatrolOrders
                 'finished_at' => $now,
                 'finish_reason' => 'came_home',
             ])->save();
+
+            return true;
         });
     }
 

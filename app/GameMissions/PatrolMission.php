@@ -107,13 +107,29 @@ class PatrolMission extends GameMission
         $maintenant = (int)Date::now()->timestamp;
 
         if ($patrouille->state === PatrolState::Returning) {
-            $base = $mission->planet_id_to === null ? null : $this->planetServiceFactory->make((int)$mission->planet_id_to, true);
+            // **La destination dit ou l on allait ; elle n autorise pas la livraison.** Entre le depart
+            // et l arrivee, la base a pu etre detruite ou changer de mains : se poser dessus
+            // livrerait la flotte, la cargaison et la reserve au proprietaire du moment. Le decideur
+            // rend le corps seulement s il est encore celui du joueur.
+            $base = $orders->homecomingBase($patrouille, $mission);
 
-            if ($base === null) {
-                throw new RuntimeException('Le retour de la patrouille ' . $patrouille->id . ' ne designe aucun corps.');
+            // **Le refus sous verrou compte autant que celui du decideur.** La planete peut changer
+            // de mains entre les deux lectures ; `land()` rend alors `false` sans rien marquer ni
+            // crediter, et la patrouille prend le meme chemin que si le corps etait deja perdu.
+            //
+            // **Cette branche-la n est pas prouvee ici, et c est dit.** Elle ne s atteint que si la
+            // ligne change entre le decideur et le verrou : un seul processus ne peut pas l ouvrir,
+            // et une mutation qui la supprime survit a toute la suite. Sa preuve appartient au bac
+            // MariaDB, avec les autres courses, et elle y est due.
+            if ($base !== null && $orders->land($patrouille, $mission, $maintenant, $base)) {
+                return;
             }
 
-            $orders->land($patrouille, $mission, $maintenant, $base);
+            // Plus de base valable : la patrouille stationne la ou elle est — elle y est
+            // physiquement — et reprend le retour de securite vers ce qui lui reste. Rien n est
+            // perdu ; unites, cargaison et reserve restent a bord.
+            $orders->park($patrouille, $mission);
+            $orders->launchSafetyReturn($patrouille, $mission, $maintenant);
 
             return;
         }
