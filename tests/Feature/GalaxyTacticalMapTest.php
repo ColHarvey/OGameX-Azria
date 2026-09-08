@@ -1542,6 +1542,95 @@ class GalaxyTacticalMapTest extends UnitTestCase
     }
 
     /**
+     * **Un point du serveur tombe sur son corps, et un clic revient sur la grille — sans miroir.**
+     *
+     * La projection des points de l'espace est rejouee ici en PHP, depuis les constantes du module,
+     * comme l'ecartement l'est deja. Trois choses : le point de reference d'un corps (rayon 100 × p,
+     * angle d'or moins 90) se projette exactement sur le point d'orbite **avant** ecartement ; un
+     * point de la grille fait l'aller-retour ecran → serveur sans bouger ; et un clic dans les
+     * cinquante-six pixels autour de l'etoile rend le centre, pas un point **miroir**. Ce dernier
+     * cas a ete trouve par calcul sur les fonctions du module : la droite qui prolonge l'echelle des
+     * orbites vers l'interieur passe par zero avant le centre, et un rayon negatif retournait la
+     * direction — a trois cents unites de la ou le joueur avait clique, hors de l'exclusion de
+     * l'etoile, donc accepte par le serveur.
+     */
+    public function testAServerPointLandsOnItsBodyAndAClickComesBackOnTheGridWithoutMirror(): void
+    {
+        $module = $this->module();
+        $positions = (int)$this->constanteDuModule('POSITIONS');
+        $rayonMin = $this->constanteDuModule('RAYON_MIN');
+        $rayonMax = $this->constanteDuModule('RAYON_MAX');
+        $aplat = $this->constanteDuModule('APLATISSEMENT');
+        $angleOr = $this->constanteDuModule('ANGLE_OR');
+        $unitesParOrbite = (int)$this->constanteDuModule('UNITES_PAR_ORBITE');
+        $grille = 10;
+        $phase = 1.2345;
+        $centre = [328.0, 294.0];
+
+        $rayonDe = static fn (float $p): float => $rayonMin + (($p - 1) * ($rayonMax - $rayonMin)) / ($positions - 1);
+
+        $spatial = static function (float $x, float $y) use ($rayonDe, $centre, $aplat, $phase, $unitesParOrbite): array {
+            $angle = atan2($y, $x) + $phase;
+            $rx = $rayonDe(sqrt($x * $x + $y * $y) / $unitesParOrbite);
+
+            return [$centre[0] + $rx * cos($angle), $centre[1] + $rx * $aplat * sin($angle)];
+        };
+
+        $serveur = static function (float $sx, float $sy) use ($centre, $aplat, $phase, $rayonMin, $rayonMax, $positions, $unitesParOrbite, $grille): array {
+            $dx = $sx - $centre[0];
+            $dy = ($sy - $centre[1]) / $aplat;
+            $rx = sqrt($dx * $dx + $dy * $dy);
+            $angle = atan2($dy, $dx) - $phase;
+            $unites = max(0.0, (1 + (($rx - $rayonMin) * ($positions - 1)) / ($rayonMax - $rayonMin)) * $unitesParOrbite);
+
+            return [(int)round(($unites * cos($angle)) / $grille) * $grille, (int)round(($unites * sin($angle)) / $grille) * $grille];
+        };
+
+        /* Le module fait ce que ce rejeu fait : les lignes qui comptent, en toutes lettres. */
+        $this->assertStringContainsString('var rx = rayonDe(unites / UNITES_PAR_ORBITE);', $module, 'The screen radius of a server point is no longer the radius of the equivalent orbit.');
+        $this->assertStringContainsString('var unites = Math.max(0, (1 + ((rx - RAYON_MIN) * (POSITIONS - 1)) / (RAYON_MAX - RAYON_MIN)) * UNITES_PAR_ORBITE);', $module, 'A click near the star gives a negative radius again: a mirrored point the server accepts.');
+        $this->assertStringContainsString('var dy = (sy - c.y) / APLATISSEMENT;', $module, 'The inverse no longer undoes the flattening.');
+
+        /* 1. Le corps p du serveur tombe sur l'orbite p de l'ecran, avant ecartement. */
+        for ($p = 1; $p <= $positions; $p++) {
+            $angle = (($p * $angleOr - 90) * M_PI) / 180;
+            $ecran = $spatial($unitesParOrbite * $p * cos($angle), $unitesParOrbite * $p * sin($angle));
+            $orbite = [$centre[0] + $rayonDe($p) * cos($angle + $phase), $centre[1] + $rayonDe($p) * $aplat * sin($angle + $phase)];
+
+            $this->assertEqualsWithDelta($orbite[0], $ecran[0], 0.000001, 'The server body ' . $p . ' does not land on its orbit point (x).');
+            $this->assertEqualsWithDelta($orbite[1], $ecran[1], 0.000001, 'The server body ' . $p . ' does not land on its orbit point (y).');
+        }
+
+        /* 2. Un point de la grille fait l'aller-retour sans bouger, sur tout le disque du systeme. */
+        $verifies = 0;
+
+        for ($x = -1800; $x <= 1800; $x += 50) {
+            for ($y = -1800; $y <= 1800; $y += 50) {
+                if ($x * $x + $y * $y > 1800 * 1800 || $x * $x + $y * $y < 60 * 60) {
+                    continue;
+                }
+
+                $ecran = $spatial($x, $y);
+                $retour = $serveur($ecran[0], $ecran[1]);
+                $this->assertSame([$x, $y], $retour, 'The grid point (' . $x . ', ' . $y . ') does not survive the round trip.');
+                $verifies++;
+            }
+        }
+
+        $this->assertGreaterThan(3000, $verifies, 'The round trip was checked on too few points.');
+
+        /* 3. Un clic dans la zone morte autour de l'etoile rend le centre — que le serveur refuse — et jamais un miroir. */
+        foreach ([[0.0, 0.0], [20.0, -10.0], [46.0, 0.0], [-30.0, 25.0]] as [$dx, $dy]) {
+            $this->assertSame([0, 0], $serveur($centre[0] + $dx, $centre[1] + $dy), 'A click at ' . $dx . ',' . $dy . ' px from the star gives a mirrored point instead of the centre.');
+        }
+
+        /* Et juste au-dela de la zone morte, le point est bien dans l'exclusion de l'etoile, pas de l'autre cote. */
+        $pres = $serveur($centre[0] + 60.0, $centre[1]);
+        $this->assertLessThan(60, sqrt($pres[0] * $pres[0] + $pres[1] * $pres[1]), 'A click just outside the dead zone lands outside the star exclusion.');
+        $this->assertGreaterThan(0, $pres[0] * cos(-$phase) + $pres[1] * sin(-$phase), 'A click to the right of the star lands on its left.');
+    }
+
+    /**
      * **On prend la patrouille a la souris, on la pose ou on veut l'envoyer, et elle y va vraiment.**
      *
      * Le geste que Keven a demande (relaye par Codex le 8 septembre 2026) : saisir la flotte, la
@@ -1601,6 +1690,21 @@ class GalaxyTacticalMapTest extends UnitTestCase
         $this->assertStringContainsString('carte.gtOrdreARestaurer = ficheOuverte && ficheOuverte.gtOrdre && ficheOuverte.gtOrdre.etape === \'destination\'', $module, 'A pending order dies on a system change: an inter-system send would be impossible by hand.');
         $this->assertStringContainsString('restaurerLOrdre(carte);', $module, 'The pending order is saved but never restored.');
         $this->assertStringContainsString('galaxy: s.galaxie,', $module, 'A clicked destination no longer carries the system on screen.');
+
+        /*
+         * Un rechargement de la couche pendant un ordre reconstruit les marqueurs : la fiche se
+         * rattache au marqueur neuf de sa patrouille au lieu de garder un noeud detache, et elle se
+         * replace des que son panneau change de hauteur — sinon un devis qui arrive la coupe au
+         * bord bas de la carte.
+         */
+        $debutCouche = strpos($lignes, 'function dessinerLesPatrouilles(carte, galaxie, systeme) {');
+        $this->assertNotFalse($debutCouche);
+        $finCouche = strpos($lignes, "\n    }\n", $debutCouche);
+        $this->assertNotFalse($finCouche);
+        $couche = substr($lignes, $debutCouche, $finCouche - $debutCouche);
+        $this->assertStringContainsString("if (f && !f.hidden && f.gtPatrouille && f.gtOrdre) {", $couche, 'A layer refresh during an order leaves the card bound to a detached marker: it would jump to the top-left corner.');
+        $this->assertStringContainsString('f.gtBloc = p._marqueur;', $couche);
+        $this->assertStringContainsString("        composerLesActions(f);\n        replacerLaFiche(carte, f);\n    }", $lignes, 'Entering the destination step no longer re-places the card: a taller panel gets cut by the map edge.');
 
         /* Le curseur dit que la carte attend une destination. */
         $this->assertMatchesRegularExpression('/#galaxyTactical\.gtChoosingDestination,\s*#galaxyTactical\.gtChoosingDestination \.gtBody \{\s*cursor: crosshair;/s', $feuille, 'Nothing tells the player the map is waiting for a destination.');

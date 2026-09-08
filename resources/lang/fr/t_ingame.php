@@ -385,7 +385,7 @@ return [
         'tactical_patrol_compose' => 'Vaisseaux à envoyer',
         'tactical_patrol_template' => 'Flotte standard (remplit la composition)',
         'tactical_patrol_no_ships' => 'Aucun vaisseau sur cette planète.',
-        'tactical_patrol_drag' => 'Glissez la patrouille vers sa destination, ou cliquez un point de la carte.',
+        'tactical_patrol_drag' => 'Glissez la patrouille vers sa destination, cliquez un point ou un corps, ou saisissez X et Y puis demandez le devis.',
         'tactical_patrol_other_system' => 'Vous pouvez changer de système : l’ordre reste en cours, et la destination sera celle du système affiché.',
         'planet_col' => 'Planète',
         'name_col' => 'Nom',

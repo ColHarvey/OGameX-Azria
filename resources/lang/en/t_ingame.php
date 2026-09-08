@@ -499,7 +499,7 @@ return [
         'tactical_patrol_compose' => 'Ships to send',
         'tactical_patrol_template' => 'Standard fleet (fills the composition)',
         'tactical_patrol_no_ships' => 'No ship on this planet.',
-        'tactical_patrol_drag' => 'Drag the patrol to its destination, or click a point of the map.',
+        'tactical_patrol_drag' => 'Drag the patrol to its destination, click a point or a body, or type X and Y then ask for the quote.',
         'tactical_patrol_other_system' => 'You may change system: the order stays pending, and the destination will be in the system on screen.',
         'planet_col'                   => 'Planet',
         'name_col'                     => 'Name',

@@ -1734,7 +1734,16 @@
         var dy = (sy - c.y) / APLATISSEMENT;
         var rx = Math.sqrt(dx * dx + dy * dy);
         var angle = Math.atan2(dy, dx) - phaseDuMoment();
-        var unites = (1 + ((rx - RAYON_MIN) * (POSITIONS - 1)) / (RAYON_MAX - RAYON_MIN)) * UNITES_PAR_ORBITE;
+        /*
+         * **Jamais un rayon negatif.** La premiere orbite est a RAYON_MIN pixels du centre, et la
+         * droite qui prolonge l'echelle vers l'interieur passe par zero avant le centre : un clic
+         * dans les cinquante-six pixels autour de l'etoile donnait un rayon negatif, donc un point
+         * **miroir**, a trois cents unites de la ou le joueur avait clique — et hors de l'exclusion
+         * de l'etoile, le serveur l'acceptait. Le plancher a zero rend le centre : le serveur
+         * refuse « trop pres de l'etoile », et le joueur lit pourquoi. Mesure faite par calcul sur
+         * les fonctions du module, pas supposee.
+         */
+        var unites = Math.max(0, (1 + ((rx - RAYON_MIN) * (POSITIONS - 1)) / (RAYON_MAX - RAYON_MIN)) * UNITES_PAR_ORBITE);
 
         return {
             x: Math.round((unites * Math.cos(angle)) / PATROUILLE_GRILLE) * PATROUILLE_GRILLE,
@@ -2298,6 +2307,22 @@
                 }
             });
         }
+
+        /*
+         * **Un ordre en cours garde sa fiche telle quelle, mais son marqueur est neuf.** La couche
+         * vient d'etre reconstruite : le marqueur que la fiche tenait n'est plus dans le document,
+         * et `placer()` sur un noeud detache l'enverrait en haut a gauche. La fiche se rattache au
+         * marqueur neuf de la meme patrouille, sans etre recomposee — recomposer effacerait l'ordre.
+         */
+        if (f && !f.hidden && f.gtPatrouille && f.gtOrdre) {
+            patrouilles.forEach(function (p) {
+                if (Number(p.id) === Number(f.gtPatrouille.id) && p._marqueur) {
+                    f.gtBloc = p._marqueur;
+                    p._marqueur.classList.add('gtSelected');
+                    placer(f, p._marqueur);
+                }
+            });
+        }
     }
 
     /* La position d'un marqueur de patrouille : son point si elle est posee, sinon celle de son segment. */
@@ -2857,6 +2882,18 @@
         carte.classList.add('gtChoosingDestination');
         composerLePanneau(carte, f);
         composerLesActions(f);
+        replacerLaFiche(carte, f);
+    }
+
+    /*
+     * La fiche se replace des que son contenu change de hauteur : un panneau qui grandit sous le
+     * bord bas de la carte serait coupe, et le cahier des charges l'interdit. Sans marqueur — une
+     * patrouille d'un autre systeme —, elle reste ou elle est.
+     */
+    function replacerLaFiche(carte, f) {
+        if (f && f.gtBloc && carte.contains(f.gtBloc)) {
+            placer(f, f.gtBloc);
+        }
     }
 
     function finirLeChoixDeDestination(carte) {
@@ -3099,6 +3136,7 @@
                 carte.classList.add('gtChoosingDestination');
                 composerLePanneau(carte, f);
                 composerLesActions(f);
+                replacerLaFiche(carte, f);
             });
     }
 
@@ -3153,6 +3191,7 @@
             carte.classList.add('gtChoosingDestination');
             composerLePanneau(carte, f);
             composerLesActions(f);
+            replacerLaFiche(carte, f);
             dire(o.erreur, true);
         };
 
