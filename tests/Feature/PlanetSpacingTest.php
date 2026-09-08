@@ -73,16 +73,67 @@ class PlanetSpacingTest extends TestCase
 
     public function testAucunePlaneteNeSePoseSurLaCaseVoisineDUneAutre(): void
     {
+        /*
+         * **Ce que l'inscription a pose, et rien d'autre.**
+         *
+         * Ce temoin lisait toutes les planetes de la base et exigeait l'ecart partout. Les classes
+         * voisines du meme processus posent les leurs a des coordonnees ecrites en dur, hors du
+         * systeme 1:1 que le montage nettoie : deux d'entre elles collees suffisaient a le faire
+         * rougir pour un placement dont l'inscription n'est pas l'auteur — ce qui est arrive en
+         * integration continue, sur un commit qui ne touchait ni l'inscription ni la Galaxie.
+         *
+         * La regle eprouvee est celle du **placement** : une planete que l'inscription pose n'est
+         * jamais voisine d'une autre. Une paire dont aucun des deux membres n'est neuf ne dit donc
+         * rien de cette regle, et n'est pas comptee. Une paire dont l'un des deux est neuf l'est —
+         * le temoin garde toute sa force contre le defaut qu'il a ferme.
+         */
+        /*
+         * **La portee du temoin, rendue observable.** Deux planetes collees que l'inscription n'a
+         * pas posees — comme celles qu'une classe voisine laisse — ne doivent rien lui faire dire.
+         * Arakis, la planete du compte systeme, occupe 1:1:2 ; une planete posee a la main en 1:1:1
+         * lui est donc voisine. Les deux cases sont hors des positions habitables (4 a 12), donc
+         * aucune inscription ne peut venir s'y coller et ce montage ne masque rien de la regle
+         * eprouvee. Si quelqu'un rend un jour au temoin sa portee d'origine, cette paire le fera
+         * rougir tout de suite.
+         */
+        $voisin = User::factory()->create();
+
+        Planet::factory()->create([
+            'user_id' => $voisin->id,
+            'galaxy' => 1,
+            'system' => 1,
+            'planet' => 1,
+        ]);
+
+        $this->assertSame(
+            [1, 2],
+            array_column($this->positionsBySystem()['1:1'], 'position'),
+            'The scenario needs exactly one adjacent pair outside the habitable range, and it does not have it.'
+        );
+
+        $avant = Planet::query()->pluck('id')->map(static fn (mixed $id): int => (int)$id)->all();
+
         $this->registerAccounts(15);
+
+        $neuves = array_flip(array_values(array_diff(
+            Planet::query()->pluck('id')->map(static fn (mixed $id): int => (int)$id)->all(),
+            $avant
+        )));
+
+        $this->assertNotSame([], $neuves, 'The registration created no planet: the witness would prove nothing.');
 
         foreach ($this->positionsBySystem() as $systeme => $positions) {
             for ($index = 1; $index < count($positions); $index++) {
-                $ecart = $positions[$index] - $positions[$index - 1];
+                $paire = [$positions[$index - 1], $positions[$index]];
+
+                if (!isset($neuves[$paire[0]['id']]) && !isset($neuves[$paire[1]['id']])) {
+                    continue;
+                }
 
                 $this->assertGreaterThanOrEqual(
                     self::MINIMUM_GAP,
-                    $ecart,
-                    'Deux planetes se touchent en ' . $systeme . ' : cases ' . $positions[$index - 1] . ' et ' . $positions[$index] . '.'
+                    $paire[1]['position'] - $paire[0]['position'],
+                    'Deux planetes se touchent en ' . $systeme . ' : cases ' . $paire[0]['position'] . ' et ' . $paire[1]['position'] . '.'
                 );
             }
         }
@@ -187,22 +238,29 @@ class PlanetSpacingTest extends TestCase
     }
 
     /**
-     * Les positions occupees, par systeme, triees.
+     * Les positions occupees, par systeme, triees — chacune avec le corps qui l'occupe.
      *
-     * @return array<string, array<int, int>>
+     * Une lune partage la case de sa planete : la case n'est gardee qu'une fois, et c'est le plus
+     * petit identifiant qui la porte, pour que le tri soit le meme d'un passage a l'autre.
+     *
+     * @return array<string, array<int, array{position: int, id: int}>>
      */
     private function positionsBySystem(): array
     {
         $parSysteme = [];
 
-        foreach (Planet::query()->orderBy('planet')->get() as $planete) {
-            $parSysteme[$planete->galaxy . ':' . $planete->system][] = (int)$planete->planet;
+        foreach (Planet::query()->orderBy('planet')->orderBy('id')->get() as $planete) {
+            $systeme = $planete->galaxy . ':' . $planete->system;
+            $position = (int)$planete->planet;
+
+            if (!isset($parSysteme[$systeme][$position])) {
+                $parSysteme[$systeme][$position] = ['position' => $position, 'id' => (int)$planete->id];
+            }
         }
 
-        foreach ($parSysteme as $systeme => $positions) {
-            $triees = array_values(array_unique($positions));
-            sort($triees);
-            $parSysteme[$systeme] = $triees;
+        foreach ($parSysteme as $systeme => $cases) {
+            ksort($cases);
+            $parSysteme[$systeme] = array_values($cases);
         }
 
         return $parSysteme;
