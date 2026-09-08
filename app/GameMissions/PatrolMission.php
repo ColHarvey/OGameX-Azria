@@ -2,6 +2,7 @@
 
 namespace OGame\GameMissions;
 
+use Illuminate\Support\Facades\Date;
 use OGame\Enums\FleetMissionStatus;
 use OGame\Enums\FleetSpeedType;
 use OGame\GameMissions\Abstracts\GameMission;
@@ -9,7 +10,10 @@ use OGame\GameMissions\Models\MissionPossibleStatus;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
+use OGame\Models\Patrol;
 use OGame\Models\Planet\Coordinate;
+use OGame\Patrol\Enums\PatrolState;
+use OGame\Patrol\PatrolOrders;
 use OGame\Services\PlanetService;
 use RuntimeException;
 
@@ -80,10 +84,49 @@ class PatrolMission extends GameMission
 
     /**
      * @inheritdoc
+     *
+     * ## Trois arrivees, une seule porte
+     *
+     * Le travailleur du jeu reprend un segment quand `time_arrival + time_holding` est atteint. Pour
+     * une patrouille cela arrive trois fois, et l etat dit laquelle :
+     *
+     *  - elle **volait** : elle se pose, et son prochain rendez-vous est arme ;
+     *  - elle **rentrait** : elle atterrit, tout revient a la planete, elle cesse d exister ;
+     *  - elle **stationnait** et son echeance est venue : le retour de securite part.
+     *
+     * Aucun autre etat ne peut arriver ici. Une patrouille terminee n a plus de segment ; une
+     * patrouille immobilisee n a plus de quoi partir, et son segment porte un rendez-vous lointain.
      */
     protected function processArrival(FleetMission $mission): void
     {
-        throw new RuntimeException('L arrivee d un segment de patrouille est reglee par le service des mouvements de patrouille, jamais par le traitement generique (mission ' . $mission->id . ').');
+        $patrouille = Patrol::query()->find($mission->patrol_id);
+
+        if ($patrouille === null) {
+            throw new RuntimeException('Le segment ' . $mission->id . ' ne rattache a aucune patrouille.');
+        }
+
+        $orders = resolve(PatrolOrders::class);
+        $maintenant = (int)Date::now()->timestamp;
+
+        if ($patrouille->state === PatrolState::Returning) {
+            $base = $mission->planet_id_to === null ? null : $this->planetServiceFactory->make((int)$mission->planet_id_to, true);
+
+            if ($base === null) {
+                throw new RuntimeException('Le retour de la patrouille ' . $patrouille->id . ' ne designe aucun corps.');
+            }
+
+            $orders->land($patrouille, $mission, $maintenant, $base);
+
+            return;
+        }
+
+        if ($patrouille->state === PatrolState::Stationed) {
+            $orders->launchSafetyReturn($patrouille, $mission, $maintenant);
+
+            return;
+        }
+
+        $orders->park($patrouille, $mission);
     }
 
     /**
