@@ -322,6 +322,11 @@ class CombatPanelTest extends FleetDispatchTestCase
         $unites->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 30);
         $this->sendMissionToOtherPlayerCleanPlanet($unites, new Resources(0, 0, 0, 0));
 
+        // **L envoi a rafraichi l application**, donc efface la source a graine posee par le montage :
+        // sans cette ligne la seconde bataille serait tiree au hasard, alors que ce banc annonce des
+        // batailles reproductibles.
+        $this->makeTheBattlesReproducible();
+
         $seconde = DB::table('fleet_missions')->where('user_id', $this->currentUserId)->where('processed', 0)->orderByDesc('id')->first();
         $this->assertNotNull($seconde);
         $this->travelTo(Date::createFromTimestamp((int)$seconde->time_arrival));

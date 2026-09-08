@@ -63,6 +63,22 @@ trait EngagesAPersistentCombat
     /**
      * Un combat clos, bataille figee, dont le fil est ecrit. Le joueur courant est l'attaquant.
      */
+    /**
+     * Rend les batailles de ce banc reproductibles, et **se repose apres chaque rafraichissement**.
+     *
+     * Une liaison de conteneur ne survit pas a `reloadApplication()`, et `dispatchFleet()` l appelle
+     * a la fin de chaque envoi : une liaison posee avant un envoi est effacee en silence, et le
+     * moteur reprend la source du systeme sans que rien ne le dise. Tout essai qui envoie une
+     * seconde flotte apres le montage doit donc rappeler cette methode avant de faire arriver cette
+     * flotte-la, sans quoi sa bataille est tiree au hasard alors que le banc annonce l inverse.
+     *
+     * @return void
+     */
+    protected function makeTheBattlesReproducible(): void
+    {
+        $this->app->bind(BattleDraws::class, static fn (): SeededDraws => new SeededDraws(self::BATTLE_SEED));
+    }
+
     protected function anEngagedCombat(): CombatInstance
     {
         for ($i = 0; $i < 6; $i++) {
@@ -116,7 +132,7 @@ trait EngagesAPersistentCombat
         // juste : `firstInstantWhereBothSidesLost()` continue d exiger les deux camps, et si un
         // changement du moteur rendait cette bataille unilaterale, l echec serait franc et
         // reproductible au lieu d apparaitre une fois sur trente.
-        $this->app->bind(BattleDraws::class, static fn (): SeededDraws => new SeededDraws(self::BATTLE_SEED));
+        $this->makeTheBattlesReproducible();
         resolve(SettingsService::class)->set('persistent_combat_enabled', '1');
         $this->travelTo(Date::createFromTimestamp((int)$mission->time_arrival));
         $this->get('/overview')->assertStatus(200);

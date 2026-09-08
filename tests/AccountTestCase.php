@@ -74,7 +74,12 @@ abstract class AccountTestCase extends TestCase
         parent::setUp();
 
         // Set default test time to 2024-01-01 00:00:00 to ensure all tests have the same starting point.
-        $this->travelTo(Date::create(2024, 1, 1, 0, 0, 0));
+        //
+        // **L instant est retenu, pas seulement pose.** `$defaultTestTime` etait declaree, typee, et
+        // jamais affectee : `resetTestTime()` la lisait et aurait leve « must not be accessed before
+        // initialization » a son premier appel. Un piege qui attendait son premier utilisateur.
+        $this->defaultTestTime = Date::create(2024, 1, 1, 0, 0, 0);
+        $this->travelTo($this->defaultTestTime);
 
         // Set default server settings for all tests.
         $settingsService = resolve(SettingsService::class);
