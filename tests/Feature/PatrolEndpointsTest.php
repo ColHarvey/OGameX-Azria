@@ -52,6 +52,31 @@ class PatrolEndpointsTest extends AccountTestCase
         $this->playerSetResearchLevel('computer_technology', 10);
     }
 
+    /**
+     * L Amiral : employer une flotte standard depuis la Galaxie le demande, comme l expedition.
+     */
+    private function hireAdmiral(): void
+    {
+        DB::table('users')->where('id', $this->currentUserId)->update(['admiral_until' => Date::now()->addDay()]);
+    }
+
+    /**
+     * La charge d un lancement depuis la planete du banc.
+     *
+     * @return array<string, int>
+     */
+    private function launchPayload(int $reserve = 10000): array
+    {
+        return $this->here() + [
+            'planet_id' => (int)$this->planetService->getPlanetId(),
+            'am' . self::CRUISER => 20,
+            'reserve' => $reserve,
+            'x' => 600,
+            'y' => 600,
+            'speed' => 10,
+        ];
+    }
+
     private function player(): PlayerService
     {
         return resolve(PlayerServiceFactory::class)->make($this->currentUserId, true);
@@ -275,7 +300,7 @@ class PatrolEndpointsTest extends AccountTestCase
 
         $this->postJson(route('galaxy.patrol.quote'), $this->here() + ['patrol_id' => $autre, 'x' => -600, 'y' => 600])->assertStatus(404);
         $this->postJson(route('galaxy.patrol.move', ['patrol' => $autre]), $this->here() + ['x' => -600, 'y' => 600, 'order_version' => 1])->assertStatus(404);
-        $this->postJson(route('galaxy.patrol.recall', ['patrol' => $autre]), [])->assertStatus(404);
+        $this->postJson(route('galaxy.patrol.recall', ['patrol' => $autre]), ['order_version' => 1])->assertStatus(404);
 
         $this->assertSame(PatrolState::Stationed->value, DB::table('patrols')->where('id', $autre)->value('state'), 'A stranger moved the patrol.');
     }
@@ -298,9 +323,18 @@ class PatrolEndpointsTest extends AccountTestCase
         $croiseursAvant = $this->planetService->getObjectAmount('cruiser');
         $deuteriumAvant = $this->planetService->deuterium()->get();
 
-        $reponse = $this->postJson(route('galaxy.patrol.recall', ['patrol' => $patrouille->id]), [])
-            ->assertStatus(200)
-            ->json();
+        // **Le parcours entier de la carte** : le devis, puis la confirmation qui rapporte ce qu il
+        // annoncait. Confirmer sans avoir lu le devis laissait passer un rappel qui volait a une
+        // autre vitesse que celle annoncee — une mutation l a montre.
+        $devis = $this->postJson(route('galaxy.patrol.quote'), [
+            'patrol_id' => $patrouille->id,
+            'kind' => 'recall',
+        ])->assertStatus(200)->json();
+
+        $reponse = $this->postJson(route('galaxy.patrol.recall', ['patrol' => $patrouille->id]), [
+            'order_version' => (int)$devis['quote']['order_version'],
+            'quoted_fuel_cost' => (int)$devis['quote']['fuel_cost'],
+        ])->assertStatus(200)->json();
 
         $this->assertTrue($reponse['success']);
 
@@ -310,6 +344,14 @@ class PatrolEndpointsTest extends AccountTestCase
 
         $retour = FleetMission::query()->findOrFail($patrouille->current_mission_id);
         $this->assertSame((int)$this->planetService->getPlanetId(), (int)$retour->planet_id_to, 'The recall does not aim at the home planet.');
+
+        // Le vol est celui du devis : meme duree, au delai de manoeuvre pres (nul depuis un stationnement).
+        $this->assertSame(
+            (int)$devis['quote']['duration_seconds'],
+            (int)$retour->time_arrival - (int)$retour->time_departure,
+            'The recall flies at another speed than the one it was quoted at.'
+        );
+
         $reserveEnVol = (float)$patrouille->fuel_reserve;
 
         Date::setTestNow(Date::createFromTimestamp((int)$retour->time_arrival + 1));
@@ -391,25 +433,19 @@ class PatrolEndpointsTest extends AccountTestCase
         $croiseursAvant = $this->planetService->getObjectAmount('cruiser');
         $deuteriumAvant = $this->planetService->deuterium()->get();
 
-        $devis = $this->postJson(route('galaxy.patrol.quote'), $this->here() + [
-            'am' . self::CRUISER => 20,
-            'reserve' => 10000,
-            'x' => 600,
-            'y' => 600,
-            'speed' => 10,
-        ])->assertStatus(200)->json();
+        $this->hireAdmiral();
+
+        $devis = $this->postJson(route('galaxy.patrol.quote'), $this->launchPayload())
+            ->assertStatus(200)
+            ->json();
 
         $this->assertTrue($devis['quote']['possible']);
         $this->assertSame(1, $devis['quote']['order_version']);
         $this->assertGreaterThan(0, $devis['quote']['fuel_cost']);
 
-        $reponse = $this->postJson(route('galaxy.patrol.launch'), $this->here() + [
-            'am' . self::CRUISER => 20,
-            'reserve' => 10000,
-            'x' => 600,
-            'y' => 600,
-            'speed' => 10,
-        ])->assertStatus(200)->json();
+        $reponse = $this->postJson(route('galaxy.patrol.launch'), $this->launchPayload())
+            ->assertStatus(200)
+            ->json();
 
         $this->assertTrue($reponse['success']);
 
@@ -430,30 +466,208 @@ class PatrolEndpointsTest extends AccountTestCase
     public function testALaunchQuoteRefusesAnImmobileShipBeforeAnyNumber(): void
     {
         $this->arm();
+        $this->hireAdmiral();
         $this->planetAddResources(new Resources(0, 0, 60000, 0));
         $this->planetAddUnit('cruiser', 20);
         $this->planetAddUnit('solar_satellite', 1);
 
-        $reponse = $this->postJson(route('galaxy.patrol.quote'), $this->here() + [
-            'am' . self::CRUISER => 20,
-            'am' . self::SOLAR_SATELLITE => 1,
-            'reserve' => 10000,
-            'x' => 600,
-            'y' => 600,
-        ])->assertStatus(409)->json();
+        $avec = $this->launchPayload() + ['am' . self::SOLAR_SATELLITE => 1];
+
+        $reponse = $this->postJson(route('galaxy.patrol.quote'), $avec)->assertStatus(409)->json();
 
         $this->assertSame('immobile_unit', $reponse['reason_key']);
         $this->assertArrayNotHasKey('quote', $reponse, 'A refused launch still shows numbers.');
 
-        $this->postJson(route('galaxy.patrol.launch'), $this->here() + [
-            'am' . self::CRUISER => 20,
-            'am' . self::SOLAR_SATELLITE => 1,
-            'reserve' => 10000,
-            'x' => 600,
-            'y' => 600,
-        ])->assertStatus(409);
+        $this->postJson(route('galaxy.patrol.launch'), $avec)->assertStatus(409);
 
         $this->assertSame(0, Patrol::query()->where('user_id', $this->currentUserId)->count(), 'A refused launch created a patrol.');
+    }
+
+    /**
+     * Le devis d un rappel est celui de l ordre : la vitesse du retour de securite, et la base que
+     * le serveur resout — pas ce qu une requete propose.
+     *
+     * ## Le defaut que ce temoin a trouve
+     *
+     * Le rappel etait chiffre a 100 % vers un corps que la carte composait de coordonnees, en
+     * supposant une planete. L ordre confirme, lui, vole a `patrolSafetyReturnSpeed()` vers
+     * `homeOf()`. Le joueur lisait donc une duree environ trois fois trop courte et un cout trop
+     * eleve, et le verdict `possible` du devis pouvait differer de celui de la confirmation.
+     */
+    public function testARecallIsQuotedAtItsOwnSpeedTowardTheHomeTheServerResolves(): void
+    {
+        [$patrouille] = $this->aParkedPatrol();
+        $coords = $this->planetService->getPlanetCoordinates();
+
+        $rappel = $this->postJson(route('galaxy.patrol.quote'), [
+            'patrol_id' => $patrouille->id,
+            'kind' => 'recall',
+            // Ce que la requete propose est ignore : ni cette vitesse, ni cette destination.
+            'speed' => 10,
+            'x' => -600,
+            'y' => 600,
+        ])->assertStatus(200)->json();
+
+        $vitesseDuRetour = resolve(SettingsService::class)->patrolSafetyReturnSpeed();
+        $this->assertEqualsWithDelta($vitesseDuRetour, (float)$rappel['quote']['speed_percent'], 0.001, 'The recall is quoted at a speed that is not the safety return speed.');
+        $this->assertLessThan(10.0, $vitesseDuRetour, 'The witness needs a safety return slower than full speed to tell the two apart.');
+        $this->assertSame($coords->position, $rappel['quote']['destination']['orbit'], 'The recall is not quoted toward the home body.');
+        $this->assertSame((int)$this->planetService->getPlanetId(), $rappel['quote']['destination']['body_id'], 'The recall destination is not the home body itself.');
+
+        // **L attendu se calcule a part** : le meme trajet chiffre a 100 % coute plus et dure moins.
+        $centPourCent = $this->postJson(route('galaxy.patrol.quote'), $this->here() + [
+            'patrol_id' => $patrouille->id,
+            'position' => $coords->position,
+            'type' => 1,
+            'speed' => 10,
+        ])->assertStatus(200)->json();
+
+        $this->assertSame($rappel['quote']['distance'], $centPourCent['quote']['distance'], 'The witness compares two different journeys.');
+        $this->assertGreaterThan($centPourCent['quote']['duration_seconds'], $rappel['quote']['duration_seconds'], 'The recall is quoted as fast as a full-speed leg.');
+        $this->assertLessThan($centPourCent['quote']['fuel_cost'], $rappel['quote']['fuel_cost'], 'The recall is quoted as expensive as a full-speed leg.');
+    }
+
+    /**
+     * Un rappel confirme sur un devis perime est refuse, et ne debite rien.
+     *
+     * Le service se donnait lui-meme la version courante : le controle etait toujours satisfait, et
+     * un rappel affiche partait quand meme apres qu un autre ordre soit passe.
+     */
+    public function testAStaleRecallIsRefusedAndChargesNothing(): void
+    {
+        [$patrouille, $segment] = $this->aParkedPatrol();
+        $reserveAvant = (float)$patrouille->fuel_reserve;
+
+        $refus = $this->postJson(route('galaxy.patrol.recall', ['patrol' => $patrouille->id]), [
+            'order_version' => (int)$patrouille->order_version + 1,
+        ])->assertStatus(409)->json();
+
+        $this->assertSame('stale_quote', $refus['reason_key']);
+
+        $patrouille->refresh();
+        $this->assertSame(PatrolState::Stationed, $patrouille->state, 'A stale recall moved the patrol.');
+        $this->assertSame((int)$segment->id, (int)$patrouille->current_mission_id, 'A stale recall replaced the segment.');
+        $this->assertSame($reserveAvant, (float)$patrouille->fuel_reserve, 'A stale recall charged the reserve.');
+
+        // Sans version du tout : meme refus.
+        $this->postJson(route('galaxy.patrol.recall', ['patrol' => $patrouille->id]), [])->assertStatus(409);
+    }
+
+    /**
+     * Un cout devenu superieur a celui du devis est refuse ; un cout inferieur passe et c est le vrai
+     * qui est preleve.
+     */
+    public function testAnOrderIsRefusedWhenTheCostHasMovedAboveWhatWasQuoted(): void
+    {
+        [$patrouille] = $this->aParkedPatrol();
+        $reserveAvant = (float)$patrouille->fuel_reserve;
+
+        $devis = $this->postJson(route('galaxy.patrol.quote'), $this->here() + [
+            'patrol_id' => $patrouille->id,
+            'x' => -600,
+            'y' => 600,
+        ])->assertStatus(200)->json();
+
+        $cout = (int)$devis['quote']['fuel_cost'];
+        $this->assertGreaterThan(1, $cout, 'The witness needs a leg that costs something.');
+
+        // Un cout lu **inferieur** au vrai : le serveur refuse de debiter plus que ce qui a ete lu.
+        $refus = $this->postJson(route('galaxy.patrol.move', ['patrol' => $patrouille->id]), $this->here() + [
+            'x' => -600,
+            'y' => 600,
+            'order_version' => (int)$patrouille->order_version,
+            'quoted_fuel_cost' => $cout - 1,
+        ])->assertStatus(409)->json();
+
+        $this->assertSame('quote_cost_moved', $refus['reason_key']);
+
+        $patrouille->refresh();
+        $this->assertSame(PatrolState::Stationed, $patrouille->state, 'A refused order moved the patrol.');
+
+        /*
+         * **Le trajet n est pas facture ; le stationnement du l est.** Un ordre depuis un
+         * stationnement paie d abord ce qu il doit — le curseur ne recule pas, et la seconde ecoulee
+         * depuis l arrivee reste due que l ordre passe ou non. Ce qui doit rester intact est le cout
+         * du trajet, de plusieurs centaines : la reserve n en a pas perdu une unite.
+         */
+        $apresRefus = (float)$patrouille->fuel_reserve;
+        $this->assertGreaterThan($reserveAvant - 1.0, $apresRefus, 'A refused order charged the leg.');
+        $this->assertLessThanOrEqual($reserveAvant, $apresRefus, 'A refused order credited the reserve.');
+
+        // Le cout exact passe, et c est lui qui est preleve.
+        $this->postJson(route('galaxy.patrol.move', ['patrol' => $patrouille->id]), $this->here() + [
+            'x' => -600,
+            'y' => 600,
+            'order_version' => (int)$patrouille->order_version,
+            'quoted_fuel_cost' => $cout,
+        ])->assertStatus(200);
+
+        $patrouille->refresh();
+        $this->assertEqualsWithDelta($apresRefus - $cout, (float)$patrouille->fuel_reserve, 0.01, 'The leg charged something else than what was quoted.');
+
+        /*
+         * **Un coût devenu inférieur passe, et c'est le vrai qui est prélevé.** Sans ce demi-témoin,
+         * un serveur qui refuserait toute différence — et non le seul dépassement — passerait :
+         * dans les cas ci-dessus le coût lu et le coût refait coïncident, donc « juste » et « faux »
+         * rendaient le même verdict. Une mutation l'a montré.
+         */
+        $avantLarge = (float)$patrouille->fuel_reserve;
+
+        $retour = $this->postJson(route('galaxy.patrol.quote'), $this->here() + [
+            'patrol_id' => $patrouille->id,
+            'x' => 600,
+            'y' => 600,
+        ])->assertStatus(200)->json();
+
+        $vrai = (int)$retour['quote']['fuel_cost'];
+
+        $this->postJson(route('galaxy.patrol.move', ['patrol' => $patrouille->id]), $this->here() + [
+            'x' => 600,
+            'y' => 600,
+            'order_version' => (int)$patrouille->refresh()->order_version,
+            'quoted_fuel_cost' => $vrai + 500,
+        ])->assertStatus(200);
+
+        $patrouille->refresh();
+        $this->assertEqualsWithDelta($avantLarge - $vrai, (float)$patrouille->fuel_reserve, 0.01, 'A cost quoted higher than the real one was charged at the quoted value.');
+    }
+
+    /**
+     * Un lancement nomme le corps d ou il part ; celui d un autre joueur est refuse, et sans Amiral
+     * le raccourci de la Galaxie l est aussi.
+     */
+    public function testALaunchNamesItsOriginAndTheMapShortcutNeedsAnAdmiral(): void
+    {
+        $this->arm();
+        $this->planetAddResources(new Resources(0, 0, 60000, 0));
+        $this->planetAddUnit('cruiser', 20);
+
+        // Sans Amiral : le raccourci est refuse **par le serveur**, pas seulement grise par la carte.
+        $sansAmiral = $this->postJson(route('galaxy.patrol.quote'), $this->launchPayload())
+            ->assertStatus(409)
+            ->json();
+
+        $this->assertSame('admiral_required', $sansAmiral['reason_key']);
+        $this->postJson(route('galaxy.patrol.launch'), $this->launchPayload())->assertStatus(409);
+        $this->assertSame(0, Patrol::query()->where('user_id', $this->currentUserId)->count(), 'A launch without an Admiral created a patrol.');
+
+        $this->hireAdmiral();
+
+        // Le corps d un autre joueur n est pas une origine.
+        $etrangere = $this->getNearbyForeignPlanet();
+
+        $refus = $this->postJson(route('galaxy.patrol.launch'), ['planet_id' => $etrangere->getPlanetId()] + $this->launchPayload())
+            ->assertStatus(409)
+            ->json();
+
+        $this->assertSame('bad_origin', $refus['reason_key']);
+        $this->assertSame(0, Patrol::query()->where('user_id', $this->currentUserId)->count(), 'A launch from a foreign body created a patrol.');
+
+        // Le sien, oui.
+        $reponse = $this->postJson(route('galaxy.patrol.launch'), $this->launchPayload())->assertStatus(200)->json();
+        $patrouille = Patrol::query()->whereKey((int)$reponse['patrol_id'])->firstOrFail();
+
+        $this->assertSame((int)$this->planetService->getPlanetId(), (int)$patrouille->home_planet_id, 'The patrol was not launched from the named body.');
     }
 
     /**

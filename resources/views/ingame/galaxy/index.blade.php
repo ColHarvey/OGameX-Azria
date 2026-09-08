@@ -42,6 +42,13 @@
             var galaxyFleetTemplatesUrl = "{{ route('fleet.templates.index') }}";
             var galaxyCheckTargetUrl = "{{ route('fleet.dispatch.checktarget') }}";
             var galaxySendFleetUrl = "{{ route('fleet.dispatch.sendfleet') }}";
+            {{-- Les patrouilles : devis, lancement, deplacement et rappel — tous decides par le serveur ; la planete active, d'ou part un lancement. --}}
+            var galaxyPatrolQuoteUrl = "{{ route('galaxy.patrol.quote') }}";
+            var galaxyPatrolLaunchUrl = "{{ route('galaxy.patrol.launch') }}";
+            var galaxyPatrolMoveUrl = "{{ route('galaxy.patrol.move', ['patrol' => 0]) }}";
+            var galaxyPatrolRecallUrl = "{{ route('galaxy.patrol.recall', ['patrol' => 0]) }}";
+            var galaxyCurrentPlanetId = {{ $current_planet_id }};
+            var galaxyPatrolGridUnits = {{ $patrol_grid_units }};
             var preserveSystemOnPlanetChange = false;
             @php
                 $galaxyLocaData = [
@@ -162,6 +169,30 @@
                     'expeditionSent' => __('t_ingame.galaxy.tactical_expedition_sent'),
                     'actions' => __('t_ingame.galaxy.tactical_actions'),
                     'targets' => __('t_ingame.galaxy.tactical_targets'),
+                    'patrolTitle' => __('t_ingame.galaxy.tactical_patrol_title'),
+                    'patrolLayer' => __('t_ingame.galaxy.tactical_patrol_layer'),
+                    'patrolReserve' => __('t_ingame.galaxy.tactical_patrol_reserve'),
+                    'patrolUpkeep' => __('t_ingame.galaxy.tactical_patrol_upkeep'),
+                    'patrolSafetyReturn' => __('t_ingame.galaxy.tactical_patrol_safety_return'),
+                    'patrolSafetyReturnAt' => __('t_ingame.galaxy.tactical_patrol_safety_return_at'),
+                    'patrolNoEnd' => __('t_ingame.galaxy.tactical_patrol_no_end'),
+                    'patrolHome' => __('t_ingame.galaxy.tactical_patrol_home'),
+                    'patrolShips' => __('t_ingame.galaxy.tactical_patrol_ships'),
+                    'patrolGauge' => __('t_ingame.galaxy.tactical_patrol_gauge'),
+                    'patrolChoose' => __('t_ingame.galaxy.tactical_patrol_choose'),
+                    'patrolQuote' => __('t_ingame.galaxy.tactical_patrol_quote'),
+                    'patrolQuoteWaiting' => __('t_ingame.galaxy.tactical_patrol_quote_waiting'),
+                    'patrolDestination' => __('t_ingame.galaxy.tactical_patrol_destination'),
+                    'patrolNear' => __('t_ingame.galaxy.tactical_patrol_near'),
+                    'patrolDuration' => __('t_ingame.galaxy.tactical_patrol_duration'),
+                    'patrolCost' => __('t_ingame.galaxy.tactical_patrol_cost'),
+                    'patrolReserveOnArrival' => __('t_ingame.galaxy.tactical_patrol_reserve_on_arrival'),
+                    'patrolAutonomy' => __('t_ingame.galaxy.tactical_patrol_autonomy'),
+                    'patrolOrderPending' => __('t_ingame.galaxy.tactical_patrol_order_pending'),
+                    'patrolFleet' => __('t_ingame.galaxy.tactical_patrol_fleet'),
+                    'patrolReserveInput' => __('t_ingame.galaxy.tactical_patrol_reserve_input'),
+                    'patrolChooseDestination' => __('t_ingame.galaxy.tactical_patrol_choose_destination'),
+                    'patrolRecallAsk' => __('t_ingame.galaxy.tactical_patrol_recall_ask'),
                     'labels' => [
                         'espionner' => __('t_ingame.fleet.mission_espionage'),
                         'attaquer' => __('t_ingame.fleet.mission_attack'),
@@ -180,6 +211,11 @@
                         'coloniser' => __('t_ingame.fleet.mission_colonise'),
                         'demenager' => __('t_ingame.galaxy.relocate_action'),
                         'expedition' => __('t_ingame.fleet.mission_expedition'),
+                        'patrouiller' => __('t_ingame.galaxy.tactical_patrol_action'),
+                        'deplacer' => __('t_ingame.galaxy.tactical_patrol_move'),
+                        'rappeler' => __('t_ingame.galaxy.tactical_patrol_recall'),
+                        'confirmer' => __('t_ingame.galaxy.tactical_patrol_confirm'),
+                        'annuler' => __('t_ingame.galaxy.tactical_patrol_cancel'),
                     ],
                     'reasons' => [
                         'own' => __('t_ingame.galaxy.tactical_reason_own'),
@@ -198,6 +234,11 @@
                         'recyclers' => __('t_ingame.galaxy.recyclers_needed'),
                         'pathfinders' => __('t_ingame.galaxy.pathfinders_needed'),
                         'colonize' => __('t_ingame.galaxy.colonize_error'),
+                        'patrolFromOwn' => __('t_ingame.galaxy.tactical_reason_patrol_own'),
+                        'patrolCurrentOnly' => __('t_ingame.galaxy.tactical_reason_patrol_current'),
+                        'patrolNoFleet' => __('t_ingame.galaxy.tactical_reason_patrol_no_fleet'),
+                        'patrolNoDestination' => __('t_ingame.galaxy.tactical_reason_patrol_no_destination'),
+                        'patrolAdmiral' => __('t_ingame.patrol.refusal_admiral_required'),
                     ],
                 ];
             @endphp

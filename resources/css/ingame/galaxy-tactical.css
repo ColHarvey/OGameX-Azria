@@ -1072,3 +1072,185 @@
 #galaxyContent #galaxyTactical .gtCardBody #expeditionDebrisSlotDebrisContainer:not(:has(*)) {
     display: none;
 }
+
+/*
+ * ## Les patrouilles — le pack `patrols-v1` de Codex
+ *
+ * Les classes du pack, prefixees `patrol-`, reprises dans la portee de la carte : l'anneau du
+ * marqueur, la grille de statistiques, la jauge, la destination en tirets qui pulse, le panneau
+ * d'ordre, et le mode « choix de destination ». Les valeurs sont celles de `patrol-ui.css` ; seule
+ * la taille de l'anneau est ramenee de 54 a 34 px, pour ne pas couvrir une planete de 44 px, et le
+ * survol est une luminosite, pas un eclat — Keven n'en veut aucun sur la carte.
+ *
+ * **Aucun droit ne vient de la feuille.** Un bouton grise est l'etat grise commun
+ * (`.gtAction:disabled`) : un vrai `disabled`, la raison du serveur a cote. La couche ne capte
+ * aucun clic sauf sur ses marqueurs, comme la couche des flottes.
+ */
+#galaxyTactical .gtPatrolLayer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 7;
+}
+
+#galaxyTactical .patrol-marker {
+    position: absolute;
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    box-sizing: border-box;
+    padding: 0;
+    background: rgba(5, 14, 23, 0.35);
+    border: 1px solid rgba(133, 201, 221, 0.56);
+    border-radius: 50%;
+    color: #85c9dd;
+    transform: translate(-50%, -50%);
+    pointer-events: auto;
+    cursor: pointer;
+    transition: filter 150ms;
+}
+
+#galaxyTactical .patrol-marker img {
+    width: 18px;
+    height: 18px;
+}
+
+#galaxyTactical .gtPatrolMarker:hover,
+#galaxyTactical .gtPatrolMarker:focus-visible {
+    filter: brightness(1.45);
+}
+
+#galaxyTactical .gtPatrolMarker.gtSelected {
+    border-width: 2px;
+    border-color: #9bd9e9;
+}
+
+#galaxyTactical .gtPatrolMarker[hidden] {
+    display: none;
+}
+
+/* La destination proposee : un anneau en tirets qui pulse, decoratif, sans clic. */
+#galaxyTactical .patrol-destination {
+    border-style: dashed;
+    pointer-events: none;
+    animation: patrol-pulse 3s ease-in-out infinite;
+}
+
+@keyframes patrol-pulse {
+    50% { box-shadow: 0 0 12px rgba(133, 201, 221, 0.38); }
+}
+
+/* En choix de destination, la carte le dit : le curseur devient un viseur, les corps restent des cibles. */
+#galaxyTactical.gtChoosingDestination,
+#galaxyTactical.gtChoosingDestination .gtBody {
+    cursor: crosshair;
+}
+
+/* La fiche : le resume (statistiques et jauge) et le panneau d'ordre prennent chacun leur rangee. */
+#galaxyTactical .patrol-summary {
+    grid-column: 1 / span 4;
+    grid-row: 4;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 4px;
+}
+
+#galaxyTactical .patrol-stats {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 5px 10px;
+    margin: 0;
+    font-size: 12px;
+}
+
+#galaxyTactical .patrol-stats dt {
+    color: #a5b8c3;
+}
+
+#galaxyTactical .patrol-stats dd {
+    margin: 0;
+    color: #d6e5ec;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+#galaxyTactical .patrol-gauge {
+    height: 7px;
+    border: 1px solid #425760;
+    background: #030a0f;
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+#galaxyTactical .patrol-gauge span {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, #3b7887, #a1d9df);
+}
+
+#galaxyTactical .patrol-order {
+    grid-column: 1 / span 4;
+    grid-row: 6;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 6px;
+    padding-top: 10px;
+    border-top: 1px solid #344c5b;
+}
+
+#galaxyTactical .patrol-field {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 12px;
+    color: #a5b8c3;
+}
+
+#galaxyTactical .patrol-input {
+    width: 110px;
+    box-sizing: border-box;
+    padding: 6px 8px;
+    background: #0a1722;
+    border: 1px solid #465863;
+    border-radius: 3px;
+    color: #d4e6f2;
+    font: inherit;
+    font-variant-numeric: tabular-nums;
+}
+
+#galaxyTactical .patrol-note {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #a5b8c3;
+}
+
+#galaxyTactical .patrol-note.patrol-error {
+    color: #f2c2be;
+}
+
+/* Les deux accents du pack : la confirmation en ambre, le rappel en rouge discret. */
+#galaxyTactical .gtAction.patrol-primary {
+    background: linear-gradient(#72592f, #352919);
+    border-color: #b3945c;
+    color: #f3e4c4;
+}
+
+#galaxyTactical .gtAction.patrol-danger {
+    border-color: #91595b;
+    color: #f2c2be;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #galaxyTactical .patrol-destination {
+        animation: none;
+    }
+
+    #galaxyTactical .patrol-marker {
+        transition: none;
+    }
+}

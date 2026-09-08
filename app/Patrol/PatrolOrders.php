@@ -396,9 +396,9 @@ final class PatrolOrders
      *
      * @throws PatrolOrderRefused
      */
-    public function orderMove(Patrol $patrol, PatrolDestination $to, float $speedPercent, int $orderVersion, int $now): FleetMission
+    public function orderMove(Patrol $patrol, PatrolDestination $to, float $speedPercent, int $orderVersion, int $now, int|null $quotedFuelCost = null): FleetMission
     {
-        return $this->dispatchOrder($patrol, $to, $speedPercent, $orderVersion, $now, PatrolState::EnRoute);
+        return $this->dispatchOrder($patrol, $to, $speedPercent, $orderVersion, $now, PatrolState::EnRoute, $quotedFuelCost);
     }
 
     /**
@@ -410,7 +410,7 @@ final class PatrolOrders
      *
      * @throws PatrolOrderRefused
      */
-    private function dispatchOrder(Patrol $patrol, PatrolDestination $to, float $speedPercent, int $orderVersion, int $now, PatrolState $departureState): FleetMission
+    private function dispatchOrder(Patrol $patrol, PatrolDestination $to, float $speedPercent, int $orderVersion, int $now, PatrolState $departureState, int|null $quotedFuelCost = null): FleetMission
     {
         $refus = $this->whyMoveIsRefused($patrol, $now);
 
@@ -463,6 +463,21 @@ final class PatrolOrders
             throw new PatrolOrderRefused((string)$devis->refusal);
         }
 
+        // **Le cout que le joueur a lu decide, s il l a rapporte.**
+        //
+        // La version d ordre ne bouge pas avec le temps, et une patrouille en vol se deplace : le
+        // point de depart d une manoeuvre est interpole a l instant de la confirmation, donc la
+        // distance — et le cout — peuvent avoir change depuis l affichage. Refaire le devis en
+        // silence et debiter le nouveau, c est exactement le « debit different » que la revue 121
+        // interdit. Un cout devenu **superieur** est donc refuse ; le joueur redemande un devis.
+        //
+        // Un cout devenu inferieur passe, et c est le vrai cout qui est preleve : le joueur n y perd
+        // rien. Ce qui a deja ete facture au stationnement plus haut reste facture — c etait du, et
+        // le curseur ne recule pas.
+        if ($quotedFuelCost !== null && $devis->fuelCost > $quotedFuelCost) {
+            throw new PatrolOrderRefused('quote_cost_moved');
+        }
+
         return DB::transaction(function () use ($patrol, $segment, $units, $to, $devis, $depart, $now, $delai, $departureState): FleetMission {
             // La meme porte que partout : la ligne relue sous verrou decide.
             $tenu = FleetMission::query()->whereKey($segment->id)->lockForUpdate()->first();
@@ -508,14 +523,46 @@ final class PatrolOrders
     }
 
     /**
-     * Rappelle la patrouille : elle rentre chez elle par le meme chemin qu un retour de securite.
+     * Le devis d un rappel : la destination **et** la vitesse sont celles de l ordre, pas celles
+     * qu un appelant proposerait.
      *
-     * Le rappel n est pas un privilege : il paie son segment comme un autre, et il est refuse aux
-     * memes conditions. Ce qu il ajoute, c est de pouvoir partir sans attendre l echeance.
+     * ## Pourquoi le rappel a son propre devis
+     *
+     * Un rappel ne se decrit pas comme un deplacement ordinaire : il vole a la vitesse du retour de
+     * securite, vers la base que `homeOf()` resout — une planete ou une lune, la base d attache ou
+     * le repli. Un devis compose par l appelant annoncait donc une autre duree et un autre cout que
+     * l ordre confirme, et son verdict `possible` pouvait diverger de celui de la confirmation. Le
+     * serveur compose le rappel de bout en bout : la carte n a rien a deviner, et ne le peut plus.
      *
      * @throws PatrolOrderRefused
      */
-    public function recall(Patrol $patrol, int $now): FleetMission
+    public function quoteForRecall(Patrol $patrol, int $now): PatrolQuote
+    {
+        $refus = $this->whyRecallIsRefused($patrol, $now);
+
+        if ($refus !== null) {
+            throw new PatrolOrderRefused($refus);
+        }
+
+        $base = $this->homeOf($patrol);
+
+        if ($base === null) {
+            throw new PatrolOrderRefused('no_home_left');
+        }
+
+        return $this->quoteFor($patrol, $this->destinationOnto($base), $this->settings->patrolSafetyReturnSpeed(), $now);
+    }
+
+    /**
+     * Rappelle la patrouille : elle rentre chez elle par le meme chemin qu un retour de securite.
+     *
+     * Le rappel n est pas un privilege : il paie son segment comme un autre, il rapporte la version
+     * du devis comme un autre, et il est refuse aux memes conditions. Ce qu il ajoute, c est de
+     * pouvoir partir sans attendre l echeance.
+     *
+     * @throws PatrolOrderRefused
+     */
+    public function recall(Patrol $patrol, int $orderVersion, int $now, int|null $quotedFuelCost = null): FleetMission
     {
         $refus = $this->whyRecallIsRefused($patrol, $now);
 
@@ -535,13 +582,18 @@ final class PatrolOrders
         // lieu d y rendre ses vaisseaux : le temoin du rappel jusqu au sol l a montre. Et la cible
         // porte l identite de la base **qui existe** — le repli si la base a disparu —, jamais
         // l identifiant d une planete detruite a cote des coordonnees d une autre.
+        // **La version vient de l appelant, jamais de la ligne.** Se donner soi-meme la version
+        // courante rendait le controle toujours vrai : un devis de rappel affiche, un autre ordre
+        // accepte entre-temps, et la confirmation partait quand meme depuis un autre point et pour
+        // un autre cout que ceux qui avaient ete lus.
         return $this->dispatchOrder(
             $patrol,
             $this->destinationOnto($base),
             $this->settings->patrolSafetyReturnSpeed(),
-            (int)$patrol->order_version,
+            $orderVersion,
             $now,
-            PatrolState::Returning
+            PatrolState::Returning,
+            $quotedFuelCost
         );
     }
 

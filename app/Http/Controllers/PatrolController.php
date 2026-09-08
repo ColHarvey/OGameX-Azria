@@ -18,6 +18,7 @@ use OGame\Patrol\PatrolOrders;
 use OGame\Patrol\PatrolPricing;
 use OGame\Patrol\PatrolQuote;
 use OGame\Services\ObjectService;
+use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
 use Throwable;
 
@@ -42,12 +43,22 @@ use Throwable;
  * envois de flotte. **Un point hors grille est refuse, jamais arrondi** : un arrondi silencieux
  * masquerait un defaut du navigateur en deplacant la flotte ailleurs que la ou le joueur a clique.
  *
- * ## La composition vient de la requete, la planete de la session
+ * ## La composition et la planete de depart viennent de la requete, et sont verifiees
  *
- * Un lancement part de la planete courante du joueur, comme tout envoi de flotte, avec une
+ * Un lancement part d un corps **nomme** (`planet_id`), verifie appartenir au joueur, avec une
  * composition `am<id>` — la forme de la page Flotte, pour qu une flotte standard s envoie telle
- * quelle. Le corps vise par une destination « pres d un corps » est **resolu ici** par ses
- * coordonnees et son genre ; l identifiant que le navigateur croirait connaitre n est pas lu.
+ * quelle. Prendre la planete courante de la session liait le devis et l ordre a un etat partage par
+ * tous les onglets : un changement de planete ailleurs entre les deux debitait un autre corps que
+ * celui que le joueur avait lu. Le corps vise par une destination « pres d un corps » est de meme
+ * **resolu ici** par ses coordonnees et son genre ; l identifiant que le navigateur croirait
+ * connaitre n est pas lu.
+ *
+ * ## Ce que ce point d entree ajoute aux regles du service
+ *
+ * Une seule chose, et c est une regle du **raccourci de la Galaxie**, pas des patrouilles : employer
+ * une flotte standard depuis la carte demande un Amiral, exactement comme l expedition. La page
+ * Flotte, ou le joueur compose lui-meme, reste ouverte a tous. La carte grisait deja ce bouton, mais
+ * avec la raison de l expedition et sans que rien ne l applique : un appel direct passait.
  */
 class PatrolController extends OGameController
 {
@@ -64,14 +75,8 @@ class PatrolController extends OGameController
     public function quote(Request $request, PlayerService $player): JsonResponse
     {
         $now = (int)Date::now()->timestamp;
-        $to = $this->destinationFrom($request);
-
-        if (is_string($to)) {
-            return $this->refused($to, 422);
-        }
-
-        $vitesse = $this->speedFrom($request);
         $identifiant = $request->input('patrol_id');
+        $rappel = $request->input('kind') === 'recall';
 
         try {
             if ($identifiant !== null && $identifiant !== '') {
@@ -93,20 +98,45 @@ class PatrolController extends OGameController
                     throw new PatrolOrderRefused('no_current_segment');
                 }
 
-                $devis = $this->orders->quoteFor($patrouille, $to, $vitesse, $now);
                 $depart = $this->orders->departurePointFor($patrouille, $segment, $now);
+
+                if ($rappel) {
+                    // **Ni destination ni vitesse ne sont lues ici** : le rappel a les siennes, et
+                    // c est le service qui les compose. La requete ne peut donc pas decrire un
+                    // rappel qui ne serait pas celui que la confirmation executerait.
+                    $devis = $this->orders->quoteForRecall($patrouille, $now);
+                } else {
+                    $to = $this->destinationFrom($request);
+
+                    if (is_string($to)) {
+                        return $this->refused($to, 422);
+                    }
+
+                    $devis = $this->orders->quoteFor($patrouille, $to, $this->speedFrom($request), $now);
+                }
             } else {
-                $planete = $player->planets->current();
+                $origine = $this->originFrom($request, $player);
+
+                if (is_string($origine)) {
+                    return $this->refused($origine, 409);
+                }
+
+                $to = $this->destinationFrom($request);
+
+                if (is_string($to)) {
+                    return $this->refused($to, 422);
+                }
+
                 $units = $this->unitsFrom($request);
                 $reserve = (int)$request->input('reserve', 0);
-                $refus = $this->orders->whyLaunchIsRefused($planete, $units, new Resources(0, 0, 0, 0), $reserve);
+                $refus = $this->orders->whyLaunchIsRefused($origine, $units, new Resources(0, 0, 0, 0), $reserve);
 
                 if ($refus !== null) {
                     throw new PatrolOrderRefused($refus);
                 }
 
-                $devis = $this->orders->quoteForLaunch($planete, $units, $reserve, $to, $vitesse);
-                $depart = $this->pricing->geometry()->bodyPoint($planete->getPlanetCoordinates()->position);
+                $devis = $this->orders->quoteForLaunch($origine, $units, $reserve, $to, $this->speedFrom($request));
+                $depart = $this->pricing->geometry()->bodyPoint($origine->getPlanetCoordinates()->position);
             }
         } catch (PatrolOrderRefused $refus) {
             return $this->refused($refus->reason, 409);
@@ -145,7 +175,7 @@ class PatrolController extends OGameController
         }
 
         try {
-            $this->orders->orderMove($patrouille, $to, $this->speedFrom($request), (int)$version, $now);
+            $this->orders->orderMove($patrouille, $to, $this->speedFrom($request), (int)$version, $now, $this->quotedCostFrom($request));
         } catch (PatrolOrderRefused $refus) {
             return $this->refused($refus->reason, 409);
         }
@@ -155,6 +185,9 @@ class PatrolController extends OGameController
 
     /**
      * Le rappel : la patrouille rentre sur sa base, ou sur le repli si la base a disparu.
+     *
+     * Il rapporte la version du devis comme un deplacement : sans elle, un devis de rappel perime
+     * partait quand meme, depuis un autre point et pour un autre cout que ceux qui avaient ete lus.
      */
     public function recall(Request $request, PlayerService $player, int $patrol): JsonResponse
     {
@@ -165,8 +198,14 @@ class PatrolController extends OGameController
             return $this->notFound();
         }
 
+        $version = $request->input('order_version');
+
+        if (!is_numeric($version)) {
+            return $this->refused('stale_quote', 409);
+        }
+
         try {
-            $this->orders->recall($patrouille, $now);
+            $this->orders->recall($patrouille, (int)$version, $now, $this->quotedCostFrom($request));
         } catch (PatrolOrderRefused $refus) {
             return $this->refused($refus->reason, 409);
         }
@@ -175,11 +214,17 @@ class PatrolController extends OGameController
     }
 
     /**
-     * Le lancement depuis la planete courante, sans cargaison : la reserve seule embarque.
+     * Le lancement depuis un corps nomme du joueur, sans cargaison : la reserve seule embarque.
      */
     public function launch(Request $request, PlayerService $player): JsonResponse
     {
         $now = (int)Date::now()->timestamp;
+        $origine = $this->originFrom($request, $player);
+
+        if (is_string($origine)) {
+            return $this->refused($origine, 409);
+        }
+
         $to = $this->destinationFrom($request);
 
         if (is_string($to)) {
@@ -188,7 +233,7 @@ class PatrolController extends OGameController
 
         try {
             $patrouille = $this->orders->launch(
-                $player->planets->current(),
+                $origine,
                 $this->unitsFrom($request),
                 new Resources(0, 0, 0, 0),
                 (int)$request->input('reserve', 0),
@@ -201,6 +246,50 @@ class PatrolController extends OGameController
         }
 
         return $this->done($patrouille, $now, 'order_launched');
+    }
+
+    /**
+     * Le corps d ou part un lancement, ou la clef du refus.
+     *
+     * **Nomme par la requete, verifie ici.** Le corps doit appartenir au joueur ; l identifiant seul
+     * ne prouve rien, c est la liste de ses corps vivants qui tranche. Sans `planet_id`, la planete
+     * courante sert de repli — le comportement de la page Flotte —, mais la carte le nomme toujours,
+     * pour que le devis et l ordre ne dependent pas d un etat de session partage par tous les
+     * onglets.
+     *
+     * Et la regle du raccourci : employer une flotte standard depuis la Galaxie demande un Amiral,
+     * comme l expedition. C est ce point d entree qui la porte, pas le service : la page Flotte, ou
+     * le joueur compose lui-meme, n a jamais rien demande de tel.
+     */
+    private function originFrom(Request $request, PlayerService $player): PlanetService|string
+    {
+        if (!$player->hasAdmiral()) {
+            return 'admiral_required';
+        }
+
+        $demande = $request->input('planet_id');
+
+        if ($demande === null || $demande === '') {
+            return $player->planets->current();
+        }
+
+        foreach ($player->planets->all() as $corps) {
+            if ($corps->getPlanetId() === (int)$demande) {
+                return $corps;
+            }
+        }
+
+        return 'bad_origin';
+    }
+
+    /**
+     * Le cout que le joueur a lu sur son devis, s il l a rapporte : le serveur refuse de debiter plus.
+     */
+    private function quotedCostFrom(Request $request): int|null
+    {
+        $lu = $request->input('quoted_fuel_cost');
+
+        return is_numeric($lu) ? max(0, (int)$lu) : null;
     }
 
     /**

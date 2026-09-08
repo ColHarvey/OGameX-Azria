@@ -89,6 +89,12 @@ class GalaxyController extends OGameController
             'max_galaxies' => $settingsService->numberOfGalaxies(),
             'is_in_vacation_mode' => $player->isInVacationMode(),
             'planet_relocation_cost' => (int)$settingsService->get('planet_relocation_cost', 240000),
+            // La planete active : c est d elle qu un lancement de patrouille part, comme tout envoi de flotte.
+            'current_planet_id' => $planet->getPlanetId(),
+            // **La grille des points libres est un reglage.** Codee en dur dans la carte, tout clic
+            // serait refuse des que l administrateur la change : le serveur refuse un point hors
+            // grille au lieu de l arrondir, et il a raison.
+            'patrol_grid_units' => $settingsService->patrolGridUnits(),
         ]);
     }
 

@@ -2,7 +2,9 @@
 
 namespace Tests\Feature;
 
+use OGame\Patrol\Geometry\SystemGeometry;
 use OGame\Services\PlanetService;
+use OGame\Services\SettingsService;
 use Tests\UnitTestCase;
 
 /**
@@ -741,7 +743,9 @@ class GalaxyTacticalMapTest extends UnitTestCase
         $this->assertStringContainsString("f.setAttribute('data-corps', corps);", $module, 'The card no longer says which body is selected.');
 
         // 3. Les trajectoires suivent le type de la cible, et l'espace profond a son point.
-        $this->assertStringContainsString('pointDeCorps(mouvement.to.position, mouvement.to.type)', $module, 'Trajectories ignore the destination type again: a mission to a moon lands on the planet.');
+        /* Le bout d'un mouvement passe par `pointDeBout()`, qui honore le type du corps — ou le point libre d'une patrouille. */
+        $this->assertStringContainsString('pointDeBout(mouvement.to)', $module, 'Trajectories no longer read the destination through pointDeBout(): a free point would land on an orbit slot.');
+        $this->assertStringContainsString('return pointDeCorps(bout.position, bout.type);', $module, 'Trajectories ignore the destination type again: a mission to a moon lands on the planet.');
         $this->assertStringContainsString('Number(position) === POSITION_ESPACE_PROFOND', $module, 'Position 16 goes through the orbit geometry again.');
 
         // 4. Un redessin du meme systeme ne ferme pas la fiche.
@@ -1217,7 +1221,8 @@ class GalaxyTacticalMapTest extends UnitTestCase
         $tableDesIcones = $bloc[1] ?? '';
         $this->assertNotSame('', $tableDesIcones, 'The action icon table is gone.');
         preg_match_all("/([a-zA-Z]+): '([a-z0-9-]+\.svg)'/", $tableDesIcones, $icones, PREG_SET_ORDER);
-        $this->assertCount(17, $icones, 'The action icon table no longer lists the seventeen actions of the inventory.');
+        /* Dix-sept actions de l'inventaire de la revue 112, plus les cinq des patrouilles (pack `patrols-v1`). */
+        $this->assertCount(22, $icones, 'The action icon table no longer lists the seventeen actions of the inventory and the five of the patrols.');
 
         foreach ($icones as [, $action, $fichier]) {
             $this->assertFileExists(public_path('img/galaxy-tactical/' . $fichier), 'The icon of ' . $action . ' is missing on disk: a button without an image.');
@@ -1455,6 +1460,89 @@ class GalaxyTacticalMapTest extends UnitTestCase
      * Un fichier de `resources/js` que `vite.config.js` ne nomme pas n'est concatene nulle part :
      * il est parfait, relu, teste — et absent du jeu.
      */
+    /**
+     * **Les patrouilles sur la carte : tout vient du serveur, et la geometrie est la sienne.**
+     *
+     * La vue publie les quatre adresses et la planete active ; le module lit `patrols` dans la
+     * couche des flottes, projette les points du serveur avec **ses** constantes — cent unites par
+     * orbite, l'angle d'or, la grille de dix —, envoie la version du devis avec la confirmation, et
+     * n'a aucun glisser-deposer. Le marqueur est un vrai bouton ; une commande grisee porte la raison
+     * du serveur ; la couche ne capte aucun clic sauf sur ses marqueurs.
+     */
+    public function testThePatrolLayerIsWiredEndToEnd(): void
+    {
+        $vue = $this->vue();
+        $module = $this->module();
+        $feuille = $this->feuille();
+
+        foreach ([
+            "var galaxyPatrolQuoteUrl = \"{{ route('galaxy.patrol.quote') }}\";",
+            "var galaxyPatrolLaunchUrl = \"{{ route('galaxy.patrol.launch') }}\";",
+            "var galaxyPatrolMoveUrl = \"{{ route('galaxy.patrol.move', ['patrol' => 0]) }}\";",
+            "var galaxyPatrolRecallUrl = \"{{ route('galaxy.patrol.recall', ['patrol' => 0]) }}\";",
+            'var galaxyCurrentPlanetId = {{ $current_planet_id }};',
+        ] as $ligne) {
+            $this->assertStringContainsString($ligne, $vue, 'The view no longer publishes ' . $ligne);
+        }
+
+        $this->assertStringContainsString("'current_planet_id' => \$planet->getPlanetId(),", (string)file_get_contents(app_path('Http/Controllers/GalaxyController.php')), 'The controller no longer hands the active planet to the view.');
+
+        /* La couche lit `patrols` la ou elle lit `movements`. */
+        $this->assertStringContainsString("patrouilles = Array.isArray(reponse.patrols) ? reponse.patrols : [];", $module, 'The patrol layer no longer reads the patrols of the fleet payload.');
+
+        /* La geometrie du serveur, en toutes lettres : les memes constantes que `SystemGeometry`. */
+        $this->assertStringContainsString('var UNITES_PAR_ORBITE = ' . SystemGeometry::ORBIT_STEP . ';', $module, 'The module and the server disagree on the units of an orbit.');
+        $this->assertStringContainsString('var ANGLE_OR = ' . SystemGeometry::GOLDEN_ANGLE_DEGREES . ';', $module, 'The module and the server disagree on the golden angle.');
+        /* La grille est un reglage : la vue la publie, le module la lit, et le repli vaut le defaut du serveur. */
+        $this->assertStringContainsString('var galaxyPatrolGridUnits = {{ $patrol_grid_units }};', $vue, 'The view no longer publishes the grid: the module would round to a constant the server may refuse.');
+        $this->assertStringContainsString("'patrol_grid_units' => \$settingsService->patrolGridUnits(),", (string)file_get_contents(app_path('Http/Controllers/GalaxyController.php')), 'The controller no longer hands the grid to the view.');
+        $this->assertStringContainsString("typeof galaxyPatrolGridUnits !== 'undefined' && Number(galaxyPatrolGridUnits) > 0", $module, 'The module no longer reads the published grid.');
+        $this->assertStringContainsString(': ' . resolve(SettingsService::class)->patrolGridUnits() . ';', $module, 'The module fallback is not the default grid of the server.');
+
+        /* Le rappel ne compose ni destination ni vitesse : le serveur les tient. */
+        /*
+         * La **garde** autant que la ligne : `charge.kind = 'recall';` reste dans la source quand la
+         * branche est morte, et un témoin qui ne cherche que la ligne ne voit rien. Une mutation qui
+         * remplaçait la condition par `false` survivait exactement ainsi.
+         */
+        $this->assertStringContainsString("if (o.genre === 'recall') {\n            charge.kind = 'recall';", str_replace("\r\n", "\n", $module), 'The recall branch is dead or gone: the map composes its destination again.');
+        $this->assertStringContainsString('charge.quoted_fuel_cost = o.devis.fuel_cost;', $module, 'The confirmation no longer carries the cost the player read.');
+        $this->assertStringContainsString('charge.planet_id = o.planete && o.planete.planetId;', $module, 'A launch no longer names the body it leaves.');
+        $this->assertStringNotContainsString("position: p.home.position, type: 1", $module, 'The recall guesses its destination again: a moon home would be called a planet.');
+        $this->assertStringContainsString('angles[i] = ((i * ANGLE_OR - 90) * Math.PI) / 180;', $module, 'The base angle of a body is no longer golden angle minus ninety: the server points would land next to the wrong bodies.');
+        $this->assertStringContainsString('var angle = Math.atan2(y, x) + phaseDuMoment();', $module, 'A server point is no longer turned by the orbital phase: it would drift away from the bodies.');
+        $this->assertStringContainsString('x: Math.round((unites * Math.cos(angle)) / PATROUILLE_GRILLE) * PATROUILLE_GRILLE,', $module, 'A click is no longer rounded to the server grid: every click would be refused.');
+        $this->assertStringContainsString("if (Number(bout.type) === TYPE_POINT_SPATIAL && bout.x !== null", $module, 'A leg toward a free point is drawn toward an orbit slot again.');
+
+        /* La version du devis part avec la confirmation ; pas de glisser-deposer. */
+        $this->assertStringContainsString('charge.order_version = o.devis.order_version;', $module, 'The confirmation no longer carries the version of the quote it confirms.');
+        $this->assertStringNotContainsString('dragstart', $module, 'A drag and drop appeared: a movement decided by an animation.');
+        $this->assertStringNotContainsString("addEventListener('drop'", $module);
+
+        /* Le marqueur est un vrai bouton ; la raison grisee est celle du serveur. */
+        $this->assertStringContainsString("element('button', 'patrol-marker gtPatrolMarker gtPatrol--'", $module, 'The patrol marker is not a button: keyboard users cannot open it.');
+        $this->assertStringContainsString('return inactif(commande.reason || locaFiche(', $module, 'A greyed patrol command no longer shows the reason the server gave.');
+        $this->assertStringContainsString("String(modele).replace('/patrol/0/', '/patrol/' + Number(id) + '/')", $module, 'The per-patrol routes are no longer derived from the published templates.');
+
+        /* Chaque icone d'etat existe sur le disque. */
+        preg_match('/var ICONES_DE_PATROUILLE = \{(.*?)\};/s', $module, $bloc);
+        preg_match_all("/'([a-z0-9-]+\.svg)'/", $bloc[1] ?? '', $icones);
+        $this->assertNotEmpty($icones[1], 'The patrol state icon table is gone.');
+
+        foreach ($icones[1] as $fichier) {
+            $this->assertFileExists(public_path('img/galaxy-tactical/' . $fichier), 'The patrol icon ' . $fichier . ' is missing on disk.');
+        }
+
+        $this->assertFileExists(public_path('img/galaxy-tactical/patrol-patrol.svg'));
+
+        /* La feuille : la couche ne capte rien, ses marqueurs si ; la destination s'immobilise sous la reduction des mouvements. */
+        $this->assertMatchesRegularExpression('/#galaxyTactical \.gtPatrolLayer \{[^}]*pointer-events: none;/', $feuille, 'The patrol layer steals clicks from the bodies.');
+        $this->assertMatchesRegularExpression('/#galaxyTactical \.patrol-marker \{[^}]*pointer-events: auto;/', $feuille, 'The patrol markers cannot be clicked.');
+        $this->assertMatchesRegularExpression('/#galaxyTactical \.patrol-destination \{[^}]*pointer-events: none;/', $feuille, 'The destination marker catches the click meant for the map.');
+        $this->assertMatchesRegularExpression('/prefers-reduced-motion: reduce\) \{\s*#galaxyTactical \.patrol-destination \{\s*animation: none;/', $feuille, 'The destination pulse ignores the reduced-motion preference.');
+        $this->assertStringContainsString('#galaxyTactical .gtPatrolMarker[hidden] {', $feuille, 'A patrol in hyperspace would still show its ring.');
+    }
+
     public function testTheModuleIsPartOfTheBundle(): void
     {
         $configuration = file_get_contents(base_path('vite.config.js'));

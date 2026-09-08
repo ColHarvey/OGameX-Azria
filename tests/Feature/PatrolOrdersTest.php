@@ -324,7 +324,7 @@ class PatrolOrdersTest extends AccountTestCase
 
         $this->assertGreaterThan(0, $devisIndependant->fuelCost, 'The recall leg is free: the witness would prove nothing.');
 
-        $retour = $this->orders()->recall($patrouille, $instant);
+        $retour = $this->orders()->recall($patrouille, (int)$patrouille->order_version, $instant);
 
         $patrouille->refresh();
 
