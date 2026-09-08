@@ -870,10 +870,11 @@ final class PatrolOrders
     }
 
     /**
-     * La planete du joueur la plus proche du point courant, a egalite le plus petit identifiant.
+     * La planete du joueur la plus proche du point courant, telle que le joueur charge la connait.
      *
-     * Deterministe et rejouable : c est ce que le protocole de retour du combat exige deja de ses
-     * propres recours, et la meme discipline s applique ici.
+     * **Lecture d agrement, jamais de decision.** La liste vient du service du joueur, donc de
+     * l instant ou il a ete charge. Elle convient a un devis ou a une ancre d affichage ; elle ne
+     * convient pas a un ordre qui engage une flotte — pour cela, `homeUnderLock()`.
      */
     private function nearestOwnPlanetOf(Patrol $patrol): PlanetService|null
     {
@@ -883,11 +884,92 @@ final class PatrolOrders
             return null;
         }
 
+        return $this->nearestOf($patrol, $joueur->planets->allPlanets());
+    }
+
+    /**
+     * La base vers laquelle un ordre peut reellement partir, decidee sur des lignes relues sous verrou.
+     *
+     * ## Pourquoi une liste chargee ne peut pas decider d un depart
+     *
+     * `homeOf()` refuse deja une base passee en d autres mains, puis se rabat sur « la planete du
+     * joueur la plus proche » — prise dans la liste que le service du joueur porte depuis son
+     * chargement. Sous `REPEATABLE READ`, meme une relecture ordinaire rendrait cet instant-la :
+     * seule une lecture verrouillante voit ce que la base dit maintenant. Le repli renvoyait donc
+     * la patrouille vers le corps qui venait de lui echapper, et le garde de `homeOf()` etait defait
+     * par son propre recours. Trouve par la course de l atterrissage sur le bac MariaDB, jamais par
+     * la suite locale : sous SQLite les deux valeurs coincident.
+     *
+     * Les lignes sont prises **par identifiant croissant**, l ordre que tout le depot emploie pour
+     * les corps, et le travailleur des pages verrouille deja le meme ensemble.
+     */
+    public function homeUnderLock(Patrol $patrol): PlanetService|null
+    {
+        $identifiants = $this->ownPlanetIdsUnderLock($patrol);
+
+        if ($identifiants === []) {
+            return null;
+        }
+
+        $corps = [];
+
+        foreach ($identifiants as $identifiant) {
+            $service = resolve(PlanetServiceFactory::class)->make($identifiant, true);
+
+            if ($service instanceof PlanetService) {
+                $corps[] = $service;
+            }
+        }
+
+        $base = $patrol->homePlanet;
+
+        if ($base !== null && in_array((int)$base->id, $identifiants, true)) {
+            foreach ($corps as $service) {
+                if ($service->getPlanetId() === (int)$base->id) {
+                    return $service;
+                }
+            }
+        }
+
+        return $this->nearestOf($patrol, $corps);
+    }
+
+    /**
+     * Les planetes que ce joueur possede **maintenant**, relues sous verrou, par identifiant croissant.
+     *
+     * @return array<int, int>
+     */
+    private function ownPlanetIdsUnderLock(Patrol $patrol): array
+    {
+        $lignes = DB::table('planets')
+            ->where('user_id', (int)$patrol->user_id)
+            ->where('planet_type', PlanetType::Planet->value)
+            ->where(function ($requete): void {
+                $requete->whereNull('destroyed')->orWhere('destroyed', 0);
+            })
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->pluck('id')
+            ->all();
+
+        return array_map(static fn ($identifiant): int => (int)$identifiant, $lignes);
+    }
+
+    /**
+     * Le plus proche de ces corps, a egalite le plus petit identifiant.
+     *
+     * Deterministe et rejouable : c est ce que le protocole de retour du combat exige deja de ses
+     * propres recours, et la meme discipline s applique ici.
+     *
+     * @param array<int, PlanetService> $candidats
+     */
+    private function nearestOf(Patrol $patrol, array $candidats): PlanetService|null
+    {
         $meilleure = null;
         $meilleurCout = null;
         $meilleurId = null;
 
-        foreach ($joueur->planets->allPlanets() as $planete) {
+        foreach ($candidats as $planete) {
             $coordonnees = $planete->getPlanetCoordinates();
             $cout = $this->pricing->distanceBetween(
                 (int)$patrol->galaxy,
@@ -981,7 +1063,10 @@ final class PatrolOrders
         $rendezVous = $this->nextEventAt($parked);
         $this->bill($patrol, $units, $rendezVous === null ? $now : min($now, $rendezVous));
 
-        $base = $this->homeOf($patrol);
+        // **Le depart se decide sur des lignes tenues, pas sur une liste chargee.** Le corps vise
+        // par ce retour est un ordre, pas un devis : il doit appartenir au joueur a l instant ou
+        // l ordre est ecrit, et seule une lecture verrouillante le dit.
+        $base = $this->homeUnderLock($patrol);
         $proprietaire = $this->playerOf($patrol);
 
         if ($base === null || $proprietaire === null) {

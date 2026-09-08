@@ -120,8 +120,15 @@ final class PatrolRaceTest extends AccountTestCase
         $this->assertNotNull($proprietaire);
         $this->assertNotSame($this->currentUserId, $proprietaire->getId());
 
-        // **Le repli doit etre observable.** Avec une reserve qui paie largement le trajet vers la
-        // planete restante, le repli cree un segment NEUF : sans cela il immobiliserait, et une
+        // **Le corps de repli est cree ici, pas espere.** Apres le transfert, la base n appartient
+        // plus au joueur ; sans un autre corps a lui, le repli n aurait nulle part ou aller et
+        // l epreuve confondrait « repli impossible » avec « repli absent » — deux issues qui se
+        // ressemblent, ce que cette course a deja paye trois fois.
+        $refuge = $this->createPlanetAtSafeCoordinate($this->currentUserId);
+        $this->assertNotSame($base, $refuge->getPlanetId(), 'The refuge is the very base that changes hands.');
+
+        // **Le repli doit etre observable.** Avec une reserve qui paie largement le trajet vers le
+        // corps de repli, le repli cree un segment NEUF : sans cela il immobiliserait, et une
         // patrouille immobilisee garde son segment — la meme observation qu une arrivee qui aurait
         // ignore le refus. Mesure faite : la mutation survivait a ce temoin tant que les deux issues
         // se ressemblaient.
@@ -211,6 +218,12 @@ final class PatrolRaceTest extends AccountTestCase
             (int)DB::table('planets')->where('id', $neuf->planet_id_to)->value('user_id'),
             'The new leg does not aim at a planet of the patrol owner.'
         );
+
+        // **Et ce n est pas le corps qui vient de partir.** La verification precedente passait deja
+        // quand le repli visait la base transferee — son proprietaire etant lu apres coup, la
+        // comparaison portait sur le mauvais joueur et non sur le mauvais corps. Le defaut trouve
+        // ici tenait a une liste de planetes chargee avant le changement de mains.
+        $this->assertNotSame($base, (int)$neuf->planet_id_to, 'The fallback aims at the base that just changed hands.');
     }
 
     /**
