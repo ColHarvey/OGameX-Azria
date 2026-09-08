@@ -26,6 +26,8 @@ use OGame\Enums\CharacterClass;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameMissions\AttackMission;
+use OGame\GameMissions\BattleEngine\Draws\BattleDraws;
+use OGame\GameMissions\BattleEngine\Draws\SeededDraws;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleetResult;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameObjects\Models\Units\UnitCollection;
@@ -77,6 +79,32 @@ use Throwable;
  */
 class CombatSettlementServiceTest extends FleetDispatchTestCase
 {
+    /**
+     * La graine des batailles de ce banc.
+     *
+     * **Un rouge aleatoire est pire qu un rouge franc.** Les batailles de cette classe tiraient du
+     * systeme, et leurs marges sont etroites par construction : l attaquant doit l emporter pour
+     * qu il y ait un butin, et le defenseur garder des Faucheurs pour qu il y ait une recolte. Une
+     * suite malchanceuse faisait donc tomber une premisse — mesure faite, run `34254299033` sur
+     * `03aed7e1` : « No defending reaper survived: nothing would be collected. » Cinquante passages
+     * en isolation ne l ont pas reproduit : c est un tirage rare, pas l etat d un voisin. La sonde
+     * a lu, a graine fixe et defenseur identique, un a trois Faucheurs survivants.
+     *
+     * La source des tirages se resout au conteneur precisement pour cela : rendre reproductible une
+     * bataille que le banc ne construit pas lui-meme, celle que la fermeture cree au fond du chemin,
+     * hors de portee de `withDraws()`.
+     *
+     * **Ce que cette graine donne, mesure** : trois Faucheurs defenseurs survivent, et la part
+     * recoltable des debris depasse leur plafond — sans quoi le plafond ne deciderait de rien et le
+     * temoin ne prouverait pas ce qu il annonce. Les deux faits sont exiges par le temoin lui-meme,
+     * pas seulement obtenus.
+     *
+     * La graine ne dispense d aucune verification. Chaque premisse reste exigee ; si un changement
+     * du moteur rendait une de ces batailles unilaterale, l echec serait franc et reproductible au
+     * lieu d apparaitre une fois sur cent.
+     */
+    private const int BATTLE_SEED = 20260908;
+
     protected int $missionType = 1;
 
     protected string $missionName = 'Attaquer';
@@ -1291,32 +1319,45 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
         $this->assertGreaterThan($plafondALaCloture, $recolte, sprintf('The collectable debris (%d, of %d) fit under the reaper cap (%d): the cap decides nothing.', $recolte, (int)$resultat->debris->sum(), $plafondALaCloture));
 
         // **Le geste du jeu**, apres la bataille et avant l'echeance : la recherche du defenseur s'acheve.
-        DB::table('users_tech')->where('user_id', $proprietaire)->update(['hyperspace_technology' => 8]);
-        $apresRecherche = resolve(PlayerServiceFactory::class)->make($proprietaire, true);
-        $plafondRelu = (int)$faucheur->properties->capacity->calculate($apresRecherche)->totalValue * $faucheursRestants;
+        //
+        // Le proprietaire de la planete propre est **partage** par les essais d'un meme processus :
+        // une epreuve remet ce qu'elle a leve. Sans cela le niveau reste a 8, et le meme essai rejoue
+        // sur cette base ne voit plus sa recherche changer la capacite — sa propre premisse tombe.
+        // Mesure faite : un rouge au neuvieme passage sur une base non remise a zero.
+        $hyperespaceAvant = (int)DB::table('users_tech')->where('user_id', $proprietaire)->value('hyperspace_technology');
+        try {
+            DB::table('users_tech')->where('user_id', $proprietaire)->update(['hyperspace_technology' => 8]);
+            $apresRecherche = resolve(PlayerServiceFactory::class)->make($proprietaire, true);
+            $plafondRelu = (int)$faucheur->properties->capacity->calculate($apresRecherche)->totalValue * $faucheursRestants;
 
-        $this->assertNotSame($plafondALaCloture, $plafondRelu, 'The research did not change the reaper capacity: the test would prove nothing.');
-        $this->assertGreaterThan($plafondALaCloture, min($recolte, $plafondRelu), 'A live re-read would have collected the same amount as the frozen cap: the test would prove nothing.');
+            $this->assertNotSame($plafondALaCloture, $plafondRelu, 'The research did not change the reaper capacity: the test would prove nothing.');
+            $this->assertGreaterThan($plafondALaCloture, min($recolte, $plafondRelu), 'A live re-read would have collected the same amount as the frozen cap: the test would prove nothing.');
 
-        $avant = $this->stockOf($cible);
-        $champAvant = $this->debrisFieldAt($cible);
+            $avant = $this->stockOf($cible);
+            $champAvant = $this->debrisFieldAt($cible);
 
-        $issue = $this->settleIt($combat, (int)$combat->ends_at);
-        $this->assertTrue($issue->settled, 'The settlement did nothing: ' . $issue->reason);
-        $this->assertNotNull($issue->loot);
+            $issue = $this->settleIt($combat, (int)$combat->ends_at);
+            $this->assertTrue($issue->settled, 'The settlement did nothing: ' . $issue->reason);
+            $this->assertNotNull($issue->loot);
 
-        // La cible perd l'applique et gagne exactement le plafond gele ; le champ garde le reste.
-        $applique = $issue->loot->applied;
-        $this->assertSame(
-            array_sum($avant) - ($applique->metal + $applique->crystal + $applique->deuterium) + $plafondALaCloture,
-            array_sum($this->stockOf($cible)),
-            'The target was credited with debris its reapers collected under a capacity re-read live.'
-        );
-        $this->assertSame(
-            (int)$resultat->debris->sum() - $plafondALaCloture,
-            $this->debrisFieldAt($cible) - $champAvant,
-            'The debris field lost more than the frozen reaper cap.'
-        );
+            // La cible perd l'applique et gagne exactement le plafond gele ; le champ garde le reste.
+            $applique = $issue->loot->applied;
+            $this->assertSame(
+                array_sum($avant) - ($applique->metal + $applique->crystal + $applique->deuterium) + $plafondALaCloture,
+                array_sum($this->stockOf($cible)),
+                'The target was credited with debris its reapers collected under a capacity re-read live.'
+            );
+            $this->assertSame(
+                (int)$resultat->debris->sum() - $plafondALaCloture,
+                $this->debrisFieldAt($cible) - $champAvant,
+                'The debris field lost more than the frozen reaper cap.'
+            );
+        } finally {
+            // **Une epreuve remet ce qu'elle a levee, meme quand elle tombe.** Une assertion en
+            // echec avant la fin laisserait le niveau a 8 sur un proprietaire partage, et le
+            // rouge suivant naitrait ailleurs, loin de sa cause.
+            DB::table('users_tech')->where('user_id', $proprietaire)->update(['hyperspace_technology' => $hyperespaceAvant]);
+        }
     }
 
     /**
@@ -1444,6 +1485,11 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
         // Et une garnison : sans defense, la cible ne perd rien et le camp defenseur ne prouverait
         // rien. Vingt lanceurs tombent devant trois cent cinquante chasseurs sans changer l'issue.
         $this->setStockOf($cible, $stock + ['metal' => 500_000, 'crystal' => 300_000, 'deuterium' => 100_000, 'rocket_launcher' => $defences]);
+
+        // **La bataille de ce banc est reproductible**, et la liaison se pose ici, pas plus tot :
+        // `dispatchFleet()` finit par `reloadApplication()`, qui reconstruit le conteneur et effacerait
+        // une liaison posee avant lui — le moteur reprendrait `SystemDraws` sans rien dire.
+        $this->app->bind(BattleDraws::class, static fn (): SeededDraws => new SeededDraws(self::BATTLE_SEED));
 
         $combat = (new CombatOpeningService())->openOrJoin($missions[0], $cible->getPlanetId(), (int)$missions[0]->time_arrival);
 
