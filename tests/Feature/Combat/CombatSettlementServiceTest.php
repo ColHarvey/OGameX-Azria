@@ -1338,6 +1338,17 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
         $reglages = resolve(SettingsService::class);
         $reglages->set('honor_system_enabled', '1');
 
+        /*
+         * **L'honneur ne compte que les defenses qui ne sont pas reparees**, et le taux de reparation
+         * est un reglage partage entre les classes d'un meme processus. Une classe voisine le laissait
+         * a 100 % : les vingt lanceurs etaient tous reconstruits, la valeur detruite valait zero, et
+         * l'honneur ne bougeait pas — rouge en integration continue, vert seul. Un essai pose
+         * l'interrupteur qu'il suppose : a zero, ce qui tombe reste tombe, et la mesure ne depend
+         * plus de personne.
+         */
+        $tauxDeReparation = $reglages->get('defense_repair_rate', '70');
+        $reglages->set('defense_repair_rate', '0');
+
         try {
             [$combat, $missions, $cible] = $this->anEngagedCombat();
 
@@ -1368,6 +1379,7 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
             );
         } finally {
             $reglages->set('honor_system_enabled', '0');
+            $reglages->set('defense_repair_rate', $tauxDeReparation);
         }
     }
 

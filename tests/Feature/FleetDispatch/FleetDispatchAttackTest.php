@@ -40,11 +40,18 @@ class FleetDispatchAttackTest extends FleetDispatchTestCase
 
     /**
      * Reset attack block setting after each test to avoid state leaking between tests.
+     *
+     * **Le taux de reparation aussi.** Deux essais de cette classe le montent a 100 % pour etre
+     * deterministes et ne le redescendaient jamais : la base est partagee entre les classes d un
+     * meme processus, et le temoin de l honneur qui suivait voyait toutes ses defenses reparees —
+     * zero unite detruite, zero honneur, rouge en integration continue des que la repartition des
+     * fichiers changeait. Une epreuve remet ce qu elle a leve.
      */
     protected function tearDown(): void
     {
         $settingsService = resolve(SettingsService::class);
         $settingsService->set('attack_block_until', 0);
+        $settingsService->set('defense_repair_rate', 70);
         parent::tearDown();
     }
 

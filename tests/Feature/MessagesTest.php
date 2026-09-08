@@ -9,6 +9,7 @@ use OGame\Models\BattleReport;
 use OGame\Models\EspionageReport;
 use OGame\Models\Message;
 use OGame\Models\Resources;
+use OGame\Models\User;
 use OGame\Services\DebrisFieldService;
 use OGame\Services\MessageService;
 use Tests\MoonTestCase;
@@ -23,6 +24,13 @@ class MessagesTest extends MoonTestCase
      */
     public function testRegistrationMessageReceived(): void
     {
+        // Le message rend le nom d'un administrateur dans une balise. Le banc joue un joueur
+        // ordinaire, et le dit : un echec ici nomme sa cause au lieu de montrer une page entiere.
+        $this->assertFalse(
+            User::findOrFail($this->currentUserId)->hasRole('admin'),
+            'The bench player is an administrator: the greeting would carry the admin span, not the bare name.'
+        );
+
         $this->assertMessageReceivedAndContains('universe', '', [
             'Welcome to OGameX!',
             'msg_new',

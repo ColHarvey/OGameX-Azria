@@ -172,11 +172,50 @@ abstract class AccountTestCase extends TestCase
         // Check if we are authenticated after registration.
         $this->assertAuthenticated();
 
+        // **Le premier vrai compte d'une base est promu administrateur et renomme « Admin »** par le
+        // crochet `created` du modele : une regle du jeu, pas du banc. Chaque processus de la suite
+        // part d'une base vierge, donc la premiere classe qu'il executait jouait un administrateur et
+        // toutes les autres un joueur ordinaire. `MessagesTest` en a rougi en integration continue le
+        // jour ou la repartition des fichiers a change : le message de bienvenue rend le nom d'un
+        // administrateur dans une balise, et l'aiguille cherchait le nom nu. Le banc joue un joueur
+        // ordinaire, comme ses deux autres fabriques de comptes le font deja.
+        $this->demoteIfPromotedAsFirstAccount($formData['username']);
+
         // Update currentUserId and planetService to reflect the new user.
         $this->retrieveMetaFields();
 
         // Set default computer technology level for newly created users.
         $this->setDefaultComputerTechnology();
+    }
+
+    /**
+     * Rend au compte tout juste inscrit son statut de joueur ordinaire et son nom d'inscription
+     * si le crochet du modele l'a promu administrateur parce qu'il etait le premier de la base.
+     *
+     * **C'est l'instance du garde qu'il faut corriger**, pas une relecture : la requete d'inscription
+     * l'a promue et renommee, et `auth()->user()` la garde entre deux requetes du meme essai. Une
+     * relecture corrigeait la ligne et laissait l'instance s'appeler « Admin » — trois essais
+     * d'administration donnaient ce nom a `ogamex:admin:assign-role`, qui ne trouvait plus personne.
+     *
+     * **Et le role se lit par une requete, jamais par `hasRole()` sur cette instance** : `hasRole()`
+     * charge la relation `roles` et la laisse en cache sur le garde, pour tous les comptes. Un essai
+     * qui donne ensuite le role par la commande voyait le garde relire une relation vide : dix essais
+     * d'administration renvoyes vers la vue generale. `removeRole()` vide cette relation, c'est
+     * pourquoi seul le cas ordinaire, celui qui ne retire rien, en souffrait.
+     *
+     * @param string $registeredUsername
+     * @return void
+     */
+    private function demoteIfPromotedAsFirstAccount(string $registeredUsername): void
+    {
+        $user = Auth::user();
+        if (!$user instanceof User || !$user->roles()->where('name', 'admin')->exists()) {
+            return;
+        }
+
+        $user->removeRole('admin');
+        $user->username = $registeredUsername;
+        $user->save();
     }
 
     /**
