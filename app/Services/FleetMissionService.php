@@ -61,14 +61,34 @@ class FleetMissionService
      */
     public function calculateFleetMissionDuration(PlanetService $fromPlanet, Coordinate $to, UnitCollection $units, GameMission|null $mission = null, float $speed_percent = 10): int
     {
-        // Get slowest unit speed.
         $player = $fromPlanet->getPlayer();
         if ($player === null) {
             throw new Exception('Planet has no owner.');
         }
 
+        return $this->durationOverDistance($player, $units, $this->calculateFleetMissionDistance($fromPlanet, $to), $mission, $speed_percent);
+    }
+
+    /**
+     * La meme duree, sur une distance deja mesuree.
+     *
+     * ## Pourquoi cette entree existe
+     *
+     * Un segment de patrouille se mesure dans la geometrie de reference d un systeme — entre deux
+     * points libres, pas entre deux positions orbitales — et sa distance ne se derive donc d aucune
+     * `Coordinate`. Recopier la formule dans une classe de patrouille aurait cree un second moteur
+     * de duree, qui aurait diverge de celui-ci au premier reglage change. La formule vit ici, une
+     * fois ; les deux entrees ne different que par la maniere d obtenir la distance.
+     *
+     * @param PlayerService $player Le proprietaire, pour les technologies de propulsion.
+     * @param UnitCollection $units La flotte : c est le plus lent qui donne le rythme.
+     * @param int $distance La distance de jeu, deja mesuree.
+     * @param GameMission|null $mission Le genre, qui choisit la vitesse serveur ; sans lui, la vitesse generale.
+     * @param float $speed_percent De 1 a 10, ou 10 vaut cent pour cent.
+     */
+    public function durationOverDistance(PlayerService $player, UnitCollection $units, int $distance, GameMission|null $mission = null, float $speed_percent = 10): int
+    {
         $slowest_speed = $units->getSlowestUnitSpeed($player);
-        $distance = $this->calculateFleetMissionDistance($fromPlanet, $to);
 
         // Determine which fleet speed to use based on mission type.
         // If no mission is provided, use the old fleet_speed for backward compatibility (e.g., for consumption calculations).
@@ -81,6 +101,7 @@ class FleetMissionService
                 FleetSpeedType::peaceful => $this->settingsService->fleetSpeedPeaceful(),
             };
         }
+
         return (int) max(
             round(
                 (35000 / $speed_percent * sqrt($distance * 10 / $slowest_speed) + 10) / $fleetSpeed
@@ -124,8 +145,25 @@ class FleetMissionService
      */
     public function calculateFleetMissionDistance(PlanetService $fromPlanet, Coordinate $to): int
     {
-        $fromCoordinate = $fromPlanet->getPlanetCoordinates();
+        return $this->distanceBetweenCoordinates($fromPlanet->getPlanetCoordinates(), $to);
+    }
 
+    /**
+     * La meme distance, entre deux coordonnees.
+     *
+     * ## Pourquoi cette entree existe
+     *
+     * Un segment de patrouille n a pas toujours une planete de depart : il peut partir d un point
+     * libre de l espace. Recopier ces quatre regles dans une classe de patrouille aurait fait un
+     * second moteur de distance, qui aurait diverge de celui-ci au premier reglage change — le
+     * nombre de galaxies, les systemes vides, les systemes inactifs. La formule vit ici, une fois.
+     *
+     * @param Coordinate $fromCoordinate
+     * @param Coordinate $to
+     * @return int
+     */
+    public function distanceBetweenCoordinates(Coordinate $fromCoordinate, Coordinate $to): int
+    {
         $diffGalaxy = abs($fromCoordinate->galaxy - $to->galaxy);
         $diffSystem = abs($fromCoordinate->system - $to->system);
         $diffPlanet = abs($fromCoordinate->position - $to->position);
@@ -186,11 +224,28 @@ class FleetMissionService
             throw new Exception('Planet has no owner.');
         }
 
+        return $this->consumptionOverDistance($player, $ships, $this->calculateFleetMissionDistance($fromPlanet, $targetCoordinate), $holdingHours, $speedPercent);
+    }
+
+    /**
+     * La meme consommation, sur une distance deja mesuree.
+     *
+     * Meme motif que `durationOverDistance()` : la formule vit une fois, et un segment de patrouille
+     * la nourrit d une distance mesuree dans la geometrie de reference au lieu d une cible.
+     *
+     * @param PlayerService $player Le proprietaire : technologies, et le bonus du General.
+     * @param UnitCollection $ships La flotte.
+     * @param int $distance La distance de jeu, deja mesuree.
+     * @param int $holdingHours Les heures de stationnement, qui ajoutent leur propre cout.
+     * @param float $speedPercent De 1 a 10.
+     * @return int
+     */
+    public function consumptionOverDistance(PlayerService $player, UnitCollection $ships, int $distance, int $holdingHours, float $speedPercent): int
+    {
         $consumption = 0;
         $holdingCosts = 0;
 
-        $distance = $this->calculateFleetMissionDistance($fromPlanet, $targetCoordinate);
-        $duration = $this->calculateFleetMissionDuration($fromPlanet, $targetCoordinate, $ships, null, $speedPercent);
+        $duration = $this->durationOverDistance($player, $ships, $distance, null, $speedPercent);
         $speedValue = max(0.5, $duration * $this->settingsService->fleetSpeed() - 10);
         foreach ($ships->units as $shipEntry) {
             // Get the ship object and amount
