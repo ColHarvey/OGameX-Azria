@@ -3,25 +3,32 @@
 namespace Tests\Feature;
 
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use OGame\Models\User;
 use Tests\TestCase;
 
 /**
- * Le premier compte d'une base devient l'administrateur, et lui seul.
+ * Le premier inscrit devient l'administrateur, garde son pseudo, et les suivants ne reçoivent rien.
  *
- * **Une règle du jeu, pas du banc.** Le crochet `created` de `User` promeut le premier compte qui
- * n'est pas Legor : rôle `admin` et nom « Admin », quel que soit le pseudo choisi. C'est ainsi que
- * le premier inscrit d'une installation neuve devient son administrateur. Les bancs de tests
- * neutralisent cette promotion pour jouer un joueur ordinaire ; sans un témoin à part, un crochet
- * supprimé ne ferait rougir aucun essai.
+ * **Une règle du jeu, pas du banc.** Le crochet `created` de `User` donne le rôle `admin` au premier
+ * compte qui n'est pas Legor. C'est ainsi que le premier inscrit d'une installation neuve devient
+ * son administrateur. L'amont le renommait « Admin » ; Azria a décidé qu'il garde le pseudo qu'il a
+ * choisi, et cette décision n'avait jamais atteint le crochet. Les bancs de tests neutralisent la
+ * promotion pour jouer un joueur ordinaire ; sans un témoin à part, un crochet supprimé ou un
+ * renommage revenu ne ferait rougir aucun essai.
+ *
+ * **Le vrai parcours d'inscription, pas une fabrique.** Les deux comptes naissent du formulaire :
+ * `POST /register`, donc Fortify puis `CreateNewUser`, exactement le chemin qu'emprunte un joueur.
+ * Un témoin qui appellerait la fabrique prouverait le crochet seul et laisserait passer une seconde
+ * règle contradictoire posée en chemin.
  *
  * **Une base isolée, à ce seul essai.** La base d'un processus est partagée et porte déjà des
- * comptes quand l'essai tourne, et la règle ne se déclenche que sur une base sans autre compte.
- * L'essai migre donc une base SQLite en mémoire, la sienne, et n'écrit dans aucune autre : les
- * comptes des essais voisins ne sont ni lus ni touchés. La migration des rôles y pose Legor, le
- * compte système, administrateur par SQL brut : c'est exactement l'état d'une installation neuve
- * au moment de la première inscription.
+ * comptes quand l'essai tourne, or la règle ne se déclenche que sur une base sans autre compte.
+ * L'essai migre donc une base SQLite en mémoire, la sienne, et n'écrit dans aucune autre : aucun
+ * compte d'un essai voisin n'est lu, modifié ni renommé. La migration des rôles y pose Legor, le
+ * compte système, administrateur par SQL brut : c'est l'état exact d'une installation neuve au
+ * moment de la première inscription.
  */
 class FirstAccountPromotionTest extends TestCase
 {
@@ -57,9 +64,9 @@ class FirstAccountPromotionTest extends TestCase
     }
 
     /**
-     * Le premier compte reçoit le rôle et le nom ; le suivant ne reçoit rien et garde le sien.
+     * Le premier inscrit reçoit le rôle et garde son nom ; le second ne reçoit ni l'un ni l'autre.
      */
-    public function testTheFirstAccountBecomesTheAdministratorAndTheNextOneDoesNot(): void
+    public function testTheFirstRegisteredPlayerBecomesTheAdministratorAndKeepsTheNameItChose(): void
     {
         // Prémisse : la base ne porte que le compte système, que la règle ignore par son nom. S'il
         // comptait comme un « autre » compte, personne ne serait jamais promu.
@@ -69,29 +76,69 @@ class FirstAccountPromotionTest extends TestCase
             'The isolated database must hold only the system account before the first registration.'
         );
 
-        $first = User::factory()->create(['username' => 'PremierInscrit']);
+        $first = $this->registerAPlayer('PremierInscrit');
 
-        // L'instance rendue par la création porte déjà le nom : le courriel de bienvenue et les
-        // données initiales tournent sur le compte renommé, sans rechargement.
-        $this->assertSame('Admin', $first->username, 'The instance returned by the creation already carries the administrator name.');
-        $this->assertTrue($first->hasRole('admin'), 'The first account holds the administrator role.');
-
-        $firstReloaded = User::query()->findOrFail($first->id);
-        $this->assertSame('Admin', $firstReloaded->username, 'The administrator name is written to the database.');
-        $this->assertTrue($firstReloaded->hasRole('admin'), 'The role is written to the database, not only held by the instance.');
-
-        $second = User::factory()->create(['username' => 'SecondInscrit']);
-
-        $this->assertSame('SecondInscrit', $second->username, 'The second account keeps the name it chose.');
-        $this->assertFalse($second->hasRole('admin'), 'The second account is not promoted.');
-        $this->assertSame('SecondInscrit', User::query()->findOrFail($second->id)->username);
-        $this->assertFalse(User::query()->findOrFail($second->id)->hasRole('admin'));
-
-        // Champ par champ : les administrateurs sont exactement le compte système et le premier inscrit.
+        $this->assertTrue($first->hasRole('admin'), 'The first registered player holds the administrator role.');
         $this->assertSame(
-            [User::SYSTEM_ACCOUNT_USERNAME, 'Admin'],
-            User::query()->role('admin')->orderBy('id')->pluck('username')->all(),
-            'Exactly the system account and the first registered account hold the administrator role.'
+            'PremierInscrit',
+            $first->username,
+            'The first registered player keeps the name it chose: the upstream rename to Admin is gone.'
         );
+
+        $second = $this->registerAPlayer('SecondInscrit');
+
+        $this->assertFalse($second->hasRole('admin'), 'The second registered player is not promoted.');
+        $this->assertSame('SecondInscrit', $second->username, 'The second registered player keeps the name it chose.');
+
+        // Le second passage ne renomme ni ne dépromeut personne rétroactivement.
+        $firstAfterwards = User::query()->findOrFail($first->id);
+        $this->assertSame('PremierInscrit', $firstAfterwards->username, 'The first player is not renamed afterwards.');
+        $this->assertTrue($firstAfterwards->hasRole('admin'), 'The first player keeps the administrator role afterwards.');
+
+        // Champ par champ : les administrateurs sont exactement le compte système et le premier
+        // inscrit. Une seconde règle qui promouvrait quelqu'un d'autre tomberait ici.
+        $this->assertSame(
+            [User::SYSTEM_ACCOUNT_USERNAME, 'PremierInscrit'],
+            User::query()->role('admin')->orderBy('id')->pluck('username')->all(),
+            'Exactly the system account and the first registered player hold the administrator role.'
+        );
+    }
+
+    /**
+     * Inscrit un joueur par le formulaire du jeu et rend le compte relu en base.
+     *
+     * @param string $username
+     * @return User
+     */
+    private function registerAPlayer(string $username): User
+    {
+        // Être invité est un fait de départ, pas une espérance : sans cela `/register` répondrait
+        // pour le joueur déjà connecté.
+        $this->post('/logout');
+        Auth::logout();
+        $this->flushSession();
+        $this->assertFalse(Auth::check(), 'The bench is still authenticated: the registration form would not be served.');
+
+        $this->get('/login')->assertSee('data-panel="register"', false);
+
+        $response = $this->post('/register', [
+            '_token' => csrf_token(),
+            'username' => $username,
+            'email' => strtolower($username) . '@example.com',
+            'password' => 'password',
+            'password_confirmation' => 'password',
+            'v' => '3',
+            'step' => 'validate',
+            'kid' => '',
+            'errorCodeOn' => '1',
+            'is_utf8' => '1',
+            'agb' => 'on',
+        ]);
+
+        $response->assertStatus(302);
+        $this->assertAuthenticated();
+
+        // Relu en base : ce qui compte est ce que le jeu a écrit, pas ce que l'instance porte.
+        return User::query()->findOrFail((int)Auth::id());
     }
 }

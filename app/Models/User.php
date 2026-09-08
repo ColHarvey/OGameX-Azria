@@ -131,7 +131,12 @@ class User extends Authenticatable
     {
         parent::boot();
 
-        // Automatically assign admin role to the first non-Legor user
+        // Automatically assign admin role to the first non-Legor user.
+        //
+        // **Le premier inscrit garde le pseudo qu'il a choisi** (decision d'Azria, journal §114.22).
+        // L'amont le renommait « Admin » ici meme ; la version du fork qui disait l'avoir retire
+        // ne touchait que CreateNewUser, derriere ce crochet, et le renommage avait toujours lieu.
+        // Le role suffit : le nom est au joueur.
         static::created(function (User $user) {
             // Skip Legor
             if ($user->username === self::SYSTEM_ACCOUNT_USERNAME) {
@@ -142,10 +147,8 @@ class User extends Authenticatable
             $nonLegorUserCount = User::where('username', '!=', self::SYSTEM_ACCOUNT_USERNAME)->where('id', '!=', $user->id)->count();
 
             if ($nonLegorUserCount === 0) {
-                // This is the first real user - assign admin role and rename to Admin
+                // This is the first real user - assign admin role
                 $user->assignRole('admin');
-                $user->username = 'Admin';
-                $user->save();
             }
         });
     }

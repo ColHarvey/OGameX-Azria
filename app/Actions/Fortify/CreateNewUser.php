@@ -190,10 +190,9 @@ class CreateNewUser implements CreatesNewUsers
             throw $e;
         }
 
-        // Le premier inscrit devient administrateur, mais garde le pseudo qu'il a choisi.
-        if (User::count() === 1) {
-            $user->assignRole('admin');
-        }
+        // Le premier inscrit devient administrateur par le crochet `created` de `User`, et garde le
+        // pseudo qu'il a choisi. La branche qui donnait ici le role sur `User::count() === 1` etait
+        // morte : Legor existe avant le premier inscrit, et le compte valait deja deux.
 
         $this->initialUserDataService->createFor($user);
         $this->sendWelcomeEmail($user);
