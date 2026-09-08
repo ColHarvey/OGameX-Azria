@@ -817,50 +817,101 @@ class GalaxyTacticalMapTest extends UnitTestCase
         $rayon = static fn (int $p): float => $rayonMin + (($p - 1) * ($rayonMax - $rayonMin)) / ($positions - 1);
         $point = static fn (int $p, float $a) => [$rayon($p) * cos($a), $rayon($p) * $aplat * sin($a)];
 
-        $angles = [];
+        /*
+         * Les planetes orbitent (decision de Keven, §113.11) : le systeme tourne d'un bloc et
+         * l'ecartement est rejoue sur les angles tournes. La preuve se fait donc a douze phases de
+         * l'orbite, pas a la seule phase zero — l'ellipse aplatie rapproche deux corps en haut et en
+         * bas, et c'est la que l'ecartement doit encore tenir.
+         */
+        $heuresParTour = (int)$this->constanteDuModule('HEURES_PAR_TOUR');
+        $this->assertGreaterThanOrEqual(1, $heuresParTour, 'A revolution faster than an hour: planets would visibly run under the mouse.');
+        $this->assertLessThanOrEqual(24, $heuresParTour, 'A revolution slower than a day: nobody would see a planet move in an hour (Keven).');
 
-        for ($i = 1; $i <= $positions; $i++) {
-            $angles[$i] = (($i * $angleOr - 90) * M_PI) / 180;
-        }
+        $ecarter = static function (float $phase) use ($positions, $angleOr, $passes, $point, $rayon, $distanceMin): array {
+            $angles = [];
 
-        for ($passe = 0; $passe < $passes; $passe++) {
+            for ($i = 1; $i <= $positions; $i++) {
+                $angles[$i] = (($i * $angleOr - 90) * M_PI) / 180 + $phase;
+            }
+
+            for ($passe = 0; $passe < $passes; $passe++) {
+                for ($i = 1; $i <= $positions; $i++) {
+                    for ($j = $i + 1; $j <= $positions; $j++) {
+                        [$ax, $ay] = $point($i, $angles[$i]);
+                        [$bx, $by] = $point($j, $angles[$j]);
+                        $d = sqrt(($bx - $ax) ** 2 + ($by - $ay) ** 2);
+
+                        if ($d >= $distanceMin) {
+                            continue;
+                        }
+
+                        $manque = ($distanceMin - $d) / 2;
+                        $ecart = atan2(sin($angles[$j] - $angles[$i]), cos($angles[$j] - $angles[$i]));
+                        $sens = $ecart >= 0 ? 1 : -1;
+                        $angles[$i] -= ($sens * $manque) / $rayon($i);
+                        $angles[$j] += ($sens * $manque) / $rayon($j);
+                    }
+                }
+            }
+
+            return $angles;
+        };
+
+        for ($douzieme = 0; $douzieme < 12; $douzieme++) {
+            $angles = $ecarter(($douzieme * M_PI) / 6);
+            $plusProche = INF;
+
             for ($i = 1; $i <= $positions; $i++) {
                 for ($j = $i + 1; $j <= $positions; $j++) {
                     [$ax, $ay] = $point($i, $angles[$i]);
                     [$bx, $by] = $point($j, $angles[$j]);
-                    $d = sqrt(($bx - $ax) ** 2 + ($by - $ay) ** 2);
-
-                    if ($d >= $distanceMin) {
-                        continue;
-                    }
-
-                    $manque = ($distanceMin - $d) / 2;
-                    $ecart = atan2(sin($angles[$j] - $angles[$i]), cos($angles[$j] - $angles[$i]));
-                    $sens = $ecart >= 0 ? 1 : -1;
-                    $angles[$i] -= ($sens * $manque) / $rayon($i);
-                    $angles[$j] += ($sens * $manque) / $rayon($j);
+                    $plusProche = min($plusProche, sqrt(($bx - $ax) ** 2 + ($by - $ay) ** 2));
                 }
             }
+
+            $this->assertGreaterThanOrEqual(
+                $distanceMin - 0.5,
+                $plusProche,
+                sprintf('At phase %d/12 two bodies end up %.1f px apart with these constants: planets would stack while orbiting.', $douzieme, $plusProche)
+            );
         }
-
-        $plusProche = INF;
-
-        for ($i = 1; $i <= $positions; $i++) {
-            for ($j = $i + 1; $j <= $positions; $j++) {
-                [$ax, $ay] = $point($i, $angles[$i]);
-                [$bx, $by] = $point($j, $angles[$j]);
-                $plusProche = min($plusProche, sqrt(($bx - $ax) ** 2 + ($by - $ay) ** 2));
-            }
-        }
-
-        $this->assertGreaterThanOrEqual(
-            $distanceMin - 0.5,
-            $plusProche,
-            sprintf('Two bodies end up %.1f px apart with these constants: planets would stack again.', $plusProche)
-        );
 
         /* Et l'ellipse la plus large tient dans la carte, corps compris. */
         $this->assertLessThanOrEqual(656 / 2 - 24, $rayonMax, 'The outer orbit runs past the map edge.');
+    }
+
+    /**
+     * **Les planetes orbitent en temps reel, et tout suit** — decision de Keven du 7 septembre 2026,
+     * qui remplace la revue 112 §3 de Codex (« positions stables »). Ce temoin epingle la forme : la
+     * phase vient de l'heure du serveur ; elle est la meme pour toutes les positions (un bloc, donc
+     * aucun chevauchement nouveau) ; l'ecartement est rejoue sur les angles tournes ; la boucle repose
+     * les corps, replace la fiche ouverte et recalcule les bouts des traces, dont chaque element est
+     * garde pour cela ; et elle s'arrete avec l'onglet.
+     */
+    public function testThePlanetsOrbitInRealTimeAndEverythingFollows(): void
+    {
+        $module = str_replace("\r\n", "\n", $this->module());
+
+        foreach ([
+            'var HEURES_PAR_TOUR = 8;' => 'the orbital period',
+            'var PAS_ORBITAL = 500;' => 'the recomputation step',
+            'var pas = Math.floor((instant === undefined ? maintenantServeur() : instant) / PAS_ORBITAL);' => 'the server-time driven phase',
+            "            angles[i] = base[i] + phase;\n" => 'the rigid rotation (one phase for every body)',
+            "        anglesCalcules = relaxer(angles);\n" => 'the spacing replayed on the rotated angles',
+            '        return pointSurOrbite(position, anglesDesPositions(instant)[position]);' => 'points read at an instant',
+            "            tournerLesOrbites(carte);\n        }, PAS_ORBITAL);" => 'the orbital loop',
+            "            placer(f, f.gtBloc);\n" => 'the open card following its body',
+            '            mouvement._bouts = extremites(mouvement, carte.gtSysteme.galaxie, carte.gtSysteme.systeme);' => 'fleet endpoints recomputed from the moved bodies',
+            "            rafraichirLeTrace(mouvement, mouvement._bouts);\n" => 'trajectories, ship headings and edge gates refreshed',
+            "\n        demarrerLesOrbites(carte);\n" => 'the loop started with each system',
+            "            arreterLesOrbites();\n" => 'the loop stopped with the tab',
+            'mouvement._trajectoire = trajectoire;' => 'the trajectory line kept for refresh',
+            'mouvement._cap = cap;' => 'the ship heading kept for refresh',
+            'mouvement._porteImage = image;' => 'the edge mark kept for refresh',
+            'mouvement._saut = saut;' => 'the jump button kept for refresh',
+        ] as $motif => $quoi) {
+            $this->assertStringContainsString($motif, $module, 'The orbit lost ' . $quoi . '.');
+        }
     }
 
     /**

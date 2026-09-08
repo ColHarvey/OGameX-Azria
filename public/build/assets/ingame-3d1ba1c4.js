@@ -76554,28 +76554,65 @@ window.playOGameXWormhole = function (canvas) {
     }
 
     /*
-     * Les angles des quinze positions : l'angle d'or, puis un ecartement **deterministe**.
+     * ## Les planetes orbitent, en temps reel
      *
-     * A chaque passe, toute paire plus proche que DISTANCE_MIN est repoussee : chacun des deux
-     * corps tourne sur sa propre orbite, de la moitie du manque convertie en angle, dans le sens
-     * qui les eloigne. Meme entree, meme sortie — le meme systeme se dessine toujours pareil, et
-     * aucune planete ne change d'orbite. `tests/Feature/GalaxyTacticalMapTest.php` rejoue cette
-     * arithmetique en PHP et exige la distance minimale sur toutes les paires.
+     * Decision de Keven (7 septembre 2026), qui remplace la revue 112 §3 de Codex (« positions
+     * stables pendant l'interaction ») : « je veux orbite… si quelqu'un laisse une heure la page
+     * ouverte, qu'il voie que sa planete orbite en temps reel ».
+     *
+     * **Tout le systeme tourne d'un bloc**, d'un tour en HEURES_PAR_TOUR heures, sur l'heure du
+     * serveur : tout le monde voit la meme chose au meme instant, et une page rouverte montre la
+     * planete la ou elle est vraiment. D'un bloc, et non chacune a sa vitesse : les orbites sont a
+     * seize pixels l'une de l'autre et les planetes en font quarante-quatre ; des vitesses
+     * differentes feraient se chevaucher une planete interieure et son exterieure a chaque
+     * conjonction — ce que Keven avait demande d'eviter. En bloc, les ecarts angulaires ne
+     * changent jamais ; seul l'aplatissement de l'ellipse rapproche deux corps quand ils passent
+     * en haut ou en bas, et l'ecartement est donc rejoue a chaque instant sur les angles tournes.
+     *
+     * Rien de metier ne bouge : distances, vitesses et durees de vol restent celles du serveur ;
+     * c'est une representation. Le temps est quantifie par PAS_ORBITAL pour ne recalculer les
+     * angles que quand ils peuvent avoir change d'un pixel.
      */
-    var anglesCalcules = null;
+    var HEURES_PAR_TOUR = 8;
+    var PAS_ORBITAL = 500;
 
-    function anglesDesPositions() {
-        if (anglesCalcules !== null) {
-            return anglesCalcules;
+    /* Les angles de depart : l'angle d'or, deux positions consecutives ne se groupent jamais. */
+    var anglesDeDepart = null;
+
+    function anglesDeBase() {
+        if (anglesDeDepart !== null) {
+            return anglesDeDepart;
         }
 
         var angles = [];
-        var i;
-        var j;
 
-        for (i = 1; i <= POSITIONS; i++) {
+        for (var i = 1; i <= POSITIONS; i++) {
             angles[i] = ((i * ANGLE_OR - 90) * Math.PI) / 180;
         }
+
+        anglesDeDepart = angles;
+
+        return angles;
+    }
+
+    /* La phase de l'orbite a un instant du serveur : un tour complet par HEURES_PAR_TOUR heures. */
+    function phaseOrbitale(instant) {
+        var periode = HEURES_PAR_TOUR * 3600000;
+
+        return ((instant % periode) / periode) * 2 * Math.PI;
+    }
+
+    /*
+     * L'ecartement **deterministe** : a chaque passe, toute paire plus proche que DISTANCE_MIN est
+     * repoussee — chacun des deux corps tourne sur sa propre orbite, de la moitie du manque
+     * convertie en angle, dans le sens qui les eloigne. Meme entree, meme sortie, et aucune
+     * planete ne change d'orbite. `tests/Feature/GalaxyTacticalMapTest.php` rejoue cette
+     * arithmetique en PHP, a douze phases de l'orbite, et exige la distance minimale partout.
+     */
+    function relaxer(entree) {
+        var angles = entree.slice();
+        var i;
+        var j;
 
         for (var passe = 0; passe < PASSES_D_ECARTEMENT; passe++) {
             for (i = 1; i <= POSITIONS; i++) {
@@ -76601,13 +76638,36 @@ window.playOGameXWormhole = function (canvas) {
             }
         }
 
-        anglesCalcules = angles;
-
         return angles;
     }
 
-    function pointDe(position) {
-        return pointSurOrbite(position, anglesDesPositions()[position]);
+    /* Les angles a un instant : la base tournee de la phase, puis ecartee. Memorises par pas de temps. */
+    var anglesCalcules = null;
+    var pasDesAngles = null;
+
+    function anglesDesPositions(instant) {
+        var pas = Math.floor((instant === undefined ? maintenantServeur() : instant) / PAS_ORBITAL);
+
+        if (anglesCalcules !== null && pasDesAngles === pas) {
+            return anglesCalcules;
+        }
+
+        var base = anglesDeBase();
+        var phase = phaseOrbitale(pas * PAS_ORBITAL);
+        var angles = [];
+
+        for (var i = 1; i <= POSITIONS; i++) {
+            angles[i] = base[i] + phase;
+        }
+
+        anglesCalcules = relaxer(angles);
+        pasDesAngles = pas;
+
+        return anglesCalcules;
+    }
+
+    function pointDe(position, instant) {
+        return pointSurOrbite(position, anglesDesPositions(instant)[position]);
     }
 
     function element(balise, classe) {
@@ -78028,6 +78088,7 @@ window.playOGameXWormhole = function (canvas) {
         var fichier = sortie ? 'system-edge-outbound' : (mouvement.side === 'hostile' ? 'system-edge-inbound-hostile' : 'system-edge-inbound-personal');
         image.setAttributeNS(COUCHE_XLINK, 'href', '/img/galaxy-tactical/' + fichier + '.svg');
         groupe.appendChild(image);
+        mouvement._porteImage = image;
 
         var cap = capDe(bouts);
         var trainee = svg('g', { 'class': 'gtWarp', transform: 'translate(' + porte.x.toFixed(1) + ',' + porte.y.toFixed(1) + ') rotate(' + cap.toFixed(1) + ')' });
@@ -78061,6 +78122,7 @@ window.playOGameXWormhole = function (canvas) {
             }
         });
         groupe.appendChild(saut);
+        mouvement._saut = saut;
     }
 
     function dessinerLesMouvements(carte, galaxie, systeme) {
@@ -78076,11 +78138,13 @@ window.playOGameXWormhole = function (canvas) {
             var groupe = svg('g', { 'class': 'gtMovement ' + genre + (mouvement.is_return ? ' gtTrajReturn' : '') });
             groupe.setAttribute('data-mission-id', String(mouvement.id));
 
-            groupe.appendChild(svg('line', {
+            var trajectoire = svg('line', {
                 'class': 'gtTrajectory',
                 x1: bouts.depart.x.toFixed(1), y1: bouts.depart.y.toFixed(1),
                 x2: bouts.arrivee.x.toFixed(1), y2: bouts.arrivee.y.toFixed(1)
-            }));
+            });
+            groupe.appendChild(trajectoire);
+            mouvement._trajectoire = trajectoire;
 
             /*
              * Une porte de bord se voit, et elle se clique : un vol qui sort ou entre a une marque a
@@ -78088,6 +78152,9 @@ window.playOGameXWormhole = function (canvas) {
              * qu'on la voit « continuer son chemin jusqu'a la planete ».
              */
             mouvement._trainee = null;
+            mouvement._porteImage = null;
+            mouvement._saut = null;
+            mouvement._cap = null;
 
             if (!bouts.partIci || !bouts.arriveIci) {
                 poserLaPorte(carte, groupe, bouts, mouvement);
@@ -78109,6 +78176,7 @@ window.playOGameXWormhole = function (canvas) {
                 icone.setAttributeNS(COUCHE_XLINK, 'href', VAISSEAU_BLANC);
                 cap.appendChild(icone);
                 marqueur.appendChild(cap);
+                mouvement._cap = cap;
             }
 
             var titre = svg('title', {});
@@ -78469,12 +78537,124 @@ window.playOGameXWormhole = function (canvas) {
         ecouterLeJoueur(carte);
     }
 
-    /* Un onglet qui revient au premier plan reprend l'animation ; un onglet cache l'arrete. */
+    /*
+     * ## La boucle orbitale
+     *
+     * Toutes les PAS_ORBITAL millisecondes : les quinze corps sont reposes a leur point du moment,
+     * la fiche ouverte suit son corps, et chaque trace (trajectoire, cap du vaisseau, marque de
+     * porte, trainee, bouton de saut) est recalcule depuis les corps qui ont bouge — une flotte
+     * qui rentre vise la position **actuelle** de sa planete. Le marqueur lui-meme est place a
+     * chaque image par `placerLesMarqueurs()`, sur ces bouts rafraichis.
+     */
+    var orbite = null;
+
+    function rafraichirLeTrace(mouvement, bouts) {
+        if (mouvement._trajectoire) {
+            mouvement._trajectoire.setAttribute('x1', bouts.depart.x.toFixed(1));
+            mouvement._trajectoire.setAttribute('y1', bouts.depart.y.toFixed(1));
+            mouvement._trajectoire.setAttribute('x2', bouts.arrivee.x.toFixed(1));
+            mouvement._trajectoire.setAttribute('y2', bouts.arrivee.y.toFixed(1));
+        }
+
+        var cap = capDe(bouts);
+
+        if (mouvement._cap) {
+            mouvement._cap.setAttribute('transform', 'rotate(' + cap.toFixed(1) + ')');
+        }
+
+        var porte = bouts.partIci ? bouts.arrivee : bouts.depart;
+
+        if (mouvement._porteImage) {
+            mouvement._porteImage.setAttribute('x', (porte.x - 9).toFixed(1));
+            mouvement._porteImage.setAttribute('y', (porte.y - 9).toFixed(1));
+        }
+
+        if (mouvement._trainee) {
+            mouvement._trainee.setAttribute('transform', 'translate(' + porte.x.toFixed(1) + ',' + porte.y.toFixed(1) + ') rotate(' + cap.toFixed(1) + ')');
+        }
+
+        if (mouvement._saut) {
+            mouvement._saut.setAttribute('x', (porte.x - 8).toFixed(1));
+            mouvement._saut.setAttribute('y', (porte.y + 11).toFixed(1));
+        }
+    }
+
+    function tournerLesOrbites(carte) {
+        var corps = carte.querySelectorAll('.gtBody[data-position]');
+        var bouge = false;
+
+        for (var k = 0; k < corps.length; k++) {
+            var position = Number(corps[k].getAttribute('data-position'));
+
+            if (position < 1 || position > POSITIONS) {
+                continue;
+            }
+
+            var p = pointDe(position);
+            var gauche = Math.round(p.x) + 'px';
+            var haut = Math.round(p.y) + 'px';
+
+            if (corps[k].style.left !== gauche || corps[k].style.top !== haut) {
+                corps[k].style.left = gauche;
+                corps[k].style.top = haut;
+                bouge = true;
+            }
+        }
+
+        if (!bouge) {
+            return;
+        }
+
+        var f = carte.querySelector('.gtCard');
+
+        if (f && !f.hidden && f.gtBloc && carte.contains(f.gtBloc)) {
+            placer(f, f.gtBloc);
+        }
+
+        if (!carte.gtSysteme) {
+            return;
+        }
+
+        mouvements.forEach(function (mouvement) {
+            if (!mouvement._marqueur) {
+                return;
+            }
+
+            mouvement._bouts = extremites(mouvement, carte.gtSysteme.galaxie, carte.gtSysteme.systeme);
+            rafraichirLeTrace(mouvement, mouvement._bouts);
+        });
+    }
+
+    function arreterLesOrbites() {
+        if (orbite !== null) {
+            window.clearInterval(orbite);
+            orbite = null;
+        }
+    }
+
+    function demarrerLesOrbites(carte) {
+        arreterLesOrbites();
+        tournerLesOrbites(carte);
+        orbite = window.setInterval(function () {
+            tournerLesOrbites(carte);
+        }, PAS_ORBITAL);
+    }
+
+    /* Un onglet qui revient au premier plan reprend l'animation et les orbites ; un onglet cache les arrete. */
     document.addEventListener('visibilitychange', function () {
+        var carte = document.getElementById('galaxyTactical');
+
         if (document.hidden) {
             arreterLAnimation();
-        } else {
-            animer();
+            arreterLesOrbites();
+
+            return;
+        }
+
+        animer();
+
+        if (carte && carte.gtSysteme) {
+            demarrerLesOrbites(carte);
         }
     });
 
@@ -78711,6 +78891,7 @@ window.playOGameXWormhole = function (canvas) {
         appliquerLesFiltres(carte);
         restaurerLaSelection(carte, aRestaurer);
         demarrerLaCoucheFlottes(carte, Number(systeme.galaxy), Number(systeme.system));
+        demarrerLesOrbites(carte);
 
         var pied = element('div', 'gtFooter');
         pied.id = 'galaxyTacticalFooter';
