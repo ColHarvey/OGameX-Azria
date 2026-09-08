@@ -78893,10 +78893,6 @@ window.playOGameXWormhole = function (canvas) {
         restaurerLaSelection(carte, aRestaurer);
         demarrerLaCoucheFlottes(carte, Number(systeme.galaxy), Number(systeme.system));
         demarrerLesOrbites(carte);
-
-        var pied = element('div', 'gtFooter');
-        pied.id = 'galaxyTacticalFooter';
-        carte.appendChild(pied);
     }
 
     /*

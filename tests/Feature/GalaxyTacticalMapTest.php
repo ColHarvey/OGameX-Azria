@@ -939,6 +939,37 @@ class GalaxyTacticalMapTest extends UnitTestCase
     }
 
     /**
+     * **Sous la carte, une seule barre : « planetes colonisees ».** Keven a vu deux barres bleues de
+     * trop — le bandeau vide que le module posait au bas de la carte, et la ligne d'etat des flottes
+     * (`#fleetstatusrow`), a laquelle le jeu donne 24 px et un fond meme vide. Le bandeau disparait ;
+     * la ligne d'etat ne se montre en vue tactique qu'avec un message, et elle en a un pendant trois
+     * secondes apres un envoi, puis le rendu herite **retire** son message — c'est ce qui rend `:empty`
+     * juste, et ce que ce temoin verifie dans le rendu herite. La vue liste garde tout.
+     */
+    public function testOnlyTheColonisedBarRemainsUnderTheTacticalMap(): void
+    {
+        $feuille = $this->feuille();
+        $module = $this->module();
+        $herite = file_get_contents(resource_path('js/ingame/e7c74974620fa35b197315ebdbb8c2.js'));
+        $this->assertIsString($herite);
+
+        $this->assertStringNotContainsString("element('div', 'gtFooter')", $module, 'The empty band is back at the bottom of the map.');
+        $this->assertStringNotContainsString('#galaxyTactical .gtFooter {', $feuille, 'The rule of the empty band is back.');
+
+        $this->assertMatchesRegularExpression(
+            '/#galaxyContent \.galaxyTable\.gtReplaced > \.ctGalaxyFleetInfo:empty \{\s*display: none;/',
+            $feuille,
+            'The empty fleet-status row shows as a full blue bar under the tactical map.'
+        );
+
+        /* Le message d'un envoi reste visible : la ligne n'est masquee que vide, et le rendu herite la vide apres le fondu. */
+        $this->assertStringContainsString("\$(div).prependTo('#fleetstatusrow').fadeOut(3000, function () {\n    \$(this).remove();", str_replace("\r\n", "\n", $herite), 'The legacy render no longer removes its fleet-status message after the fade: the row would stay visible, blank, forever.');
+        $this->assertStringContainsString('<div class="galaxyRow ctGalaxyFleetInfo" id="fleetstatusrow"></div>', $this->vue(), 'The fleet-status row is no longer empty in the view: :empty never matches.');
+
+        $this->assertDoesNotMatchRegularExpression('/\.gtReplaced > \.ctGalaxyFooter[^{]*\{[^}]*display:\s*none/', $feuille, 'The colonised-planets bar is hidden: Keven wants it.');
+    }
+
+    /**
      * La nebuleuse n'a pas le halo rond des planetes, et la boite historique s'y range proprement.
      */
     public function testTheNebulaAndItsCardLookLikeThemselves(): void
