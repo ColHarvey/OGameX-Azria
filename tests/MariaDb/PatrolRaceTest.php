@@ -117,6 +117,13 @@ final class PatrolRaceTest extends AccountTestCase
         $this->assertNotNull($proprietaire);
         $this->assertNotSame($this->currentUserId, $proprietaire->getId());
 
+        // **Le repli doit etre observable.** Avec une reserve qui paie largement le trajet vers la
+        // planete restante, le repli cree un segment NEUF : sans cela il immobiliserait, et une
+        // patrouille immobilisee garde son segment — la meme observation qu une arrivee qui aurait
+        // ignore le refus. Mesure faite : la mutation survivait a ce temoin tant que les deux issues
+        // se ressemblaient.
+        DB::table('patrols')->where('id', $patrouille->id)->update(['fuel_reserve' => 200000]);
+
         $avant = DB::table('planets')->where('id', $base)->first();
         $this->assertNotNull($avant);
 
@@ -149,8 +156,21 @@ final class PatrolRaceTest extends AccountTestCase
         $patrouille->refresh();
         $this->assertNotSame(PatrolState::Finished, $patrouille->state, 'The patrol landed on a body that had just changed hands.');
 
+        // Le repli a bien eu lieu : le segment qui ne pouvait pas se poser est regle, un segment
+        // neuf le remplace, et il vise une planete du proprietaire.
+        $retourApres = FleetMission::query()->findOrFail($retour->id);
+        $this->assertSame(1, (int)$retourApres->processed, 'The leg that could not land is still live: the arrival ignored the refusal and will retry for ever.');
+        $this->assertNotSame((int)$retour->id, (int)$patrouille->current_mission_id, 'The patrol kept the leg that could not land.');
+
         $vivants = FleetMission::query()->where('patrol_id', $patrouille->id)->where('processed', 0)->count();
         $this->assertSame(1, $vivants, 'The patrol holds ' . $vivants . ' live legs: the fallback happened more than once, or not at all.');
+
+        $neuf = FleetMission::query()->findOrFail($patrouille->current_mission_id);
+        $this->assertSame(
+            $utilisateur,
+            (int)DB::table('planets')->where('id', $neuf->planet_id_to)->value('user_id'),
+            'The new leg does not aim at a planet of the patrol owner.'
+        );
     }
 
     /**
