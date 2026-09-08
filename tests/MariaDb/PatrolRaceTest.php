@@ -141,9 +141,16 @@ final class PatrolRaceTest extends AccountTestCase
             1,
             static fn (int $rang): string => self::settleTheArrival($utilisateur, $arrivee),
             function () use ($temoin): void {
-                // L enfant a lu le corps « a lui » et attend maintenant le verrou : le changement de
-                // mains devient visible a cet instant precis.
-                $this->waitUntilAProcessWaitsOnALock();
+                // **L attente doit viser la bonne table.** Le travailleur prend plusieurs verrous avant
+                // d arriver au corps — la mission, la ligne du compte. Attendre « un verrou
+                // quelconque » liberait le parent trop tot : l enfant lisait alors le corps deja
+                // passe en d autres mains, prenait le repli des la premiere question, et la mutation
+                // devenait invisible. Mesure faite : elle a survecu deux fois a ce temoin.
+                //
+                // Ici on attend que l enfant bute sur la ligne des **planetes**, c est-a-dire qu il
+                // ait deja lu le corps « a lui » sans verrou. Le changement de mains devient alors
+                // visible entre les deux lectures, ce qui est exactement la course visee.
+                $this->waitUntilAProcessWaitsOnALockOn('planets');
                 $temoin->commit();
             }
         );

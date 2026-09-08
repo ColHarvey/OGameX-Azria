@@ -117,12 +117,39 @@ trait RunsInParallelProcesses
      */
     protected function waitUntilAProcessWaitsOnALock(int $timeoutMs = 15_000): void
     {
+        $this->waitUntilAProcessWaitsOnALockOn(null, $timeoutMs);
+    }
+
+    /**
+     * Attend qu un autre processus bute sur un verrou **de cette table**, ou de n importe laquelle
+     * quand aucune n est nommee.
+     *
+     * ## Pourquoi la table compte
+     *
+     * Un chemin du jeu prend plusieurs verrous a la suite. Un parent qui relache des le premier
+     * venu libere trop tot : l enfant lit alors deja l etat neuf la ou la course voulait qu il lise
+     * l ancien, et la mutation que l epreuve devait tuer devient invisible. Mesure : une course de
+     * patrouille a laisse passer sa mutation deux fois pour cette raison.
+     */
+    protected function waitUntilAProcessWaitsOnALockOn(string|null $table = null, int $timeoutMs = 15_000): void
+    {
         $limite = microtime(true) + $timeoutMs / 1000;
         do {
-            $requete = DB::selectOne("SELECT COUNT(*) AS n FROM information_schema.PROCESSLIST WHERE ID <> CONNECTION_ID() AND INFO LIKE '%for update%'");
-            $transaction = DB::selectOne("SELECT COUNT(*) AS n FROM information_schema.INNODB_TRX WHERE trx_state = 'LOCK WAIT'");
-            if (($requete !== null && (int)$requete->n > 0) || ($transaction !== null && (int)$transaction->n > 0)) {
+            $motif = $table === null ? '%for update%' : '%' . $table . '%for update%';
+            $requete = DB::selectOne("SELECT COUNT(*) AS n FROM information_schema.PROCESSLIST WHERE ID <> CONNECTION_ID() AND INFO LIKE ?", [$motif]);
+
+            if ($requete !== null && (int)$requete->n > 0) {
                 return;
+            }
+
+            // Sans table nommee, une transaction en attente suffit ; avec une table, seule sa
+            // requete fait foi — `INNODB_TRX` ne dit pas sur quoi elle bute.
+            if ($table === null) {
+                $transaction = DB::selectOne("SELECT COUNT(*) AS n FROM information_schema.INNODB_TRX WHERE trx_state = 'LOCK WAIT'");
+
+                if ($transaction !== null && (int)$transaction->n > 0) {
+                    return;
+                }
             }
             usleep(20_000);
         } while (microtime(true) < $limite);
