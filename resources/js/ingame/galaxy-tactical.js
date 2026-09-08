@@ -1581,12 +1581,13 @@
 
         var p = pointDe(position);
 
+        /* Les memes points que la feuille : la lune en haut a gauche, les debris a gauche, a la meme distance. */
         if (Number(type) === TYPE_LUNE) {
-            return { x: p.x + (p.aDroite ? -26 : 26), y: p.y, aDroite: p.aDroite };
+            return { x: p.x - 20, y: p.y - 20, aDroite: p.aDroite };
         }
 
         if (Number(type) === TYPE_DEBRIS) {
-            return { x: p.x, y: p.y + 20, aDroite: p.aDroite };
+            return { x: p.x - 28, y: p.y, aDroite: p.aDroite };
         }
 
         return p;

@@ -915,6 +915,29 @@ class GalaxyTacticalMapTest extends UnitTestCase
     }
 
     /**
+     * **La lune et les debris sont autour de la planete, pas empiles sous elle** (Keven : « la lune en
+     * haut a gauche de la planete, les debris cote gauche, meme distance »). Le bloc est une colonne ;
+     * les deux satellites en sortent en absolu, a vingt-huit pixels du centre de la vignette — et
+     * `pointDeCorps()` vise ces memes points, sinon une trajectoire vers la lune finirait a cote de la
+     * lune. Les deux paires de nombres sont epinglees ensemble.
+     */
+    public function testMoonAndDebrisSitAroundThePlanetNotUnderIt(): void
+    {
+        $feuille = $this->feuille();
+        $module = $this->module();
+
+        /* Lune : centre (−20, −20), creneau de 22 px → coin (50 % − 31, 22 − 20 − 11). Debris : centre (−28, 0), 17 px → coin (50 % − 36,5, 13,5). */
+        $this->assertMatchesRegularExpression('/#galaxyTactical \.gtMoonSlot \{\s*position: absolute;\s*left: calc\(50% - 31px\);\s*top: -9px;/', $feuille, 'The moon is no longer at the upper left of the planet.');
+        $this->assertMatchesRegularExpression('/#galaxyTactical \.gtDebris \{\s*position: absolute;\s*left: calc\(50% - 36px\);\s*top: 14px;/', $feuille, 'The debris field is no longer at the left of the planet, at the same distance.');
+
+        $this->assertStringContainsString('return { x: p.x - 20, y: p.y - 20, aDroite: p.aDroite };', $module, 'A trajectory to the moon no longer ends on the moon.');
+        $this->assertStringContainsString('return { x: p.x - 28, y: p.y, aDroite: p.aDroite };', $module, 'A trajectory to the debris field no longer ends on it.');
+
+        /* La meme distance : 28 px pour les debris, sqrt(20² + 20²) = 28,3 px pour la lune. */
+        $this->assertEqualsWithDelta(28.0, sqrt(20 ** 2 + 20 ** 2), 0.5, 'The moon and the debris are no longer at the same distance from the planet.');
+    }
+
+    /**
      * La nebuleuse n'a pas le halo rond des planetes, et la boite historique s'y range proprement.
      */
     public function testTheNebulaAndItsCardLookLikeThemselves(): void

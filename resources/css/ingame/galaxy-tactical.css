@@ -164,16 +164,23 @@
  * variante : aucune identite par corps a preserver. Le pack tactique s'y applique donc pleinement,
  * comme le cahier des charges le prevoit.
  */
+/*
+ * **Autour de la planete, jamais empiles sous elle** (Keven). Le bloc est une colonne — vignette,
+ * nom, numero — et la lune comme les debris en sortent : places en absolu depuis le centre de la
+ * vignette (50 %, 22 px), la lune en haut a gauche (−20, −20), les debris a gauche (−28, 0) — a la
+ * meme distance de la planete, vingt-huit pixels (Keven).
+ * `pointDeCorps()` vise exactement ces deux points : une trajectoire vers la lune finit sur la lune.
+ */
 #galaxyTactical .gtMoonSlot {
-    position: relative;
+    position: absolute;
+    left: calc(50% - 31px);
+    top: -9px;
     display: flex;
     align-items: center;
     justify-content: center;
     width: 22px;
     height: 22px;
-    margin-left: -4px;
     background: url("/img/galaxy-tactical/moon-orbit-ring.svg") center / contain no-repeat;
-    flex: 0 0 auto;
 }
 
 #galaxyTactical .gtMoon {
@@ -188,10 +195,12 @@
 }
 
 #galaxyTactical .gtDebris {
+    position: absolute;
+    left: calc(50% - 36px);
+    top: 14px;
     width: 17px;
     height: 17px;
     background: url("/img/galaxy-tactical/debris-marker.svg") center / contain no-repeat;
-    flex: 0 0 auto;
 }
 
 /*
