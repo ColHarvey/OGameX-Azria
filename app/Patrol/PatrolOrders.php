@@ -39,8 +39,11 @@ use Throwable;
  * `FleetMissionService::updateMission()` ne le reprend qu a cette echeance, sans qu aucune ligne de
  * son chemin n ait ete modifiee pour les patrouilles.
  *
- * Consequence voulue : une patrouille posee retient le retrait d un compte exactement comme une
- * flotte en vol, et une patrouille engagee dans un combat ne bouge plus, par les regles existantes.
+ * Consequence voulue : une patrouille engagee dans un combat ne bouge plus, par les regles
+ * existantes. Une patrouille posee ne retient **pas** le retrait d un compte — le retrait ne tient
+ * que les genres qui peuvent encore engager un combat, et le genre 11 n en est pas
+ * (`PatrolIsolationTest`). Engagee, elle le retient comme cible d une bataille qu elle n a pas
+ * ouverte : la bataille va a son terme, la suppression attend, rien n est annule ni rendu.
  *
  * ## La reserve et la cargaison ne se melangent pas
  *
@@ -236,6 +239,66 @@ final class PatrolOrders
     }
 
     /**
+     * Pourquoi un ordre de mouvement serait refuse maintenant — ou `null` s il passerait.
+     *
+     * ## Un seul decideur, deux lecteurs
+     *
+     * La carte grise un bouton et en dit la raison ; `orderMove()` refuse. Les deux doivent dire la
+     * meme chose : un bouton actif qui mene a un refus, ou un bouton grise pour une raison que la
+     * confirmation ignore, est un mensonge d interface. Ils lisent donc **la meme methode**, et
+     * l interface ne calcule rien de son cote — positions, couts et autorisations viennent du
+     * serveur, c est la regle de la carte.
+     *
+     * ## Ce qui n est pas ici, et pourquoi
+     *
+     * La **version d ordre** ne se juge qu a la confirmation : elle compare le devis que le joueur a
+     * lu a l etat courant, et n existe pas avant qu un devis soit affiche. L etat du **segment relu
+     * sous verrou** ne vaut que sous ce verrou. Ces deux refus-la restent dans `orderMove()`.
+     */
+    public function whyMoveIsRefused(Patrol $patrol, int $now): string|null
+    {
+        if (!$this->settings->patrolsEnabled()) {
+            return 'disabled';
+        }
+
+        $segment = $patrol->currentMission;
+
+        if (!$segment instanceof FleetMission || $this->playerOf($patrol) === null) {
+            return 'no_current_segment';
+        }
+
+        if (!$patrol->state->acceptsMovementOrders()) {
+            return 'state_refuses_orders';
+        }
+
+        if (resolve(EngagedFleetCheck::class)->isEngaged($segment)) {
+            return 'engaged_in_combat';
+        }
+
+        if (!$patrol->state->isParked()
+            && (int)$segment->time_arrival <= $now + $this->settings->patrolManoeuvreDelaySeconds()) {
+            return 'arriving_before_the_manoeuvre_ends';
+        }
+
+        return null;
+    }
+
+    /**
+     * Pourquoi un rappel serait refuse maintenant : les memes raisons qu un mouvement, plus
+     * l absence de toute base ou rentrer.
+     */
+    public function whyRecallIsRefused(Patrol $patrol, int $now): string|null
+    {
+        $refus = $this->whyMoveIsRefused($patrol, $now);
+
+        if ($refus !== null) {
+            return $refus;
+        }
+
+        return $this->homeCoordinateOf($patrol) === null ? 'no_home_left' : null;
+    }
+
+    /**
      * Donne un nouvel ordre a une patrouille : elle repart, posee ou en vol.
      *
      * ## Ce qui est revalide a la confirmation, et pourquoi chacun
@@ -255,32 +318,27 @@ final class PatrolOrders
      */
     public function orderMove(Patrol $patrol, PatrolDestination $to, float $speedPercent, int $orderVersion, int $now): FleetMission
     {
-        $this->refuseIfDisabled();
+        $refus = $this->whyMoveIsRefused($patrol, $now);
+
+        if ($refus !== null) {
+            throw new PatrolOrderRefused($refus);
+        }
 
         $segment = $patrol->currentMission;
         $proprietaire = $this->playerOf($patrol);
 
+        // Deja etabli par `whyMoveIsRefused()` ; redit pour que l analyse statique le sache.
         if (!$segment instanceof FleetMission || $proprietaire === null) {
             throw new PatrolOrderRefused('no_current_segment');
         }
 
-        if (!$patrol->state->acceptsMovementOrders()) {
-            throw new PatrolOrderRefused('state_refuses_orders');
-        }
-
+        // **La version ne se juge qu ici**, jamais dans le refus lisible d avance : elle compare le
+        // devis que le joueur a lu a l etat courant, et n a de sens qu a la confirmation.
         if ((int)$patrol->order_version !== $orderVersion) {
             throw new PatrolOrderRefused('stale_quote');
         }
 
-        if (resolve(EngagedFleetCheck::class)->isEngaged($segment)) {
-            throw new PatrolOrderRefused('engaged_in_combat');
-        }
-
         $delai = $patrol->state->isParked() ? 0 : $this->settings->patrolManoeuvreDelaySeconds();
-
-        if (!$patrol->state->isParked() && (int)$segment->time_arrival <= $now + $delai) {
-            throw new PatrolOrderRefused('arriving_before_the_manoeuvre_ends');
-        }
 
         $units = $this->unitsOf($segment);
 
@@ -365,9 +423,16 @@ final class PatrolOrders
      */
     public function recall(Patrol $patrol, int $now): FleetMission
     {
+        $refus = $this->whyRecallIsRefused($patrol, $now);
+
+        if ($refus !== null) {
+            throw new PatrolOrderRefused($refus);
+        }
+
         $base = $this->homeCoordinateOf($patrol);
 
         if ($base === null) {
+            // Deja exclu par `whyRecallIsRefused()` ; redit pour l analyse statique.
             throw new PatrolOrderRefused('no_home_left');
         }
 
@@ -446,6 +511,23 @@ final class PatrolOrders
             : max(0, $instant - (int)$segment->time_arrival);
 
         $segment->forceFill(['time_holding' => $delai])->save();
+    }
+
+    /**
+     * L instant du prochain rendez-vous d un segment pose — le retour de securite —, ou `null` si la
+     * flotte ne brule rien et n en a aucun.
+     *
+     * **Lu sur la ligne, jamais recalcule** : c est `time_arrival + time_holding` que le travailleur
+     * attend, et une carte qui recalculerait de son cote pourrait annoncer un autre instant que celui
+     * qui aura lieu.
+     */
+    public function nextEventAt(FleetMission $segment): int|null
+    {
+        if ($segment->time_holding === null || (int)$segment->time_holding >= self::HOLD_WITHOUT_END) {
+            return null;
+        }
+
+        return (int)$segment->time_arrival + (int)$segment->time_holding;
     }
 
     /**

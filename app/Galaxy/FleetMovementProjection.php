@@ -29,6 +29,15 @@ use OGame\Services\PlayerService;
  * l'icone et la couleur. Les coordonnees des deux bouts, pour tracer. **Ni unites, ni ressources,
  * ni cargaison** : la carte n'en a pas besoin, et une charge utile qui les porterait pour rien
  * serait une charge utile qui les revelerait un jour par erreur.
+ *
+ * ## Un bout peut etre un point de l'espace, pas un corps
+ *
+ * Le segment d'une patrouille part d'un point libre ou y arrive (`x_from/y_from`, `x_to/y_to`, en
+ * unites de reference du systeme). Quand le bout en porte un, il voyage avec la position d'orbite,
+ * et le navigateur trace vers **ce point** — vers l'orbite, il dessinerait la flotte a un endroit
+ * ou elle n'est pas, et c'est exactement la confusion que la revue 120 interdit. Un bout sans point
+ * est un corps, comme avant. Le segment porte aussi `patrol_id`, pour que la carte relie le
+ * mouvement a la patrouille qu'elle affiche a part.
  */
 final class FleetMovementProjection
 {
@@ -48,7 +57,7 @@ final class FleetMovementProjection
         $mouvements = [];
 
         foreach ($this->fleetMissionService->getActiveFleetMissionsForCurrentPlayer() as $mission) {
-            if (!$this->touches($mission, $galaxy, $system)) {
+            if (!self::touches($mission, $galaxy, $system)) {
                 continue;
             }
 
@@ -69,8 +78,10 @@ final class FleetMovementProjection
 
     /**
      * Une mission touche un systeme si elle en part ou y arrive.
+     *
+     * Partagee avec la projection des patrouilles : une seule regle pour « est dans ce systeme ».
      */
-    private function touches(FleetMission $mission, int $galaxy, int $system): bool
+    public static function touches(FleetMission $mission, int $galaxy, int $system): bool
     {
         $part = (int)$mission->galaxy_from === $galaxy && (int)$mission->system_from === $system;
         $arrive = (int)$mission->galaxy_to === $galaxy && (int)$mission->system_to === $system;
@@ -89,17 +100,22 @@ final class FleetMovementProjection
             'label' => $this->fleetMissionService->missionTypeToLabel((int)$mission->mission_type),
             'side' => $this->sideOf($mission)->value,
             'is_return' => !empty($mission->parent_id),
+            'patrol_id' => $mission->patrol_id === null ? null : (int)$mission->patrol_id,
             'from' => [
                 'galaxy' => (int)$mission->galaxy_from,
                 'system' => (int)$mission->system_from,
                 'position' => (int)$mission->position_from,
                 'type' => (int)$mission->type_from,
+                'x' => $mission->x_from === null ? null : (int)$mission->x_from,
+                'y' => $mission->y_from === null ? null : (int)$mission->y_from,
             ],
             'to' => [
                 'galaxy' => (int)$mission->galaxy_to,
                 'system' => (int)$mission->system_to,
                 'position' => (int)$mission->position_to,
                 'type' => (int)$mission->type_to,
+                'x' => $mission->x_to === null ? null : (int)$mission->x_to,
+                'y' => $mission->y_to === null ? null : (int)$mission->y_to,
             ],
             'time_departure' => (int)$mission->time_departure,
             'time_arrival' => (int)$mission->time_arrival,
