@@ -244,21 +244,42 @@ final class PatrolOrders
      */
     public function bill(Patrol $patrol, UnitCollection $units, int $jusqua): float
     {
-        $depuis = (int)($patrol->upkeep_paid_at ?? $jusqua);
+        return DB::transaction(function () use ($patrol, $units, $jusqua): float {
+            // **La ligne relue sous verrou decide, jamais celle que l appelant tenait.** Entre son
+            // chargement et cette ecriture, un autre passage a pu facturer : le curseur qu il tient
+            // decrirait alors un passe, et rejouer la periode prelverait deux fois. Le verrou
+            // serialise, et le curseur relu dit ce qui reste vraiment du.
+            $tenue = Patrol::query()->whereKey($patrol->id)->lockForUpdate()->first();
 
-        if ($jusqua <= $depuis) {
-            return 0.0;
-        }
+            if (!$tenue instanceof Patrol) {
+                return 0.0;
+            }
 
-        $du = $this->upkeep->dueBetween($units, $depuis, $jusqua);
-        $preleve = min($du, (float)$patrol->fuel_reserve);
+            $depuis = (int)($tenue->upkeep_paid_at ?? $jusqua);
 
-        $patrol->forceFill([
-            'fuel_reserve' => (float)$patrol->fuel_reserve - $preleve,
-            'upkeep_paid_at' => $jusqua,
-        ])->save();
+            if ($jusqua <= $depuis) {
+                $patrol->forceFill([
+                    'fuel_reserve' => (float)$tenue->fuel_reserve,
+                    'upkeep_paid_at' => $tenue->upkeep_paid_at,
+                ])->syncOriginal();
 
-        return $preleve;
+                return 0.0;
+            }
+
+            $du = $this->upkeep->dueBetween($units, $depuis, $jusqua);
+            $preleve = min($du, (float)$tenue->fuel_reserve);
+            $reste = (float)$tenue->fuel_reserve - $preleve;
+
+            $tenue->forceFill([
+                'fuel_reserve' => $reste,
+                'upkeep_paid_at' => $jusqua,
+            ])->save();
+
+            // L objet de l appelant suit la ligne : il vient de la lire, il doit la lire juste.
+            $patrol->forceFill(['fuel_reserve' => $reste, 'upkeep_paid_at' => $jusqua])->syncOriginal();
+
+            return $preleve;
+        });
     }
 
     /**
@@ -432,8 +453,20 @@ final class PatrolOrders
         $duree = $this->fleetMissionsFor($proprietaire)->durationOverDistance($proprietaire, $units, $distance, null, $vitesse);
         $cout = $this->fleetMissionsFor($proprietaire)->consumptionOverDistance($proprietaire, $units, $distance, 0, $vitesse);
 
-        return DB::transaction(function () use ($patrol, $parked, $units, $base, $depart, $now, $duree, $cout): FleetMission {
-            $parked->forceFill(['processed' => 1])->save();
+        return DB::transaction(function () use ($patrol, $parked, $units, $base, $depart, $now, $duree, $cout): FleetMission|null {
+            // **Le segment pose est la porte, et la base l arbitre.** Deux passages simultanes
+            // liraient tous deux « non traite » ; celui qui perd la course trouve ici la ligne deja
+            // marquee et repart sans creer un second retour. Le jeton de `updateMission()` couvre le
+            // cas ordinaire, mais il se reprend au bout de cinq minutes : la garde ne peut pas
+            // reposer sur lui seul.
+            $tenu = FleetMission::query()->whereKey($parked->id)->lockForUpdate()->first();
+
+            if (!$tenu instanceof FleetMission || (int)$tenu->processed === 1) {
+                return null;
+            }
+
+            $tenu->forceFill(['processed' => 1])->save();
+            $parked->forceFill(['processed' => 1])->syncOriginal();
 
             $retour = $this->createSegment(
                 $patrol,
@@ -482,6 +515,18 @@ final class PatrolOrders
     public function land(Patrol $patrol, FleetMission $segment, int $now, PlanetService $home): void
     {
         DB::transaction(function () use ($patrol, $segment, $now, $home): void {
+            // **La meme porte que le depart, pour la meme raison** : deux passages simultanes
+            // rendraient les vaisseaux deux fois, et le carburant avec. Le marquage vient donc avant
+            // tout credit, sous verrou, et le perdant de la course ne credite rien.
+            $tenu = FleetMission::query()->whereKey($segment->id)->lockForUpdate()->first();
+
+            if (!$tenu instanceof FleetMission || (int)$tenu->processed === 1) {
+                return;
+            }
+
+            $tenu->forceFill(['processed' => 1])->save();
+            $segment->forceFill(['processed' => 1])->syncOriginal();
+
             $home->addUnits($this->unitsOf($segment));
 
             $home->addResourcesAtomic(new Resources(
@@ -490,8 +535,6 @@ final class PatrolOrders
                 (float)$segment->deuterium + max(0.0, (float)$patrol->fuel_reserve),
                 0
             ));
-
-            $segment->forceFill(['processed' => 1])->save();
 
             $patrol->forceFill([
                 'state' => PatrolState::Finished,

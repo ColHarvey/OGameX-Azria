@@ -4,10 +4,13 @@ namespace Tests\Feature;
 
 use Illuminate\Support\Facades\Date;
 use OGame\Combat\Enums\CombatMissionKind;
+use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Services\AccountCombatWithdrawal;
+use OGame\Combat\Services\CombatsInvolvingPlayer;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\Galaxy\FleetMovementProjection;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Models\CombatInstance;
 use OGame\Models\FleetMission;
 use OGame\Models\Patrol;
 use OGame\Models\Resources;
@@ -252,6 +255,75 @@ class PatrolIsolationTest extends AccountTestCase
             $this->assertFalse(CombatMissionKind::Patrol->reinforcesTheDefence());
         } finally {
             resolve(SettingsService::class)->set('persistent_combat_enabled', 0);
+        }
+
+        unset($patrouille);
+        Date::setTestNow();
+    }
+
+    /**
+     * Une patrouille engagee dans un combat retient la suppression jusqu au reglement.
+     *
+     * ## Le critere est l engagement, pas le genre
+     *
+     * Codex l a demande ainsi, et le depot le fait deja : ce qui protege un participant n est pas
+     * une liste de genres de mission, mais le lien de combat que porte sa ligne. `CombatsInvolvingPlayer`
+     * cherche par trois liens, dont `fleet_missions.combat_instance_id` — que **toute** mission peut
+     * porter, patrouille comprise. Le retrait ne supprime donc pas le participant : il **annule sa
+     * bataille**, ce qui est le reglement sur, et la flotte rentre par le chemin ordinaire.
+     *
+     * Ce temoin l etablit avec un combat monte a la main, avant meme que le combat en espace libre
+     * existe : le jour ou une patrouille sera attaquable, la protection sera deja la et prouvee.
+     */
+    public function testAnEngagedPatrolIsSettledNotSilentlyRemoved(): void
+    {
+        [$patrouille, $segment] = $this->aParkedPatrol();
+
+        $planetes = $this->player()->planets->allIds();
+        $base = $this->planetService;
+
+        $combat = CombatInstance::create([
+            'status' => CombatState::Active,
+            'mission_id' => $segment->id,
+            'target_planet_id' => $base->getPlanetId(),
+            'target_type' => 1,
+            'galaxy' => $base->getPlanetCoordinates()->galaxy,
+            'system' => $base->getPlanetCoordinates()->system,
+            'position' => $base->getPlanetCoordinates()->position,
+            'started_at' => 1_700_000_000,
+        ]);
+
+        // Le segment porte le lien, comme le porterait une patrouille attaquee en espace libre.
+        $segment->forceFill(['combat_instance_id' => $combat->id])->save();
+
+        resolve(SettingsService::class)->set('persistent_combat_enabled', 1);
+
+        try {
+            // **Elle est bien tenue pour partie au combat**, par le lien que porte sa ligne.
+            $this->assertTrue(
+                CombatsInvolvingPlayer::isPartyTo($combat, $this->currentUserId, $planetes),
+                'An engaged patrol is not recognised as a party to its own battle.'
+            );
+
+            $plan = resolve(AccountCombatWithdrawal::class)->planFor($this->currentUserId, $planetes);
+
+            // **Le retrait la regle au lieu de l effacer** : la bataille est annulee, et c est par
+            // cette annulation que la flotte rentre. Aucun participant ne disparait avant.
+            $this->assertContains(
+                (int)$combat->id,
+                array_map(static fn (mixed $id): int => (int)$id, array_keys($plan->aAnnuler)),
+                'The withdrawal ignored the battle an engaged patrol is fighting.'
+            );
+
+            // Et elle ne figure pas parmi celles qui bloquent : bloquer et regler sont exclusifs.
+            $this->assertNotContains(
+                (int)$segment->id,
+                $plan->flottesQuiPeuventEncoreEngager,
+                'An engaged patrol both blocks the deletion and has its battle cancelled.'
+            );
+        } finally {
+            resolve(SettingsService::class)->set('persistent_combat_enabled', 0);
+            $segment->forceFill(['combat_instance_id' => null])->save();
         }
 
         unset($patrouille);
