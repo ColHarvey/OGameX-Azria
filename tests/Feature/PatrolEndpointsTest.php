@@ -169,6 +169,16 @@ class PatrolEndpointsTest extends AccountTestCase
         $ici = (int)$this->planetService->getPlanetId();
         $coords = $etrangere->getPlanetCoordinates();
 
+        // **Ce que l etranger voit deja n appartient pas a cet essai.** La base est partagee entre les
+        // essais d un processus, et il peut avoir ses propres flottes en vol : compter zero
+        // supposerait l etat de ses voisins. On mesure donc l ecart que la patrouille creuse, qui doit
+        // etre nul.
+        $moi = User::findOrFail($this->currentUserId);
+        $this->be(User::findOrFail($proprietaire->getId()));
+        $boiteAvant = $this->getJson('/ajax/fleet/eventbox/fetch')->assertStatus(200)->json();
+        $compteAvant = (int)($boiteAvant['friendly'] ?? 0) + (int)($boiteAvant['hostile'] ?? 0) + (int)($boiteAvant['neutral'] ?? 0);
+        $this->be($moi);
+
         $reponse = $this->postJson(route('galaxy.patrol.launch'), [
             'galaxy' => $coords->galaxy,
             'system' => $coords->system,
@@ -193,7 +203,6 @@ class PatrolEndpointsTest extends AccountTestCase
         $this->assertSame($coords->system, (int)$segment->system_to);
 
         // Le proprietaire de la planete visee ne voit rien, ni sur sa carte ni dans ses evenements.
-        $moi = User::findOrFail($this->currentUserId);
         $this->be(User::findOrFail($proprietaire->getId()));
 
         $couche = $this->getJson(route('galaxy.fleets', ['galaxy' => $coords->galaxy, 'system' => $coords->system]))
@@ -210,7 +219,7 @@ class PatrolEndpointsTest extends AccountTestCase
 
         // Et la boite ne compte pas cette patrouille parmi les flottes qui le concernent.
         $boite = $this->getJson('/ajax/fleet/eventbox/fetch')->assertStatus(200)->json();
-        $this->assertSame(0, (int)($boite['friendly'] ?? 0) + (int)($boite['hostile'] ?? 0) + (int)($boite['neutral'] ?? 0), 'The stranger event box counts a fleet that is only a patrol parking nearby.');
+        $this->assertSame($compteAvant, (int)($boite['friendly'] ?? 0) + (int)($boite['hostile'] ?? 0) + (int)($boite['neutral'] ?? 0), 'The stranger event box counts a fleet that is only a patrol parking nearby.');
 
         // Le proprietaire de la patrouille, lui, la voit — la correction ne masque pas tout.
         $this->be($moi);

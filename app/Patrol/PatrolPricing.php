@@ -103,8 +103,24 @@ final class PatrolPricing
         $cout = $this->fleetMissionService->consumptionOverDistance($player, $units, $distance, 0, $speedPercent);
 
         // Le retour de securite, depuis la destination vers la base, a sa propre vitesse.
+        //
+        // **Il se mesure comme il sera mesure.** Le devis prenait la distance entre *coordonnees*,
+        // celle du jeu classique, alors que le retour reel prend la distance entre *points* de la
+        // carte (`PatrolOrders::safetyReturnCostOf()`). Dans un meme systeme les deux ne coincident
+        // pas : le cout et l autonomie annonces pouvaient etre faux, et une reserve insuffisante
+        // acceptee au lancement. Un devis doit decrire l ordre qui sera execute, pas un ordre voisin.
         $vitesseRetour = $this->settings->patrolSafetyReturnSpeed();
-        $distanceRetour = $this->fleetMissionService->distanceBetweenCoordinates($to->coordinate(), $home);
+        $distanceRetour = $this->distanceBetween(
+            $to->galaxy,
+            $to->system,
+            $to->point,
+            PatrolDestination::spatialPoint(
+                $this->geometry(),
+                $home->galaxy,
+                $home->system,
+                $this->geometry()->stationingPointNear($home->position)
+            )
+        );
         $coutRetour = $this->fleetMissionService->consumptionOverDistance($player, $units, $distanceRetour, 0, $vitesseRetour);
         $dureeRetour = $this->fleetMissionService->durationOverDistance($player, $units, $distanceRetour, null, $vitesseRetour);
 
