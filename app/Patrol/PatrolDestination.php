@@ -32,6 +32,7 @@ final readonly class PatrolDestination
         public PlanetType $type,
         public int|null $bodyId,
         public int $orbit,
+        public bool $landsOnTheBody,
     ) {
     }
 
@@ -48,7 +49,7 @@ final readonly class PatrolDestination
             throw new InvalidArgumentException('Ce point n est pas un stationnement valide : ' . $refus . '.');
         }
 
-        return new self($galaxy, $system, $point, PlanetType::SpatialPoint, null, $geometry->orbitIndexOf($point));
+        return new self($galaxy, $system, $point, PlanetType::SpatialPoint, null, $geometry->orbitIndexOf($point), false);
     }
 
     /**
@@ -64,7 +65,33 @@ final readonly class PatrolDestination
             throw new InvalidArgumentException('Seuls une planete et une lune sont des corps.');
         }
 
-        return new self($galaxy, $system, $geometry->stationingPointNear($orbit), $type, $bodyId, $orbit);
+        return new self($galaxy, $system, $geometry->stationingPointNear($orbit), $type, $bodyId, $orbit, false);
+    }
+
+    /**
+     * Le corps sur lequel la patrouille va **se poser** : son atterrissage, jamais un stationnement.
+     *
+     * ## Pourquoi ce fait vit ici, et ce qu il ferme
+     *
+     * Un segment de flotte inscrit son corps d arrivee dans `planet_id_to`, et le jeu rend a chaque
+     * joueur **toute mission qui arrive sur une de ses planetes** : c est ainsi qu une attaque
+     * s annonce. Une patrouille qui stationne au voisinage d un corps n y arrive pas — elle se pose
+     * a cote — mais elle inscrivait quand meme son identite, et le proprietaire du corps la voyait
+     * dans sa boite d evenements et sur sa carte **sans aucun detecteur**, avec son genre, ses deux
+     * instants et ses deux bouts. La detection doit etre le seul chemin par lequel une patrouille
+     * etrangere se montre ; celui-la le contournait entierement.
+     *
+     * Le corps d arrivee n est donc inscrit que lorsque la patrouille s y pose vraiment, c est-a-dire
+     * a son retour. `PatrolMission::processArrival()` est le seul lecteur de ce champ, et il ne le
+     * lit que pour un retour.
+     */
+    public static function landingOn(SystemGeometry $geometry, int $galaxy, int $system, int $orbit, PlanetType $type, int $bodyId): self
+    {
+        if (!in_array($type, [PlanetType::Planet, PlanetType::Moon], true)) {
+            throw new InvalidArgumentException('Seuls une planete et une lune sont des corps.');
+        }
+
+        return new self($galaxy, $system, $geometry->stationingPointNear($orbit), $type, $bodyId, $orbit, true);
     }
 
     /**

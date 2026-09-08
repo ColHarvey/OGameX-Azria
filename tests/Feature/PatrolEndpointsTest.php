@@ -8,9 +8,11 @@ use OGame\Combat\Enums\CombatState;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\CombatInstance;
+use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\Patrol;
 use OGame\Models\Resources;
+use OGame\Models\User;
 use OGame\Patrol\Enums\PatrolState;
 use OGame\Patrol\Geometry\SpatialPoint;
 use OGame\Patrol\PatrolDestination;
@@ -129,6 +131,100 @@ class PatrolEndpointsTest extends AccountTestCase
         $coords = $this->planetService->getPlanetCoordinates();
 
         return ['galaxy' => $coords->galaxy, 'system' => $coords->system];
+    }
+
+    /**
+     * Une patrouille posee pres d une planete etrangere reste invisible a son proprietaire.
+     *
+     * ## La fuite que ce temoin ferme
+     *
+     * Un segment de flotte inscrit son corps d arrivee, et le jeu rend a chaque joueur **toute
+     * mission qui arrive sur une de ses planetes** : c est ainsi qu une attaque s annonce. Une
+     * patrouille qui stationne au **voisinage** d un corps n y arrive pas, mais elle y inscrivait
+     * quand meme l identite du corps : le proprietaire la voyait dans sa boite d evenements et sur
+     * sa carte, **sans aucun detecteur**, avec son genre, ses deux instants et ses deux bouts. La
+     * detection doit etre le seul chemin par lequel une patrouille etrangere se montre.
+     *
+     * ## Ce que ce temoin exige, et pourquoi il passe par le vrai parcours
+     *
+     * Une ligne fabriquee a la main dans un essai ne prouve rien d une correction **a l ecriture** :
+     * elle porterait ce que l essai lui donne. Le lancement passe donc par le point d entree du jeu,
+     * avec une destination « pres de ce corps », et le temoin lit ensuite ce que le serveur a ecrit.
+     *
+     * Il exige aussi que **la base de suivi survive** : le segment garde sa planete de depart, et la
+     * patrouille se pose vraiment a l arrivee — c est par cette ancre, et non par la destination, que
+     * le travailleur des pages retrouve la mission.
+     */
+    public function testAPatrolStationedNextToAStrangerPlanetStaysInvisibleToThatStranger(): void
+    {
+        $this->arm();
+        $this->planetAddResources(new Resources(0, 0, 200000, 0));
+        $this->planetAddUnit('cruiser', 20);
+
+        $etrangere = $this->getNearbyForeignPlanet();
+        $proprietaire = $etrangere->getPlayer();
+        $this->assertNotNull($proprietaire, 'The foreign planet has no owner.');
+        $this->assertNotSame($this->currentUserId, $proprietaire->getId(), 'The « foreign » planet belongs to the bench player.');
+
+        $ici = (int)$this->planetService->getPlanetId();
+        $coords = $etrangere->getPlanetCoordinates();
+
+        $reponse = $this->postJson(route('galaxy.patrol.launch'), [
+            'galaxy' => $coords->galaxy,
+            'system' => $coords->system,
+            'position' => $coords->position,
+            'type' => PlanetType::Planet->value,
+            'planet_id' => $ici,
+            'am' . self::CRUISER => 20,
+            'reserve' => 15000,
+            'speed' => 10,
+        ]);
+
+        $reponse->assertStatus(200);
+        $reponse->assertJson(['success' => true]);
+
+        $patrouille = Patrol::query()->where('user_id', $this->currentUserId)->orderByDesc('id')->firstOrFail();
+        $segment = FleetMission::query()->whereKey($patrouille->current_mission_id)->firstOrFail();
+
+        // Le fait serveur : le segment ne nomme aucun corps d arrivee, et garde sa base de suivi.
+        $this->assertNull($segment->planet_id_to, 'The patrol leg names the stranger body it merely parks next to.');
+        $this->assertSame($ici, (int)$segment->planet_id_from, 'The patrol leg lost the base the worker finds it by.');
+        $this->assertSame($coords->galaxy, (int)$segment->galaxy_to, 'The leg does not even go there: the scenario would prove nothing.');
+        $this->assertSame($coords->system, (int)$segment->system_to);
+
+        // Le proprietaire de la planete visee ne voit rien, ni sur sa carte ni dans ses evenements.
+        $moi = User::findOrFail($this->currentUserId);
+        $this->be(User::findOrFail($proprietaire->getId()));
+
+        $couche = $this->getJson(route('galaxy.fleets', ['galaxy' => $coords->galaxy, 'system' => $coords->system]))
+            ->assertStatus(200)
+            ->json();
+
+        $mouvements = $couche['movements'] ?? [];
+        $patrouilles = $couche['patrols'] ?? [];
+        $this->assertSame([], array_values(array_filter($mouvements, static fn (array $m): bool => (int)($m['id'] ?? 0) === (int)$segment->id)), 'The stranger sees the patrol leg as a movement, with no detector at all.');
+        $this->assertSame([], $patrouilles, 'The stranger is served a patrol layer that is not his.');
+
+        $liste = (string)$this->get('/ajax/fleet/eventlist/fetch')->assertStatus(200)->getContent();
+        $this->assertStringNotContainsString('timer_' . $segment->id, $liste, 'The stranger event list carries a timer for the patrol leg.');
+
+        // Et la boite ne compte pas cette patrouille parmi les flottes qui le concernent.
+        $boite = $this->getJson('/ajax/fleet/eventbox/fetch')->assertStatus(200)->json();
+        $this->assertSame(0, (int)($boite['friendly'] ?? 0) + (int)($boite['hostile'] ?? 0) + (int)($boite['neutral'] ?? 0), 'The stranger event box counts a fleet that is only a patrol parking nearby.');
+
+        // Le proprietaire de la patrouille, lui, la voit — la correction ne masque pas tout.
+        $this->be($moi);
+        $sienne = $this->getJson(route('galaxy.fleets', ['galaxy' => $coords->galaxy, 'system' => $coords->system]))
+            ->assertStatus(200)
+            ->json();
+        $this->assertNotSame([], array_values(array_filter($sienne['movements'] ?? [], static fn (array $m): bool => (int)($m['id'] ?? 0) === (int)$segment->id)), 'The owner lost sight of his own patrol leg.');
+
+        // La base de suivi tient : la patrouille se pose vraiment a l arrivee.
+        Date::setTestNow(Date::createFromTimestamp((int)$segment->time_arrival));
+        $this->get('/overview')->assertStatus(200);
+
+        $patrouille->refresh();
+        $this->assertSame(PatrolState::Stationed, $patrouille->state, 'The patrol never parked: the worker no longer finds a leg without a destination body.');
     }
 
     /**

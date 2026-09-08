@@ -604,7 +604,7 @@ final class PatrolOrders
     {
         $coordonnees = $body->getPlanetCoordinates();
 
-        return PatrolDestination::nearBody(
+        return PatrolDestination::landingOn(
             $this->pricing->geometry(),
             $coordonnees->galaxy,
             $coordonnees->system,
@@ -1076,7 +1076,12 @@ final class PatrolOrders
         $segment->x_from = $pointFrom?->x;
         $segment->y_from = $pointFrom?->y;
 
-        $segment->planet_id_to = $to->bodyId;
+        // **Seul un atterrissage nomme son corps.** Un stationnement au voisinage d un corps n y
+        // arrive pas, et l y inscrire le donnait a voir au proprietaire de ce corps — la boite
+        // d evenements rend toute mission arrivant sur une de ses planetes — sans le moindre
+        // detecteur. Le suivi ne perd rien : `planet_id_from` porte toujours la base d attache, et
+        // c est par elle que le travailleur des pages trouve la mission.
+        $segment->planet_id_to = $to->landsOnTheBody ? $to->bodyId : null;
         $segment->type_to = $to->type->value;
         $segment->galaxy_to = $to->galaxy;
         $segment->system_to = $to->system;
