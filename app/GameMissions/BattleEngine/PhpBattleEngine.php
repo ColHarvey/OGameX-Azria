@@ -8,6 +8,7 @@ use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameMissions\BattleEngine\Models\BattleResultRound;
 use OGame\GameMissions\BattleEngine\Models\BattleUnit;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
+use OGame\GameMissions\BattleEngine\State\BattleFieldState;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\GameObjects\Models\Units\UnitEntry;
 use OGame\Services\CharacterClassService;
@@ -35,13 +36,35 @@ class PhpBattleEngine extends BattleEngine
     /**
      * Fight the battle in max 6 rounds.
      *
+     * **La bataille se joue desormais en trois temps nommes** — ouvrir le champ, jouer des rounds,
+     * fermer le champ — et cette methode les enchaine tels qu'ils l'ont toujours ete : une seule
+     * etape de six rounds. Le comportement ne change pas d'un tir ; ce qui change est qu'on peut
+     * maintenant s'arreter entre deux rounds, ce que le moteur progressif demandera.
+     *
      * @param BattleResult $result
      * @return array<BattleResultRound>
      */
     protected function fightBattleRounds(BattleResult $result): array
     {
-        $rounds = [];
+        $etat = $this->openTheField($result);
 
+        $rounds = $this->playRounds($etat, self::MAX_ROUNDS);
+
+        $this->closeTheField($result, $etat);
+
+        return $rounds;
+    }
+
+    /**
+     * Le champ a son ouverture : les unites des deux camps, la manoeuvre de Hamill, la bande neuve.
+     *
+     * **L'ordre canonique est pris ici et nulle part ailleurs** : flottes par identifiant de
+     * mission, unites par identifiant d'objet. Une cible se choisit par sa position parmi les
+     * unites restantes ; deux moteurs nourris des memes tirages ne visent la meme unite que s'ils
+     * les ont rangees pareil.
+     */
+    protected function openTheField(BattleResult $result): BattleFieldState
+    {
         // Convert attacker units to BattleUnit objects to keep track of hull plating and shields.
         // Each attacker fleet uses its own player's tech levels.
         // **Ordre canonique** : flottes par identifiant de mission, unites par identifiant d'objet.
@@ -100,26 +123,67 @@ class PhpBattleEngine extends BattleEngine
         // leurs rounds au meme point.
         $this->roundDraws = $this->draws->forRounds();
 
-        $roundNumber = 0;
         $attackerRemainingShips = clone $result->attackerUnitsStart;
         $defenderRemainingShips = clone $result->defenderUnitsStart;
-        $attackerLosses = new UnitCollection();
-        $defenderLosses = new UnitCollection();
 
         // Initialize per-fleet tracking for multi-attacker battles
         $attackerLossesPerFleet = [];
         $attackerShipsPerFleet = [];
-        $hitsPerAttackerFleet = [];
-        $damagePerAttackerFleet = [];
         foreach ($this->attackers as $attackerFleet) {
             $attackerLossesPerFleet[$attackerFleet->fleetMissionId] = new UnitCollection();
             $attackerShipsPerFleet[$attackerFleet->fleetMissionId] = clone $attackerFleet->units;
-            $hitsPerAttackerFleet[$attackerFleet->fleetMissionId] = 0;
-            $damagePerAttackerFleet[$attackerFleet->fleetMissionId] = 0;
         }
 
-        while ($roundNumber < 6  && count($attackerUnits) > 0 && count($defenderUnits) > 0) {
-            $roundNumber++;
+        // Les deux tableaux sont deja reindexes : la manoeuvre de Hamill vient de le faire.
+        return new BattleFieldState(
+            $attackerUnits,
+            $defenderUnits,
+            $this->roundDraws,
+            0,
+            $attackerRemainingShips,
+            $defenderRemainingShips,
+            new UnitCollection(),
+            new UnitCollection(),
+            $attackerLossesPerFleet,
+            $attackerShipsPerFleet,
+        );
+    }
+
+    /**
+     * Joue au plus ce nombre de rounds sur ce champ, sans jamais depasser le plafond du jeu.
+     *
+     * ## Ce que « depuis cet etat » veut dire
+     *
+     * L'etat d'entree est l'etat de sortie du dernier round joue : coques entamees comprises. Le
+     * corps de la boucle n'a pas bouge d'une ligne — il travaille sur des variables locales
+     * deballees a l'entree et remballees a la sortie. C'etait la condition pour que cette couture
+     * ne change aucun comportement, et pour que la suite entiere en soit le temoin.
+     *
+     * **La bande des rounds est celle de l'etat**, pas une nouvelle : c'est ce qui rend la suite de
+     * tirages independante du decoupage. `$this->roundDraws` la recoit parce que les deux aides du
+     * round — `attackUnit()` et `cleanupRound()` — la lisent la ; une seule source, posee ici.
+     *
+     * @return array<BattleResultRound> Les rounds joues **par cet appel**, pas depuis le debut.
+     */
+    protected function playRounds(BattleFieldState $etat, int $howMany): array
+    {
+        $this->roundDraws = $etat->roundDraws;
+
+        $rounds = [];
+
+        $attackerUnits = $etat->attackerUnits;
+        $defenderUnits = $etat->defenderUnits;
+        $attackerRemainingShips = $etat->attackerRemainingShips;
+        $defenderRemainingShips = $etat->defenderRemainingShips;
+        $attackerLosses = $etat->attackerLosses;
+        $defenderLosses = $etat->defenderLosses;
+        $attackerLossesPerFleet = $etat->attackerLossesPerFleet;
+        $attackerShipsPerFleet = $etat->attackerShipsPerFleet;
+
+        $jusqua = min(self::MAX_ROUNDS, $etat->roundsPlayed + max(0, $howMany));
+
+        while ($etat->roundsPlayed < $jusqua && count($attackerUnits) > 0 && count($defenderUnits) > 0) {
+            $etat->roundsPlayed++;
             $round = new BattleResultRound();
             $round->defenderLossesInRound = new UnitCollection();
             $round->attackerLossesInRound = new UnitCollection();
@@ -205,8 +269,34 @@ class PhpBattleEngine extends BattleEngine
             $rounds[] = $round;
         }
 
+        // **Remballage.** Les collections sont des objets, donc l'etat suivait deja ; les tableaux
+        // d'unites, eux, ont ete reindexes par `array_values()` a chaque round et doivent revenir.
+        $etat->attackerUnits = $attackerUnits;
+        $etat->defenderUnits = $defenderUnits;
+        $etat->attackerRemainingShips = $attackerRemainingShips;
+        $etat->defenderRemainingShips = $defenderRemainingShips;
+        $etat->attackerLosses = $attackerLosses;
+        $etat->defenderLosses = $defenderLosses;
+        $etat->attackerLossesPerFleet = $attackerLossesPerFleet;
+        $etat->attackerShipsPerFleet = $attackerShipsPerFleet;
+
+        return $rounds;
+    }
+
+    /**
+     * Le champ a sa fermeture : ce que chaque flotte a perdu, et ce que la bande a consomme.
+     *
+     * Rien ici ne depend du decoupage : les resultats par flotte se lisent sur les **survivants**,
+     * et le journal des tirages sur la bande de l'etat — la meme, qu'elle ait servi en une etape ou
+     * en six.
+     */
+    protected function closeTheField(BattleResult $result, BattleFieldState $etat): void
+    {
+        $attackerUnits = $etat->attackerUnits;
+        $defenderUnits = $etat->defenderUnits;
+
         // Ce que la source des rounds a tire, pour le banc de parite ; nul en jeu.
-        $journal = $this->roundDraws->journal();
+        $journal = $etat->roundDraws->journal();
         $result->drawsConsumed = $journal === null ? null : ['count' => $journal->count(), 'raw' => $journal->rawCount(), 'digest' => $journal->digest()];
 
         // Populate per-fleet attacker results by scanning surviving units
@@ -245,8 +335,6 @@ class PhpBattleEngine extends BattleEngine
             // Check if completely destroyed
             $fleetResult->completelyDestroyed = $fleetResult->unitsResult->getAmount() === 0;
         }
-
-        return $rounds;
     }
 
     /**

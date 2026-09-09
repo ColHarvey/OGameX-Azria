@@ -45,6 +45,17 @@ use RuntimeException;
 abstract class BattleEngine
 {
     /**
+     * Le nombre de rounds au-dela duquel une bataille s'arrete, quoi qu'il arrive.
+     *
+     * **Six, et c'est la regle du jeu amont**, pas un reglage de ce serveur. Elle vivait en dur
+     * dans la boucle des deux moteurs ; la nommer ici ne la change pas et n'anticipe rien : le
+     * plafond que le moteur progressif demandera est une **decision de jeu**, qui appartient a
+     * Keven et qui n'est pas prise. Le moteur Rust garde sa propre copie de cette valeur, comme
+     * pour toute mecanique de combat.
+     */
+    public const int MAX_ROUNDS = 6;
+
+    /**
      * Le taux de pillage de ce combat, en points de base.
      *
      * **En centiemes de pour-cent, jamais en pour-cent entiers.** La ponderation par le fret
