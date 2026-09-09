@@ -5,6 +5,8 @@ namespace OGame\GameMissions\Abstracts;
 use Closure;
 use Exception;
 use Illuminate\Support\Facades\Date;
+use OGame\Alliance\AllianceOffensiveGuard;
+use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Services\RefusedFleetHomecoming;
 use OGame\Combat\Support\ReturnOrder;
 use OGame\Enums\FleetMissionStatus;
@@ -476,6 +478,41 @@ abstract class GameMission
             return new MissionPossibleStatus(false);
         }
         return null;
+    }
+
+    /**
+     * Aucune offensive contre un bien d un membre de sa propre alliance.
+     *
+     * ## Le lancement, et pas seulement lui
+     *
+     * Le plan approuve exige les deux moments : « Controles au lancement et a l arrivee avant
+     * ouverture/admission [...] Ne pas se contenter de boutons grises. » Ce garde-ci est celui du
+     * lancement ; celui de l arrivee vit dans la porte des mouvements, et **les deux appellent le
+     * meme decideur** — `AllianceOffensiveGuard` — pour qu ils ne puissent pas diverger.
+     *
+     * Le genre vient de la classe qui appelle : une attaque groupee (type 2) partage la classe de
+     * l attaque simple, et les deux sont offensives.
+     *
+     * @param PlanetService $planet le corps d ou part l ordre
+     * @param PlanetService|null $targetPlanet le corps vise, s il existe
+     * @return MissionPossibleStatus|null un refus, ou null si rien ne s y oppose
+     */
+    protected function checkAllianceProtection(PlanetService $planet, PlanetService|null $targetPlanet): MissionPossibleStatus|null
+    {
+        $attaquant = $planet->getPlayer();
+        $cible = $targetPlanet?->getPlayer();
+
+        if ($attaquant === null || $cible === null) {
+            return null;
+        }
+
+        $garde = resolve(AllianceOffensiveGuard::class);
+
+        if (!$garde->forbids(CombatMissionKind::fromMissionType(static::$typeId), $attaquant->getId(), $cible->getId())) {
+            return null;
+        }
+
+        return new MissionPossibleStatus(false, __($garde->reason()));
     }
 
     /**

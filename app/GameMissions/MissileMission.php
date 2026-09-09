@@ -76,6 +76,11 @@ class MissileMission extends GameMission
             return $ownPlanetCheck;
         }
 
+        // Aucune offensive contre un membre de sa propre alliance (plan du 9 septembre 2026).
+        if ($allianceCheck = $this->checkAllianceProtection($planet, $targetPlanet)) {
+            return $allianceCheck;
+        }
+
         // Les deux protections que cette mission etait seule a ne pas appliquer, alors
         // qu'elle vise la planete d'un autre joueur exactement comme une attaque. Les neuf
         // autres missions les portent depuis toujours ; leur absence ici laissait frapper

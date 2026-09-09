@@ -75,6 +75,11 @@ class MoonDestructionMission extends GameMission
             return new MissionPossibleStatus(false, __('You cannot destroy your own moon.'));
         }
 
+        // Aucune offensive contre un membre de sa propre alliance (plan du 9 septembre 2026).
+        if ($allianceCheck = $this->checkAllianceProtection($planet, $targetMoon)) {
+            return $allianceCheck;
+        }
+
         // Fleet must contain at least one Deathstar
         $deathstarCount = 0;
         foreach ($units->units as $unit) {

@@ -78,6 +78,11 @@ class AttackMission extends GameMission
             return $ownPlanetCheck;
         }
 
+        // Aucune offensive contre un membre de sa propre alliance (plan du 9 septembre 2026).
+        if ($allianceCheck = $this->checkAllianceProtection($planet, $targetPlanet)) {
+            return $allianceCheck;
+        }
+
         // If target player is in vacation mode, the mission is not possible.
         if ($vacationCheck = $this->checkTargetVacationMode($targetPlanet)) {
             return $vacationCheck;

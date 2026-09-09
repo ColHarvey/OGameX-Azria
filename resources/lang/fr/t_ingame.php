@@ -636,6 +636,7 @@ return [
         'battle_defender_fires' => 'Le :defender tire un total de :hits coups sur le :attacker avec une force totale de :strength. Les boucliers du :attacker2 absorbent :absorbed points de dégâts.',
     ],
     'alliance' => [
+        'refusal_offensive_against_a_member' => 'Vous ne pouvez pas lancer une offensive contre un membre de votre alliance.',
         'page_title' => 'Alliance',
         'tab_overview' => 'Vue générale',
         'tab_management' => 'Gestion',
@@ -1432,6 +1433,8 @@ Taux d\'évasion de la flotte amélioré',
         'state_finished' => 'Terminée',
     ],
     'admin' => [
+        'alliance_offensive_protection_enabled' => 'Protection d’alliance',
+        'alliance_offensive_protection_enabled_desc' => 'Aucune offensive entre membres d’une même alliance : attaque, attaque groupée, missiles et destruction de lune sont refusés au lancement comme à l’arrivée. L’espionnage reste permis.',
         'patrols_enabled' => 'Patrouilles activées :',
         'patrols_enabled_desc' => 'Interrupteur du chantier patrouilles, stationnement et surveillance. Éteint, rien ne change en jeu.',
         'patrol_manoeuvre_delay' => 'Délai de manœuvre en vol (secondes) :',

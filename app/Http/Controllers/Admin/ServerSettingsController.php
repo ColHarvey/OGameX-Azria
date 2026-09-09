@@ -59,6 +59,7 @@ class ServerSettingsController extends OGameController
             'expedition_reward_multiplier_resources' => $settingsService->expeditionRewardMultiplierResources(),
             'expedition_reward_multiplier_ships' => $settingsService->expeditionRewardMultiplierShips(),
             'patrols_enabled' => $settingsService->patrolsEnabled(),
+            'alliance_offensive_protection_enabled' => $settingsService->allianceOffensiveProtectionEnabled(),
             'patrol_manoeuvre_delay_seconds' => $settingsService->patrolManoeuvreDelaySeconds(),
             'patrol_upkeep_divisor' => $settingsService->patrolUpkeepDivisor(),
             'patrol_safety_return_speed' => $settingsService->patrolSafetyReturnSpeed(),
@@ -141,6 +142,7 @@ class ServerSettingsController extends OGameController
 
         // Chantier patrouilles (journal §114) : l interrupteur et les valeurs encore ouvertes.
         $settingsService->set('patrols_enabled', request('patrols_enabled', 0));
+        $settingsService->set('alliance_offensive_protection_enabled', request('alliance_offensive_protection_enabled', 0));
         $settingsService->set('patrol_manoeuvre_delay_seconds', request('patrol_manoeuvre_delay_seconds', 60));
         $settingsService->set('patrol_upkeep_divisor', request('patrol_upkeep_divisor', 20));
         $settingsService->set('patrol_safety_return_speed', request('patrol_safety_return_speed', 3));

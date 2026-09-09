@@ -189,6 +189,32 @@ enum CombatMissionKind: string
     }
 
     /**
+     * Si ce genre porte une offensive contre un autre joueur.
+     *
+     * ## Pourquoi ce predicat n est pas `opensCombat()`
+     *
+     * `opensCombat()` repond a une question etroite : ce genre dispute-t-il la possession du corps
+     * celeste vise ? Le missile frappe sans engager de flotte, et il est pourtant une offensive. La
+     * protection d alliance porte sur l intention hostile, pas sur l ouverture d une bataille.
+     *
+     * L espionnage est hostile au sens du jeu, mais il ne detruit rien et le plan approuve ne le
+     * nomme pas : « planete, lune, flotte/patrouille, missiles, destruction de lune et groupes
+     * ACS ». Il reste donc permis entre membres, et ce choix se dit ici plutot que de se deduire.
+     *
+     * **La correspondance est exhaustive** : un genre nouveau devra decider s il est offensif.
+     *
+     * @return bool
+     */
+    public function isOffensiveAgainstAnotherPlayer(): bool
+    {
+        return match ($this) {
+            self::Attack, self::AcsAttack, self::MoonDestruction, self::Missile => true,
+            self::AcsDefend, self::Transport, self::Deployment, self::Espionage,
+            self::Colonisation, self::Recycle, self::Expedition, self::Patrol => false,
+        };
+    }
+
+    /**
      * Ce que l'aller de cette mission vise reellement.
      *
      * **Le retour n'est pas concerne** : une flotte qui rentre se pose toujours sur un corps

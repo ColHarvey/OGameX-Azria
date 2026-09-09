@@ -789,6 +789,7 @@ return [
     // -------------------------------------------------------------------------
 
     'alliance' => [
+        'refusal_offensive_against_a_member' => 'You cannot launch an offensive against a member of your own alliance.',
         // Page / navigation
         'page_title'                    => 'Alliance',
         'tab_overview'                  => 'Overview',
@@ -1760,6 +1761,8 @@ Improved fleet escape rate',
         'state_finished' => 'Finished',
     ],
     'admin' => [
+        'alliance_offensive_protection_enabled' => 'Alliance protection',
+        'alliance_offensive_protection_enabled_desc' => 'No offensive between members of the same alliance: attack, ACS attack, missiles and moon destruction are refused at launch and on arrival. Espionage stays allowed.',
         'patrols_enabled' => 'Patrols enabled:',
         'patrols_enabled_desc' => 'Switch for the patrols, stationing and surveillance project. Off, nothing changes in game.',
         'patrol_manoeuvre_delay' => 'In-flight manoeuvre delay (seconds):',

@@ -468,6 +468,17 @@
                                     </square-checkbox>
                                 </div>
                             </div>
+                            {{-- Protection d'alliance : aucune offensive entre membres (plan du 9 septembre 2026). --}}
+                            <div class="fieldwrapper">
+                                <label class="styled textBeefy">{{ __('t_ingame.admin.alliance_offensive_protection_enabled') }}</label>
+                                <div class="thefield">
+                                    <square-checkbox class="square-checkbox">
+                                        <input type="checkbox" id="square-checkBoxAllianceOffensiveProtection" name="alliance_offensive_protection_enabled" value="1" {{ $alliance_offensive_protection_enabled ? 'checked' : '' }}>
+                                        <label for="square-checkBoxAllianceOffensiveProtection"></label>
+                                    </square-checkbox>
+                                </div>
+                                <div class="smallFont">{{ __('t_ingame.admin.alliance_offensive_protection_enabled_desc') }}</div>
+                            </div>
                             {{-- Chantier patrouilles (journal §114) : interrupteur et valeurs encore ouvertes. --}}
                             <div class="fieldwrapper">
                                 <label class="styled textBeefy">{{ __('t_ingame.admin.patrols_enabled') }}</label>

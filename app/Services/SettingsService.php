@@ -877,6 +877,19 @@ class SettingsService
     }
 
     /**
+     * Aucune offensive entre membres d une meme alliance (plan approuve du 9 septembre 2026,
+     * section 2). Eteint par defaut : tant qu il vaut non, la regle n existe pas et aucun
+     * lancement ne lit d alliance.
+     *
+     * Il est distinct de l interrupteur des combats durables et de celui des patrouilles : c est
+     * une regle de jeu qui se tient seule, et Keven doit pouvoir l armer sans le reste.
+     */
+    public function allianceOffensiveProtectionEnabled(): bool
+    {
+        return $this->get('alliance_offensive_protection_enabled', '0') === '1';
+    }
+
+    /**
      * Delai d une manoeuvre en vol, en secondes, compte a partir de la confirmation serveur
      * (revue 121, R2). Le nouveau segment part de la position reellement atteinte a la fin du delai.
      */
