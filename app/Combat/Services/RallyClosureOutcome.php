@@ -69,6 +69,18 @@ final readonly class RallyClosureOutcome
     }
 
     /**
+     * Un autre travailleur tenait une arrivee dont la fermeture avait besoin : elle s'est retiree.
+     *
+     * **Ce n'est ni un echec ni une anomalie** : c'est une course ordinaire. Rien n'a ete ecrit, le
+     * ralliement reste ouvert, et l'avanceur repassera. L'echeance, elle, ne bouge pas : elle vit
+     * sur la barriere depuis l'ouverture, et une reprise plus tardive la relit telle quelle.
+     */
+    public static function heldByAnotherWorker(): self
+    {
+        return new self(false, 'arrivee tenue ailleurs');
+    }
+
+    /**
      * Combien de flottes ont ete admises, les deux camps confondus.
      */
     public function admittedFleets(): int

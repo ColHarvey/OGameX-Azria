@@ -4,6 +4,7 @@ namespace OGame\Combat\Services;
 
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use LogicException;
 use OGame\Combat\Admission\AdmissionBudget;
 use OGame\Combat\Admission\AdmissionCeiling;
@@ -21,6 +22,7 @@ use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\FleetDispositionKind;
 use OGame\Combat\Enums\SnapshotContribution;
+use OGame\Combat\Exceptions\ClosureMustWaitForAnotherWorker;
 use OGame\Combat\Exceptions\ContradictorySnapshotInclusion;
 use OGame\Combat\Projection\SnapshotProjectionRegistry;
 use OGame\Combat\Support\ActorKindResolver;
@@ -104,6 +106,26 @@ final class RallyClosureService
      * @return RallyClosureOutcome
      */
     public function close(int $combatInstanceId, int $now): RallyClosureOutcome
+    {
+        try {
+            return $this->closeInATransaction($combatInstanceId, $now);
+        } catch (ClosureMustWaitForAnotherWorker $tenue) {
+            /*
+             * **Le retrait est une issue, pas une erreur.** Un autre travailleur tenait une arrivee
+             * dont cette fermeture avait besoin. L exception a fait revenir la transaction en
+             * arriere — donc aucun effet partiel, et l instance est restee en ralliement — et
+             * l avanceur repassera. Journalise pour que la course se voie, sans reveiller personne.
+             */
+            Log::info('Fermeture retiree : une arrivee est tenue par un autre travailleur.', [
+                'combat' => $tenue->combatInstanceId,
+                'arrivee' => $tenue->eventIdentity,
+            ]);
+
+            return RallyClosureOutcome::heldByAnotherWorker();
+        }
+    }
+
+    private function closeInATransaction(int $combatInstanceId, int $now): RallyClosureOutcome
     {
         return DB::transaction(function () use ($combatInstanceId, $now): RallyClosureOutcome {
             // **La barriere d'abord, et par l'identifiant de combat** — pas apres avoir verrouille

@@ -6,6 +6,7 @@ use Exception;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use OGame\Combat\Enums\MissionUpdateOutcome;
 use OGame\Combat\Services\CombatEffectLedger;
 use OGame\Combat\Services\EngagedFleetCheck;
 use OGame\Combat\Services\FleetDispositionRegistry;
@@ -692,15 +693,20 @@ class FleetMissionService
     /**
      * Process a fleet mission.
      *
+     * **Elle rend ce qu elle a fait, et c est neuf.** Trois chemins sortaient d ici sans effet — le
+     * jeton tenu par un autre travailleur, le missile differe, le missile annule — et l appelant
+     * devait le deviner. La fermeture du ralliement en tirait une conclusion fausse : ne trouvant
+     * pas de delta au registre, elle accusait la porte de ne pas avoir vu la barriere. **Une absence
+     * n est pas une explication.**
+     *
      * @param FleetMission $mission
-     * @return void
      */
-    public function updateMission(FleetMission $mission): void
+    public function updateMission(FleetMission $mission): MissionUpdateOutcome
     {
         // Load the mission object again from database to ensure we have the latest data.
         $mission = $this->getFleetMissionById($mission->id, false);
         if ($mission === null) {
-            return;
+            return MissionUpdateOutcome::Vanished;
         }
 
         // Sanity check: only process missions that have arrived AND potential waiting time has passed.
@@ -749,7 +755,7 @@ class FleetMissionService
                 // mission relue sous verrou — et c'est la mission qui prend la porte, pour qu'aucun
                 // appelant ne puisse decider avec un modele d'avant.
                 if ($defense->settleArrival($mission, (int)Date::now()->timestamp)) {
-                    return;
+                    return MissionUpdateOutcome::Applied;
                 }
 
                 // **Pas de relecture ici, et c'est voulu.** L'objet que ce code tient decrit peut-etre
@@ -762,12 +768,12 @@ class FleetMissionService
 
         $arrivalTimeWithWaitingTime = $mission->time_arrival + $holdTime;
         if ($arrivalTimeWithWaitingTime > Date::now()->timestamp) {
-            return;
+            return MissionUpdateOutcome::NotDueYet;
         }
 
         // Sanity check: only process missions that have not been processed yet.
         if ($mission->processed) {
-            return;
+            return MissionUpdateOutcome::AlreadyProcessed;
         }
 
         // **Lire `processed` ne suffit pas : c'est un « je lis, puis j'agis ».** Entre la lecture
@@ -781,7 +787,13 @@ class FleetMissionService
         // La reservation, elle, est une **ecriture conditionnelle unique** : c'est la base qui
         // arbitre, le perdant compte zero ligne et repart sans rien faire.
         if (!$this->claimForProcessing($mission)) {
-            return;
+            // **Refuse pour deux raisons, et l appelant doit les distinguer.** La reservation exige
+            // `processed = 0` : elle echoue donc aussi bien quand un autre travailleur tient la
+            // mission que quand elle vient d etre traitee. Une fermeture qui attendait cet effet n a
+            // pas la meme conduite dans les deux cas.
+            return (int)FleetMission::query()->whereKey($mission->id)->value('processed') === 1
+                ? MissionUpdateOutcome::AlreadyProcessed
+                : MissionUpdateOutcome::ClaimedElsewhere;
         }
 
         try {
@@ -789,8 +801,12 @@ class FleetMissionService
             // s'il est parti avant l'ouverture, il est annule sans impact s'il est parti apres, et il
             // attend le reglement si la bataille est engagee — pour frapper ce qui reste, une seule
             // fois.
-            if (resolve(MissileArrivalGate::class)->decide($mission) !== MissileArrivalGate::APPLY) {
-                return;
+            $verdict = resolve(MissileArrivalGate::class)->decide($mission);
+
+            if ($verdict !== MissileArrivalGate::APPLY) {
+                return $verdict === MissileArrivalGate::DEFER
+                    ? MissionUpdateOutcome::Deferred
+                    : MissionUpdateOutcome::Cancelled;
             }
 
             $missionObject = $this->gameMissionFactory->getMissionById($mission->mission_type, [
@@ -806,6 +822,8 @@ class FleetMissionService
             resolve(CombatEffectLedger::class)->applyUnderAnOpenBarrier($mission, function () use ($missionObject, $mission): void {
                 $missionObject->process($mission);
             });
+
+            return MissionUpdateOutcome::Applied;
         } finally {
             $this->releaseTheProcessingClaim($mission);
         }

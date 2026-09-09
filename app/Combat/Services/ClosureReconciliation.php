@@ -13,7 +13,9 @@ use OGame\Combat\Causality\PartitionBarrier;
 use OGame\Combat\Causality\ReconciledEvent;
 use OGame\Combat\Causality\VerifiedCompleteEventSlice;
 use OGame\Combat\Enums\CombatMissionKind;
+use OGame\Combat\Enums\MissionUpdateOutcome;
 use OGame\Combat\Enums\SnapshotContribution;
+use OGame\Combat\Exceptions\ClosureMustWaitForAnotherWorker;
 use OGame\Combat\Projection\MissileStrikeProjection;
 use OGame\Combat\Support\CombatEventIdentity;
 use OGame\Combat\Support\EffectOrderKey;
@@ -169,10 +171,53 @@ final class ClosureReconciliation
             // delta reel, quel que soit le sens et le genre : une flotte deposee ajoute, un missile
             // retire. La fermeture ne mesure rien elle-meme : une seule source, la meme que pour un
             // effet que le monde a livre avant elle.
-            resolve(FleetMissionService::class)->updateMission($mission);
+            $issue = resolve(FleetMissionService::class)->updateMission($mission);
+
+            /*
+             * **Ce que la porte a fait, elle le dit maintenant.** Elle ne le disait pas : trois de
+             * ses chemins sortaient sans effet, et cette fermeture en concluait que la barriere
+             * n avait pas ete vue. Un rouge du bac l a montre le 9 septembre 2026 — un travailleur
+             * tenait le jeton pendant que la fermeture appliquait, et le message accusait le mauvais
+             * coupable. **Une absence n est pas une explication.**
+             */
+            if ($issue === MissionUpdateOutcome::ClaimedElsewhere) {
+                /*
+                 * **Un autre travailleur tient cette arrivee.** On ne l attend pas en gardant les
+                 * verrous : il a peut-etre besoin de ceux-la pour finir. On relache tout et on
+                 * recommencera — l instance reste en ralliement, aucun effet partiel ne subsiste, et
+                 * l echeance logique de la fenetre est celle que la barriere porte, donc le retard
+                 * technique ne prolonge rien.
+                 */
+                throw new ClosureMustWaitForAnotherWorker((int)$combat->id, $reconcilie->event->identity);
+            }
+
+            if ($issue === MissionUpdateOutcome::Deferred) {
+                /*
+                 * **Dans une fermeture, un differe est une incoherence, pas un succes silencieux.**
+                 * `close()` tient la barriere puis l instance sous verrou et refuse si l etat n est
+                 * plus `Rallying` ; or la matrice ne differe que sur `Active` ou `Resolving`. Voir un
+                 * differe ici veut donc dire que le combat qui gouverne ce corps n est pas celui
+                 * qu on ferme. Le tolerer ferait photographier des defenses qu un missile aurait du
+                 * detruire.
+                 *
+                 * **Ce filet est inatteignable, et il est garde exprès.** Aucun essai ne le
+                 * declenche, et une mutation qui le desarme survit — le fait est dit plutot que
+                 * masque par un temoin fabrique. Il ne coute rien et il nomme, le jour ou un chemin
+                 * neuf rendrait la chose possible, ce que le silence aurait laisse passer.
+                 */
+                throw new RuntimeException('Le combat ' . $combat->id . ' ferme son ralliement alors que la matrice differe l effet ' . $reconcilie->event->identity . ' : le corps est gouverne par un combat qui n est pas celui-ci.');
+            }
+
             $delta = $this->ledger->deltaOf((int)$combat->id, $reconcilie->event->identity);
+
+            if ($issue === MissionUpdateOutcome::Cancelled) {
+                // **Annule sans impact** : aucune frappe, rien a photographier. Le registre porte
+                // un delta nul si la porte l a inscrit ; son absence n est pas une faute ici.
+                continue;
+            }
+
             if ($delta === null) {
-                throw new RuntimeException('Le combat ' . $combat->id . ' a applique l effet ' . $reconcilie->event->identity . ' sans que le registre en garde le delta : la barriere n a pas ete vue par la porte, ou l effet n a pas eu lieu.');
+                throw new RuntimeException('Le combat ' . $combat->id . ' a applique l effet ' . $reconcilie->event->identity . ' (issue ' . $issue->value . ') sans que le registre en garde le delta : la barriere n a pas ete vue par la porte.');
             }
 
             $appliques[] = $reconcilie->event->identity;

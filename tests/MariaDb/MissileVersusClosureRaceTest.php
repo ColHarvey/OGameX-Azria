@@ -122,15 +122,42 @@ final class MissileVersusClosureRaceTest extends FleetDispatchTestCase
 
         $issues = $this->inParallel(2, static function (int $rang) use ($identifiant, $missile, $fermeture): string {
             if ($rang === 0) {
-                return (new RallyClosureService())->close($identifiant, $fermeture)->closed ? 'fermee' : 'deja fermee';
+                return (new RallyClosureService())->close($identifiant, $fermeture)->reason;
             }
 
             resolve(FleetMissionService::class)->updateMission(FleetMission::query()->findOrFail($missile->id));
 
             return 'livre';
         });
-        sort($issues);
-        $this->assertSame(['fermee', 'livre'], $issues, 'One of the two workers failed instead of finding the other had passed.');
+
+        $this->assertContains('livre', $issues, 'The worker that delivers the missile did not run.');
+
+        /*
+         * **Trois denouements, et aucun n est un echec.**
+         *
+         * La fermeture passe, ou elle trouve le ralliement deja ferme, ou elle **se retire** parce que
+         * l autre travailleur tenait l arrivee. Ce dernier cas etait, jusqu au 9 septembre 2026, une
+         * exception qui accusait la barriere de ne pas avoir ete vue : la course a rougi une fois pour
+         * cela. Un retrait n est pas un echec — il ne laisse rien derriere lui, et l avanceur repasse.
+         */
+        $fermetures = array_values(array_diff($issues, ['livre']));
+        $this->assertCount(1, $fermetures);
+        $this->assertContains(
+            $fermetures[0],
+            ['fermee', 'deja fermee', 'arrivee tenue ailleurs'],
+            'The closure ended in a way that is neither a success, nor a race already won, nor a clean withdrawal.'
+        );
+
+        /*
+         * **Le retrait se rattrape, et c est cela qu il faut prouver.** Un passage suivant ferme le
+         * ralliement : exactement une frappe, et une photographie juste — les memes exigences que
+         * dans les deux autres denouements.
+         */
+        if ($fermetures[0] === 'arrivee tenue ailleurs') {
+            $reprise = (new RallyClosureService())->close($identifiant, $fermeture + 120);
+
+            $this->assertTrue($reprise->closed, 'The withdrawn closure never came back: ' . $reprise->reason);
+        }
 
         // **Une seule frappe dans le monde.**
         $this->assertSame(1, (int)DB::table('fleet_missions')->where('id', $missile->id)->value('processed'), 'The missile was never applied.');

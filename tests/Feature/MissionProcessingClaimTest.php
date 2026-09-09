@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use Illuminate\Support\Facades\Date;
+use OGame\Combat\Enums\MissionUpdateOutcome;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
@@ -56,9 +57,10 @@ class MissionProcessingClaimTest extends AccountTestCase
     {
         $mission = $this->anArrivedTransport();
 
-        resolve(FleetMissionService::class)->updateMission($mission);
+        $issue = resolve(FleetMissionService::class)->updateMission($mission);
 
         $this->assertSame(1, (int)FleetMission::query()->whereKey($mission->id)->value('processed'), 'An unclaimed mission was not processed at all.');
+        $this->assertSame(MissionUpdateOutcome::Applied, $issue, 'The door did not say it had applied the mission.');
     }
 
     /**
@@ -71,12 +73,72 @@ class MissionProcessingClaimTest extends AccountTestCase
         // Le jeton d'un autre processus, pose il y a un instant.
         FleetMission::query()->whereKey($mission->id)->update(['processing_claimed_at' => Date::now()]);
 
-        resolve(FleetMissionService::class)->updateMission($mission);
+        $issue = resolve(FleetMissionService::class)->updateMission($mission);
 
         $this->assertSame(
             0,
             (int)FleetMission::query()->whereKey($mission->id)->value('processed'),
             'A mission held by another pass was processed anyway: the arrival would be delivered twice.'
+        );
+
+        /*
+         * **L issue nomme le cas, et c est neuf.** La porte ne rendait rien : une fermeture de
+         * ralliement qui avait besoin de cet effet en concluait que la barriere n avait pas ete vue,
+         * et accusait le mauvais coupable. Un rouge du bac MariaDB l a montre le 9 septembre 2026.
+         */
+        $this->assertSame(MissionUpdateOutcome::ClaimedElsewhere, $issue, 'The door did not say the mission was held by another worker.');
+    }
+
+    /**
+     * **Deja traitee n est pas tenue ailleurs**, et la reservation echoue pareillement pour les deux.
+     *
+     * `claimForProcessing()` exige `processed = 0` : sans cette distinction, une fermeture verrait
+     * « tenue ailleurs » la ou l effet est en realite fait, et se retirerait pour rien.
+     */
+    public function testAnAlreadyProcessedMissionIsToldApartFromAHeldOne(): void
+    {
+        $mission = $this->anArrivedTransport();
+
+        $this->assertSame(MissionUpdateOutcome::Applied, resolve(FleetMissionService::class)->updateMission($mission));
+
+        $this->assertSame(
+            MissionUpdateOutcome::AlreadyProcessed,
+            resolve(FleetMissionService::class)->updateMission($mission->refresh()),
+            'A mission that is simply done was reported as held by someone else.'
+        );
+    }
+
+    /**
+     * L echeance pas atteinte se dit elle aussi, plutot que de se taire.
+     */
+    public function testAMissionThatIsNotDueYetSaysSo(): void
+    {
+        $mission = $this->anArrivedTransport();
+
+        FleetMission::query()->whereKey($mission->id)->update(['time_arrival' => (int)Date::now()->timestamp + 3600]);
+
+        $this->assertSame(
+            MissionUpdateOutcome::NotDueYet,
+            resolve(FleetMissionService::class)->updateMission($mission->refresh()),
+            'A mission that has not arrived yet was reported as something else.'
+        );
+    }
+
+    /**
+     * Une mission effacee entre-temps ne se confond avec rien.
+     */
+    public function testAVanishedMissionSaysSo(): void
+    {
+        $mission = $this->anArrivedTransport();
+        $copie = $mission->replicate();
+        $copie->id = $mission->id;
+
+        FleetMission::query()->whereKey($mission->id)->delete();
+
+        $this->assertSame(
+            MissionUpdateOutcome::Vanished,
+            resolve(FleetMissionService::class)->updateMission($copie),
+            'A mission that no longer exists was reported as something else.'
         );
     }
 
