@@ -8,6 +8,7 @@ use OGame\Models\Alliance;
 use OGame\Models\AllianceMember;
 use OGame\Services\AllianceService;
 use OGame\Services\SettingsService;
+use ReflectionClass;
 use Tests\AccountTestCase;
 
 /**
@@ -16,9 +17,11 @@ use Tests\AccountTestCase;
  * ## La regle et sa source
  *
  * Plan approuve du 9 septembre 2026, section 2. Elle n existait pas : rien n empechait d attaquer
- * la planete d un membre de sa propre alliance. Ces temoins etablissent le refus au **lancement** ;
- * celui de l arrivee, sous la transaction ou l action devient effective, est la piece suivante et
- * n est pas couvert ici — le dire plutot que de laisser croire que la protection est entiere.
+ * la planete d un membre de sa propre alliance. Ces temoins etablissent le refus au **lancement**,
+ * et l accord des deux entrees du decideur. L arrivee a les siens : `AllianceArrivalProtectionTest`
+ * pour le chemin instantane, `AllianceUnderTheCombatGateTest` pour la decision prise sous le
+ * rendez-vous — ouverture et admission —, et `AllianceVersusCombatOpeningRaceTest` au bac MariaDB
+ * pour la course elle-meme, que SQLite ne peut pas jouer.
  *
  * ## Le monde est fabrique
  *
@@ -142,6 +145,81 @@ class AllianceOffensiveProtectionTest extends AccountTestCase
 
         // Se viser soi-meme releve d une autre regle, et repondre « votre alliance » serait faux.
         $this->assertFalse($garde->forbids(CombatMissionKind::Attack, $this->currentUserId, $this->currentUserId));
+    }
+
+    /**
+     * **Les deux entrees rendent le meme verdict.** L une decide, l autre fait autorite.
+     *
+     * `forbids()` lit hors de toute protection ; `forbidsUnderTheRendezvous()` relit sous le
+     * rendez-vous, par une lecture verrouillante, et c est elle qui autorise l ouverture ou
+     * l admission d un combat. Deux entrees, une seule regle : si elles divergeaient, le controle
+     * anticipe dirait non quand la decision dirait oui — ou pire, l inverse.
+     *
+     * Elles ne lisent pas la meme table : `users.alliance_id` pour la premiere, `alliance_members`
+     * pour la seconde. `AllianceMembershipMirrorsTheMemberRowTest` etablit que les cinq routes
+     * gardent les deux d accord ; ce temoin-ci verifie que le decideur en tire les memes reponses.
+     */
+    public function testBothEntriesAnswerTheSameOnTheSameWorld(): void
+    {
+        $this->armer();
+        [$etranger] = $this->unEtranger();
+
+        $garde = resolve(\OGame\Alliance\AllianceOffensiveGuard::class);
+
+        $cas = [
+            [CombatMissionKind::Attack, $etranger],
+            [CombatMissionKind::MoonDestruction, $etranger],
+            [CombatMissionKind::Espionage, $etranger],
+            [CombatMissionKind::Attack, null],
+            [CombatMissionKind::Attack, $this->currentUserId],
+        ];
+
+        // Avant l alliance, puis apres : les deux etats du monde, pas seulement celui qui refuse.
+        foreach ([false, true] as $allies) {
+            if ($allies) {
+                $this->uneAllianceCommune($etranger);
+            }
+
+            foreach ($cas as [$genre, $cible]) {
+                $this->assertSame(
+                    $garde->forbids($genre, $this->currentUserId, $cible),
+                    $garde->forbidsUnderTheRendezvous($genre, $this->currentUserId, $cible),
+                    'The two entries of the same rule disagree on ' . $genre->value
+                    . ($allies ? ' between allies.' : ' between strangers.')
+                );
+            }
+        }
+    }
+
+    /**
+     * **La decision sous le rendez-vous ne verrouille jamais la ligne d un compte.**
+     *
+     * Une premiere version le faisait, et il a fallu la retirer : `PlayerService::update()` prend le
+     * compte **puis** les corps, `updateFleetMissions()` prend les corps **puis** les missions, et
+     * deux onglets du meme joueur fermaient le cycle. Sous SQLite `lockForUpdate()` ne compile a
+     * rien : aucun essai d execution ne distinguerait ici le verrou pris du verrou oublie. Une garde
+     * de source, en revanche, empeche qu un futur passage refasse le geste sans que personne ne le
+     * voie.
+     */
+    public function testTheDecisionUnderTheRendezvousNeverLocksAnAccountRow(): void
+    {
+        $fichier = (new ReflectionClass(\OGame\Alliance\AllianceOffensiveGuard::class))->getFileName();
+        $this->assertNotFalse($fichier);
+
+        $source = preg_replace('/\s+/', ' ', (string)file_get_contents($fichier));
+        $this->assertNotNull($source);
+
+        // Sans verrou du tout, la garde ne surveillerait rien : la relecture doit bien en prendre un.
+        $this->assertStringContainsString('lockForUpdate()', $source, 'The authoritative re-read takes no lock at all.');
+        $this->assertStringContainsString("DB::table('alliance_members')", $source, 'The authoritative re-read no longer reads the member row.');
+
+        foreach (["DB::table('users')", 'User::query()', 'User::find'] as $prise) {
+            $this->assertStringNotContainsString(
+                $prise,
+                $source,
+                'The alliance decision locks an account row: the cycle removed in September would close again.'
+            );
+        }
     }
 
     /**

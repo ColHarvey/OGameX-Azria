@@ -227,21 +227,52 @@ class AttackMission extends GameMission
             return;
         }
 
+        // **L'aiguillage du combat durable.** Ce qui suit — simuler, appliquer, creer le retour —
+        // est le chemin instantane, et il reste intact. Quand l'interrupteur est mis, l'arrivee
+        // n'est plus la fin de l'histoire mais son debut : la flotte entre dans un combat qui dure,
+        // et tout ce qui la concerne se decidera a l'echeance de ce combat.
+        //
+        // **L'heure d'ouverture est l'arrivee, pas l'horloge du travailleur.** Un traitement en
+        // retard ouvrirait sinon un combat plus tard qu'il n'a commence, et decalerait de la meme
+        // duree l'echeance du ralliement — donc les flottes admises.
+        if ($this->settings->persistentCombatEnabled()) {
+            // **Ouvrir, rejoindre et se rattacher sont une seule section critique.** Le lien
+            // `combat_instance_id` s'ecrivait apres le retour de l'ouverture, hors de sa transaction
+            // et sur le modele recu : un rappel pouvait prendre la porte entre les deux, relire une
+            // mission sans lien, creer son retour — puis ce code lui rattachait le combat quand
+            // meme. Une flotte partie et engagee a la fois.
+            resolve(FleetMovementGate::class)->decideUnderLock(
+                $mission,
+                function (FleetMission $tenue) use ($defenderPlanet): void {
+                    $this->enterOrLeaveTheCombat($tenue, $defenderPlanet->getPlanetId());
+                }
+            );
+
+            return;
+        }
+
         /*
          * **L alliance se relit a l arrivee, pas seulement au lancement.** Le plan approuve exige le
          * controle aux deux moments, et nomme le cas qui les separe : l appartenance peut changer
          * **pendant le trajet**. Au depart la cible etait attaquable ; a l arrivee elle ne l est
          * plus, et « jamais autoriser une offensive contre un allie courant » tranche.
          *
-         * Ce controle vient **avant** l aiguillage du combat durable : la flotte fait demi-tour sans
-         * rien ouvrir ni rejoindre, donc sans toucher au combat des autres participants. La route de
-         * refus des combats ne conviendrait pas ici — elle compose sa decision et son avis depuis
-         * une instance, et il n y en a aucune.
+         * **Ce controle-ci ne sert que le chemin instantane**, et il vient donc apres l aiguillage.
+         * Il vivait avant, et c etait le defaut : le controle etait rendu hors de toute transaction
+         * et hors du rendez-vous des joueurs, puis servait a decider d une ouverture que la porte,
+         * elle, protegeait. Une course du bac MariaDB a montre les deux chemins commiter des etats
+         * contradictoires. Sous l interrupteur, la decision **et** le demi-tour vivent desormais
+         * dans `EntersADurableCombat`, sous les verrous de la porte — un demi-tour ecrit ici serait
+         * en plus un second ecrivain du mouvement d une flotte gouvernee.
+         *
+         * Ici, il n y a ni porte ni combat durable : l arrivee est la fin de l histoire, aucune
+         * bataille ne survit a la transaction, et l invariant « aucun combat entre allies » ne peut
+         * pas etre viole par une adhesion concurrente. Le controle ordinaire suffit.
          *
          * Rien n est calcule : aucun tir, aucun degat, aucun butin, aucun debris. `processed` est
-         * pose avant le retour, comme le demi-tour ci-dessus, donc un traitement relance ne cree pas
-         * un second retour. Vaisseaux et cargaison rentrent tels quels, et le carburant suit la
-         * regle ordinaire du trajet.
+         * pose avant le retour, comme le demi-tour du mode vacances, donc un traitement relance ne
+         * cree pas un second retour. Vaisseaux et cargaison rentrent tels quels, et le carburant
+         * suit la regle ordinaire du trajet.
          */
         if (resolve(AllianceOffensiveGuard::class)->forbids(
             CombatMissionKind::fromMissionType((int)$mission->mission_type),
@@ -263,30 +294,6 @@ class AttackMission extends GameMission
                 $attaquant,
                 AttackCancelledByAllianceProtection::class,
                 ['coordinates' => $defenderPlanet->getPlanetCoordinates()->asString()]
-            );
-
-            return;
-        }
-
-        // **L'aiguillage du combat durable.** Ce qui suit — simuler, appliquer, creer le retour —
-        // est le chemin instantane, et il reste intact. Quand l'interrupteur est mis, l'arrivee
-        // n'est plus la fin de l'histoire mais son debut : la flotte entre dans un combat qui dure,
-        // et tout ce qui la concerne se decidera a l'echeance de ce combat.
-        //
-        // **L'heure d'ouverture est l'arrivee, pas l'horloge du travailleur.** Un traitement en
-        // retard ouvrirait sinon un combat plus tard qu'il n'a commence, et decalerait de la meme
-        // duree l'echeance du ralliement — donc les flottes admises.
-        if ($this->settings->persistentCombatEnabled()) {
-            // **Ouvrir, rejoindre et se rattacher sont une seule section critique.** Le lien
-            // `combat_instance_id` s'ecrivait apres le retour de l'ouverture, hors de sa transaction
-            // et sur le modele recu : un rappel pouvait prendre la porte entre les deux, relire une
-            // mission sans lien, creer son retour — puis ce code lui rattachait le combat quand
-            // meme. Une flotte partie et engagee a la fois.
-            resolve(FleetMovementGate::class)->decideUnderLock(
-                $mission,
-                function (FleetMission $tenue) use ($defenderPlanet): void {
-                    $this->enterOrLeaveTheCombat($tenue, $defenderPlanet->getPlanetId());
-                }
             );
 
             return;
