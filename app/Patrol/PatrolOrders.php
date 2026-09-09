@@ -62,6 +62,7 @@ final class PatrolOrders
         private readonly PatrolPricing $pricing,
         private readonly PatrolUpkeep $upkeep,
         private readonly SettingsService $settings,
+        private readonly SurveillanceWatch $watch,
     ) {
     }
 
@@ -695,6 +696,17 @@ final class PatrolOrders
                 : $arrivee,
         ])->save();
 
+        // **Changer de systeme ferme ce que l ancien voyait, et ouvre l acquisition du neuf.**
+        // Un deplacement interne ne ferme rien : l horloge d acquisition court depuis l entree,
+        // et la remettre a zero pour de petits sauts est exactement ce que la revue 120 interdit.
+        // L acquisition, elle, est appelee dans les deux cas : elle est idempotente, et un corps
+        // dont le reseau vient d etre construit doit pouvoir ouvrir son contact au passage suivant.
+        if (!$memeSysteme) {
+            $this->watch->revokeAllFor($patrol, $arrivee);
+        }
+
+        $this->watch->acquire($patrol, $arrivee);
+
         $this->scheduleNextEvent($patrol, $segment);
     }
 
@@ -1298,6 +1310,10 @@ final class PatrolOrders
                 'finished_at' => $now,
                 'finish_reason' => 'came_home',
             ])->save();
+
+            // La patrouille n existe plus dans l espace : ce que les reseaux voyaient d elle
+            // cesse de se voir. Revoque, jamais efface — la ligne reste lisible.
+            $this->watch->revokeAllFor($patrol, $now);
 
             return true;
         });
