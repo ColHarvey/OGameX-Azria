@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Log;
+use OGame\Alliance\AllianceMembershipChangeGuard;
 use OGame\GameMessages\AllianceApplicationReceived;
 use OGame\GameMessages\AllianceBroadcast;
 use OGame\Models\Alliance;
@@ -254,6 +255,19 @@ class AllianceService
 
         DB::beginTransaction();
         try {
+            /*
+             * **Une adhesion n emmene jamais un adversaire d une bataille en cours.** Plan approuve
+             * du 9 septembre 2026 : elle attend le reglement. Et la bataille, elle, ne s annule
+             * jamais pour ce motif — sans quoi rejoindre l alliance de son attaquant deviendrait une
+             * sortie de secours.
+             *
+             * Le controle est ici, **dans la transaction**, et non avant : c est ou l adhesion
+             * devient effective.
+             */
+            if (resolve(AllianceMembershipChangeGuard::class)->reunitesAdversaries((int)$application->user_id, (int)$application->alliance_id)) {
+                throw new Exception(__('t_ingame.alliance.err_adversaries_of_an_active_battle'));
+            }
+
             // Accept the application
             $application->accept();
             $application->save();

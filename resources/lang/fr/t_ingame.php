@@ -637,6 +637,7 @@ return [
     ],
     'alliance' => [
         'refusal_offensive_against_a_member' => 'Vous ne pouvez pas lancer une offensive contre un membre de votre alliance.',
+        'err_adversaries_of_an_active_battle' => 'Ce joueur et un membre de l’alliance s’affrontent dans une bataille en cours. L’adhésion sera possible une fois cette bataille réglée ; la bataille, elle, suit son cours.',
         'page_title' => 'Alliance',
         'tab_overview' => 'Vue générale',
         'tab_management' => 'Gestion',

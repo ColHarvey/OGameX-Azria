@@ -790,6 +790,7 @@ return [
 
     'alliance' => [
         'refusal_offensive_against_a_member' => 'You cannot launch an offensive against a member of your own alliance.',
+        'err_adversaries_of_an_active_battle' => 'This player and a member of the alliance are fighting each other in an ongoing battle. Joining will be possible once that battle is settled; the battle itself runs its course.',
         // Page / navigation
         'page_title'                    => 'Alliance',
         'tab_overview'                  => 'Overview',
