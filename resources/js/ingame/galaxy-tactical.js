@@ -2289,6 +2289,23 @@
         });
     }
 
+    /*
+     * Le droit du joueur redevient inconnu : on masque, on ne conserve pas.
+     *
+     * **Remplacer a reception ne suffit pas.** Si la reponse tarde, ce qui vient de devenir
+     * interdit resterait a l ecran pendant tout le vol de la requete. La couche des flottes n est
+     * pas interrogee en boucle : elle se recharge quand quelque chose a change — un ordre, un
+     * evenement du serveur, un changement de systeme, un onglet qui revient. Chaque rechargement
+     * signifie donc que le droit peut avoir change, et l inconnu ne s affiche pas.
+     *
+     * Ce n est volontairement pas une peremption a l horloge : sans interrogation periodique, une
+     * peremption effacerait des contacts parfaitement valides pendant une periode calme.
+     */
+    function invaliderLaSurveillance(carte) {
+        contactsDeSurveillance = [];
+        dessinerLaSurveillance(carte);
+    }
+
     function adresseDePatrouille(modele, id) {
         return String(modele).replace('/patrol/0/', '/patrol/' + Number(id) + '/');
     }
@@ -3377,6 +3394,9 @@
 
         var jeton = ++jetonDeSysteme;
 
+        /* Le droit est inconnu tant que la reponse n est pas la : on masque des maintenant. */
+        invaliderLaSurveillance(carte);
+
         window.jQuery.getJSON(galaxyFleetsUrl, { galaxy: galaxie, system: systeme })
             .done(function (reponse) {
                 if (jeton !== jetonDeSysteme || !reponse || !reponse.success) {
@@ -3641,6 +3661,14 @@
             demarrerLesOrbites(carte);
             demarrerLaVeilleDesCompteurs(carte);
             rafraichirLesCompteurs(carte);
+
+            /*
+             * **Un onglet qui revient ne sait plus ce qu il a le droit de voir.** Il a pu manquer
+             * une revocation pendant qu il dormait : reprendre l animation sans redemander aurait
+             * laisse a l ecran des renseignements devenus interdits, indefiniment. La demande
+             * masque d abord, puis repeint ce que le serveur autorise encore.
+             */
+            chargerLesFlottes(carte, carte.gtSysteme.galaxie, carte.gtSysteme.systeme);
         }
     });
 
