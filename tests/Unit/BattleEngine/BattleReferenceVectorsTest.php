@@ -14,6 +14,7 @@ use OGame\GameMissions\BattleEngine\PhpBattleEngine;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Resources;
 use OGame\Services\ObjectService;
+use Tests\Support\PinsSettings;
 use Tests\UnitTestCase;
 
 /**
@@ -58,6 +59,8 @@ use Tests\UnitTestCase;
  */
 class BattleReferenceVectorsTest extends UnitTestCase
 {
+    use PinsSettings;
+
     /**
      * Les scenarios, et les faits releves sur le moteur de `08dae302`.
      *
@@ -155,11 +158,28 @@ class BattleReferenceVectorsTest extends UnitTestCase
     {
         parent::setUp();
 
-        foreach (self::REGLAGES_DU_MOTEUR as $clef => $valeur) {
-            $this->settingsService->set($clef, $valeur);
-        }
+        $this->pinSettings(self::REGLAGES_DU_MOTEUR);
 
         $this->createAndSetUserTechModel([]);
+    }
+
+    /**
+     * **Une epreuve remet ce qu elle a levee**, et celle-ci leve huit reglages.
+     *
+     * Sans cela, cet essai ferait a ses voisins ce que ses voisins lui ont fait : partir en laissant
+     * le monde regle a sa main. `tearDown()` s execute meme quand l essai echoue, ce qui est
+     * exactement le cas ou l oubli ferait le plus de degats — un rouge suivi de rouges qui n ont
+     * rien a voir.
+     *
+     * Un reglage qui n existait pas est laisse a sa valeur par defaut plutot que supprime : le
+     * service n offre pas de retrait, et la valeur **effective** lue par la suite est la meme dans
+     * les deux cas.
+     */
+    protected function tearDown(): void
+    {
+        $this->restorePinnedSettings();
+
+        parent::tearDown();
     }
 
     /**
