@@ -53,6 +53,32 @@ final class MissileVersusClosureRaceTest extends FleetDispatchTestCase
         parent::setUp();
         $this->requiresMariaDb();
         $this->requiresProcesses();
+
+        /*
+         * **Aucune bataille heritee, et six classes soeurs du bac le faisaient deja.**
+         *
+         * Cet essai travaille sur la planete propre **partagee** par le processus, et la porte du
+         * missile lit la barriere de ce corps par un simple `->first()`. Une barriere laissee par une
+         * voisine ferait donc decider le missile contre un combat qui n est pas le sien. Le 9 septembre
+         * 2026, l ajout de deux essais a change qui passe avant celui-ci, et il a rougi une fois.
+         */
+        DB::table('fleet_missions')->whereNotNull('combat_instance_id')->update(['combat_instance_id' => null]);
+
+        foreach ([
+            'patrol_combat_barriers',
+            'combat_field_states',
+            'combat_presentation_events',
+            'combat_snapshot_inclusions',
+            'combat_outbox',
+            'combat_participants',
+            'combat_effect_ledger',
+            'combat_effect_receipts',
+            'combat_loot_reservations',
+            'celestial_body_combat_barriers',
+            'combat_instances',
+        ] as $table) {
+            DB::table($table)->delete();
+        }
     }
 
     protected function basicSetup(): void
@@ -82,6 +108,18 @@ final class MissileVersusClosureRaceTest extends FleetDispatchTestCase
         $this->travelTo(Date::createFromTimestamp($fermeture));
 
         $identifiant = (int)$combat->id;
+
+        /*
+         * **La premisse, exigee et non esperee.** La porte du missile decide contre la barriere du
+         * corps ; si elle ne designait pas ce combat-ci, le verdict porterait sur une autre bataille
+         * et le rouge qui suivrait ne dirait pas pourquoi.
+         */
+        $this->assertSame(
+            $identifiant,
+            (int)DB::table('celestial_body_combat_barriers')->where('target_body_id', $cible)->value('combat_instance_id'),
+            'The barrier of the target body does not name the combat being closed: the missile would be decided against another battle.'
+        );
+
         $issues = $this->inParallel(2, static function (int $rang) use ($identifiant, $missile, $fermeture): string {
             if ($rang === 0) {
                 return (new RallyClosureService())->close($identifiant, $fermeture)->closed ? 'fermee' : 'deja fermee';

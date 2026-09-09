@@ -51,6 +51,30 @@ final class ClosureVersusTransportArrivalTest extends FleetDispatchTestCase
         parent::setUp();
         $this->requiresMariaDb();
         $this->requiresProcesses();
+
+        /*
+         * **Aucune bataille heritee d une voisine.** Cet essai ouvre un ralliement sur la planete
+         * propre **partagee** par le processus ; une barriere laissee derriere elle ferait decider
+         * les arrivees contre un combat qui n est pas le sien. Six classes soeurs du bac le faisaient
+         * deja, deux non — celle-ci et la course du missile — et c est la seconde qui a rougi.
+         */
+        DB::table('fleet_missions')->whereNotNull('combat_instance_id')->update(['combat_instance_id' => null]);
+
+        foreach ([
+            'patrol_combat_barriers',
+            'combat_field_states',
+            'combat_presentation_events',
+            'combat_snapshot_inclusions',
+            'combat_outbox',
+            'combat_participants',
+            'combat_effect_ledger',
+            'combat_effect_receipts',
+            'combat_loot_reservations',
+            'celestial_body_combat_barriers',
+            'combat_instances',
+        ] as $table) {
+            DB::table($table)->delete();
+        }
     }
 
     protected function tearDown(): void
