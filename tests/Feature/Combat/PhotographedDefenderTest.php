@@ -35,6 +35,18 @@ final class PhotographedDefenderTest extends FleetDispatchTestCase
 
     protected string $missionName = 'Attaquer';
 
+    /**
+     * Les files du proprietaire, telles qu elles etaient aux deux instants qui decident.
+     *
+     * **Un releve fait au seul moment de l echec ne suffit pas.** Une file presente a
+     * l ouverture peut avoir ete traitee ou supprimee avant qu on regarde : « aucune file » a
+     * la fin n ecarterait donc pas la piste qu elle designe. Les deux photographies sont prises
+     * en cours de route et ne sont rendues que si une assertion tombe.
+     *
+     * @var array<string, string>
+     */
+    private array $photographiesDesFiles = [];
+
     private const int NIVEAU_OUVERTURE = 3;
 
     private const int NIVEAU_ADMISSIBLE = 4;
@@ -71,6 +83,7 @@ final class PhotographedDefenderTest extends FleetDispatchTestCase
 
         $fermeture = $ouverture + self::RALLY_WINDOW_SECONDS + 1;
         $this->travelTo(Date::createFromTimestamp($fermeture));
+        $this->photographierLesFiles($proprietaire, 'avant fermeture');
         $this->assertTrue((new RallyClosureService())->close($combat->id, $fermeture)->closed, 'The rally did not close.');
 
         $bonus = $this->classBonusOf($proprietaire);
@@ -95,6 +108,7 @@ final class PhotographedDefenderTest extends FleetDispatchTestCase
 
         $fermeture = $ouverture + self::RALLY_WINDOW_SECONDS + 1;
         $this->travelTo(Date::createFromTimestamp($fermeture));
+        $this->photographierLesFiles($proprietaire, 'avant fermeture');
         (new RallyClosureService())->close($combat->id, $fermeture);
 
         $bonus = $this->classBonusOf($proprietaire);
@@ -120,6 +134,7 @@ final class PhotographedDefenderTest extends FleetDispatchTestCase
 
         $fermeture = $ouverture + self::RALLY_WINDOW_SECONDS + 1;
         $this->travelTo(Date::createFromTimestamp($fermeture));
+        $this->photographierLesFiles($proprietaire, 'avant fermeture');
         $this->assertTrue((new RallyClosureService())->close($combat->id, $fermeture)->closed, 'The rally did not close.');
 
         $this->assertSame(self::NIVEAU_ADMISSIBLE + $this->classBonusOf($proprietaire), $this->frozenLevel($combat, 'weapon'), 'A research the world finished during the rally did not give the level a pending one gives.' . $this->diagnosticDuGel($cible, $proprietaire, $ouverture));
@@ -144,6 +159,7 @@ final class PhotographedDefenderTest extends FleetDispatchTestCase
 
         $fermeture = $ouverture + self::RALLY_WINDOW_SECONDS + 1;
         $this->travelTo(Date::createFromTimestamp($fermeture));
+        $this->photographierLesFiles($proprietaire, 'avant fermeture');
         $this->assertTrue((new RallyClosureService())->close($combat->id, $fermeture)->closed, 'The rally did not close.');
 
         $this->assertSame(self::NIVEAU_ADMISSIBLE + $this->classBonusOf($proprietaire), $this->frozenLevel($combat, 'weapon'), 'A research finished before the opening raised the level a second time, or was lost.' . $this->diagnosticDuGel($cible, $proprietaire, $ouverture));
@@ -188,22 +204,15 @@ final class PhotographedDefenderTest extends FleetDispatchTestCase
         // L'etat d'ouverture doit refleter ces niveaux : il est capture a l'ouverture, donc on le
         // recapture ici, comme si le combat venait de s'ouvrir sur ce joueur.
         (new OpeningStateRecorder())->capture($combat, $cible, $ouverture);
+        $this->photographierLesFiles($proprietaire, 'a l ouverture');
 
         return [$combat, $cible, $ouverture, $proprietaire];
     }
 
     /**
-     * Ce qu il faut voir pour comparer un echec reel au mecanisme reproduit.
-     *
-     * Le niveau gele de cette classe a rougi une fois en integration continue — 4 la ou
-     * l ouverture vaut 3 — sans qu on puisse dire si la cause etait celle qu une experience a
-     * su reproduire : une file de recherche laissee sur un autre corps du proprietaire. La
-     * difference entre les deux ne se devine pas, elle se lit. Un prochain rouge portera donc le
-     * proprietaire reellement selectionne, tous ses corps, et chaque file avec ses dates.
-     *
-     * Construite seulement quand une assertion tombe : un echec paie une requete, un succes rien.
+     * Les files de recherche de ce proprietaire, sur tous ses corps, en une ligne.
      */
-    private function diagnosticDuGel(int $cible, int $proprietaire, int $ouverture): string
+    private function filesDe(int $proprietaire): string
     {
         $corps = DB::table('planets')->where('user_id', $proprietaire)->orderBy('id')->pluck('id')
             ->map(static fn (mixed $identifiant): int => (int)$identifiant)->all();
@@ -224,6 +233,41 @@ final class PhotographedDefenderTest extends FleetDispatchTestCase
             );
         }
 
+        return $lignes === [] ? 'aucune file' : implode(' ; ', $lignes);
+    }
+
+    /**
+     * Garde l etat des files sous ce nom, pour le rendre si une assertion tombe.
+     */
+    private function photographierLesFiles(int $proprietaire, string $instant): void
+    {
+        $this->photographiesDesFiles[$instant] = $this->filesDe($proprietaire);
+    }
+
+    /**
+     * Ce qu il faut voir pour comparer un echec reel au mecanisme reproduit.
+     *
+     * Le niveau gele de cette classe a rougi une fois en integration continue — 4 la ou
+     * l ouverture vaut 3 — sans qu on puisse dire si la cause etait celle qu une experience a
+     * su reproduire : une file de recherche laissee sur un autre corps du proprietaire. La
+     * difference entre les deux ne se devine pas, elle se lit. Un prochain rouge portera donc le
+     * proprietaire reellement selectionne, tous ses corps, et chaque file avec ses dates.
+     *
+     * Construite seulement quand une assertion tombe : un echec paie une requete, un succes rien.
+     */
+    private function diagnosticDuGel(int $cible, int $proprietaire, int $ouverture): string
+    {
+        $corps = DB::table('planets')->where('user_id', $proprietaire)->orderBy('id')->pluck('id')
+            ->map(static fn (mixed $identifiant): int => (int)$identifiant)->all();
+
+        $photographies = [];
+
+        foreach ($this->photographiesDesFiles as $instant => $etat) {
+            $photographies[] = $instant . ' -> ' . $etat;
+        }
+
+        $photographies[] = 'a l echec -> ' . $this->filesDe($proprietaire);
+
         return sprintf(
             ' | proprietaire=%d cible=%d corps=[%s] ouverture=%d bonus=%d | %s',
             $proprietaire,
@@ -231,7 +275,7 @@ final class PhotographedDefenderTest extends FleetDispatchTestCase
             implode(',', $corps),
             $ouverture,
             $this->classBonusOf($proprietaire),
-            $lignes === [] ? 'aucune file' : implode(' ; ', $lignes)
+            implode(' | ', $photographies)
         );
     }
 
