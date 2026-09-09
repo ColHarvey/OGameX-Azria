@@ -75,22 +75,18 @@ final class AllianceOffensiveGuard
     }
 
     /*
-     * ## Une coordination retiree, et pourquoi
+     * ## Ou la coordination vit, et pourquoi pas ici
      *
-     * Une variante `forbidsUnderLock()` a existe ici : elle verrouillait les lignes `users` des deux
-     * combattants avant la porte des mouvements, pour se serialiser avec l adhesion a une alliance.
-     * L intention etait juste — deux transactions concurrentes pouvaient sinon valider un combat
-     * ouvert entre deux membres d une meme alliance.
+     * Une variante `forbidsUnderLock()` a existe dans cette classe : elle verrouillait les lignes
+     * `users` des deux combattants. **Elle a ete retiree parce qu elle inversait un ordre.** Mesure
+     * faite : `PlayerService::update()` verrouille le compte **puis** les planetes, a presque chaque
+     * page ; `updateFleetMissions()` verrouille les planetes **puis** les missions. Deux requetes
+     * concurrentes du meme joueur — deux onglets — fermaient le cycle.
      *
-     * **Elle a ete retiree parce qu elle introduisait une inversion d ordre.** Mesure faite :
-     * `PlayerService::update()` verrouille le compte **puis** les planetes, et elle tourne a presque
-     * chaque chargement de page ; `updateFleetMissions()` verrouille les planetes **puis** les
-     * missions, et le verrou de compte serait venu apres. Planetes → compte contre compte →
-     * planetes, entre deux des chemins les plus frequentes du jeu.
-     *
-     * Fermer cette course demande donc de decider ou le compte se prend dans l ordre global du
-     * combat — une decision d architecture, pas un ajout local. **La course reste ouverte**, et
-     * `tests/MariaDb/AllianceVersusCombatOpeningRaceTest.php` est la preuve qui l attend.
+     * La coordination vit desormais dans `PlayerCoordinationBarrier`, sur une table que rien d autre
+     * ne verrouille, prise **en tete** par la porte des mouvements, le chemin administratif et
+     * l adhesion. Cette classe-ci ne verrouille donc rien : elle decide, et le rendez-vous est pris
+     * avant qu on l appelle.
      */
     /**
      * La clef du message que le joueur lira.

@@ -5,6 +5,7 @@ namespace OGame\Combat\Services;
 use Closure;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use OGame\Alliance\PlayerCoordinationBarrier;
 use OGame\Combat\Exceptions\MovementLocksOutdated;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
@@ -154,6 +155,24 @@ final class FleetMovementGate
      */
     private function attempt(FleetMission $mission, Closure $decider, array $alsoHoldingUnionIds): mixed
     {
+        // 0. **Le rendez-vous des joueurs, avant tout le reste.** Il coordonne cette porte avec
+        // l'adhesion a une alliance, qui decide d'une chose incompatible : reunir deux adversaires
+        // d'une bataille active. Sans lui, les deux lisent le monde en meme temps, chacun conclut
+        // qu'il peut agir, et les deux ecrivent.
+        //
+        // Il est pris **avant la barriere du corps**, et sur une table que rien d'autre ne
+        // verrouille : c'est ce qui lui permet d'occuper la tete de l'ordre global sans entrer en
+        // conflit avec quoi que ce soit. Une tentative precedente verrouillait `users` a la place et
+        // fermait un cycle avec le traitement des pages — voir `PlayerCoordinationBarrier`.
+        //
+        // Inerte tant que la protection d'alliance n'est pas armee.
+        resolve(PlayerCoordinationBarrier::class)->hold(
+            (int)$mission->user_id,
+            $mission->planet_id_to === null
+                ? 0
+                : (int)(DB::table('planets')->where('id', $mission->planet_id_to)->value('user_id') ?? 0)
+        );
+
         // 1. La barriere du corps vise. Elle est le « ce corps est pris » du systeme, et le
         // reglement la prend en premier : la prendre ailleurs en second remettrait les deux sens
         // de rotation que l'ordre global existe pour interdire.

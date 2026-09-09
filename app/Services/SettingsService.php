@@ -241,11 +241,25 @@ class SettingsService
      * This is the number of days a player must wait after leaving an alliance
      * before they can create or join another alliance.
      *
+     * ## Sept jours, decides par Keven
+     *
+     * Le plan approuve du 9 septembre 2026 fixe **sept jours** apres un depart, une exclusion ou une
+     * dissolution. Le defaut amont valait trois ; il vaut desormais sept, et ce n est pas un
+     * changement silencieux — c est la regle demandee, ecrite ou elle se lit.
+     *
+     * **Ce qui ne change pas retroactivement :** l echeance d un joueur deja parti est persistee
+     * (`users.alliance_cooldown_until`), et la migration qui l a posee emploie l ancienne valeur.
+     * Celui qui est parti sous la regle de trois jours la garde ; seuls les departs suivants
+     * comptent sept.
+     *
+     * Un serveur dont l administrateur a deja pose une valeur garde la sienne : ce defaut ne
+     * s applique qu en son absence.
+     *
      * @return int
      */
     public function allianceCooldownDays(): int
     {
-        return (int)$this->get('alliance_cooldown_days', 3);
+        return (int)$this->get('alliance_cooldown_days', 7);
     }
 
     /**

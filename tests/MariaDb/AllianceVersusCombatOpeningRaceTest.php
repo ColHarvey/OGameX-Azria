@@ -29,12 +29,15 @@ use Throwable;
  * commiter tous les deux — et laisser un combat actif **entre deux membres d une meme alliance**,
  * exactement ce que la regle interdit.
  *
- * **La course est ouverte a ce jour**, et ce fichier ne la ferme pas : il est la preuve qui attend la
- * coordination, pas la coordination elle-meme. Voir `requiresTheCoordinationThisProofNeeds()`.
+ * **La coordination existe desormais** : `PlayerCoordinationBarrier`, une table que rien d autre ne
+ * verrouille, prise en tete par la porte des mouvements, le chemin administratif et l adhesion. Ce
+ * temoin est ce qui dira si elle tient. Une premiere tentative verrouillait `users` a la place et a
+ * ete retiree — elle inversait un ordre avec le traitement des pages.
  *
  * Sous SQLite `lockForUpdate()` ne compile a rien, et deux appels sequentiels prouveraient
  * l idempotence, jamais la course : cette preuve n a de sens que sur MariaDB, avec deux processus
- * reels qui se disputent les memes lignes.
+ * reels qui se disputent les memes lignes. **Elle n a pas encore tourne** : ce poste n a pas
+ * MariaDB, et la poussee qui declencherait le job `courses` est refusee.
  *
  * ## Ce que le temoin exigera
  *
@@ -61,31 +64,6 @@ final class AllianceVersusCombatOpeningRaceTest extends FleetDispatchTestCase
         parent::setUp();
         $this->requiresMariaDb();
         $this->requiresProcesses();
-        $this->requiresTheCoordinationThisProofNeeds();
-    }
-
-    /**
-     * La condition que cette preuve attend, et qui n existe pas encore.
-     *
-     * ## Pourquoi elle est ecrite avant d etre eprouvable
-     *
-     * Une premiere tentative verrouillait les comptes des deux combattants a l arrivee. Elle a ete
-     * **retiree** : elle introduisait une inversion d ordre entre `PlayerService::update()` — compte
-     * puis planetes, a presque chaque page — et `updateFleetMissions()` — planetes puis missions, le
-     * compte serait venu apres. Un interblocage entre deux des chemins les plus frequentes du jeu
-     * vaut pire que la course qu il pretendait fermer.
-     *
-     * Le temoin reste donc ecrit et **inactif**. L activer aujourd hui donnerait un rouge
-     * intermittent qui ne prouverait qu une chose deja sue : la course est ouverte. Il s active le
-     * jour ou une coordination couvrant les quatre chemins existe — pages, arrivees, traitement
-     * administratif, adhesions — et c est alors lui qui dira si elle tient.
-     */
-    private function requiresTheCoordinationThisProofNeeds(): void
-    {
-        $this->markTestSkipped(
-            'La coordination transactionnelle entre adhesion et ouverture de combat n existe pas encore. '
-            . 'Cette preuve attend sa livraison ; la course est ouverte et documentee.'
-        );
     }
 
     protected function basicSetup(): void
@@ -126,6 +104,86 @@ final class AllianceVersusCombatOpeningRaceTest extends FleetDispatchTestCase
 
     protected function messageCheckMissionReturn(): void
     {
+    }
+
+    /**
+     * **Deux adversaires postulent a une TROISIEME alliance, et l acceptent en meme temps.**
+     *
+     * Cas signale par Codex. Verrouiller le seul candidat ne suffit pas : les deux n ont aucune
+     * ligne commune. C est la ligne de l **alliance** qui les met en file — et encore faut-il que la
+     * seconde lise la liste **mise a jour**, sans photographie transactionnelle ni relation en
+     * cache. Sous `REPEATABLE READ`, une relecture ordinaire rendrait le monde tel qu il etait au
+     * debut de la transaction, et le verrou ne servirait a rien : la lecture des membres est donc
+     * verrouillante, et c est cet essai qui le prouve.
+     */
+    public function testTwoAdversariesCannotBothBeAcceptedIntoAThirdAllianceAtOnce(): void
+    {
+        $this->basicSetup();
+
+        $flotte = new UnitCollection();
+        $flotte->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 5);
+
+        $cible = $this->sendMissionToOtherPlayerCleanPlanet($flotte, new Resources(0, 0, 0, 0));
+        $mission = FleetMission::query()->where('user_id', $this->currentUserId)->orderByDesc('id')->firstOrFail();
+
+        $defenseur = $cible->getPlayer();
+        $this->assertNotNull($defenseur);
+        $adverse = $defenseur->getId();
+        $attaquant = $this->currentUserId;
+
+        // La bataille est ouverte avant les candidatures : les deux sont adversaires.
+        Date::setTestNow(Date::createFromTimestamp((int)$mission->time_arrival + 1));
+        resolve(PlayerServiceFactory::class)->make($attaquant, true)->updateFleetMissions();
+
+        $corps = Planet::query()->where('user_id', $adverse)->pluck('id')->map(static fn (mixed $id): int => (int)$id)->all();
+
+        $this->assertTrue(
+            CombatsInvolvingPlayer::stillRunning($attaquant, $corps)->isNotEmpty(),
+            'No battle opened: the two players are not adversaries, and the race would prove nothing.'
+        );
+
+        // Un tiers fonde l alliance ; les deux adversaires y postulent.
+        $tiers = (int)(DB::table('users')
+            ->whereNotIn('id', [$attaquant, $adverse])
+            ->whereNull('alliance_id')
+            ->orderBy('id')
+            ->value('id') ?? 0);
+
+        if ($tiers === 0) {
+            $this->markTestSkipped('Aucun troisieme joueur libre : le scenario ne peut pas etre monte.');
+        }
+
+        $service = resolve(AllianceService::class);
+        $alliance = $service->createAlliance($tiers, 'T' . substr((string)$tiers, -3) . substr((string)$attaquant, -3), 'Tierce ' . $tiers);
+        $this->alliance = (int)$alliance->id;
+
+        $premiere = (int)$service->applyToAlliance($attaquant, $this->alliance)->id;
+        $seconde = (int)$service->applyToAlliance($adverse, $this->alliance)->id;
+
+        // Les deux acceptations, en meme temps.
+        $issues = $this->inParallel(2, function (int $rang) use ($premiere, $seconde, $tiers): string {
+            try {
+                resolve(AllianceService::class)->acceptApplication($rang === 0 ? $premiere : $seconde, $tiers);
+
+                return 'acceptee';
+            } catch (Throwable $refus) {
+                return 'refusee';
+            }
+        });
+
+        // **L invariant** : jamais les deux dans la meme alliance.
+        $this->assertFalse(
+            resolve(AllianceService::class)->arePlayersInSameAlliance($attaquant, $adverse),
+            'Two adversaries of a running battle were both accepted into the same third alliance. '
+            . 'Issues: ' . implode(' | ', $issues)
+        );
+
+        // **Et un denouement normal** : exactement une acceptee, pas zero.
+        $this->assertSame(
+            1,
+            count(array_filter($issues, static fn (string $issue): bool => $issue === 'acceptee')),
+            'The two acceptances did not settle into exactly one: ' . implode(' | ', $issues)
+        );
     }
 
     /**

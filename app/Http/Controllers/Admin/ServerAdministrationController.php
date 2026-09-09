@@ -10,6 +10,8 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
+use OGame\Alliance\Exceptions\CoordinatedParticipantsChanged;
+use OGame\Alliance\PlayerCoordinationBarrier;
 use OGame\Factories\GameMissionFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\Http\Controllers\OGameController;
@@ -33,6 +35,15 @@ class ServerAdministrationController extends OGameController
      * @var array<int>
      */
     private const EXCLUDED_MISSION_TYPES = [6, 9];
+
+    /**
+     * Combien de fois reprendre le traitement d une mission bloquee dont les joueurs changent.
+     *
+     * Borne, parce qu une reprise sans fin serait un blocage deguise : au bout du compte,
+     * l operation est declaree reessayable et **rien n a ete fait** — la transaction annulee s en
+     * charge.
+     */
+    private const int STUCK_MISSION_ATTEMPTS = 3;
 
     /**
      * Shows the server administration page.
@@ -570,30 +581,75 @@ class ServerAdministrationController extends OGameController
         try {
             $message = '';
 
-            DB::transaction(function () use ($validated, &$message) {
-                /** @var FleetMission|null $mission */
-                $mission = FleetMission::query()
-                    ->where('id', $validated['mission_id'])
-                    ->where('processed', 0)
-                    ->where('canceled', 0)
-                    ->lockForUpdate()
-                    ->first();
+            /*
+             * **Le rendez-vous d abord, et s il ne correspond plus, on recommence depuis le debut.**
+             *
+             * Ce chemin est rare, et c'est precisement pour cela qu'il compte : c'est par les
+             * chemins rares que les invariants se perdent. S'il prenait la mission d'abord, il la
+             * tiendrait en voulant le rendez-vous pendant qu'une arrivee tient le rendez-vous en
+             * voulant la mission.
+             *
+             * La mission est lue **sans verrou** pour savoir quels joueurs sont concernes, puis
+             * relue sous verrou apres le rendez-vous. Si les joueurs ont change entre les deux, les
+             * barrieres tenues ne sont plus les bonnes : on **quitte la transaction** — ce qui
+             * relache tout — et on reprend depuis la premiere lecture. Ajouter les verrous manquants
+             * au milieu du traitement donnerait une coordination qui croit coordonner.
+             *
+             * La reprise est bornee. Une mission qui changerait sans cesse laisse l'operation
+             * reessayable, jamais a moitie faite : tout vit dans la transaction annulee.
+             */
+            $tentatives = 0;
 
-                if ($mission === null) {
-                    throw new RuntimeException('Mission is no longer active.');
+            while (true) {
+                $tentatives++;
+
+                $apercu = FleetMission::query()->whereKey($validated['mission_id'])->first();
+                $participants = $this->missionParticipants($apercu);
+
+                try {
+                    DB::transaction(function () use ($validated, $participants, &$message) {
+                        resolve(PlayerCoordinationBarrier::class)->hold(...$participants);
+
+                        /** @var FleetMission|null $mission */
+                        $mission = FleetMission::query()
+                            ->where('id', $validated['mission_id'])
+                            ->where('processed', 0)
+                            ->where('canceled', 0)
+                            ->lockForUpdate()
+                            ->first();
+
+                        if ($mission === null) {
+                            throw new RuntimeException('Mission is no longer active.');
+                        }
+
+                        if ($this->missionParticipants($mission) !== $participants) {
+                            throw new CoordinatedParticipantsChanged();
+                        }
+
+                        $player = resolve(PlayerServiceFactory::class)->make($mission->user_id, true);
+                        $fleetMissionService = resolve(FleetMissionService::class, ['player' => $player]);
+                        $fleetMissionService->updateMission($mission);
+
+                        $mission->refresh();
+                        if (!$mission->processed) {
+                            throw new RuntimeException('Mission remains active after processing attempt.');
+                        }
+
+                        $message = "Mission #{$mission->id} processed successfully.";
+                    });
+
+                    break;
+                } catch (CoordinatedParticipantsChanged $change) {
+                    if ($tentatives >= self::STUCK_MISSION_ATTEMPTS) {
+                        throw new RuntimeException(
+                            'The players involved in this mission kept changing while it was being processed. '
+                            . 'Nothing was done; try again.'
+                        );
+                    }
+
+                    usleep(50_000 * $tentatives);
                 }
-
-                $player = resolve(PlayerServiceFactory::class)->make($mission->user_id, true);
-                $fleetMissionService = resolve(FleetMissionService::class, ['player' => $player]);
-                $fleetMissionService->updateMission($mission);
-
-                $mission->refresh();
-                if (!$mission->processed) {
-                    throw new RuntimeException('Mission remains active after processing attempt.');
-                }
-
-                $message = "Mission #{$mission->id} processed successfully.";
-            });
+            }
 
             return redirect()->route('admin.server-administration.index')
                 ->with('status', $message);
@@ -831,6 +887,29 @@ class ServerAdministrationController extends OGameController
         $collection = collect($stuckMissionRows);
 
         return $collection;
+    }
+
+    /**
+     * Les joueurs qu une mission concerne : son proprietaire, et celui du corps vise.
+     *
+     * C est la liste dont les barrieres se prennent, et celle qui doit encore correspondre apres la
+     * relecture sous verrou. Zero signifie « aucun » — une mission sans corps vise, un corps sans
+     * proprietaire — et se compare comme le reste : deux listes egales, ou une reprise.
+     *
+     * @return array<int, int>
+     */
+    private function missionParticipants(FleetMission|null $mission): array
+    {
+        if ($mission === null) {
+            return [0, 0];
+        }
+
+        return [
+            (int)$mission->user_id,
+            $mission->planet_id_to === null
+                ? 0
+                : (int)(DB::table('planets')->where('id', $mission->planet_id_to)->value('user_id') ?? 0),
+        ];
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace OGame\Alliance;
 
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Services\CombatsInvolvingPlayer;
@@ -52,24 +53,35 @@ final class AllianceMembershipChangeGuard
         }
 
         /*
-         * **La lecture se fait sous verrou, et il faut dire ce qu elle ferme et ce qu elle ne ferme
-         * pas.** `lockForUpdate()` sur les lignes de `users` serialise deux changements
-         * d appartenance concurrents : deux acceptations simultanees ne peuvent plus se lire
-         * mutuellement « hors alliance » et commiter toutes les deux.
+         * **Le rendez-vous du candidat, avant tout le reste.** Il coordonne cette porte avec la
+         * porte des mouvements, qui ouvre les combats : sans lui, les deux lisent le monde en meme
+         * temps et ecrivent des etats contradictoires. Le candidat suffit — le cas dangereux est
+         * exactement celui ou il est l un des deux combattants, et l arrivee prend les rendez-vous
+         * des deux.
+         */
+        resolve(PlayerCoordinationBarrier::class)->hold($joiningUserId);
+
+        /*
+         * **Et la ligne de l alliance, parce que le candidat ne suffit pas entre candidats.**
          *
-         * **Elle ne ferme pas la course contre l ouverture d un combat.** Celle-ci prend la barriere
-         * du corps, puis l instance, puis les missions — et le depot **interdit** de verrouiller un
-         * compte apres une barriere : une garde de source y veille, parce que l ordre inverse
-         * produirait un interblocage. Ajouter ce verrou au chemin d ouverture serait donc un
-         * changement d ordre global, pas un detail.
+         * Deux adversaires d une meme bataille qui postulent a une **troisieme** alliance ne
+         * partagent aucun rendez-vous : chacun tient le sien, lit les membres actuels — ou aucun des
+         * deux ne figure encore — et conclut qu il peut entrer. Les deux commitent, et les voila
+         * allies en pleine bataille. Cas signale par Codex, et il n avait rien d improbable.
          *
-         * Ce qui reste ouvert, dit precisement : entre la lecture des combats ici et le commit de
-         * l adhesion, un combat peut s ouvrir entre ce joueur et un membre. La fenetre est etroite et
-         * demande que l attaque ait ete lancee **avant** l alliance et arrive **pendant** ce
-         * commit-la ; les deux autres portes — refus au lancement, demi-tour a l arrivee — la
-         * couvrent dans tous les cas ou l attaque part apres. La mesure de cette course appartient au
-         * bac MariaDB, comme toutes les autres du depot : sous SQLite, `lockForUpdate()` ne compile a
-         * rien et prouverait un ordre qui n existe pas.
+         * Verrouiller la ligne de l alliance serialise ces deux adhesions : la seconde lit la liste
+         * que la premiere vient de changer, y voit son adversaire, et refuse.
+         */
+        DB::table('alliances')->where('id', $allianceId)->lockForUpdate()->first();
+
+        /*
+         * **Les lignes `users`, apres le rendez-vous et l alliance.** Elles serialisent l ecriture
+         * de l appartenance elle-meme ; l ordre est celui de `PlayerService::update()`, qui prend le
+         * compte avant les corps, donc rien ne s inverse.
+         *
+         * Elles viennent **apres** le rendez-vous, jamais avant : c est lui qui tient la tete de
+         * l ordre global, et un verrou de compte pris plus tot n y changerait rien tout en brouillant
+         * la lecture de cet ordre.
          */
         User::query()->whereKey($joiningUserId)->lockForUpdate()->first();
 

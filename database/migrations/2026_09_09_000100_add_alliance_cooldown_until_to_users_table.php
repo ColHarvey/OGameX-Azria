@@ -32,6 +32,10 @@ return new class () extends Migration {
             $table->timestamp('alliance_cooldown_until')->nullable()->after('alliance_left_at');
         });
 
+        // **Trois jours, et non sept, pour ceux qui sont deja partis.** La regle approuvee porte
+        // desormais a sept jours, mais l appliquer ici retiendrait retroactivement des joueurs qui
+        // avaient quitte sous l ancienne. Le rattrapage emploie donc la valeur qui avait cours ;
+        // seuls les departs posterieurs comptent sept.
         $jours = (int)(DB::table('settings')->where('key', 'alliance_cooldown_days')->value('value') ?? 3);
 
         DB::table('users')

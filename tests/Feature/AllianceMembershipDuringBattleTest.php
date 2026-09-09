@@ -283,6 +283,64 @@ class AllianceMembershipDuringBattleTest extends AccountTestCase
     }
 
     /**
+     * **Deux adversaires ne se retrouvent pas dans une TROISIEME alliance.**
+     *
+     * Cas signale par Codex, et il n avait rien d improbable : chacun postule a une alliance dont
+     * aucun des deux n est membre. Verrouiller le seul candidat ne les serialise pas — ils ne
+     * partagent aucune ligne. C est la ligne de l **alliance** qui les met en file, et la seconde
+     * adhesion lit alors la liste que la premiere vient de changer.
+     *
+     * Ce temoin-ci eprouve la **regle** : le second est refuse une fois le premier entre. Que les
+     * deux ne puissent pas entrer *simultanement* est une course, et sa preuve appartient au bac.
+     */
+    public function testTwoAdversariesCannotBothJoinAThirdAlliance(): void
+    {
+        resolve(SettingsService::class)->set('alliance_offensive_protection_enabled', 1);
+
+        [$etranger, $corps] = $this->unEtranger();
+        $this->uneBatailleOuJAttaque($corps);
+
+        /*
+         * Une troisieme alliance, fondee par quelqu un d autre que les deux adversaires.
+         *
+         * `getNearbyForeignPlanetFor()` n exclut qu **un** joueur ; ici il en faut deux. Le tiers est
+         * donc cherche directement, et l essai le dit s il n en existe aucun plutot que de jouer un
+         * scenario ou le fondateur serait l un des deux — ce qui ne prouverait rien.
+         */
+        $tiers = (int)(DB::table('users')
+            ->whereNotIn('id', [$this->currentUserId, $etranger])
+            ->whereNull('alliance_id')
+            ->where('username', '!=', 'Legor')
+            ->orderBy('id')
+            ->value('id') ?? 0);
+
+        if ($tiers === 0) {
+            $this->markTestSkipped('Cette base ne porte aucun troisieme joueur libre : le scenario ne peut pas etre monte.');
+        }
+
+        $alliance = $this->uneAllianceDe($tiers);
+
+        // Le premier adversaire entre.
+        $premiere = $this->service()->applyToAlliance($this->currentUserId, $alliance);
+        $this->service()->acceptApplication((int)$premiere->id, $tiers);
+
+        $this->assertTrue(
+            $this->service()->arePlayersInSameAlliance($this->currentUserId, $tiers),
+            'The first adversary did not join: the scenario proves nothing.'
+        );
+
+        // Le second, son adversaire, ne peut plus.
+        $seconde = $this->service()->applyToAlliance($etranger, $alliance);
+
+        try {
+            $this->service()->acceptApplication((int)$seconde->id, $tiers);
+            $this->fail('Both adversaries of a running battle ended up in the same third alliance.');
+        } catch (Exception $refus) {
+            $this->assertSame(__('t_ingame.alliance.err_adversaries_of_an_active_battle'), $refus->getMessage());
+        }
+    }
+
+    /**
      * L interrupteur eteint, la regle n existe pas.
      */
     public function testTheRuleDoesNotExistWhileTheSwitchIsOff(): void
