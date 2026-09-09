@@ -491,3 +491,27 @@
     color: #8fa0bd;
     text-decoration: underline;
 }
+
+/* ~~~~~ RESEAU DE SURVEILLANCE ~~~~~ */
+/*
+ * La feuille de sprites partagee n'a plus de case libre sur la rangee des installations, et la
+ * repeindre pour un objet propre a ce serveur toucherait une image que tout le jeu lit. Le carreau
+ * porte donc sa propre image, et doit remplacer les trois proprietes que la feuille impose :
+ *
+ *  - la source, sinon c'est la feuille qui s'affiche ;
+ *  - la position, calculee en pourcentages pour une grille dont ce carreau ne fait pas partie ;
+ *  - la taille de fond, sans quoi les regles de dimension (sprite_medium 2000x3000,
+ *    sprite_small 1600x2400) etireraient une image de 200 px aux dimensions de la feuille entiere
+ *    et n'en montreraient qu'un coin.
+ *
+ * `azria.css` est importe en dernier dans `ingame.css` : a specificite egale (0,2,0), c'est cette
+ * regle qui gagne. Elle ne porte donc aucun `!important` — et le temoin verifie cet ordre plutot
+ * que de le supposer, une regle battue en cascade ayant deja coute trois fois ici.
+ */
+.sprite_before.surveillanceNetwork::before,
+.sprite_after.surveillanceNetwork::after,
+.sprite.surveillanceNetwork {
+    background-image: url('/img/objects/buildings/surveillance_network_tile.jpg');
+    background-position: 0 0;
+    background-size: cover;
+}
