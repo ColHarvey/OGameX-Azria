@@ -74,8 +74,8 @@ final class PhotographedDefenderTest extends FleetDispatchTestCase
         $this->assertTrue((new RallyClosureService())->close($combat->id, $fermeture)->closed, 'The rally did not close.');
 
         $bonus = $this->classBonusOf($proprietaire);
-        $this->assertSame(self::NIVEAU_ADMISSIBLE + $bonus, $this->frozenLevel($combat, 'weapon'), 'The eligible research did not raise the level the battle used.');
-        $this->assertSame(self::NIVEAU_OUVERTURE + $bonus, $this->frozenLevel($combat, 'shield'), 'A research engaged after the opening strengthened a defence already engaged.');
+        $this->assertSame(self::NIVEAU_ADMISSIBLE + $bonus, $this->frozenLevel($combat, 'weapon'), 'The eligible research did not raise the level the battle used.' . $this->diagnosticDuGel($cible, $proprietaire, $ouverture));
+        $this->assertSame(self::NIVEAU_OUVERTURE + $bonus, $this->frozenLevel($combat, 'shield'), 'A research engaged after the opening strengthened a defence already engaged.' . $this->diagnosticDuGel($cible, $proprietaire, $ouverture));
 
         // Ni l'une ni l'autre n'a ete appliquee : la fermeture ne draine pas la file de recherche.
         $this->assertSame(0, (int)DB::table('research_queues')->where('id', $admissible)->value('processed'));
@@ -98,8 +98,8 @@ final class PhotographedDefenderTest extends FleetDispatchTestCase
         (new RallyClosureService())->close($combat->id, $fermeture);
 
         $bonus = $this->classBonusOf($proprietaire);
-        $this->assertSame(self::NIVEAU_OUVERTURE + $bonus, $this->frozenLevel($combat, 'weapon'), 'The battle used the level the world reached during the rally.');
-        $this->assertNotSame(self::NIVEAU_INADMISSIBLE + $bonus, $this->frozenLevel($combat, 'weapon'), 'The living player and the photograph agree here: this test would pass without the photograph.');
+        $this->assertSame(self::NIVEAU_OUVERTURE + $bonus, $this->frozenLevel($combat, 'weapon'), 'The battle used the level the world reached during the rally.' . $this->diagnosticDuGel($cible, $proprietaire, $ouverture));
+        $this->assertNotSame(self::NIVEAU_INADMISSIBLE + $bonus, $this->frozenLevel($combat, 'weapon'), 'The living player and the photograph agree here: this test would pass without the photograph.' . $this->diagnosticDuGel($cible, $proprietaire, $ouverture));
     }
 
     /**
@@ -122,7 +122,7 @@ final class PhotographedDefenderTest extends FleetDispatchTestCase
         $this->travelTo(Date::createFromTimestamp($fermeture));
         $this->assertTrue((new RallyClosureService())->close($combat->id, $fermeture)->closed, 'The rally did not close.');
 
-        $this->assertSame(self::NIVEAU_ADMISSIBLE + $this->classBonusOf($proprietaire), $this->frozenLevel($combat, 'weapon'), 'A research the world finished during the rally did not give the level a pending one gives.');
+        $this->assertSame(self::NIVEAU_ADMISSIBLE + $this->classBonusOf($proprietaire), $this->frozenLevel($combat, 'weapon'), 'A research the world finished during the rally did not give the level a pending one gives.' . $this->diagnosticDuGel($cible, $proprietaire, $ouverture));
     }
 
     /**
@@ -146,7 +146,7 @@ final class PhotographedDefenderTest extends FleetDispatchTestCase
         $this->travelTo(Date::createFromTimestamp($fermeture));
         $this->assertTrue((new RallyClosureService())->close($combat->id, $fermeture)->closed, 'The rally did not close.');
 
-        $this->assertSame(self::NIVEAU_ADMISSIBLE + $this->classBonusOf($proprietaire), $this->frozenLevel($combat, 'weapon'), 'A research finished before the opening raised the level a second time, or was lost.');
+        $this->assertSame(self::NIVEAU_ADMISSIBLE + $this->classBonusOf($proprietaire), $this->frozenLevel($combat, 'weapon'), 'A research finished before the opening raised the level a second time, or was lost.' . $this->diagnosticDuGel($cible, $proprietaire, $ouverture));
     }
 
     /**
@@ -190,6 +190,49 @@ final class PhotographedDefenderTest extends FleetDispatchTestCase
         (new OpeningStateRecorder())->capture($combat, $cible, $ouverture);
 
         return [$combat, $cible, $ouverture, $proprietaire];
+    }
+
+    /**
+     * Ce qu il faut voir pour comparer un echec reel au mecanisme reproduit.
+     *
+     * Le niveau gele de cette classe a rougi une fois en integration continue — 4 la ou
+     * l ouverture vaut 3 — sans qu on puisse dire si la cause etait celle qu une experience a
+     * su reproduire : une file de recherche laissee sur un autre corps du proprietaire. La
+     * difference entre les deux ne se devine pas, elle se lit. Un prochain rouge portera donc le
+     * proprietaire reellement selectionne, tous ses corps, et chaque file avec ses dates.
+     *
+     * Construite seulement quand une assertion tombe : un echec paie une requete, un succes rien.
+     */
+    private function diagnosticDuGel(int $cible, int $proprietaire, int $ouverture): string
+    {
+        $corps = DB::table('planets')->where('user_id', $proprietaire)->orderBy('id')->pluck('id')
+            ->map(static fn (mixed $identifiant): int => (int)$identifiant)->all();
+
+        $lignes = [];
+
+        foreach (DB::table('research_queues')->whereIn('planet_id', $corps)->orderBy('id')->get() as $file) {
+            $lignes[] = sprintf(
+                'file#%d corps=%d objet=%d niveau=%d du %d au %d traite=%d annule=%d',
+                (int)$file->id,
+                (int)$file->planet_id,
+                (int)$file->object_id,
+                (int)$file->object_level_target,
+                (int)$file->time_start,
+                (int)$file->time_end,
+                (int)$file->processed,
+                (int)$file->canceled
+            );
+        }
+
+        return sprintf(
+            ' | proprietaire=%d cible=%d corps=[%s] ouverture=%d bonus=%d | %s',
+            $proprietaire,
+            $cible,
+            implode(',', $corps),
+            $ouverture,
+            $this->classBonusOf($proprietaire),
+            $lignes === [] ? 'aucune file' : implode(' ; ', $lignes)
+        );
     }
 
     private function classBonusOf(int $playerId): int
