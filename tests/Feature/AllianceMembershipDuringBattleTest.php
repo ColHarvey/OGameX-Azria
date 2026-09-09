@@ -14,6 +14,7 @@ use OGame\Models\FleetMission;
 use OGame\Services\AllianceService;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
+use Tests\Support\DetachesFromAnyAlliance;
 
 /**
  * Une adhesion ne reunit jamais deux adversaires d une bataille en cours — et n annule rien.
@@ -30,6 +31,8 @@ use Tests\AccountTestCase;
  */
 class AllianceMembershipDuringBattleTest extends AccountTestCase
 {
+    use DetachesFromAnyAlliance;
+
     /** @var array<int, int> */
     private array $alliances = [];
 
@@ -147,6 +150,11 @@ class AllianceMembershipDuringBattleTest extends AccountTestCase
      */
     private function uneAllianceDe(int $fondateur): int
     {
+        // **L etranger est partage par les classes du processus**, et plusieurs y laissent une
+        // alliance : la fondation echouerait pour l etat d une voisine. Le run sequentiel du
+        // 9 septembre 2026 l a montre sur cette ligne meme.
+        $this->detachFromAnyAlliance($fondateur, $this->currentUserId);
+
         $alliance = $this->service()->createAlliance(
             $fondateur,
             'B' . substr((string)$fondateur, -3) . substr((string)$this->currentUserId, -3),

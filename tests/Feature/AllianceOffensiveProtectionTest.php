@@ -10,6 +10,7 @@ use OGame\Services\AllianceService;
 use OGame\Services\SettingsService;
 use ReflectionClass;
 use Tests\AccountTestCase;
+use Tests\Support\DetachesFromAnyAlliance;
 
 /**
  * Aucune offensive entre membres d une meme alliance.
@@ -31,6 +32,8 @@ use Tests\AccountTestCase;
  */
 class AllianceOffensiveProtectionTest extends AccountTestCase
 {
+    use DetachesFromAnyAlliance;
+
     private int|null $alliance = null;
 
     protected function tearDown(): void
@@ -65,6 +68,10 @@ class AllianceOffensiveProtectionTest extends AccountTestCase
          * seulement dans `alliance_members`, et une insertion directe laisserait le lien a moitie
          * pose sans que rien ne le dise.
          */
+        // **Le monde exige, pas suppose.** Le proprietaire de la planete voisine est partage par
+        // toutes les classes du processus, et plusieurs y laissent une alliance derriere elles.
+        $this->detachFromAnyAlliance($this->currentUserId, $autre);
+
         $service = resolve(AllianceService::class);
 
         $alliance = $service->createAlliance(

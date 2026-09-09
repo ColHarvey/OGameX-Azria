@@ -19,6 +19,7 @@ use OGame\Services\AllianceService;
 use OGame\Services\ObjectService;
 use OGame\Services\SettingsService;
 use Tests\FleetDispatchTestCase;
+use Tests\Support\DetachesFromAnyAlliance;
 
 /**
  * La protection d alliance decide **sous la porte**, et couvre l ouverture comme l admission.
@@ -54,6 +55,7 @@ use Tests\FleetDispatchTestCase;
  */
 class AllianceUnderTheCombatGateTest extends FleetDispatchTestCase
 {
+    use DetachesFromAnyAlliance;
     use OpensARallyWithAWindow;
 
     protected int $missionType = 1;
@@ -317,6 +319,10 @@ class AllianceUnderTheCombatGateTest extends FleetDispatchTestCase
      */
     private function uneAllianceAvec(int $autre): void
     {
+        // Le proprietaire de la planete propre est partage par les classes du processus : une voisine
+        // peut l avoir laisse dans son alliance, et la fondation echouerait pour son etat a elle.
+        $this->detachFromAnyAlliance($this->currentUserId, $autre);
+
         $service = resolve(AllianceService::class);
 
         $alliance = $service->createAlliance(

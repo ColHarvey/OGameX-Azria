@@ -11,6 +11,7 @@ use OGame\Models\User;
 use OGame\Services\AllianceService;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
+use Tests\Support\DetachesFromAnyAlliance;
 
 /**
  * Les trois departs d une alliance posent la meme echeance, et elle ne se recalcule pas.
@@ -30,6 +31,8 @@ use Tests\AccountTestCase;
  */
 class AllianceDepartureCooldownTest extends AccountTestCase
 {
+    use DetachesFromAnyAlliance;
+
     /** @var array<int, int> */
     private array $alliances = [];
 
@@ -69,6 +72,10 @@ class AllianceDepartureCooldownTest extends AccountTestCase
      */
     private function uneAllianceAvec(int $second): int
     {
+        // Le second membre est l etranger voisin, partage par les classes du processus : il peut
+        // porter l alliance ou l echeance de depart qu une voisine lui a laissee.
+        $this->detachFromAnyAlliance($this->currentUserId, $second);
+
         $alliance = $this->service()->createAlliance(
             $this->currentUserId,
             'D' . substr((string)$this->currentUserId, -3) . substr((string)$second, -3),

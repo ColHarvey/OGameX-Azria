@@ -15,6 +15,7 @@ use OGame\Services\AllianceService;
 use OGame\Services\ObjectService;
 use OGame\Services\SettingsService;
 use Tests\FleetDispatchTestCase;
+use Tests\Support\DetachesFromAnyAlliance;
 
 /**
  * Une attaque lancee avant l alliance, arrivee apres : elle fait demi-tour sans combattre.
@@ -33,6 +34,8 @@ use Tests\FleetDispatchTestCase;
  */
 class AllianceArrivalProtectionTest extends FleetDispatchTestCase
 {
+    use DetachesFromAnyAlliance;
+
     protected int $missionType = 1;
 
     protected string $missionName = 'Attack';
@@ -78,6 +81,10 @@ class AllianceArrivalProtectionTest extends FleetDispatchTestCase
      */
     private function uneAllianceCommune(int $autre): void
     {
+        // Le proprietaire de la planete propre est partage par les classes du processus : une voisine
+        // peut l avoir laisse dans son alliance, et la fondation echouerait pour son etat a elle.
+        $this->detachFromAnyAlliance($this->currentUserId, $autre);
+
         $service = resolve(AllianceService::class);
 
         $alliance = $service->createAlliance(

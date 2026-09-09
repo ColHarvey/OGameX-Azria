@@ -17,6 +17,7 @@ use OGame\Services\ObjectService;
 use OGame\Services\SettingsService;
 use PHPUnit\Framework\Attributes\Group;
 use Tests\FleetDispatchTestCase;
+use Tests\Support\DetachesFromAnyAlliance;
 use Throwable;
 
 /**
@@ -51,6 +52,7 @@ use Throwable;
 #[Group('mariadb')]
 final class AllianceVersusCombatOpeningRaceTest extends FleetDispatchTestCase
 {
+    use DetachesFromAnyAlliance;
     use RunsInParallelProcesses;
 
     protected int $missionType = 1;
@@ -64,6 +66,31 @@ final class AllianceVersusCombatOpeningRaceTest extends FleetDispatchTestCase
         parent::setUp();
         $this->requiresMariaDb();
         $this->requiresProcesses();
+
+        /*
+         * **Aucune bataille heritee, et ce n est pas une precaution : c est la lecon d un run.**
+         *
+         * L invariant se lit par `CombatsInvolvingPlayer::stillRunning()`, qui retient tout combat
+         * **visant une planete du defenseur**, quel que soit l attaquant. Le bac MariaDB tourne sur
+         * une base unique, et l essai frere de cette classe ouvre deliberement une bataille sur la
+         * meme planete propre, partagee par le processus. Le temoin lisait donc la bataille de son
+         * voisin et rougissait sans qu aucune course n ait rien contredit — run `34342533005`, puis
+         * `34346418720`.
+         */
+        DB::table('fleet_missions')->whereNotNull('combat_instance_id')->update(['combat_instance_id' => null]);
+
+        foreach ([
+            'patrol_combat_barriers',
+            'combat_snapshot_inclusions',
+            'combat_outbox',
+            'combat_participants',
+            'combat_effect_receipts',
+            'combat_loot_reservations',
+            'celestial_body_combat_barriers',
+            'combat_instances',
+        ] as $table) {
+            DB::table($table)->delete();
+        }
     }
 
     protected function basicSetup(): void
@@ -153,6 +180,8 @@ final class AllianceVersusCombatOpeningRaceTest extends FleetDispatchTestCase
             $this->markTestSkipped('Aucun troisieme joueur libre : le scenario ne peut pas etre monte.');
         }
 
+        $this->detachFromAnyAlliance($tiers, $attaquant, $adverse);
+
         $service = resolve(AllianceService::class);
         $alliance = $service->createAlliance($tiers, 'T' . substr((string)$tiers, -3) . substr((string)$attaquant, -3), 'Tierce ' . $tiers);
         $this->alliance = (int)$alliance->id;
@@ -187,6 +216,28 @@ final class AllianceVersusCombatOpeningRaceTest extends FleetDispatchTestCase
     }
 
     /**
+     * De qui est cette bataille ? **Un rouge doit le dire de lui-meme.**
+     *
+     * Le message precedent affirmait « un combat court entre allies » sans nommer le combat : il a
+     * fallu lire le code pour decouvrir qu il pouvait s agir de celui d un essai voisin.
+     *
+     * @param \Illuminate\Support\Collection<int, \OGame\Models\CombatInstance> $combats
+     */
+    private function describe($combats, int $missionDeCetEssai): string
+    {
+        if ($combats->isEmpty()) {
+            return 'none';
+        }
+
+        return $combats->map(function ($combat) use ($missionDeCetEssai): string {
+            $missions = FleetMission::query()->where('combat_instance_id', $combat->id)->pluck('id')->implode(',');
+
+            return '#' . $combat->id . ' (statut ' . $combat->status->value . ', corps ' . $combat->target_planet_id
+                . ', missions ' . ($missions === '' ? 'aucune' : $missions) . ', celle de cet essai ' . $missionDeCetEssai . ')';
+        })->implode(' ; ');
+    }
+
+    /**
      * L attaque part, l alliance se prepare, puis les deux chemins courent ensemble.
      */
     public function testNoConcurrentExecutionOpensACombatBetweenAllies(): void
@@ -203,7 +254,10 @@ final class AllianceVersusCombatOpeningRaceTest extends FleetDispatchTestCase
         $this->assertNotNull($defenseur);
         $adverse = $defenseur->getId();
 
-        // Le defenseur fonde une alliance, l attaquant y postule — mais n y est pas encore.
+        // Le defenseur fonde une alliance, l attaquant y postule — mais n y est pas encore. Les deux
+        // sont d abord detaches de ce qu une classe voisine aurait laisse sur eux.
+        $this->detachFromAnyAlliance($this->currentUserId, $adverse);
+
         $service = resolve(AllianceService::class);
         $alliance = $service->createAlliance($adverse, 'C' . substr((string)$adverse, -3) . substr((string)$this->currentUserId, -3), 'Course ' . $adverse);
         $this->alliance = (int)$alliance->id;
@@ -218,6 +272,20 @@ final class AllianceVersusCombatOpeningRaceTest extends FleetDispatchTestCase
         $arrivee = (int)$mission->time_arrival + 1;
         $attaquant = $this->currentUserId;
         $candidatureId = (int)$candidature->id;
+
+        /*
+         * **La premisse, sans laquelle l invariant ne dit rien.** Un combat deja ouvert sur un corps
+         * du defenseur satisferait « un combat court entre allies » sans qu aucun des deux chemins
+         * n ait rien decide. Le monde de depart doit etre libre, et l essai l exige au lieu de
+         * l esperer.
+         */
+        $corpsAvant = Planet::query()->where('user_id', $adverse)->pluck('id')->map(static fn (mixed $id): int => (int)$id)->all();
+
+        $this->assertSame(
+            0,
+            CombatsInvolvingPlayer::stillRunning($attaquant, $corpsAvant)->count(),
+            'A battle is already running against the defender before the race: the invariant would be satisfied by a neighbour.'
+        );
 
         // Les deux chemins, en meme temps.
         $issues = $this->inParallel(2, function (int $rang) use ($attaquant, $adverse, $candidatureId, $arrivee): string {
@@ -255,7 +323,7 @@ final class AllianceVersusCombatOpeningRaceTest extends FleetDispatchTestCase
         $this->assertFalse(
             $allies && $partages->isNotEmpty(),
             'A combat is running between two members of the same alliance: the two paths committed contradictory states. '
-            . 'Issues: ' . implode(' | ', $issues)
+            . 'Issues: ' . implode(' | ', $issues) . '. Battles: ' . $this->describe($partages, $mission->id)
         );
 
         /*
