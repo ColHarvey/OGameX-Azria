@@ -78738,6 +78738,23 @@ window.playOGameXWormhole = function (canvas) {
         });
     }
 
+    /*
+     * Le droit du joueur redevient inconnu : on masque, on ne conserve pas.
+     *
+     * **Remplacer a reception ne suffit pas.** Si la reponse tarde, ce qui vient de devenir
+     * interdit resterait a l ecran pendant tout le vol de la requete. La couche des flottes n est
+     * pas interrogee en boucle : elle se recharge quand quelque chose a change — un ordre, un
+     * evenement du serveur, un changement de systeme, un onglet qui revient. Chaque rechargement
+     * signifie donc que le droit peut avoir change, et l inconnu ne s affiche pas.
+     *
+     * Ce n est volontairement pas une peremption a l horloge : sans interrogation periodique, une
+     * peremption effacerait des contacts parfaitement valides pendant une periode calme.
+     */
+    function invaliderLaSurveillance(carte) {
+        contactsDeSurveillance = [];
+        dessinerLaSurveillance(carte);
+    }
+
     function adresseDePatrouille(modele, id) {
         return String(modele).replace('/patrol/0/', '/patrol/' + Number(id) + '/');
     }
@@ -79826,6 +79843,9 @@ window.playOGameXWormhole = function (canvas) {
 
         var jeton = ++jetonDeSysteme;
 
+        /* Le droit est inconnu tant que la reponse n est pas la : on masque des maintenant. */
+        invaliderLaSurveillance(carte);
+
         window.jQuery.getJSON(galaxyFleetsUrl, { galaxy: galaxie, system: systeme })
             .done(function (reponse) {
                 if (jeton !== jetonDeSysteme || !reponse || !reponse.success) {
@@ -79915,6 +79935,61 @@ window.playOGameXWormhole = function (canvas) {
         }
     }
 
+    var connexionPerdue = false;
+
+    /*
+     * Une connexion qui tombe puis revient, sans que l onglet ait bouge.
+     *
+     * **Ce cas ne produit aucun `visibilitychange`.** Un onglet reste visible pendant une coupure
+     * de reseau, et la resynchronisation au retour au premier plan ne le couvre donc pas. Or c est
+     * exactement pendant une coupure qu une revocation peut passer inapercue : le canal ne porte
+     * plus rien, et l ecran garde ce qu il avait.
+     *
+     * Deux moments, deux gestes. **A la perte**, on masque : tant que le canal est mort, plus rien
+     * ne peut confirmer que ces contacts restent autorises, et un renseignement inverifiable ne
+     * s affiche pas. **Au retour**, on redemande : c est le serveur qui dit ce qui subsiste, jamais
+     * la memoire de l onglet.
+     *
+     * Deux sources, parce qu aucune n est complete : l evenement `online` du navigateur voit la
+     * carte reseau, la connexion du diffuseur voit le canal lui-meme — une coupure serveur ne
+     * touche pas la premiere.
+     */
+    function surveillerLaConnexion(carte) {
+        var reprendre = function () {
+            if (!connexionPerdue) {
+                return;
+            }
+
+            connexionPerdue = false;
+
+            if (carte.gtSysteme) {
+                chargerLesFlottes(carte, carte.gtSysteme.galaxie, carte.gtSysteme.systeme);
+            }
+        };
+
+        var perdre = function () {
+            connexionPerdue = true;
+            invaliderLaSurveillance(carte);
+        };
+
+        window.addEventListener('online', reprendre);
+        window.addEventListener('offline', perdre);
+
+        var connexion = window.Echo && window.Echo.connector && window.Echo.connector.pusher
+            ? window.Echo.connector.pusher.connection
+            : null;
+
+        if (!connexion || typeof connexion.bind !== 'function') {
+            return;
+        }
+
+        connexion.bind('connected', reprendre);
+
+        ['unavailable', 'disconnected', 'failed'].forEach(function (etat) {
+            connexion.bind(etat, perdre);
+        });
+    }
+
     function ecouterLeJoueur(carte) {
         if (joueurAbonne || typeof window.Echo === 'undefined' || typeof window.Echo.private !== 'function') {
             return;
@@ -79960,6 +80035,7 @@ window.playOGameXWormhole = function (canvas) {
         chargerLesFlottes(carte, galaxie, systeme);
         ecouterLeSysteme(carte, galaxie, systeme);
         ecouterLeJoueur(carte);
+        surveillerLaConnexion(carte);
         demarrerLaVeilleDesCompteurs(carte);
     }
 
@@ -80090,6 +80166,14 @@ window.playOGameXWormhole = function (canvas) {
             demarrerLesOrbites(carte);
             demarrerLaVeilleDesCompteurs(carte);
             rafraichirLesCompteurs(carte);
+
+            /*
+             * **Un onglet qui revient ne sait plus ce qu il a le droit de voir.** Il a pu manquer
+             * une revocation pendant qu il dormait : reprendre l animation sans redemander aurait
+             * laisse a l ecran des renseignements devenus interdits, indefiniment. La demande
+             * masque d abord, puis repeint ce que le serveur autorise encore.
+             */
+            chargerLesFlottes(carte, carte.gtSysteme.galaxie, carte.gtSysteme.systeme);
         }
     });
 

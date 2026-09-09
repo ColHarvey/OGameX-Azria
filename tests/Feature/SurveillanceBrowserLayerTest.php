@@ -39,6 +39,26 @@ class SurveillanceBrowserLayerTest extends TestCase
     }
 
     /**
+     * Le corps d une fonction du bundle, decoupe jusqu a la fonction suivante.
+     *
+     * **Comparer des positions sur tout le fichier ne prouve rien.** Un meme appel figure a
+     * plusieurs endroits — `dessinerLaSurveillance(carte);` vit aussi dans l invalidation, definie
+     * bien plus haut — et `strpos` prend le premier venu, qui n est pas celui qu on juge. Mesure
+     * faite : deux assertions d ordre comparaient des sites d appel differents, et c est l essai qui
+     * l a dit en rougissant.
+     */
+    private function corpsDe(string $bundle, string $fonction, string $suivante): string
+    {
+        $debut = strpos($bundle, 'function ' . $fonction . '(');
+        $this->assertIsInt($debut, 'La fonction ' . $fonction . ' est absente du bundle servi.');
+
+        $fin = strpos($bundle, 'function ' . $suivante . '(', $debut);
+        $this->assertIsInt($fin, 'La fonction ' . $suivante . ' ne suit pas ' . $fonction . ' : le decoupage serait faux.');
+
+        return substr($bundle, $debut, $fin - $debut);
+    }
+
+    /**
      * La liste des contacts est **remplacee** a chaque reponse acceptee.
      */
     public function testTheServedBundleReplacesTheContactList(): void
@@ -88,12 +108,63 @@ class SurveillanceBrowserLayerTest extends TestCase
 
         // Et il protege bien la reponse ou la surveillance est lue : les deux vivent dans la meme
         // fonction, donc le garde precede l affectation.
-        $garde = strpos($bundle, 'jeton !== jetonDeSysteme');
-        $affectation = strpos($bundle, 'contactsDeSurveillance = Array.isArray(reponse.surveillance)');
+        $corps = $this->corpsDe($bundle, 'chargerLesFlottes', 'redemanderLeSysteme');
+        $garde = strpos($corps, 'jeton !== jetonDeSysteme');
+        $affectation = strpos($corps, 'contactsDeSurveillance = Array.isArray(reponse.surveillance)');
 
         $this->assertIsInt($garde);
         $this->assertIsInt($affectation);
         $this->assertLessThan($affectation, $garde, 'La surveillance est lue avant le rejet des reponses tardives.');
+    }
+
+    /**
+     * La couche est masquee **au depart** de la demande, pas seulement a son retour.
+     *
+     * ## Ce que le remplacement a reception ne couvre pas
+     *
+     * Si la reponse tarde, ce qui vient de devenir interdit reste a l ecran pendant tout le vol de
+     * la requete. L invalidation doit donc preceder l envoi. Le temoin compare les positions dans le
+     * bundle servi : masquer apres l appel reseau serait une autre regle, verte a la lecture et
+     * fausse a l execution.
+     */
+    public function testTheLayerIsClearedBeforeTheRequestLeaves(): void
+    {
+        $bundle = $this->bundleServi();
+
+        $this->assertStringContainsString('function invaliderLaSurveillance(', $bundle);
+
+        $corps = $this->corpsDe($bundle, 'chargerLesFlottes', 'redemanderLeSysteme');
+
+        $invalidation = strpos($corps, 'invaliderLaSurveillance(carte);');
+        $requete = strpos($corps, 'window.jQuery.getJSON(galaxyFleetsUrl');
+
+        $this->assertIsInt($invalidation, 'Rien n invalide la couche dans la demande : une reponse tardive laisserait l interdit a l ecran.');
+        $this->assertIsInt($requete);
+        $this->assertLessThan($requete, $invalidation, 'La couche est masquee apres le depart de la requete, donc trop tard.');
+    }
+
+    /**
+     * Une connexion perdue masque, et son retour resynchronise — sans changement d onglet.
+     *
+     * Une coupure reseau ne produit aucun `visibilitychange` : l onglet reste visible. Ce sont donc
+     * les evenements de connexion qui doivent agir, et sur les deux sources — celle du navigateur et
+     * celle du diffuseur, aucune ne voyant ce que l autre voit.
+     */
+    public function testALostConnectionHidesAndItsReturnResynchronises(): void
+    {
+        $bundle = $this->bundleServi();
+
+        $this->assertStringContainsString('function surveillerLaConnexion(', $bundle);
+
+        // Les deux sources : la carte reseau du navigateur, et le canal du diffuseur.
+        $this->assertStringContainsString("window.addEventListener('offline'", $bundle, 'La perte de reseau du navigateur n est pas ecoutee.');
+        $this->assertStringContainsString("window.addEventListener('online'", $bundle, 'Le retour de reseau du navigateur n est pas ecoute.');
+        $this->assertStringContainsString("connexion.bind('connected'", $bundle, 'Le retour du canal du diffuseur n est pas ecoute.');
+        $this->assertStringContainsString("'unavailable', 'disconnected', 'failed'", $bundle, 'La perte du canal du diffuseur n est pas ecoutee.');
+
+        // La perte masque, et le retour redemande : les deux gestes existent et sont distincts.
+        $this->assertStringContainsString('connexionPerdue = true;', $bundle);
+        $this->assertStringContainsString('connexionPerdue = false;', $bundle);
     }
 
     /**
@@ -106,11 +177,13 @@ class SurveillanceBrowserLayerTest extends TestCase
         $this->assertStringContainsString('gtSurveillanceLayer', $bundle);
         $this->assertStringContainsString('function dessinerLaSurveillance(', $bundle);
 
-        $affectation = strpos($bundle, 'contactsDeSurveillance = Array.isArray(reponse.surveillance)');
-        $appel = strpos($bundle, 'dessinerLaSurveillance(carte);');
+        $corps = $this->corpsDe($bundle, 'chargerLesFlottes', 'redemanderLeSysteme');
+
+        $affectation = strpos($corps, 'contactsDeSurveillance = Array.isArray(reponse.surveillance)');
+        $appel = strpos($corps, 'dessinerLaSurveillance(carte);');
 
         $this->assertIsInt($affectation);
-        $this->assertIsInt($appel);
+        $this->assertIsInt($appel, 'La couche n est pas dessinee dans la reponse acceptee.');
         $this->assertGreaterThan($affectation, $appel, 'La couche est dessinee avant d avoir recu la liste neuve.');
     }
 }
