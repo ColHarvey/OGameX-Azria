@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Support;
 
+use OGame\Models\Setting;
 use OGame\Services\SettingsService;
 use Tests\Support\PinsSettings;
 use Tests\UnitTestCase;
@@ -71,6 +72,9 @@ class PinsSettingsTest extends UnitTestCase
 
         $this->avantEssai = [];
 
+        // La clef temoin n appartient a personne : elle part avec l essai qui l a inventee.
+        Setting::query()->where('key', 'temoin_isolation_reglages')->delete();
+
         parent::tearDown();
     }
 
@@ -120,5 +124,42 @@ class PinsSettingsTest extends UnitTestCase
         $this->restorePinnedSettings();
 
         $this->assertSame('17', $reglages->get('maximum_moon_chance', ''), 'An empty restore wrote something.');
+    }
+
+    /**
+     * **Un reglage qui n existait pas redevient absent**, et le service cesse de le servir.
+     *
+     * La valeur effective ne suffit pas : une ligne ecrite explicitement survivrait a un changement
+     * du defaut, et dirait alors l ancienne valeur pour toujours. Le depot l a paye sur le delai
+     * d alliance, passe de trois a sept jours.
+     *
+     * Deux assertions, et la seconde n est pas la premiere : la table peut avoir perdu sa ligne
+     * pendant que le service, lui, garde la valeur en memoire.
+     */
+    public function testASettingThatDidNotExistIsAbsentAgainAfterTheRestore(): void
+    {
+        $clef = 'temoin_isolation_reglages';
+
+        // Monde de depart : cette clef n existe pas. L essai l etablit au lieu de l esperer.
+        Setting::query()->where('key', $clef)->delete();
+        $this->assertFalse(Setting::query()->where('key', $clef)->exists());
+
+        $this->pinSettings([$clef => 5]);
+
+        $this->assertTrue(Setting::query()->where('key', $clef)->exists(), 'The pin wrote no row at all.');
+        $this->assertSame('5', resolve(SettingsService::class)->get($clef, 'defaut'));
+
+        $this->restorePinnedSettings();
+
+        $this->assertFalse(
+            Setting::query()->where('key', $clef)->exists(),
+            'A row this test created outlived it: the day the default changes, that row would keep saying the old value.'
+        );
+
+        $this->assertSame(
+            'defaut',
+            resolve(SettingsService::class)->get($clef, 'defaut'),
+            'The service still serves a value the table no longer carries: its cache was left incoherent.'
+        );
     }
 }
