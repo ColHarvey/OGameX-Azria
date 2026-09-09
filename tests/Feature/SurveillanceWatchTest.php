@@ -576,6 +576,86 @@ class SurveillanceWatchTest extends AccountTestCase
     }
 
     /**
+     * Perdre le meilleur detecteur quand l inferieur a deja acquis : le renseignement se reduit.
+     *
+     * O1 l exige : ne conserver que ce a quoi les detecteurs restants donnent effectivement droit.
+     * Lire le niveau en direct rend ce comportement plausible ; seul un temoin le prouve.
+     */
+    public function testLosingTheBestDetectorFallsBackToWhatTheLesserOneAlreadyAcquired(): void
+    {
+        [, $etranger, $galaxie, $systeme] = $this->unSystemeEtranger();
+
+        $entree = 1_700_007_000;
+        $patrouille = $this->unePatrouilleEntree((int)$this->currentUserId, $galaxie, $systeme, $entree);
+
+        $lent = $this->unCorpsEquipe($etranger, $galaxie, $systeme, SurveillanceTier::Identity->value);
+        $rapide = $this->unCorpsEquipe($etranger, $galaxie, $systeme, SurveillanceTier::Estimate->value);
+
+        $veille = resolve(SurveillanceWatch::class);
+        $veille->acquire($patrouille, $entree);
+
+        // Les deux ont fini d acquerir : le meilleur gouverne.
+        $lesDeux = $entree + SurveillanceTier::Identity->acquisitionSeconds();
+        $this->assertSame(SurveillanceTier::Estimate, $veille->acquiredTierFor($etranger, (int)$patrouille->id, $lesDeux));
+
+        // Le meilleur tombe : il reste ce que l inferieur avait deja acquis, ni plus ni rien.
+        DB::table('planets')->where('id', $rapide)->update(['surveillance_network' => 0]);
+        $veille->networkLevelChanged($rapide, 0, $lesDeux);
+
+        $this->assertSame(
+            SurveillanceTier::Identity,
+            $veille->acquiredTierFor($etranger, (int)$patrouille->id, $lesDeux),
+            'La perte du meilleur detecteur a tout emporte, ou n a rien retire.'
+        );
+    }
+
+    /**
+     * Perdre le meilleur detecteur quand l inferieur acquiert encore : le contact se masque.
+     *
+     * Le cas symetrique du precedent, et le plus facile a manquer : l inferieur existe, mais son
+     * delai n est pas ecoule. Le joueur ne conserve donc rien — jusqu a l echeance de ce qui lui
+     * reste, pas une seconde avant.
+     */
+    public function testLosingTheBestDetectorHidesTheContactWhileTheLesserOneIsStillAcquiring(): void
+    {
+        [, $etranger, $galaxie, $systeme] = $this->unSystemeEtranger();
+
+        $entree = 1_700_008_000;
+        $patrouille = $this->unePatrouilleEntree((int)$this->currentUserId, $galaxie, $systeme, $entree);
+
+        $lent = $this->unCorpsEquipe($etranger, $galaxie, $systeme, SurveillanceTier::Identity->value);
+        $rapide = $this->unCorpsEquipe($etranger, $galaxie, $systeme, SurveillanceTier::Estimate->value);
+
+        $veille = resolve(SurveillanceWatch::class);
+        $veille->acquire($patrouille, $entree);
+
+        // Entre les deux echeances : le rapide sait, le lent ecoute encore.
+        $entreLesDeux = $entree + SurveillanceTier::Estimate->acquisitionSeconds();
+        $this->assertLessThan(
+            $entree + SurveillanceTier::Identity->acquisitionSeconds(),
+            $entreLesDeux,
+            'Les deux paliers acquierent en meme temps : le cas ne prouverait rien.'
+        );
+        $this->assertSame(SurveillanceTier::Estimate, $veille->acquiredTierFor($etranger, (int)$patrouille->id, $entreLesDeux));
+
+        // Le meilleur tombe : rien ne reste, car l inferieur n a pas fini d ecouter.
+        DB::table('planets')->where('id', $rapide)->update(['surveillance_network' => 0]);
+        $veille->networkLevelChanged($rapide, 0, $entreLesDeux);
+
+        $this->assertNull(
+            $veille->acquiredTierFor($etranger, (int)$patrouille->id, $entreLesDeux),
+            'Le detecteur inferieur a livre avant son echeance : la perte du meilleur lui a offert son anciennete.'
+        );
+
+        // Et a sa propre echeance, il livre ce qui lui revient.
+        $this->assertSame(
+            SurveillanceTier::Identity,
+            $veille->acquiredTierFor($etranger, (int)$patrouille->id, $entree + SurveillanceTier::Identity->acquisitionSeconds()),
+            'Le detecteur restant ne livre jamais, alors que son delai est ecoule.'
+        );
+    }
+
+    /**
      * Le meilleur reseau du systeme gouverne, jamais la somme de plusieurs.
      */
     public function testTheBestNetworkOfTheSystemGoverns(): void

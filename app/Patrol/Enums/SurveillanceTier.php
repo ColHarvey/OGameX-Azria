@@ -28,10 +28,10 @@ namespace OGame\Patrol\Enums;
  * 15 / 10 / 5 / 2 / 0 minutes est la base d equilibrage transmise (revue 122, decision O1, sur
  * accord de Keven), et ce n est pas une certification de l equilibrage en production.
  *
- * L intention : une patrouille qui **traverse** un systeme echappe aux reseaux ordinaires, une
- * patrouille qui s y **installe** finit par se voir, et un reseau porte au maximum voit
- * **a l instant** — le zero du dernier palier est la recompense de cet investissement, non un
- * oubli. Elles tiennent en un seul endroit pour qu un reequilibrage soit une modification de
+ * L intention : un reseau ordinaire n acquiert qu apres son delai, si bien qu un passage plus
+ * bref lui echappe — mais **une traversee plus longue que ce delai est detectee**, et il n y a
+ * la aucune immunite. Un reseau porte au maximum, lui, voit **a l instant** : le zero du dernier
+ * palier est la recompense de cet investissement, non un oubli. Elles tiennent en un seul endroit pour qu un reequilibrage soit une modification de
  * cette table et de son temoin, sans toucher a la mecanique.
  */
 enum SurveillanceTier: int

@@ -90,17 +90,47 @@ class SurveillanceTierTest extends TestCase
     }
 
     /**
-     * Seul le dernier palier detecte a l instant ; tous les autres laissent traverser.
+     * Les cinq durees sont exactement celles qui ont ete transmises.
      *
-     * ## Deux regles que la seule decroissance ne porte pas
+     * ## Pourquoi les valeurs elles-memes, et pas seulement leur forme
      *
-     * Le zero du palier maximal est une **decision transmise** (revue 122, decision O1), pas une
-     * commodite : un reseau porte au bout voit une patrouille des son entree. Et c est le seul
-     * qui le peut — un delai nul plus bas ferait voir a un reseau modeste ce qu il n a pas
-     * ecoute, et une patrouille qui ne fait que traverser serait reperee partout.
+     * La decroissance stricte et le zero final laissent encore passer 14 / 9 / 4 / 1 / 0, ou
+     * n importe quelle autre suite decroissante : elles decrivent une forme, jamais la table.
+     * Or ces cinq nombres sont une **decision transmise** (revue 122, decision O1, sur accord de
+     * Keven), et une decision se verifie par sa valeur. Ce temoin est donc le seul endroit ou un
+     * reequilibrage doit etre reecrit sciemment.
+     */
+    public function testTheFiveDelaysAreTheOnesWritten(): void
+    {
+        $attendu = [
+            1 => 15 * 60,
+            2 => 10 * 60,
+            3 => 5 * 60,
+            4 => 2 * 60,
+            5 => 0,
+        ];
+
+        $reel = [];
+
+        foreach (SurveillanceTier::cases() as $palier) {
+            $reel[$palier->value] = $palier->acquisitionSeconds();
+        }
+
+        $this->assertSame($attendu, $reel, 'La table des delais s ecarte de la base transmise 15 / 10 / 5 / 2 / 0.');
+    }
+
+    /**
+     * Seul le dernier palier detecte a l instant ; les autres n acquierent qu apres leur delai.
      *
-     * Ces deux faits se decrivent ici plutot que dans le seul commentaire de la table, parce
-     * qu une valeur changee par megarde doit rougir, pas passer.
+     * ## Ce que les autres paliers font, et ne font pas
+     *
+     * Ils **n empechent pas** une traversee d etre vue : passe leur delai, ils acquierent comme
+     * les autres, et une traversee assez longue est donc detectee. Ce qu un delai non nul
+     * garantit est plus etroit : un passage plus bref que lui echappe. Dire « les autres
+     * laissent traverser » promettrait une immunite qui n existe pas.
+     *
+     * Le zero du palier maximal est une decision transmise (revue 122, decision O1) : un reseau
+     * porte au bout voit des l entree, et c est le seul qui le peut.
      */
     public function testOnlyTheTopTierDetectsAtOnce(): void
     {
@@ -114,7 +144,7 @@ class SurveillanceTierTest extends TestCase
             $this->assertGreaterThan(
                 0,
                 $palier->acquisitionSeconds(),
-                'Le palier ' . $palier->value . ' detecte a l instant : une patrouille qui traverse serait vue.'
+                'Le palier ' . $palier->value . ' detecte a l instant : un passage bref ne lui echapperait plus.'
             );
         }
     }
