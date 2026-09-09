@@ -51,6 +51,11 @@ Deuterium: :deuterium',
     ],
 
     // ------------------------
+    'attack_cancelled_by_alliance_protection' => [
+        'from' => 'Fleet Command',
+        'subject' => 'Attack cancelled',
+        'body' => 'Attack cancelled: the target now belongs to your own alliance. Your fleet is turning back from :coordinates without engaging. Ships and cargo return untouched.',
+    ],
     'return_of_fleet' => [
         'from' => 'Fleet Command',
         'subject' => 'Return of a fleet',
@@ -104,6 +109,7 @@ Reason: :reason',
             'target_combat_locked' => 'the target is already engaged in another combat',
             'rally_closed' => 'the rally was already closed when it arrived',
             'alliance_not_eligible' => 'your alliance cannot join this combat',
+            'alliance_protects_the_target' => 'the target belongs to a member of your alliance',
             'fleet_limit_reached' => 'the maximum number of fleets has been reached',
             'player_limit_reached' => 'the maximum number of players has been reached',
             'npc_side_not_reinforceable' => 'this side cannot be reinforced',

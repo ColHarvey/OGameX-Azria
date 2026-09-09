@@ -35,6 +35,15 @@ enum CombatReasonCode: string
     case AllianceNotEligible = 'alliance_not_eligible';
 
     /**
+     * La cible appartient a un membre de la meme alliance que l attaquant.
+     *
+     * Distinct de `AllianceNotEligible`, qui refuse un **renfort** dont l alliance n est pas celle
+     * de l attaquant initial. Ici la flotte est refusee parce qu elle attaque un allie : le
+     * message que le joueur lit n est pas le meme, et confondre les deux les ferait diverger.
+     */
+    case AllianceProtectsTheTarget = 'alliance_protects_the_target';
+
+    /**
      * Le camp a atteint son plafond de flottes.
      */
     case FleetLimitReached = 'fleet_limit_reached';

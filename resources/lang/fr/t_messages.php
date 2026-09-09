@@ -39,6 +39,11 @@ Métal : :metal
 Cristal : :crystal
 Deutérium : :deuterium',
     ],
+    'attack_cancelled_by_alliance_protection' => [
+        'from' => 'Commandement de la flotte',
+        'subject' => 'Attaque annulée',
+        'body' => 'Attaque annulée : la cible appartient désormais à votre alliance. Votre flotte fait demi-tour depuis :coordinates, sans avoir engagé le combat. Vaisseaux et cargaison rentrent intacts.',
+    ],
     'return_of_fleet' => [
         'from' => 'Commandement de la flotte',
         'subject' => 'Retour d\'une flotte',
@@ -82,6 +87,7 @@ Raison : :reason',
             'target_combat_locked' => 'la cible est déjà engagée dans un autre combat',
             'rally_closed' => 'le ralliement était déjà fermé à son arrivée',
             'alliance_not_eligible' => 'votre alliance ne peut pas rejoindre ce combat',
+            'alliance_protects_the_target' => 'la cible appartient à un membre de votre alliance',
             'fleet_limit_reached' => 'le nombre maximal de flottes est atteint',
             'player_limit_reached' => 'le nombre maximal de joueurs est atteint',
             'npc_side_not_reinforceable' => 'ce camp ne peut pas être renforcé',

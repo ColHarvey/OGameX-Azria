@@ -9,6 +9,7 @@ use OGame\GameMessages\AcsDefendArrivalSender;
 use OGame\GameMessages\AdminAnnouncement;
 use OGame\GameMessages\AllianceApplicationReceived;
 use OGame\GameMessages\AllianceBroadcast;
+use OGame\GameMessages\AttackCancelledByAllianceProtection;
 use OGame\GameMessages\BattleReport;
 use OGame\GameMessages\BuddyRemoved;
 use OGame\GameMessages\BuddyRequestAccepted;
@@ -70,6 +71,7 @@ class GameMessageFactory
         'event_started' => EventStarted::class,
         'welcome_message' => WelcomeMessage::class,
         'return_of_fleet_with_resources' => ReturnOfFleetWithResources::class,
+        'attack_cancelled_by_alliance_protection' => AttackCancelledByAllianceProtection::class,
         'return_of_fleet' => ReturnOfFleet::class,
         'transport_arrived' => TransportArrived::class,
         'transport_received' => TransportReceived::class,

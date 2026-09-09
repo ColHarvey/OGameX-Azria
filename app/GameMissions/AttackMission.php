@@ -3,9 +3,11 @@
 namespace OGame\GameMissions;
 
 use Illuminate\Support\Facades\Date;
+use OGame\Alliance\AllianceOffensiveGuard;
 use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Application\LiveCombatApplicationContext;
 use OGame\Combat\Enums\CombatCancellationCause;
+use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Services\CombatCancellationOutcome;
 use OGame\Combat\Services\CombatCancellationService;
 use OGame\Combat\Services\CombatResolutionService;
@@ -20,6 +22,7 @@ use OGame\Combat\Support\SealedResourceDiagnostics;
 use OGame\Enums\FleetMissionStatus;
 use OGame\Enums\FleetSpeedType;
 use OGame\Factories\GameMissionFactory;
+use OGame\GameMessages\AttackCancelledByAllianceProtection;
 use OGame\GameMissions\Abstracts\GameMission;
 use OGame\GameMissions\BattleEngine\BattleEngineFactory;
 use OGame\GameMissions\Concerns\EntersADurableCombat;
@@ -219,6 +222,47 @@ class AttackMission extends GameMission
                 $mission,
                 $this->fleetMissionService->getResources($mission),
                 $this->fleetMissionService->getFleetUnits($mission)
+            );
+
+            return;
+        }
+
+        /*
+         * **L alliance se relit a l arrivee, pas seulement au lancement.** Le plan approuve exige le
+         * controle aux deux moments, et nomme le cas qui les separe : l appartenance peut changer
+         * **pendant le trajet**. Au depart la cible etait attaquable ; a l arrivee elle ne l est
+         * plus, et « jamais autoriser une offensive contre un allie courant » tranche.
+         *
+         * Ce controle vient **avant** l aiguillage du combat durable : la flotte fait demi-tour sans
+         * rien ouvrir ni rejoindre, donc sans toucher au combat des autres participants. La route de
+         * refus des combats ne conviendrait pas ici — elle compose sa decision et son avis depuis
+         * une instance, et il n y en a aucune.
+         *
+         * Rien n est calcule : aucun tir, aucun degat, aucun butin, aucun debris. `processed` est
+         * pose avant le retour, comme le demi-tour ci-dessus, donc un traitement relance ne cree pas
+         * un second retour. Vaisseaux et cargaison rentrent tels quels, et le carburant suit la
+         * regle ordinaire du trajet.
+         */
+        if (resolve(AllianceOffensiveGuard::class)->forbids(
+            CombatMissionKind::fromMissionType((int)$mission->mission_type),
+            (int)$mission->user_id,
+            $defenderPlayer->getId()
+        )) {
+            $mission->processed = 1;
+            $mission->save();
+
+            $this->startReturn(
+                $mission,
+                $this->fleetMissionService->getResources($mission),
+                $this->fleetMissionService->getFleetUnits($mission)
+            );
+
+            $attaquant = $this->playerServiceFactory->make((int)$mission->user_id, true);
+
+            $this->messageService->sendSystemMessageToPlayer(
+                $attaquant,
+                AttackCancelledByAllianceProtection::class,
+                ['coordinates' => $defenderPlanet->getPlanetCoordinates()->asString()]
             );
 
             return;
