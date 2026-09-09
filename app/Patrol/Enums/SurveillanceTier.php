@@ -21,13 +21,18 @@ namespace OGame\Patrol\Enums;
  * de palier : ils ne voyagent jamais. Un niveau qui les rendrait ferait de la surveillance un
  * espionnage sans sonde et sans risque.
  *
- * ## Les durees sont une adaptation d Azria
+ * ## Les durees sont une adaptation d Azria, et elles sont ecrites ailleurs
  *
  * Le jeu d origine n a pas de reseau de surveillance : ces cinq durees n imitent rien et ne se
- * presentent pas comme officielles. Elles tiennent en un seul endroit — ici — pour qu un
- * reequilibrage soit une modification de cette table et de son temoin, sans toucher a la mecanique.
- * L intention : une patrouille qui **traverse** un systeme ne se voit pas, une patrouille qui s y
- * **installe** finit par se voir, et un reseau developpe raccourcit franchement cette attente.
+ * presentent pas comme officielles. **Elles ne sont pas non plus une invention de ce fichier** :
+ * 15 / 10 / 5 / 2 / 0 minutes est la base d equilibrage transmise (revue 122, decision O1, sur
+ * accord de Keven), et ce n est pas une certification de l equilibrage en production.
+ *
+ * L intention : une patrouille qui **traverse** un systeme echappe aux reseaux ordinaires, une
+ * patrouille qui s y **installe** finit par se voir, et un reseau porte au maximum voit
+ * **a l instant** — le zero du dernier palier est la recompense de cet investissement, non un
+ * oubli. Elles tiennent en un seul endroit pour qu un reequilibrage soit une modification de
+ * cette table et de son temoin, sans toucher a la mecanique.
  */
 enum SurveillanceTier: int
 {
@@ -62,11 +67,11 @@ enum SurveillanceTier: int
     public function acquisitionSeconds(): int
     {
         return match ($this) {
-            self::Contact => 30 * 60,
-            self::Identity => 20 * 60,
-            self::Heading => 12 * 60,
-            self::Estimate => 7 * 60,
-            self::Strength => 3 * 60,
+            self::Contact => 15 * 60,
+            self::Identity => 10 * 60,
+            self::Heading => 5 * 60,
+            self::Estimate => 2 * 60,
+            self::Strength => 0,
         };
     }
 

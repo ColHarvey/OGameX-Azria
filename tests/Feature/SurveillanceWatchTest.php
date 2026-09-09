@@ -30,12 +30,30 @@ class SurveillanceWatchTest extends AccountTestCase
      */
     private array $corpsPoses = [];
 
+    /**
+     * Les patrouilles que cet essai a posees, retirees au demontage.
+     *
+     * **Une mise en service voit toutes les patrouilles etrangeres du systeme**, et c est juste.
+     * Une patrouille laissee par un essai voisin ouvre donc un contact de plus, et un comptage
+     * global se met a dependre de l ordre d execution. Les retirer ferme la cause plutot que de
+     * relacher l assertion.
+     *
+     * @var array<int, int>
+     */
+    private array $patrouillesPosees = [];
+
     protected function tearDown(): void
     {
         if ($this->corpsPoses !== []) {
             SurveillanceContact::query()->whereIn('observer_planet_id', $this->corpsPoses)->delete();
             Planet::query()->whereIn('id', $this->corpsPoses)->delete();
             $this->corpsPoses = [];
+        }
+
+        if ($this->patrouillesPosees !== []) {
+            SurveillanceContact::query()->whereIn('patrol_id', $this->patrouillesPosees)->delete();
+            Patrol::query()->whereIn('id', $this->patrouillesPosees)->delete();
+            $this->patrouillesPosees = [];
         }
 
         parent::tearDown();
@@ -85,7 +103,7 @@ class SurveillanceWatchTest extends AccountTestCase
      */
     private function unePatrouilleEntree(int $userId, int $galaxie, int $systeme, int $entree): Patrol
     {
-        return Patrol::query()->create([
+        $patrouille = Patrol::query()->create([
             'user_id' => $userId,
             'home_planet_id' => $this->planetService->getPlanetId(),
             'state' => PatrolState::Stationed->value,
@@ -99,6 +117,10 @@ class SurveillanceWatchTest extends AccountTestCase
             'entered_system_at' => $entree,
             'order_version' => 1,
         ]);
+
+        $this->patrouillesPosees[] = (int)$patrouille->id;
+
+        return $patrouille;
     }
 
     /**
@@ -323,9 +345,14 @@ class SurveillanceWatchTest extends AccountTestCase
         DB::table('planets')->where('id', $observateur)->update(['surveillance_network' => SurveillanceTier::Contact->value]);
         $ouverts = resolve(SurveillanceWatch::class)->commission($observateur, SurveillanceTier::Contact->value, $miseEnService);
 
-        $this->assertSame(1, $ouverts, 'La mise en service n a ouvert aucun contact sur une patrouille pourtant presente.');
+        // Au moins celle-ci : le systeme peut porter d autres patrouilles, et les compter serait
+        // supposer qu il n en porte aucune autre.
+        $this->assertGreaterThanOrEqual(1, $ouverts, 'La mise en service n a ouvert aucun contact sur une patrouille pourtant presente.');
 
-        $contact = SurveillanceContact::query()->where('observer_planet_id', $observateur)->firstOrFail();
+        $contact = SurveillanceContact::query()
+            ->where('observer_planet_id', $observateur)
+            ->where('patrol_id', $patrouille->id)
+            ->firstOrFail();
 
         $this->assertSame($entree, (int)$contact->entered_system_at, 'Le contact a oublie quand la patrouille est entree.');
         $this->assertSame($miseEnService, (int)$contact->acquisition_from, 'L acquisition ne part pas de la mise en service.');
@@ -390,7 +417,10 @@ class SurveillanceWatchTest extends AccountTestCase
         $veille = resolve(SurveillanceWatch::class);
         $veille->acquire($patrouille, $entree);
 
-        $premier = SurveillanceContact::query()->where('observer_planet_id', $observateur)->firstOrFail();
+        $premier = SurveillanceContact::query()
+            ->where('observer_planet_id', $observateur)
+            ->where('patrol_id', $patrouille->id)
+            ->firstOrFail();
         $this->assertSame($entree, (int)$premier->acquisition_from);
 
         // Demolition : ce que ce corps observait est revoque.
@@ -470,7 +500,10 @@ class SurveillanceWatchTest extends AccountTestCase
         $rapide = $this->unCorpsEquipe($etranger, $galaxie, $systeme, SurveillanceTier::Heading->value);
         $veille->commission($rapide, SurveillanceTier::Heading->value, $maintenant);
 
-        $enAttente = SurveillanceContact::query()->where('observer_planet_id', $rapide)->firstOrFail();
+        $enAttente = SurveillanceContact::query()
+            ->where('observer_planet_id', $rapide)
+            ->where('patrol_id', $patrouille->id)
+            ->firstOrFail();
         $this->assertGreaterThan($maintenant, (int)$enAttente->visible_from, 'Le detecteur superieur a acquis instantanement : le cas ne prouverait rien.');
 
         // **Ni revelation prematuree, ni masquage** : le palier reste celui du detecteur acquis.

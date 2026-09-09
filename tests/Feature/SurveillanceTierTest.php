@@ -79,13 +79,43 @@ class SurveillanceTierTest extends TestCase
         foreach (SurveillanceTier::cases() as $palier) {
             $delai = $palier->acquisitionSeconds();
 
-            $this->assertGreaterThan(0, $delai, 'Tier ' . $palier->value . ' detects instantly: a patrol crossing the system would be seen.');
+            $this->assertGreaterThanOrEqual(0, $delai, 'Tier ' . $palier->value . ' has a negative delay.');
 
             if ($precedent !== null) {
                 $this->assertLessThan($precedent, $delai, 'Tier ' . $palier->value . ' is not faster than the tier below it.');
             }
 
             $precedent = $delai;
+        }
+    }
+
+    /**
+     * Seul le dernier palier detecte a l instant ; tous les autres laissent traverser.
+     *
+     * ## Deux regles que la seule decroissance ne porte pas
+     *
+     * Le zero du palier maximal est une **decision transmise** (revue 122, decision O1), pas une
+     * commodite : un reseau porte au bout voit une patrouille des son entree. Et c est le seul
+     * qui le peut — un delai nul plus bas ferait voir a un reseau modeste ce qu il n a pas
+     * ecoute, et une patrouille qui ne fait que traverser serait reperee partout.
+     *
+     * Ces deux faits se decrivent ici plutot que dans le seul commentaire de la table, parce
+     * qu une valeur changee par megarde doit rougir, pas passer.
+     */
+    public function testOnlyTheTopTierDetectsAtOnce(): void
+    {
+        $this->assertSame(0, SurveillanceTier::Strength->acquisitionSeconds(), 'Le palier maximal n est plus instantane : la base transmise dit zero.');
+
+        foreach (SurveillanceTier::cases() as $palier) {
+            if ($palier === SurveillanceTier::Strength) {
+                continue;
+            }
+
+            $this->assertGreaterThan(
+                0,
+                $palier->acquisitionSeconds(),
+                'Le palier ' . $palier->value . ' detecte a l instant : une patrouille qui traverse serait vue.'
+            );
         }
     }
 
