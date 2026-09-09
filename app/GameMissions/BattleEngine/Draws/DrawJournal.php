@@ -2,6 +2,8 @@
 
 namespace OGame\GameMissions\BattleEngine\Draws;
 
+use InvalidArgumentException;
+
 /**
  * Ce qu'une source a graine a tire : combien de fois, et une empreinte de chaque tirage.
  *
@@ -52,6 +54,39 @@ final class DrawJournal
     public function rawCount(): int
     {
         return $this->rawCount;
+    }
+
+    /**
+     * L empreinte telle qu elle vit ici : un entier, non la chaine hexadecimale que Rust compare.
+     *
+     * Elle sert a **reprendre** un journal, pas a le comparer — reprendre depuis les seize chiffres
+     * demanderait de les relire, et une conversion de plus est une occasion de plus de se tromper.
+     */
+    public function digestAsInteger(): int
+    {
+        return $this->digest;
+    }
+
+    /**
+     * Un journal repris la ou un autre s est arrete.
+     *
+     * **Les trois compteurs, pas seulement l empreinte.** Le banc de parite compare le nombre de
+     * tirages semantiques, le nombre de tirages bruts **et** l empreinte : reprendre en oubliant
+     * l un des trois rendrait une bataille decoupee incomparable a la meme bataille entiere, alors
+     * meme qu elle aurait joue les memes nombres.
+     */
+    public static function resumedFrom(int $count, int $rawCount, int $digest): self
+    {
+        if ($count < 0 || $rawCount < 0) {
+            throw new InvalidArgumentException('A resumed journal counts from zero, got ' . $count . ' and ' . $rawCount . '.');
+        }
+
+        $journal = new self();
+        $journal->count = $count;
+        $journal->rawCount = $rawCount;
+        $journal->digest = $digest;
+
+        return $journal;
     }
 
     /**

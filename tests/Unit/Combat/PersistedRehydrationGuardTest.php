@@ -68,6 +68,10 @@ class PersistedRehydrationGuardTest extends TestCase
             'tests/Unit/Combat/FrozenCombatApplicationContextTest.php',
             'testASpaceDockLevelGivenAsANumericStringIsRefused',
         ],
+        'Replay/BattleFieldStateCodec::fromStorage' => [
+            'tests/Unit/Combat/BattleFieldStateCodecTest.php',
+            'testANumericStringIsRefused',
+        ],
         'Replay/BattleResultCodec::fromStorage' => [
             'tests/Unit/Combat/BattleResultCodecTest.php',
             'testANumericStringIsRefused',

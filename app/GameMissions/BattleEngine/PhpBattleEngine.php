@@ -135,10 +135,13 @@ class PhpBattleEngine extends BattleEngine
         }
 
         // Les deux tableaux sont deja reindexes : la manoeuvre de Hamill vient de le faire.
+        // **Les deux bandes voyagent** : celle des rounds, et celle de la bataille dont elle est
+        // nee — Hamill y a deja puise, le tirage de lune y puisera apres les rounds.
         return new BattleFieldState(
             $attackerUnits,
             $defenderUnits,
             $this->roundDraws,
+            $this->draws,
             0,
             $attackerRemainingShips,
             $defenderRemainingShips,

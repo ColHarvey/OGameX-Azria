@@ -31,12 +31,17 @@ use OGame\GameObjects\Models\Units\UnitCollection;
  * etape** : un defaut invisible en lecture, enorme en jeu. Les unites voyagent en objets, avec leur
  * coque, et c est la raison d etre de ce transport.
  *
- * ## L etat des tirages voyage avec le champ
+ * ## L etat des tirages voyage avec le champ — et il y a DEUX bandes
  *
  * Le generateur est un xorshift 32 bits : son etat tient en un mot. Le porter ici rend la suite de
  * tirages **independante du decoupage** — jouer six rounds d affilee ou six etapes d un round
- * consomme exactement la meme sequence, dans le meme ordre. C est ce qui permettra de prouver que
- * decouper la bataille ne la change pas.
+ * consomme exactement la meme sequence, dans le meme ordre.
+ *
+ * **La bande des rounds ne suffit pas, et la conception ne l avait pas vu.** Le moteur tire de deux
+ * sources : celle de la bataille (`$draws`), ou la manoeuvre de Hamill puise **avant** les rounds et
+ * ou le tirage de lune puise **apres**, et celle des rounds (`forRounds()`), qui en nait. Une reprise
+ * qui ne garderait que la seconde rejouerait bien les rounds, puis divergerait sur ce qui vient
+ * apres. Les deux voyagent donc ensemble.
  *
  * ## Ce que cet objet n est pas encore
  *
@@ -50,6 +55,7 @@ final class BattleFieldState
      * @param array<int, BattleUnit> $attackerUnits Les unites attaquantes vivantes, en ordre canonique.
      * @param array<int, BattleUnit> $defenderUnits Les unites defenseuses vivantes, en ordre canonique.
      * @param BattleDraws $roundDraws La bande des rounds, avec ce qu elle a deja consomme.
+     * @param BattleDraws $battleDraws La bande de la bataille, celle d ou la bande des rounds est nee.
      * @param int $roundsPlayed Combien de rounds ont ete joues sur ce champ.
      * @param UnitCollection $attackerRemainingShips Le decompte attaquant apres les pertes.
      * @param UnitCollection $defenderRemainingShips Le decompte defenseur apres les pertes.
@@ -62,6 +68,7 @@ final class BattleFieldState
         public array $attackerUnits,
         public array $defenderUnits,
         public BattleDraws $roundDraws,
+        public BattleDraws $battleDraws,
         public int $roundsPlayed,
         public UnitCollection $attackerRemainingShips,
         public UnitCollection $defenderRemainingShips,

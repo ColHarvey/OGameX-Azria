@@ -33,11 +33,34 @@ final class SeededDraws implements BattleDraws
 
     /**
      * @param int|RawDraws $seedOrRaw Une graine pour le xorshift, ou une suite brute dictee.
+     * @param DrawJournal|null $journal Un journal deja commence, pour reprendre une bande en cours.
+     *        Absent, la bande commence a zero — le cas de toutes les batailles d'un seul tenant.
      */
-    public function __construct(int|RawDraws $seedOrRaw)
+    public function __construct(int|RawDraws $seedOrRaw, DrawJournal|null $journal = null)
     {
         $this->raw = $seedOrRaw instanceof RawDraws ? $seedOrRaw : new Xorshift32($seedOrRaw);
-        $this->journal = new DrawJournal();
+        $this->journal = $journal ?? new DrawJournal();
+    }
+
+    /**
+     * La bande reprise exactement ou elle s'etait arretee.
+     *
+     * ## Ce que « exactement » exige, et pourquoi les quatre
+     *
+     * Le mot du generateur donne les nombres a venir. Les trois compteurs du journal donnent la
+     * comparabilite : le banc de parite verifie le nombre de tirages semantiques, le nombre de
+     * tirages bruts **et** l'empreinte. Reprendre en oubliant l'un des trois jouerait la meme
+     * bataille tout en la rendant incomparable a elle-meme.
+     *
+     * Une bande reprise n'est pas une bande neuve : `forRounds()` reste ce qui commence une suite,
+     * au premier round et nulle part ailleurs.
+     */
+    public static function resumedFrom(int $seed, int $state, int $count, int $rawCount, int $digest): self
+    {
+        return new self(
+            Xorshift32::resumedAt($seed, $state),
+            DrawJournal::resumedFrom($count, $rawCount, $digest)
+        );
     }
 
     /**
@@ -47,6 +70,17 @@ final class SeededDraws implements BattleDraws
     public function seed(): int|null
     {
         return $this->raw instanceof Xorshift32 ? $this->raw->seed() : null;
+    }
+
+    /**
+     * Le mot courant de la suite brute — ou `null` quand la suite est dictee par un essai.
+     *
+     * Avec la graine et les trois compteurs du journal, c'est tout ce qu'il faut pour reprendre.
+     * Une suite dictee, elle, ne se reprend pas : elle est une liste, pas un generateur.
+     */
+    public function rawState(): int|null
+    {
+        return $this->raw instanceof Xorshift32 ? $this->raw->state() : null;
     }
 
     public function targetIndex(int $count): int
