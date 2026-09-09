@@ -370,6 +370,67 @@ class SurveillanceWatchTest extends AccountTestCase
     }
 
     /**
+     * Demolir puis reconstruire est une nouvelle mise en service, et l anciennete ne revient pas.
+     *
+     * ## Ce que ce temoin refuse
+     *
+     * Un contact revoque garde sa ligne — c est voulu, un audit doit rester lisible. Le risque est
+     * qu une reconstruction la **reprenne** : la patrouille serait alors vue aussitot, avec une
+     * anciennete acquise par un capteur qui n existait plus. Le nouveau contact doit etre une ligne
+     * neuve, dont l acquisition part de la seconde mise en service.
+     */
+    public function testRebuildingAfterADemolitionStartsANewAcquisition(): void
+    {
+        [, $etranger, $galaxie, $systeme] = $this->unSystemeEtranger();
+
+        $entree = 1_700_003_000;
+        $patrouille = $this->unePatrouilleEntree((int)$this->currentUserId, $galaxie, $systeme, $entree);
+        $observateur = $this->unCorpsEquipe($etranger, $galaxie, $systeme, SurveillanceTier::Contact->value);
+
+        $veille = resolve(SurveillanceWatch::class);
+        $veille->acquire($patrouille, $entree);
+
+        $premier = SurveillanceContact::query()->where('observer_planet_id', $observateur)->firstOrFail();
+        $this->assertSame($entree, (int)$premier->acquisition_from);
+
+        // Demolition : ce que ce corps observait est revoque.
+        $demolition = $entree + 60;
+        DB::table('planets')->where('id', $observateur)->update(['surveillance_network' => 0]);
+        $veille->networkLevelChanged($observateur, 0, $demolition);
+
+        $premier->refresh();
+        $this->assertSame($demolition, (int)$premier->revoked_at, 'La demolition n a pas revoque.');
+
+        // Reconstruction bien plus tard : une acquisition neuve, jamais la reprise de l ancienne.
+        $reconstruction = $entree + 100_000;
+        DB::table('planets')->where('id', $observateur)->update(['surveillance_network' => SurveillanceTier::Contact->value]);
+        $veille->commission($observateur, SurveillanceTier::Contact->value, $reconstruction);
+
+        $lignes = SurveillanceContact::query()
+            ->where('observer_planet_id', $observateur)
+            ->where('patrol_id', $patrouille->id)
+            ->orderBy('id')
+            ->get();
+
+        $this->assertCount(2, $lignes, 'La reconstruction a repris la ligne revoquee au lieu d en ouvrir une neuve.');
+
+        $ancienne = $lignes->first();
+        $neuve = $lignes->last();
+
+        $this->assertNotNull($ancienne);
+        $this->assertNotNull($neuve);
+        $this->assertSame($demolition, (int)$ancienne->revoked_at, 'L ancienne ligne a ete ressuscitee.');
+        $this->assertNull($neuve->revoked_at);
+        $this->assertSame($reconstruction, (int)$neuve->acquisition_from, 'La nouvelle acquisition n a pas commence a la reconstruction.');
+        $this->assertSame(
+            $reconstruction + SurveillanceTier::Contact->acquisitionSeconds(),
+            (int)$neuve->visible_from,
+            'Le capteur reconstruit a herite d une anciennete qu il n a pas vecue.'
+        );
+        $this->assertFalse($neuve->isVisibleAt($reconstruction), 'Le contact est visible des la reconstruction.');
+    }
+
+    /**
      * Le meilleur reseau du systeme gouverne, jamais la somme de plusieurs.
      */
     public function testTheBestNetworkOfTheSystemGoverns(): void
