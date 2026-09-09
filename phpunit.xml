@@ -8,6 +8,10 @@
       <directory suffix="Test.php">./tests/Unit</directory>
     </testsuite>
   </testsuites>
+  <extensions>
+    <!-- Inerte tant que OGAMEX_TEST_JOURNAL ne nomme pas un dossier ; voir la classe. -->
+    <bootstrap class="Tests\Support\DistributionJournal"/>
+  </extensions>
   <php>
     <env name="APP_ENV" value="testing"/>
     <env name="CACHE_DRIVER" value="array"/>
