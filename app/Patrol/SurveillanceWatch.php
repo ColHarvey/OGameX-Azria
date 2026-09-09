@@ -231,7 +231,47 @@ final class SurveillanceWatch
     }
 
     /**
+     * Le palier qui gouverne ce que ce joueur sait de cette patrouille : le meilleur **deja acquis**.
+     *
+     * ## Construit n est pas acquis, et les deux se confondent facilement
+     *
+     * `bestTierOf()` repond a une autre question — quel est le meilleur reseau **construit** — et
+     * cette question-la ne decide rien. Un detecteur superieur dont l acquisition court encore ne
+     * doit ni livrer ses renseignements par avance, ni masquer ceux qu un detecteur inferieur donne
+     * deja. Les deux fautes sont symetriques et un seul controle les ferme : ne considerer que les
+     * contacts dont l echeance est passee, et prendre le meilleur palier parmi ceux-la.
+     *
+     * Exemple qui les distingue : un reseau de niveau 2 acquis depuis longtemps et un niveau 3
+     * encore en attente. Le joueur voit ce que le niveau 2 autorise — ni plus, ni rien.
+     *
+     * Le niveau est relu **sur le corps observateur maintenant** : c est ce qui fait qu une
+     * amelioration livre aussitot davantage, et qu une demolition retire ce qu elle seule
+     * autorisait. Le contact ne porte aucun palier, et c est voulu.
+     */
+    public function acquiredTierFor(int $userId, int $patrolId, int $now): SurveillanceTier|null
+    {
+        $niveaux = DB::table('surveillance_contacts')
+            ->join('planets', 'planets.id', '=', 'surveillance_contacts.observer_planet_id')
+            ->where('surveillance_contacts.observer_user_id', $userId)
+            ->where('surveillance_contacts.patrol_id', $patrolId)
+            ->whereNull('surveillance_contacts.revoked_at')
+            ->where('surveillance_contacts.visible_from', '<=', $now)
+            ->where('planets.user_id', $userId)
+            ->where(function ($requete): void {
+                $requete->whereNull('planets.destroyed')->orWhere('planets.destroyed', 0);
+            })
+            ->pluck('planets.surveillance_network')
+            ->all();
+
+        return SurveillanceTier::bestOf(array_map(static fn (mixed $niveau): int => (int)$niveau, $niveaux));
+    }
+
+    /**
      * Le meilleur palier dont ce joueur dispose dans ce systeme, ou `null` s il n en a aucun.
+     *
+     * **Ce qui est construit, non ce qui est acquis.** Cette lecture sert a decrire l equipement
+     * d un joueur — un devis, un ecran d installations —, jamais a decider ce qu il voit d une
+     * patrouille : pour cela, `acquiredTierFor()`, qui exige que l acquisition soit terminee.
      *
      * **Aucun detecteur, aucun renseignement.** Le meilleur, jamais la somme : c est
      * `SurveillanceTier::bestOf()` qui porte la regle, et cette methode ne fait que lui donner les

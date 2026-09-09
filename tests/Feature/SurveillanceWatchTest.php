@@ -431,6 +431,118 @@ class SurveillanceWatchTest extends AccountTestCase
     }
 
     /**
+     * Un detecteur superieur encore en acquisition ne revele rien, et ne masque rien non plus.
+     *
+     * ## Deux fautes symetriques, un seul cas pour les prendre
+     *
+     * Un niveau 3 dont l acquisition court encore, et un niveau 2 acquise depuis longtemps. Deux
+     * facons de se tromper :
+     *
+     *  - **reveler par avance** — rendre ce que le niveau 3 donnera, alors qu il n a pas fini
+     *    d ecouter ;
+     *  - **masquer l acquis** — ne rien rendre du tout sous pretexte que le meilleur detecteur n est
+     *    pas pret, alors que le niveau 2 sait deja.
+     *
+     * La reponse juste est au milieu, et c est la seule que ce cas laisse passer : le palier
+     * gouvernant vaut exactement `Identity`.
+     */
+    public function testAHigherNetworkStillAcquiringNeitherRevealsNorHides(): void
+    {
+        [, $etranger, $galaxie, $systeme] = $this->unSystemeEtranger();
+
+        $entree = 1_700_004_000;
+        $patrouille = $this->unePatrouilleEntree((int)$this->currentUserId, $galaxie, $systeme, $entree);
+
+        $lent = $this->unCorpsEquipe($etranger, $galaxie, $systeme, SurveillanceTier::Identity->value);
+        $veille = resolve(SurveillanceWatch::class);
+        $veille->acquire($patrouille, $entree);
+
+        // Le niveau 2 a fini d acquerir ; on se place juste apres son echeance.
+        $maintenant = $entree + SurveillanceTier::Identity->acquisitionSeconds();
+
+        $this->assertSame(
+            SurveillanceTier::Identity,
+            $veille->acquiredTierFor($etranger, (int)$patrouille->id, $maintenant),
+            'Le palier acquis n est pas celui du detecteur qui a fini d ecouter.'
+        );
+
+        // Un niveau 3 entre en service maintenant : son acquisition commence, elle n est pas finie.
+        $rapide = $this->unCorpsEquipe($etranger, $galaxie, $systeme, SurveillanceTier::Heading->value);
+        $veille->commission($rapide, SurveillanceTier::Heading->value, $maintenant);
+
+        $enAttente = SurveillanceContact::query()->where('observer_planet_id', $rapide)->firstOrFail();
+        $this->assertGreaterThan($maintenant, (int)$enAttente->visible_from, 'Le detecteur superieur a acquis instantanement : le cas ne prouverait rien.');
+
+        // **Ni revelation prematuree, ni masquage** : le palier reste celui du detecteur acquis.
+        $this->assertSame(
+            SurveillanceTier::Identity,
+            $veille->acquiredTierFor($etranger, (int)$patrouille->id, $maintenant),
+            'Le detecteur superieur a revele par avance, ou a masque ce que l inferieur savait deja.'
+        );
+
+        // Et quand il a fini d ecouter a son tour, c est lui qui gouverne.
+        $acquis = (int)$enAttente->visible_from;
+
+        $this->assertSame(
+            SurveillanceTier::Heading,
+            $veille->acquiredTierFor($etranger, (int)$patrouille->id, $acquis),
+            'Le detecteur superieur ne gouverne pas une fois son acquisition terminee.'
+        );
+    }
+
+    /**
+     * Aucun contact acquis, aucun palier : un detecteur qui ecoute encore ne donne rien.
+     */
+    public function testATierIsGrantedOnlyOnceSomethingHasBeenAcquired(): void
+    {
+        [, $etranger, $galaxie, $systeme] = $this->unSystemeEtranger();
+
+        $entree = 1_700_005_000;
+        $patrouille = $this->unePatrouilleEntree((int)$this->currentUserId, $galaxie, $systeme, $entree);
+        $observateur = $this->unCorpsEquipe($etranger, $galaxie, $systeme, SurveillanceTier::Estimate->value);
+
+        $veille = resolve(SurveillanceWatch::class);
+        $veille->acquire($patrouille, $entree);
+
+        // Une seconde avant l echeance : le reseau existe, il a ecoute, il n a pas fini.
+        $this->assertNull(
+            $veille->acquiredTierFor($etranger, (int)$patrouille->id, $entree + SurveillanceTier::Estimate->acquisitionSeconds() - 1),
+            'Un detecteur qui n a pas fini d acquerir accorde deja son palier.'
+        );
+
+        $this->assertSame(
+            SurveillanceTier::Estimate,
+            $veille->acquiredTierFor($etranger, (int)$patrouille->id, $entree + SurveillanceTier::Estimate->acquisitionSeconds()),
+            'L echeance atteinte n accorde pas le palier.'
+        );
+    }
+
+    /**
+     * Un contact revoque ne gouverne plus rien, meme s il avait ete acquis.
+     */
+    public function testARevokedContactGrantsNoTier(): void
+    {
+        [, $etranger, $galaxie, $systeme] = $this->unSystemeEtranger();
+
+        $entree = 1_700_006_000;
+        $patrouille = $this->unePatrouilleEntree((int)$this->currentUserId, $galaxie, $systeme, $entree);
+        $observateur = $this->unCorpsEquipe($etranger, $galaxie, $systeme, SurveillanceTier::Identity->value);
+
+        $veille = resolve(SurveillanceWatch::class);
+        $veille->acquire($patrouille, $entree);
+
+        $acquis = $entree + SurveillanceTier::Identity->acquisitionSeconds();
+        $this->assertSame(SurveillanceTier::Identity, $veille->acquiredTierFor($etranger, (int)$patrouille->id, $acquis));
+
+        $veille->revokeAllFrom($observateur, $acquis + 1);
+
+        $this->assertNull(
+            $veille->acquiredTierFor($etranger, (int)$patrouille->id, $acquis + 2),
+            'Un contact revoque continue de gouverner : perdre la couverture ne retire pas ce qu elle autorisait.'
+        );
+    }
+
+    /**
      * Le meilleur reseau du systeme gouverne, jamais la somme de plusieurs.
      */
     public function testTheBestNetworkOfTheSystemGoverns(): void
