@@ -9,6 +9,7 @@ use OGame\Galaxy\GalaxyHeaderCounters;
 use OGame\Galaxy\PatrolProjection;
 use OGame\Patrol\PatrolOrders;
 use OGame\Patrol\PatrolUpkeep;
+use OGame\Patrol\SurveillanceProjection;
 use OGame\Services\FleetMissionService;
 use OGame\Services\PlayerService;
 
@@ -54,6 +55,12 @@ class GalaxyFleetsController extends OGameController
             'server_now' => $now,
             'movements' => $projection->inSystem($galaxy, $system),
             'patrols' => (new PatrolProjection($player, $orders, $upkeep))->inSystem($galaxy, $system, $now),
+            // **Les patrouilles etrangeres arrivent par une clef distincte, et reduites a leur droit.**
+            // Les siennes et celles d autrui n obeissent pas aux memes regles : melanger les deux
+            // listes ferait porter a une seule projection deux jeux de faits, et la moins stricte
+            // finirait par gouverner. Ici la surveillance omet ce qu elle ne peut pas dire, et la
+            // liste est vide pour qui n a pas de detecteur acquis.
+            'surveillance' => resolve(SurveillanceProjection::class)->inSystem($player->getId(), $galaxy, $system, $now),
             // Les compteurs du bandeau, a jour a chaque mouvement : la carte redemande cette couche
             // sur le canal du joueur, la ou la photographie ne se relit qu'au changement de systeme.
             'counters' => GalaxyHeaderCounters::of($player),

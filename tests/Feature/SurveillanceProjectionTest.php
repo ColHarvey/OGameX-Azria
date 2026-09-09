@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use OGame\Models\FleetMission;
 use OGame\Models\Patrol;
@@ -320,6 +321,70 @@ class SurveillanceProjectionTest extends AccountTestCase
 
         $this->assertFalse($cap['leaves_system']);
         $this->assertSame(['x' => 700, 'y' => 500], $cap['towards'], 'Le point vise dans le systeme observe n est pas donne.');
+    }
+
+    /**
+     * Par la vraie route de la Galaxie : la surveillance arrive, et aucune autre couche ne la double.
+     *
+     * ## Ce que la classe seule ne prouve pas
+     *
+     * Une projection juste que le service n appelle pas laisse le jeu ou il etait ; et une projection
+     * appelee qui cohabite avec une autre couche revelant les memes faits ne protege rien. Ce temoin
+     * demande donc la reponse au serveur et la lit entiere : la clef `surveillance` porte le contact,
+     * et la couche `movements` — qui sert dans la meme reponse — n en dit pas un mot.
+     */
+    public function testTheRealGalaxyAnswerCarriesTheContactAndNoOtherLayerDoes(): void
+    {
+        $this->monDetecteur(SurveillanceTier::Identity->value);
+        [$patrouille, $etranger] = $this->unePatrouilleEtrangere(20);
+        $maintenant = $this->acquisA($patrouille, SurveillanceTier::Identity);
+
+        $coords = $this->planetService->getPlanetCoordinates();
+        Date::setTestNow(Date::createFromTimestamp($maintenant));
+
+        $reponse = $this->getJson(route('galaxy.fleets', ['galaxy' => $coords->galaxy, 'system' => $coords->system]));
+        $reponse->assertStatus(200);
+
+        $charge = $reponse->json();
+
+        $this->assertArrayHasKey('surveillance', $charge, 'La reponse de la Galaxie ne porte pas la surveillance : la projection n est pas branchee.');
+        $this->assertCount(1, $charge['surveillance'], 'Le contact acquis n arrive pas au navigateur.');
+        $this->assertSame($etranger, $charge['surveillance'][0]['owner']['id']);
+
+        // **Aucune autre couche ne dit la meme chose.** La patrouille etrangere ne doit apparaitre
+        // ni dans les mouvements, ni dans la liste des patrouilles du joueur.
+        $enJson = json_encode($charge['movements']);
+        $this->assertIsString($enJson);
+        $this->assertStringNotContainsString('"' . $patrouille->id . '"', $enJson);
+
+        foreach ($charge['patrols'] as $sienne) {
+            $this->assertNotSame((int)$patrouille->id, (int)$sienne['id'], 'La patrouille etrangere figure parmi celles du joueur.');
+        }
+    }
+
+    /**
+     * Par la vraie route, sans detecteur : la clef existe et elle est vide.
+     *
+     * Vide plutot qu absente : le navigateur doit pouvoir remplacer ce qu il affiche par rien. Une
+     * clef manquante le laisserait garder l ancien contenu, ce qui est exactement la faute que la
+     * revocation doit empecher.
+     */
+    public function testTheRealGalaxyAnswerIsEmptyWithoutADetector(): void
+    {
+        $this->monDetecteur(0);
+        [$patrouille] = $this->unePatrouilleEtrangere(20);
+        resolve(SurveillanceWatch::class)->acquire($patrouille, (int)$patrouille->entered_system_at);
+
+        $coords = $this->planetService->getPlanetCoordinates();
+        Date::setTestNow(Date::createFromTimestamp((int)$patrouille->entered_system_at + 86_400));
+
+        $reponse = $this->getJson(route('galaxy.fleets', ['galaxy' => $coords->galaxy, 'system' => $coords->system]));
+        $reponse->assertStatus(200);
+
+        $charge = $reponse->json();
+
+        $this->assertArrayHasKey('surveillance', $charge, 'La clef disparait sans detecteur : le navigateur garderait son ancien contenu.');
+        $this->assertSame([], $charge['surveillance'], 'Un joueur sans detecteur recoit un renseignement par la vraie route.');
     }
 
     /**
