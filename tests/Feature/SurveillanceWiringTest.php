@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\FleetMission;
@@ -199,6 +200,65 @@ class SurveillanceWiringTest extends AccountTestCase
             SurveillanceContact::query()->where('observer_planet_id', $sansReseau)->where('patrol_id', $patrouille->id)->count(),
             'A neighbour with no network was told about the patrol: the leak is server-side, not a display matter.'
         );
+    }
+
+    /**
+     * Construire le reseau par le vrai ecrivain ouvre les contacts des patrouilles deja posees.
+     *
+     * `PlanetService::setObjectLevel()` est le seul endroit ou un niveau de batiment s ecrit : la
+     * file terminee, la demolition et l administration y passent toutes. L eprouver ici, plutot que
+     * d appeler la veille, est ce qui distingue une regle juste d une regle atteinte.
+     */
+    public function testBuildingTheNetworkOpensContactsForPatrolsAlreadyThere(): void
+    {
+        $observateur = $this->unTiersDansMonSysteme(0);
+        $patrouille = $this->unePatrouillePosee();
+
+        $this->assertSame(
+            0,
+            SurveillanceContact::query()->where('observer_planet_id', $observateur)->count(),
+            'Un corps sans reseau observait deja : la premisse est fausse.'
+        );
+
+        $corps = resolve(PlanetServiceFactory::class)->make($observateur, true);
+        $this->assertNotNull($corps);
+
+        $maintenant = (int)Date::now()->timestamp;
+        $corps->setObjectLevel(ObjectService::getObjectByMachineName('surveillance_network')->id, SurveillanceTier::Contact->value);
+
+        $contact = SurveillanceContact::query()
+            ->where('observer_planet_id', $observateur)
+            ->where('patrol_id', $patrouille->id)
+            ->first();
+
+        $this->assertNotNull($contact, 'Construire le reseau n a ouvert aucun contact : le raccordement manque.');
+        $this->assertSame($maintenant, (int)$contact->acquisition_from, 'L acquisition ne part pas de la mise en service.');
+    }
+
+    /**
+     * Demolir le reseau par le vrai ecrivain revoque ce que ce corps observait.
+     */
+    public function testDemolishingTheNetworkRevokesWhatItWatched(): void
+    {
+        $observateur = $this->unTiersDansMonSysteme(SurveillanceTier::Identity->value);
+        $patrouille = $this->unePatrouillePosee();
+
+        $this->assertSame(
+            1,
+            SurveillanceContact::query()->where('observer_planet_id', $observateur)->whereNull('revoked_at')->count(),
+            'La premisse manque : aucun contact ouvert a revoquer.'
+        );
+
+        $corps = resolve(PlanetServiceFactory::class)->make($observateur, true);
+        $this->assertNotNull($corps);
+        $corps->setObjectLevel(ObjectService::getObjectByMachineName('surveillance_network')->id, 0);
+
+        $contact = SurveillanceContact::query()
+            ->where('observer_planet_id', $observateur)
+            ->where('patrol_id', $patrouille->id)
+            ->firstOrFail();
+
+        $this->assertNotNull($contact->revoked_at, 'Demolir le reseau n a rien revoque : ce que la perte doit retirer est reste.');
     }
 
     /**

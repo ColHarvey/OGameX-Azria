@@ -20,6 +20,7 @@ use Illuminate\Support\Carbon;
  * @property int $observer_user_id
  * @property int $patrol_id
  * @property int $entered_system_at
+ * @property int $acquisition_from
  * @property int $visible_from
  * @property int|null $revoked_at
  * @property Carbon|null $created_at
@@ -34,6 +35,7 @@ use Illuminate\Support\Carbon;
     'observer_user_id',
     'patrol_id',
     'entered_system_at',
+    'acquisition_from',
     'visible_from',
     'revoked_at',
 ])]

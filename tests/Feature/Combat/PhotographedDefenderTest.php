@@ -253,7 +253,11 @@ final class PhotographedDefenderTest extends FleetDispatchTestCase
      * difference entre les deux ne se devine pas, elle se lit. Un prochain rouge portera donc le
      * proprietaire reellement selectionne, tous ses corps, et chaque file avec ses dates.
      *
-     * Construite seulement quand une assertion tombe : un echec paie une requete, un succes rien.
+     * **Construite a chaque assertion, reussie ou non**, parce qu elle est le troisieme argument
+     * de l assertion : PHP l evalue avant que PHPUnit ne compare. Casser une assertion prouve que
+     * le message s affiche, jamais qu il est absent quand elle passe. Le cout est de quelques
+     * requetes par assertion dans cette seule classe, et il est assume ; ce qui ne l est pas,
+     * c est de le decrire autrement qu il n est.
      */
     private function diagnosticDuGel(int $cible, int $proprietaire, int $ouverture): string
     {

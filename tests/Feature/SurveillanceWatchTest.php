@@ -300,6 +300,76 @@ class SurveillanceWatchTest extends AccountTestCase
     }
 
     /**
+     * Un reseau construit apres l arrivee acquiert depuis sa mise en service, jamais depuis l entree.
+     *
+     * Sans cette regle, batir un capteur a onze heures revelerait d emblee une patrouille posee a
+     * dix : l entree plus le delai serait deja echue, et l acquisition n aurait jamais eu lieu.
+     */
+    public function testANetworkBuiltAfterThePatrolAcquiresFromItsCommissioning(): void
+    {
+        [, $etranger, $galaxie, $systeme] = $this->unSystemeEtranger();
+
+        $entree = 1_700_001_000;
+        $patrouille = $this->unePatrouilleEntree((int)$this->currentUserId, $galaxie, $systeme, $entree);
+
+        // Le corps n a rien au moment ou la patrouille se pose.
+        $observateur = $this->unCorpsEquipe($etranger, $galaxie, $systeme, 0);
+        resolve(SurveillanceWatch::class)->acquire($patrouille, $entree);
+
+        $this->assertSame(0, SurveillanceContact::query()->where('observer_planet_id', $observateur)->count(), 'Un corps sans reseau a ouvert un contact.');
+
+        // Une heure plus tard, le reseau entre en service.
+        $miseEnService = $entree + 3600;
+        DB::table('planets')->where('id', $observateur)->update(['surveillance_network' => SurveillanceTier::Contact->value]);
+        $ouverts = resolve(SurveillanceWatch::class)->commission($observateur, SurveillanceTier::Contact->value, $miseEnService);
+
+        $this->assertSame(1, $ouverts, 'La mise en service n a ouvert aucun contact sur une patrouille pourtant presente.');
+
+        $contact = SurveillanceContact::query()->where('observer_planet_id', $observateur)->firstOrFail();
+
+        $this->assertSame($entree, (int)$contact->entered_system_at, 'Le contact a oublie quand la patrouille est entree.');
+        $this->assertSame($miseEnService, (int)$contact->acquisition_from, 'L acquisition ne part pas de la mise en service.');
+        $this->assertSame(
+            $miseEnService + SurveillanceTier::Contact->acquisitionSeconds(),
+            (int)$contact->visible_from,
+            'L echeance a ete calculee depuis l entree : le capteur aurait observe avant d exister.'
+        );
+
+        // Et elle n est pas deja echue au moment ou le capteur s allume.
+        $this->assertFalse($contact->isVisibleAt($miseEnService), 'Le contact est visible des l allumage du capteur.');
+    }
+
+    /**
+     * Une amelioration recalcule depuis le depart d acquisition, et ne relance pas l horloge.
+     */
+    public function testAnUpgradeRecomputesFromTheAcquisitionStartNotTheEntry(): void
+    {
+        [, $etranger, $galaxie, $systeme] = $this->unSystemeEtranger();
+
+        $entree = 1_700_002_000;
+        $patrouille = $this->unePatrouilleEntree((int)$this->currentUserId, $galaxie, $systeme, $entree);
+        $observateur = $this->unCorpsEquipe($etranger, $galaxie, $systeme, 0);
+
+        $miseEnService = $entree + 3600;
+        DB::table('planets')->where('id', $observateur)->update(['surveillance_network' => SurveillanceTier::Contact->value]);
+        resolve(SurveillanceWatch::class)->commission($observateur, SurveillanceTier::Contact->value, $miseEnService);
+
+        // L amelioration survient plus tard encore : elle raccourcit le delai, elle ne redemarre rien.
+        $amelioration = $miseEnService + 600;
+        DB::table('planets')->where('id', $observateur)->update(['surveillance_network' => SurveillanceTier::Strength->value]);
+        resolve(SurveillanceWatch::class)->networkLevelChanged($observateur, SurveillanceTier::Strength->value, $amelioration);
+
+        $contact = SurveillanceContact::query()->where('observer_planet_id', $observateur)->firstOrFail();
+
+        $this->assertSame(
+            $miseEnService + SurveillanceTier::Strength->acquisitionSeconds(),
+            (int)$contact->visible_from,
+            'L amelioration a relance l horloge depuis elle-meme au lieu de partir du depart d acquisition.'
+        );
+        $this->assertTrue($contact->isVisibleAt($amelioration), 'L amelioration n a pas revele le contact aussitot.');
+    }
+
+    /**
      * Le meilleur reseau du systeme gouverne, jamais la somme de plusieurs.
      */
     public function testTheBestNetworkOfTheSystemGoverns(): void

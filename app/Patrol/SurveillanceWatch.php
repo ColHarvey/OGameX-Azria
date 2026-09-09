@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\DB;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\Patrol;
 use OGame\Models\SurveillanceContact;
+use OGame\Patrol\Enums\PatrolState;
 use OGame\Patrol\Enums\SurveillanceTier;
 
 /**
@@ -30,6 +31,15 @@ use OGame\Patrol\Enums\SurveillanceTier;
  * son reseau, change de mains ou disparait. Dans tous les cas le contact est **revoque**, pas
  * efface : ce qui a ete su l a ete, et une ligne revoquee reste lisible pour un audit. Un retour
  * dans le systeme ouvre une **nouvelle** ligne — donc une nouvelle acquisition, depuis zero.
+ *
+ * ## L entree n est pas toujours le depart de l acquisition
+ *
+ * Un reseau construit **apres** l arrivee d une patrouille ne peut pas avoir observe ce qui l a
+ * precede : son acquisition part de sa mise en service, pas de l entree. Le contact porte donc
+ * `acquisition_from`, egal a l entree quand le reseau existait deja, et a l instant de la mise en
+ * service quand il est ne apres. Sans cette distinction, batir un reseau a onze heures aurait
+ * revele d emblee une patrouille posee a dix — une acquisition deja echue sans qu aucun capteur
+ * n ait ecoute.
  *
  * ## L amelioration est retroactive, la perte ne l est pas
  *
@@ -96,6 +106,8 @@ final class SurveillanceWatch
                 'observer_user_id' => (int)$observateur->user_id,
                 'patrol_id' => (int)$patrol->id,
                 'entered_system_at' => $entree,
+                // Le reseau existait avant que la patrouille n arrive : l acquisition part de l entree.
+                'acquisition_from' => $entree,
                 'visible_from' => $entree + $palier->acquisitionSeconds(),
             ]);
         }
@@ -152,7 +164,70 @@ final class SurveillanceWatch
         SurveillanceContact::query()
             ->where('observer_planet_id', $observerPlanetId)
             ->whereNull('revoked_at')
-            ->update(['visible_from' => DB::raw('entered_system_at + ' . $palier->acquisitionSeconds())]);
+            ->update(['visible_from' => DB::raw('acquisition_from + ' . $palier->acquisitionSeconds())]);
+    }
+
+    /**
+     * Un reseau vient d entrer en service : il ouvre les contacts des patrouilles deja presentes.
+     *
+     * ## Ce que la mise en service ne rattrape pas
+     *
+     * Elle n observe pas le passe. Une patrouille posee depuis dix heures ne devient pas visible
+     * parce qu un capteur s allume a onze : son acquisition **commence** a cet allumage, et court
+     * le delai du palier. C est pourquoi le contact naissant part de `$now` et non de l entree.
+     *
+     * Idempotent : un contact deja ouvert n est pas double.
+     *
+     * @return int Le nombre de contacts ouverts.
+     */
+    public function commission(int $observerPlanetId, int $level, int $now): int
+    {
+        $palier = SurveillanceTier::fromLevel($level);
+
+        if ($palier === null) {
+            return 0;
+        }
+
+        $corps = DB::table('planets')->where('id', $observerPlanetId)->first(['user_id', 'galaxy', 'system', 'destroyed']);
+
+        if ($corps === null || (int)$corps->destroyed > 0) {
+            return 0;
+        }
+
+        $ouverts = 0;
+
+        $patrouilles = Patrol::query()
+            ->where('galaxy', (int)$corps->galaxy)
+            ->where('system', (int)$corps->system)
+            ->where('user_id', '!=', (int)$corps->user_id)
+            ->whereIn('state', [PatrolState::Stationed->value, PatrolState::Immobilised->value, PatrolState::Attacking->value])
+            ->orderBy('id')
+            ->get();
+
+        foreach ($patrouilles as $patrouille) {
+            $ouvert = SurveillanceContact::query()
+                ->where('observer_planet_id', $observerPlanetId)
+                ->where('patrol_id', (int)$patrouille->id)
+                ->whereNull('revoked_at')
+                ->exists();
+
+            if ($ouvert) {
+                continue;
+            }
+
+            SurveillanceContact::query()->create([
+                'observer_planet_id' => $observerPlanetId,
+                'observer_user_id' => (int)$corps->user_id,
+                'patrol_id' => (int)$patrouille->id,
+                'entered_system_at' => $patrouille->entered_system_at === null ? $now : (int)$patrouille->entered_system_at,
+                'acquisition_from' => $now,
+                'visible_from' => $now + $palier->acquisitionSeconds(),
+            ]);
+
+            $ouverts++;
+        }
+
+        return $ouverts;
     }
 
     /**

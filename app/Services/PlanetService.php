@@ -27,6 +27,7 @@ use OGame\Models\ResearchQueue;
 use OGame\Models\Resource;
 use OGame\Models\Resources;
 use OGame\Models\UnitQueue;
+use OGame\Patrol\SurveillanceWatch;
 use OGame\Support\WholeUnits;
 use RuntimeException;
 use Throwable;
@@ -1797,10 +1798,53 @@ class PlanetService
             throw new RuntimeException('setObjectLevel() can only be used for buildings and stations, not: ' . $object->machine_name);
         }
 
+        $avant = (int)($this->planet->{$object->machine_name} ?? 0);
         $this->planet->{$object->machine_name} = $level;
         if ($save_planet) {
             $this->save();
         }
+
+        $this->surveillanceNetworkChanged($object->machine_name, $avant, $level);
+    }
+
+    /**
+     * Un Reseau de surveillance qui change de niveau agit sur ce que son systeme observe.
+     *
+     * ## Pourquoi ici, et nulle part ailleurs
+     *
+     * `setObjectLevel()` est le seul endroit ou un niveau de batiment s ecrit : la file de
+     * construction terminee y passe (`updateBuildingQueue()`), la demolition aussi, et les raccourcis
+     * d administration egalement. Accrocher la veille a un seul de ces chemins l aurait laissee muette
+     * sur les autres, sans que rien ne le signale.
+     *
+     * Trois transitions, trois effets :
+     *
+     *  - **mise en service** (aucun reseau, puis un niveau) : les patrouilles etrangeres deja posees
+     *    dans le systeme ouvrent un contact, dont l acquisition part de **cet instant** — un capteur
+     *    qui s allume n observe pas ce qui l a precede ;
+     *  - **changement de niveau** (un reseau, puis un autre) : les contacts ouverts recalculent leur
+     *    echeance depuis leur propre depart d acquisition, ce qui peut la faire tomber dans le passe
+     *    et reveler aussitot ;
+     *  - **demolition** (un reseau, puis aucun) : tout ce que ce corps observait est revoque.
+     *
+     * Muet pour tout autre batiment, et sans effet quand le niveau ne bouge pas.
+     */
+    private function surveillanceNetworkChanged(string $machineName, int $avant, int $apres): void
+    {
+        if ($machineName !== 'surveillance_network' || $avant === $apres) {
+            return;
+        }
+
+        $veille = resolve(SurveillanceWatch::class);
+        $maintenant = (int)Date::now()->timestamp;
+
+        if ($avant < 1 && $apres >= 1) {
+            $veille->commission($this->getPlanetId(), $apres, $maintenant);
+
+            return;
+        }
+
+        $veille->networkLevelChanged($this->getPlanetId(), $apres, $maintenant);
     }
 
     /**

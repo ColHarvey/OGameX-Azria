@@ -51,6 +51,13 @@ return new class () extends Migration {
                 ->cascadeOnDelete();
 
             $table->integer('entered_system_at', false, true);
+
+            // **L instant ou l acquisition commence, qui n est pas toujours l entree.** Un reseau
+            // construit apres l arrivee d une patrouille ne peut pas avoir observe ce qui l a
+            // precede : son acquisition part de sa mise en service. Une amelioration, elle, ne
+            // relance rien — elle raccourcit le delai applique a ce meme depart, et peut donc
+            // reveler aussitot. Les deux regles tiennent par cette colonne.
+            $table->integer('acquisition_from', false, true);
             $table->integer('visible_from', false, true);
             $table->integer('revoked_at', false, true)->nullable();
 
