@@ -59,7 +59,21 @@ class PlanetSpacingTest extends TestCase
         //
         // Ce qui doit partir, ce sont les planetes laissees par les classes voisines du meme
         // processus : leurs coordonnees sont ecrites en dur ici, et une seule collision fait
-        // echouer l'insertion. `planet_moves` d'abord, seule table qui les reference.
+        // echouer l'insertion.
+        //
+        // **Le nettoyage prend la portee de ce qui le bloque.** Ce commentaire affirmait que
+        // `planet_moves` etait « la seule table qui les reference » : c'etait faux, et le banc l'a
+        // dit en rougissant sur `users.planet_current`, qu'un voisin laissait pointer vers une lune
+        // de 1:1. Inventaire des clefs etrangeres vers `planets` : huit references en `NO ACTION`
+        // bloquent une suppression — `users.planet_current`, `messages.action_planet_id`, les trois
+        // files (batiments, recherche, unites), `planet_moves`, et les deux bouts de
+        // `fleet_missions`. Deux autres se gerent seules : `patrols.home_planet_id` (SET NULL) et
+        // `surveillance_contacts.observer_planet_id` (CASCADE).
+        //
+        // Les liens sont **denoues** la ou la ligne garde un sens sans sa planete — un message reste
+        // lisible, une mission garde ses coordonnees, c'est ce que fait le jeu lui-meme quand il
+        // supprime un corps — et **effaces** la ou elle n'en a plus : une file est le travail d'une
+        // planete, et rien d'autre.
         $systeme = User::where('username', User::SYSTEM_ACCOUNT_USERNAME)->value('id');
 
         $etrangeres = Planet::where('galaxy', 1)
@@ -67,7 +81,15 @@ class PlanetSpacingTest extends TestCase
             ->when($systeme !== null, fn ($requete) => $requete->where('user_id', '!=', $systeme))
             ->pluck('id');
 
-        DB::table('planet_moves')->whereIn('planet_id', $etrangeres)->delete();
+        DB::table('users')->whereIn('planet_current', $etrangeres)->update(['planet_current' => null]);
+        DB::table('messages')->whereIn('action_planet_id', $etrangeres)->update(['action_planet_id' => null]);
+        DB::table('fleet_missions')->whereIn('planet_id_from', $etrangeres)->update(['planet_id_from' => null]);
+        DB::table('fleet_missions')->whereIn('planet_id_to', $etrangeres)->update(['planet_id_to' => null]);
+
+        foreach (['planet_moves', 'building_queues', 'research_queues', 'unit_queues'] as $file) {
+            DB::table($file)->whereIn('planet_id', $etrangeres)->delete();
+        }
+
         Planet::whereIn('id', $etrangeres)->delete();
     }
 
