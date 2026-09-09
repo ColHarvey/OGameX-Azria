@@ -237,7 +237,7 @@ class GalaxyController extends OGameController
 
         $planets_array = [
             [
-                'activity' => $isDestroyed ? null : $this->getPlanetActivityStatus($planet),
+                'activity' => $isDestroyed ? self::noActivity() : $this->getPlanetActivityStatus($planet),
                 'availableMissions' => $availableMissions,
                 'fleet' => [],
                 // Une base hostile n'est pas une planete comme les autres : elle porte sa
@@ -323,7 +323,7 @@ class GalaxyController extends OGameController
         );
 
         return [
-            'activity' => $isDestroyed ? null : $this->getPlanetActivityStatus($moon),
+            'activity' => $isDestroyed ? self::noActivity() : $this->getPlanetActivityStatus($moon),
             'availableMissions' => $availableMissions,
             'fleet' => [],
             // Destroyed moons use the red-border moon_c sprite.
@@ -921,6 +921,45 @@ class GalaxyController extends OGameController
      *     showMinutes: bool
      * }
      */
+    /**
+     * L absence d activite, dite dans la forme que la vue attend — jamais `null`.
+     *
+     * ## Le defaut que cette methode ferme, vu en production le 9 septembre 2026
+     *
+     * Un corps detruit renvoyait `activity: null`. Le rendu **herite** de la Galaxie deconstruit
+     * `showActivity` sur cet objet sans le tester :
+     *
+     * ```
+     * Uncaught TypeError: Cannot read properties of null (reading 'showActivity')
+     *     at getActivityStar → renderPlanet → renderContentGalaxy
+     * ```
+     *
+     * L exception arretait le rendu du systeme, et **le chargement tournait sans fin**. La carte
+     * tactique, elle, se gardait (`!a || !a.showActivity`) : c est le vieux chemin qui tombait, donc
+     * la vue liste comme la carte, puisque celle-ci se construit par-dessus.
+     *
+     * ## Pourquoi corriger ici plutot que dans le navigateur
+     *
+     * Les deux valent, et la garde du cote du rendu viendra. Mais **le paquet livre est celui qui
+     * plante**, et le reconstruire demande un cycle complet de construction du front ; une charge
+     * utile qui ne porte plus jamais `null` se deploie avec le PHP, tout de suite. Et c est la
+     * meilleure place au fond : la vue n a jamais eu besoin d un cas particulier, elle a besoin d une
+     * forme constante.
+     *
+     * `showActivity = false` est exactement ce que la vue sait afficher pour « aucune activite » —
+     * la meme valeur qu un corps vivant inactif depuis plus d une heure.
+     *
+     * @return array<string, mixed>
+     */
+    private static function noActivity(): array
+    {
+        return [
+            'showMinutes' => true,
+            'idleTime' => null,
+            'showActivity' => false,
+        ];
+    }
+
     private function getPlanetActivityStatus(PlanetService $planet): array
     {
         $lastActivity = $planet->getMinutesSinceLastUpdate();
