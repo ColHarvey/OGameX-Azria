@@ -142,6 +142,13 @@ final class MissileVersusClosureRaceTest extends FleetDispatchTestCase
          */
         $fermetures = array_values(array_diff($issues, ['livre']));
         $this->assertCount(1, $fermetures);
+
+        /*
+         * **Le denouement se lit dans le journal de la CI.** Trois sont admis, et les compteurs d un
+         * passage vert ne disent pas lequel a eu lieu : un entrelacement qui ne se produirait jamais
+         * resterait invisible, et on croirait l avoir eprouve. Une ligne suffit a le savoir.
+         */
+        fwrite(STDERR, '[course missile/fermeture] denouement : ' . $fermetures[0] . PHP_EOL);
         $this->assertContains(
             $fermetures[0],
             ['fermee', 'deja fermee', 'arrivee tenue ailleurs'],
