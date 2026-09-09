@@ -2187,6 +2187,15 @@
     var VITESSE_DE_PATROUILLE = 10;
     var patrouilles = [];
 
+    /*
+     * Les contacts de surveillance, tels que le serveur les a rendus a la derniere reponse acceptee.
+     *
+     * **Remplacee en bloc, jamais fusionnee.** Une fusion garderait un contact que le serveur ne
+     * renvoie plus — c est-a-dire exactement ce qu une perte de couverture doit retirer. Une liste
+     * vide est donc une information : « plus rien », et non « rien de neuf ».
+     */
+    var contactsDeSurveillance = [];
+
     function coucheDesPatrouilles(carte) {
         var couche = carte.querySelector('.gtPatrolLayer');
 
@@ -2200,6 +2209,84 @@
         carte.appendChild(couche);
 
         return couche;
+    }
+
+    function coucheDeSurveillance(carte) {
+        var couche = carte.querySelector('.gtSurveillanceLayer');
+
+        if (couche) {
+            return couche;
+        }
+
+        couche = element('div', 'gtSurveillanceLayer');
+        couche.setAttribute('role', 'group');
+        couche.setAttribute('aria-label', locaFiche('surveillanceLayer', 'Contacts de surveillance'));
+        carte.appendChild(couche);
+
+        return couche;
+    }
+
+    /*
+     * Ce qu un contact permet de dire, et rien de plus.
+     *
+     * Le serveur **omet** les faits qu il n autorise pas : leur clef est absente, pas vide. Le
+     * navigateur teste donc la presence de la clef et ne fabrique aucune valeur de remplacement —
+     * inventer « proprietaire inconnu » la ou le serveur s est tu reviendrait a affirmer qu il y a
+     * un proprietaire a connaitre.
+     */
+    function intituleDuContact(contact) {
+        var morceaux = [locaFiche('surveillanceContact', 'Contact')];
+
+        if (contact.owner && contact.owner.name) {
+            morceaux.push(contact.owner.name);
+        }
+
+        if (contact.heading) {
+            morceaux.push(contact.heading.moving
+                ? (contact.heading.leaves_system
+                    ? locaFiche('surveillanceLeaving', 'quitte le systeme')
+                    : locaFiche('surveillanceMoving', 'en deplacement'))
+                : locaFiche('surveillanceStationed', 'stationnee'));
+        }
+
+        if (typeof contact.strength === 'number') {
+            morceaux.push(String(contact.strength));
+        } else if (contact.size_estimate) {
+            morceaux.push(contact.size_estimate.to === null
+                ? String(contact.size_estimate.from) + '+'
+                : String(contact.size_estimate.from) + '-' + String(contact.size_estimate.to));
+        }
+
+        return morceaux.join(' — ');
+    }
+
+    /*
+     * La couche est reconstruite a chaque reponse acceptee : ce que le serveur ne renvoie plus
+     * disparait de l ecran sans rechargement, et sans qu aucun code n ait a se souvenir de ce
+     * qu il fallait retirer.
+     */
+    function dessinerLaSurveillance(carte) {
+        var couche = coucheDeSurveillance(carte);
+
+        couche.innerHTML = '';
+
+        contactsDeSurveillance.forEach(function (contact) {
+            if (!contact || !contact.position) {
+                return;
+            }
+
+            var marqueur = element('div', 'gtSurveillanceContact');
+            var intitule = intituleDuContact(contact);
+
+            marqueur.setAttribute('data-contact-id', String(contact.contact_id));
+            marqueur.setAttribute('data-tier', String(contact.tier));
+            marqueur.setAttribute('aria-label', intitule);
+            marqueur.title = intitule;
+            marqueur.style.left = String(contact.position.x) + 'px';
+            marqueur.style.top = String(contact.position.y) + 'px';
+
+            couche.appendChild(marqueur);
+        });
     }
 
     function adresseDePatrouille(modele, id) {
@@ -3300,8 +3387,16 @@
                 decalageHorloge = Number(reponse.server_now) * 1000 - Date.now();
                 mouvements = Array.isArray(reponse.movements) ? reponse.movements : [];
                 patrouilles = Array.isArray(reponse.patrols) ? reponse.patrols : [];
+                /*
+                 * **Remplacement, jamais fusion.** Le serveur rend la liste complete de ce que le
+                 * joueur a le droit de voir a cet instant ; une liste vide retire donc ce qui etait
+                 * affiche. Le jeton, plus haut, garantit qu une reponse plus ancienne ne repasse
+                 * jamais par ici — sans quoi elle reintroduirait ce qu une revocation vient d oter.
+                 */
+                contactsDeSurveillance = Array.isArray(reponse.surveillance) ? reponse.surveillance : [];
                 dessinerLesMouvements(carte, galaxie, systeme);
                 dessinerLesPatrouilles(carte, galaxie, systeme);
+                dessinerLaSurveillance(carte);
                 animer();
             });
     }
