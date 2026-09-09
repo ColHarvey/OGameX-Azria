@@ -19,6 +19,12 @@ use Tests\TestCase;
  * Chaque motif cherche ce qui ne peut etre que du code — une affectation, un appel avec ses
  * parentheses. Chercher « surveillance » trouverait aussi bien un commentaire, et un commentaire ne
  * s execute pas.
+ *
+ * ## Les deux moities du rejet des reponses tardives
+ *
+ * Le bundle servi porte la correction de la revue 124 : une reponse compare sa generation, et une
+ * invalidation ouvre un nouveau contexte. Les deux comptent — comparer sans incrementer laisserait
+ * une demande partie avant une revocation revenir et reafficher ce qu elle vient d oter.
  */
 class SurveillanceBrowserLayerTest extends TestCase
 {
@@ -101,7 +107,7 @@ class SurveillanceBrowserLayerTest extends TestCase
         $bundle = $this->bundleServi();
 
         $this->assertStringContainsString(
-            'jeton !== jetonDeSysteme',
+            'generation !== generationDuContexte',
             $bundle,
             'Le rejet des reponses tardives a disparu : la surveillance s appuyait sur lui.'
         );
@@ -109,12 +115,27 @@ class SurveillanceBrowserLayerTest extends TestCase
         // Et il protege bien la reponse ou la surveillance est lue : les deux vivent dans la meme
         // fonction, donc le garde precede l affectation.
         $corps = $this->corpsDe($bundle, 'chargerLesFlottes', 'redemanderLeSysteme');
-        $garde = strpos($corps, 'jeton !== jetonDeSysteme');
+        $garde = strpos($corps, 'generation !== generationDuContexte');
         $affectation = strpos($corps, 'contactsDeSurveillance = Array.isArray(reponse.surveillance)');
 
         $this->assertIsInt($garde);
         $this->assertIsInt($affectation);
         $this->assertLessThan($affectation, $garde, 'La surveillance est lue avant le rejet des reponses tardives.');
+
+        /*
+         * **La seconde moitie, dans le bundle aussi** (revue 124, point 3). Comparer la generation
+         * ne sert a rien si aucune invalidation n en ouvre une nouvelle : une demande partie avant
+         * une revocation resterait « courante » et sa reponse reafficherait ce qui vient d etre
+         * retire. Le motif est cherche dans le corps de l invalidation, pas dans tout le fichier —
+         * le compteur est aussi incremente ailleurs, et un `strpos` global trouverait ce site-la.
+         */
+        $invalidation = $this->corpsDe($bundle, 'invaliderLaSurveillance', 'adresseDePatrouille');
+
+        $this->assertStringContainsString(
+            'generationDuContexte++',
+            $invalidation,
+            'Le bundle servi n ouvre pas de nouveau contexte a l invalidation : une demande en vol au moment d une revocation reafficherait ce qu elle vient d oter.'
+        );
     }
 
     /**

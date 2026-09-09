@@ -623,10 +623,25 @@ class GalaxyTacticalMapTest extends UnitTestCase
             );
         }
 
+        /*
+         * **Le garde a deux moities, et une seule ne suffit pas** (revue 124 de Codex, point 3).
+         * Comparer la generation rejette une reponse d un contexte perime ; encore faut-il qu une
+         * invalidation ouvre un nouveau contexte, sinon une demande partie avant une revocation
+         * reste « courante » et sa reponse reaffiche ce que la revocation vient d oter.
+         *
+         * Ce temoin lit une forme de code ; la preuve du comportement vit dans
+         * `tests/js/surveillance-layer.test.js`, sur le module reel dans un DOM simule.
+         */
         $this->assertStringContainsString(
-            'jeton !== jetonDeSysteme',
+            'generation !== generationDuContexte',
             $module,
-            'A late response from the previous system can overwrite the new one: the sequence token is gone.'
+            'A late response from the previous system can overwrite the new one: the context generation is gone.'
+        );
+
+        $this->assertMatchesRegularExpression(
+            '/function invaliderLaSurveillance\(carte\) \{(?:(?!\n    \}).)*generationDuContexte\+\+;/s',
+            str_replace("\r\n", "\n", $module),
+            'An invalidation no longer opens a new context: a request in flight when rights are lost would redisplay them.'
         );
 
         /*

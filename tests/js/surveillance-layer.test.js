@@ -382,3 +382,84 @@ test('la perte de connexion masque avant meme qu une demande parte', () => {
         monde.fermer();
     }
 });
+
+/*
+ * ## Le temoin decisif de la revue 124, point 3
+ *
+ * Les temoins precedents lancaient TOUJOURS une nouvelle demande apres l invalidation. Comparer a
+ * la derniere demande suffisait alors, et le scenario passait par accident : c est exactement ce que
+ * Codex a nomme. Ici, rien ne repart. Seule une generation de contexte incrementee par
+ * l invalidation elle-meme peut rejeter la reponse en vol.
+ */
+test('une invalidation sans nouvelle demande perime quand meme la demande en vol', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5);
+
+        const enVol = monde.demandes[monde.demandes.length - 1];
+        const avant = monde.demandes.length;
+
+        // La revocation arrive pendant le vol. Rien ne repart : la connexion est perdue.
+        monde.diffuseur.declencher('disconnected');
+
+        assert.equal(monde.demandes.length, avant, 'une demande est repartie : le temoin ne prouverait plus rien');
+
+        // La reponse partie AVANT la revocation arrive maintenant.
+        enVol.repondre(reponse(1, 5, [unContact(11, 640, 480)]));
+
+        assert.equal(
+            monde.contacts().length,
+            0,
+            'une demande en vol au moment de la revocation a rehabille des renseignements revoques'
+        );
+    } finally {
+        monde.fermer();
+    }
+});
+
+/*
+ * L ordre exact decrit par Codex : reponse affichee, demande en vol, invalidation, seconde demande,
+ * puis la PREMIERE arrive avant la seconde. Elle ne doit rien reafficher, et la seconde doit
+ * pouvoir s afficher ensuite.
+ *
+ * **Ce temoin-ci passait deja sur l ancien code, et il faut le dire** : mesure faite en restaurant
+ * le comportement d avant la revue 124, seul le temoin precedent tombe. La seconde demande
+ * incrementait le compteur, donc la premiere se trouvait perimee par accident. C est precisement ce
+ * que Codex a nomme — l exemple litteral etait couvert sans que la regle le soit. Il reste ecrit
+ * parce qu il fixe l ordre d arrivee decrit dans la revue et qu il tombe sur d autres mutations
+ * (retirer la comparaison de generation), mais il ne prouve pas la correction : c est le temoin
+ * sans nouvelle demande qui la prouve.
+ */
+test('une demande d avant la revocation arrivant avant la demande d apres ne reaffiche rien', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5);
+        monde.demandes[monde.demandes.length - 1].repondre(reponse(1, 5, [unContact(11, 640, 480)]));
+        assert.equal(monde.contacts().length, 1, 'le point de depart n est pas celui du scenario');
+
+        monde.amorcer(1, 5);
+        const avantRevocation = monde.demandes[monde.demandes.length - 1];
+
+        monde.diffuseur.declencher('disconnected');
+        monde.diffuseur.declencher('connected');
+
+        const apresRevocation = monde.demandes[monde.demandes.length - 1];
+        assert.notEqual(apresRevocation, avantRevocation, 'aucune demande apres la reconnexion : le scenario est incomplet');
+
+        // La plus ancienne arrive la premiere, chargee de ce que le joueur n a plus le droit de voir.
+        avantRevocation.repondre(reponse(1, 5, [unContact(11, 640, 480)]));
+
+        assert.equal(monde.contacts().length, 0, 'la reponse d avant la revocation s est affichee');
+
+        // La plus recente arrive ensuite : elle, fait foi.
+        apresRevocation.repondre(reponse(1, 5, [unContact(22, 100, 200)]));
+
+        const vus = monde.contacts();
+        assert.equal(vus.length, 1, 'la reponse courante n a pas ete affichee');
+        assert.equal(vus[0].getAttribute('data-contact-id'), '22');
+    } finally {
+        monde.fermer();
+    }
+});

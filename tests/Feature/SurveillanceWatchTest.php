@@ -296,6 +296,63 @@ class SurveillanceWatchTest extends AccountTestCase
     }
 
     /**
+     * Une echeance deja ecoulee revele aussitot, et ce n est pas reserve au palier a delai nul.
+     *
+     * ## Ce que ce temoin ferme
+     *
+     * Revue 124 de Codex, point 2 : « si cette echeance est deja atteinte au moment de
+     * l amelioration, le contact devient visible immediatement ». Le temoin voisin le montre en
+     * passant a N5, dont le delai vaut zero — on pourrait donc croire que seul un delai nul revele
+     * a l instant. Ici le nouveau palier garde un delai reel de cinq minutes, et le contact
+     * apparait quand meme, parce que douze minutes ont deja passe. **Ne pas inventer de delai
+     * supplementaire pour eviter cela** : la formule reste
+     * `max(entree, mise en service) + delai du nouveau palier`, et rien d autre.
+     *
+     * Ce que cela ne donne pas : le passe. Le joueur recoit le contact **courant**, jamais les
+     * mouvements d avant.
+     */
+    public function testAnUpgradeWhoseDeadlineHasAlreadyPassedRevealsAtOnceWithoutAZeroDelay(): void
+    {
+        [, $etranger, $galaxie, $systeme] = $this->unSystemeEtranger();
+
+        $observateur = $this->unCorpsEquipe($etranger, $galaxie, $systeme, SurveillanceTier::Contact->value);
+        $entree = 1_700_000_900;
+        $patrouille = $this->unePatrouilleEntree((int)$this->currentUserId, $galaxie, $systeme, $entree);
+
+        $veille = resolve(SurveillanceWatch::class);
+        $veille->acquire($patrouille, $entree);
+
+        // Douze minutes : le palier 1 en demande quinze, le palier 3 seulement cinq.
+        $maintenant = $entree + 12 * 60;
+        $this->assertNull(
+            $veille->acquiredTierFor((int)$etranger, (int)$patrouille->id, $maintenant),
+            'The first tier revealed the contact before its own deadline.'
+        );
+
+        DB::table('planets')->where('id', $observateur)->update(['surveillance_network' => SurveillanceTier::Heading->value]);
+        $veille->networkLevelChanged($observateur, SurveillanceTier::Heading->value, $maintenant);
+
+        $this->assertNotSame(
+            0,
+            SurveillanceTier::Heading->acquisitionSeconds(),
+            'This witness only means something while the third tier still has a real delay.'
+        );
+
+        $contact = SurveillanceContact::query()->where('observer_planet_id', $observateur)->firstOrFail();
+
+        $this->assertSame(
+            $entree + SurveillanceTier::Heading->acquisitionSeconds(),
+            (int)$contact->visible_from,
+            'The upgrade did not recompute the deadline from the acquisition start.'
+        );
+        $this->assertSame(
+            SurveillanceTier::Heading,
+            $veille->acquiredTierFor((int)$etranger, (int)$patrouille->id, $maintenant),
+            'An upgrade whose deadline had already passed did not grant its tier at once.'
+        );
+    }
+
+    /**
      * La patrouille qui s en va cesse d etre vue, et ce qui a ete su reste lisible.
      */
     public function testAPatrolThatLeavesStopsBeingSeen(): void

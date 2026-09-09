@@ -1634,7 +1634,24 @@
         redemanderLeSysteme(galaxie, systeme);
     }
 
-    var jetonDeSysteme = 0;
+    /*
+     * ## La generation du contexte d affichage
+     *
+     * Elle s incremente a chaque fois que ce qui est affichable **peut avoir change** : une
+     * nouvelle demande, mais aussi une invalidation — perte de connexion, revocation annoncee,
+     * changement de systeme. Toute reponse nee sous une generation anterieure est jetee.
+     *
+     * **Comparer a la derniere reponse affichee ne suffit pas** (revue 124 de Codex, point 3).
+     * L ancien jeton ne bougeait qu au depart d une demande : une revocation qui masquait sans
+     * relancer laissait la demande en vol parfaitement « courante », et sa reponse reintroduisait a
+     * l ecran ce que la revocation venait d oter. Le scenario de Codex — reponse n10 affichee,
+     * demande n11 en vol, invalidation, demande n12, n11 arrive avant n12 — n etait couvert que par
+     * accident, parce qu une seconde demande suivait. Sans elle, rien ne rejetait n11.
+     *
+     * C est le meme compteur qu avant, pas un second garde-fou : deux mecanismes de peremption
+     * divergeraient, et le depot a deja paye cette lecon.
+     */
+    var generationDuContexte = 0;
     var decalageHorloge = 0;
     var mouvements = [];
     var animation = null;
@@ -2302,6 +2319,13 @@
      * peremption effacerait des contacts parfaitement valides pendant une periode calme.
      */
     function invaliderLaSurveillance(carte) {
+        /*
+         * **Une invalidation perime aussi ce qui est en vol.** Masquer l ecran ne suffit pas : une
+         * demande partie avant la revocation reviendrait avec des renseignements auxquels le joueur
+         * n a plus droit, et les reafficherait. La generation change donc ici aussi, et cette
+         * reponse-la sera jetee — meme si aucune demande plus recente n a ete lancee.
+         */
+        generationDuContexte++;
         contactsDeSurveillance = [];
         dessinerLaSurveillance(carte);
     }
@@ -3392,14 +3416,19 @@
             return;
         }
 
-        var jeton = ++jetonDeSysteme;
-
-        /* Le droit est inconnu tant que la reponse n est pas la : on masque des maintenant. */
+        /*
+         * **Invalider d abord, adopter la generation ensuite.** Le droit est inconnu tant que la
+         * reponse n est pas la : on masque des maintenant, ce qui perime du meme geste toute
+         * demande plus ancienne encore en vol. La demande qui part prend la generation qui en
+         * resulte — l inverse ferait qu elle se perimerait elle-meme.
+         */
         invaliderLaSurveillance(carte);
+
+        var generation = generationDuContexte;
 
         window.jQuery.getJSON(galaxyFleetsUrl, { galaxy: galaxie, system: systeme })
             .done(function (reponse) {
-                if (jeton !== jetonDeSysteme || !reponse || !reponse.success) {
+                if (generation !== generationDuContexte || !reponse || !reponse.success) {
                     return;
                 }
 
