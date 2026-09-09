@@ -7,6 +7,7 @@ use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\BattleReport;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\Resources;
+use OGame\Models\User;
 use OGame\Services\FleetMissionService;
 use OGame\Services\ObjectService;
 use Tests\FleetDispatchTestCase;
@@ -19,6 +20,39 @@ class FleetDispatchTacticalRetreatTest extends FleetDispatchTestCase
     protected int $missionType = 1;
 
     protected string $missionName = 'Attack';
+
+    /**
+     * Le compte dont cet essai change le rapport de retraite, et la valeur qu il y a trouvee.
+     *
+     * ## Rendre ce qu on a trouve, et non poser une valeur
+     *
+     * Le proprietaire de la planete etrangere « propre » est partage par les essais d un meme
+     * processus. Ce que cette classe y ecrit, la suivante le lit. Poser zero au demontage serait
+     * une seconde decision, aussi arbitraire que la premiere ; seule la valeur trouvee en
+     * arrivant laisse le banc tel qu il etait.
+     *
+     * **Mesure faite, et elle contredit l intuition** : la colonne a pour defaut 5, la valeur
+     * meme que cet essai ecrit. Il ne fuit donc rien aujourd hui, et ce retablissement ne
+     * corrige aucun defaut observable. Il ferme un piege futur : l innocuite tient a une
+     * coincidence entre deux nombres, et changer le defaut de la colonne ferait naitre la fuite
+     * en silence, sans qu aucun essai ne bouge.
+     *
+     * Le retablissement vit dans `tearDown()`, qui s execute meme quand l essai echoue — et
+     * c est precisement quand un essai echoue que le suivant a besoin d un banc intact.
+     */
+    private int|null $compteDuRatio = null;
+
+    private int|null $ratioDOrigine = null;
+
+    protected function tearDown(): void
+    {
+        if ($this->compteDuRatio !== null) {
+            User::query()->whereKey($this->compteDuRatio)->update(['tactical_retreat_ratio' => $this->ratioDOrigine]);
+            $this->compteDuRatio = null;
+        }
+
+        parent::tearDown();
+    }
 
     protected function basicSetup(): void
     {
@@ -41,6 +75,8 @@ class FleetDispatchTacticalRetreatTest extends FleetDispatchTestCase
         $defenderPlayer = $foreignPlanet->getPlayer();
         $this->assertNotNull($defenderPlayer);
         $user = $defenderPlayer->getUser();
+        $this->compteDuRatio = (int)$user->id;
+        $this->ratioDOrigine = $user->tactical_retreat_ratio;
         $user->tactical_retreat_ratio = 5;
         $user->time = (string) now()->timestamp;
         $user->save();
