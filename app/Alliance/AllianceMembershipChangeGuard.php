@@ -2,6 +2,7 @@
 
 namespace OGame\Alliance;
 
+use Illuminate\Support\Facades\Log;
 use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Services\CombatsInvolvingPlayer;
 use OGame\Models\CombatInstance;
@@ -50,9 +51,32 @@ final class AllianceMembershipChangeGuard
             return false;
         }
 
+        /*
+         * **La lecture se fait sous verrou, et il faut dire ce qu elle ferme et ce qu elle ne ferme
+         * pas.** `lockForUpdate()` sur les lignes de `users` serialise deux changements
+         * d appartenance concurrents : deux acceptations simultanees ne peuvent plus se lire
+         * mutuellement « hors alliance » et commiter toutes les deux.
+         *
+         * **Elle ne ferme pas la course contre l ouverture d un combat.** Celle-ci prend la barriere
+         * du corps, puis l instance, puis les missions — et le depot **interdit** de verrouiller un
+         * compte apres une barriere : une garde de source y veille, parce que l ordre inverse
+         * produirait un interblocage. Ajouter ce verrou au chemin d ouverture serait donc un
+         * changement d ordre global, pas un detail.
+         *
+         * Ce qui reste ouvert, dit precisement : entre la lecture des combats ici et le commit de
+         * l adhesion, un combat peut s ouvrir entre ce joueur et un membre. La fenetre est etroite et
+         * demande que l attaque ait ete lancee **avant** l alliance et arrive **pendant** ce
+         * commit-la ; les deux autres portes — refus au lancement, demi-tour a l arrivee — la
+         * couvrent dans tous les cas ou l attaque part apres. La mesure de cette course appartient au
+         * bac MariaDB, comme toutes les autres du depot : sous SQLite, `lockForUpdate()` ne compile a
+         * rien et prouverait un ordre qui n existe pas.
+         */
+        User::query()->whereKey($joiningUserId)->lockForUpdate()->first();
+
         $membres = User::query()
             ->where('alliance_id', $allianceId)
             ->where('id', '!=', $joiningUserId)
+            ->lockForUpdate()
             ->pluck('id')
             ->map(static fn (mixed $id): int => (int)$id)
             ->all();
@@ -68,7 +92,23 @@ final class AllianceMembershipChangeGuard
             $sien = $this->sideOf($joiningUserId, $camps);
 
             if ($sien === null) {
-                continue;
+                /*
+                 * **Une donnee ambigue ne donne jamais plus de droits.** Ce joueur figure des deux
+                 * cotes, ou d aucun, alors que la lecture des combats le dit partie prenante : les
+                 * deux sont des incoherences. Passer au combat suivant reviendrait a laisser
+                 * l adhesion se faire *parce que* l etat est douteux — une ouverture par le defaut,
+                 * exactement ce qu il ne faut pas.
+                 *
+                 * On refuse donc, et on le journalise pour que l anomalie se voie. La bataille, elle,
+                 * n est pas touchee : la regle n annule jamais un combat.
+                 */
+                Log::warning('Adhesion refusee : camp indecidable dans un combat en cours.', [
+                    'combat' => (int)$combat->id,
+                    'joueur' => $joiningUserId,
+                    'alliance' => $allianceId,
+                ]);
+
+                return true;
             }
 
             $adverse = $sien === CombatParticipant::SIDE_ATTACKER
@@ -154,9 +194,12 @@ final class AllianceMembershipChangeGuard
     /**
      * Le camp de ce joueur dans ces camps, ou null s il n y figure pas.
      *
-     * **Un joueur present des deux cotes n a pas de camp exploitable.** Le cas ne devrait pas
-     * exister, et repondre « attaquant » par defaut ferait decider une regle de jeu sur une
-     * incoherence. On s abstient, et le combat suivant est examine.
+     * **Un joueur present des deux cotes, ou d aucun, n a pas de camp exploitable.** Repondre
+     * « attaquant » par defaut ferait decider une regle de jeu sur une incoherence.
+     *
+     * Rendre `null` ne veut pas dire « laisser passer » : l appelant **refuse** l adhesion et
+     * journalise. Une premiere version examinait le combat suivant, ce qui faisait de l incoherence
+     * une **ouverture** — l adhesion passait justement parce que l etat etait douteux.
      *
      * @param array<string, array<int, int>> $camps
      */

@@ -248,6 +248,41 @@ class AllianceMembershipDuringBattleTest extends AccountTestCase
     }
 
     /**
+     * **Une donnee ambigue ne donne jamais plus de droits.**
+     *
+     * Un joueur inscrit des DEUX cotes d un meme combat est une incoherence. La premiere version de
+     * la porte passait au combat suivant, si bien que l adhesion se faisait *parce que* l etat etait
+     * douteux — une ouverture par le defaut. Elle refuse desormais, et laisse la bataille intacte.
+     */
+    public function testAnUndecidableSideRefusesInsteadOfLettingThrough(): void
+    {
+        resolve(SettingsService::class)->set('alliance_offensive_protection_enabled', 1);
+
+        [$etranger, $corps] = $this->unEtranger();
+        $combat = $this->uneBatailleOuJAttaque($corps);
+        $alliance = $this->uneAllianceDe($etranger);
+
+        // Le meme joueur, inscrit aussi du cote defenseur : l etat devient indecidable.
+        CombatParticipant::query()->create([
+            'combat_instance_id' => $combat->id,
+            'player_id' => $this->currentUserId,
+            'fleet_mission_id' => null,
+            'participant_key' => 'test:defenseur:' . $this->currentUserId,
+            'side' => CombatParticipant::SIDE_DEFENDER,
+            'participant_type' => 'fleet',
+        ]);
+
+        $this->assertTrue(
+            $this->garde()->reunitesAdversaries($this->currentUserId, $alliance),
+            'An undecidable side let the membership through: ambiguity granted more permission.'
+        );
+
+        // Et la bataille n a pas bouge : la regle n annule jamais un combat.
+        $combat->refresh();
+        $this->assertSame(CombatState::Active, $combat->status, 'The battle was touched by an ambiguity.');
+    }
+
+    /**
      * L interrupteur eteint, la regle n existe pas.
      */
     public function testTheRuleDoesNotExistWhileTheSwitchIsOff(): void

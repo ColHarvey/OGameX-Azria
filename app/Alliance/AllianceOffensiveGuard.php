@@ -74,6 +74,24 @@ final class AllianceOffensiveGuard
         return $this->alliances->arePlayersInSameAlliance($attackerId, $targetOwnerId);
     }
 
+    /*
+     * ## Une coordination retiree, et pourquoi
+     *
+     * Une variante `forbidsUnderLock()` a existe ici : elle verrouillait les lignes `users` des deux
+     * combattants avant la porte des mouvements, pour se serialiser avec l adhesion a une alliance.
+     * L intention etait juste — deux transactions concurrentes pouvaient sinon valider un combat
+     * ouvert entre deux membres d une meme alliance.
+     *
+     * **Elle a ete retiree parce qu elle introduisait une inversion d ordre.** Mesure faite :
+     * `PlayerService::update()` verrouille le compte **puis** les planetes, et elle tourne a presque
+     * chaque chargement de page ; `updateFleetMissions()` verrouille les planetes **puis** les
+     * missions, et le verrou de compte serait venu apres. Planetes → compte contre compte →
+     * planetes, entre deux des chemins les plus frequentes du jeu.
+     *
+     * Fermer cette course demande donc de decider ou le compte se prend dans l ordre global du
+     * combat — une decision d architecture, pas un ajout local. **La course reste ouverte**, et
+     * `tests/MariaDb/AllianceVersusCombatOpeningRaceTest.php` est la preuve qui l attend.
+     */
     /**
      * La clef du message que le joueur lira.
      *
