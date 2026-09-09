@@ -855,6 +855,7 @@ return [
         // (avant le commit 618b8083) : plusieurs tests amont verifient ces chaines.
         'err_already_in_alliance' => 'Ce joueur est déjà membre d\'une alliance',
         'err_wait_days' => 'Vous devez encore attendre :days jour(s) avant de pouvoir créer ou rejoindre une alliance.',
+        'err_wait_until' => 'Vous devez encore attendre :days jour(s), jusqu’au :date, avant de pouvoir créer ou rejoindre une alliance.',
         'err_tag_length' => 'Le tag doit contenir entre 3 et 8 caractères',
         'err_name_length' => 'Le nom doit contenir entre 3 et 30 caractères',
         'err_tag_taken' => 'Ce tag est déjà utilisé',

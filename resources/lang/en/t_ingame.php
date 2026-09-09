@@ -1047,6 +1047,7 @@ return [
         // (avant le commit 618b8083) : plusieurs tests amont verifient ces chaines.
         'err_already_in_alliance' => 'User is already in an alliance',
         'err_wait_days' => 'You must wait :days more day(s) before you can create or join an alliance.',
+        'err_wait_until' => 'You must wait :days more day(s), until :date, before you can create or join an alliance.',
         'err_tag_length' => 'Alliance tag must be between 3 and 8 characters',
         'err_name_length' => 'Alliance name must be between 3 and 30 characters',
         'err_tag_taken' => 'Alliance tag is already taken',

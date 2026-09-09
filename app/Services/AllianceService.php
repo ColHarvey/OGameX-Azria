@@ -4,6 +4,7 @@ namespace OGame\Services;
 
 use Exception;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Log;
 use OGame\GameMessages\AllianceApplicationReceived;
@@ -56,16 +57,8 @@ class AllianceService
             throw new Exception(__('t_ingame.alliance.err_already_in_alliance'));
         }
 
-        // Check if user left an alliance recently (configurable cooldown)
-        if ($user->alliance_left_at !== null) {
-            $cooldownDays = $this->settingsService->allianceCooldownDays();
-            $cooldownEnd = $user->alliance_left_at->addDays($cooldownDays);
-            if (now()->isBefore($cooldownEnd)) {
-                $remainingHours = now()->diffInHours($cooldownEnd);
-                $remainingDays = ceil($remainingHours / 24);
-                throw new Exception(__('t_ingame.alliance.err_wait_days', ['days' => $remainingDays]));
-            }
-        }
+        // **L echeance se lit, elle ne se recalcule pas.** Voir `refuseWhileTheCooldownRuns()`.
+        $this->refuseWhileTheCooldownRuns($user);
 
         // Validate tag length (3-8 characters)
         if (strlen($tag) < 3 || strlen($tag) > 8) {
@@ -103,6 +96,7 @@ class AllianceService
             /** @phpstan-ignore assign.propertyType */
             $user->alliance_id = $alliance->id;
             $user->alliance_left_at = null;
+            $user->alliance_cooldown_until = null;
             $user->save();
 
             DB::commit();
@@ -181,16 +175,8 @@ class AllianceService
             throw new Exception(__('t_ingame.alliance.err_already_in_alliance'));
         }
 
-        // Check if user left an alliance recently (configurable cooldown)
-        if ($user->alliance_left_at !== null) {
-            $cooldownDays = $this->settingsService->allianceCooldownDays();
-            $cooldownEnd = $user->alliance_left_at->addDays($cooldownDays);
-            if (now()->isBefore($cooldownEnd)) {
-                $remainingHours = now()->diffInHours($cooldownEnd);
-                $remainingDays = ceil($remainingHours / 24);
-                throw new Exception(__('t_ingame.alliance.err_wait_days', ['days' => $remainingDays]));
-            }
-        }
+        // **L echeance se lit, elle ne se recalcule pas.** Voir `refuseWhileTheCooldownRuns()`.
+        $this->refuseWhileTheCooldownRuns($user);
 
         // Validate that alliance exists and is open
         $alliance = Alliance::findOrFail($allianceId);
@@ -288,6 +274,7 @@ class AllianceService
             /** @phpstan-ignore assign.propertyType */
             $applicant->alliance_id = $application->alliance_id;
             $applicant->alliance_left_at = null;
+            $applicant->alliance_cooldown_until = null;
             $applicant->save();
 
             DB::commit();
@@ -354,8 +341,12 @@ class AllianceService
             $memberToKick->delete();
 
             // Update user's alliance_id
+            // **Etre exclu compte comme partir.** Le plan nomme les trois departs ensemble ; sans
+            // cette echeance, l exclusion serait le moyen le plus rapide de changer d alliance.
             $user = User::findOrFail($memberUserId);
             $user->alliance_id = null;
+            $user->alliance_left_at = now();
+            $user->alliance_cooldown_until = $this->cooldownDeadline();
             $user->save();
 
             DB::commit();
@@ -398,6 +389,7 @@ class AllianceService
             // Update user's alliance_id and set cooldown
             $user->alliance_id = null;
             $user->alliance_left_at = now();
+            $user->alliance_cooldown_until = $this->cooldownDeadline();
             $user->save();
 
             DB::commit();
@@ -760,7 +752,10 @@ class AllianceService
             foreach ($members as $allianceMember) {
                 $user = User::find($allianceMember->user_id);
                 if ($user) {
+                    // La dissolution est un depart pour chacun, y compris pour qui la prononce.
                     $user->alliance_id = null;
+                    $user->alliance_left_at = now();
+                    $user->alliance_cooldown_until = $this->cooldownDeadline();
                     $user->save();
                 }
             }
@@ -951,6 +946,48 @@ class AllianceService
 
         // Both users must be in the same alliance (not null)
         return $user1->alliance_id !== null && $user1->alliance_id === $user2->alliance_id;
+    }
+
+    /**
+     * L instant jusqu auquel un joueur qui vient de quitter une alliance devra attendre.
+     *
+     * Le reglage est lu **une fois, au depart**, et le resultat est ecrit. Le relire a chaque
+     * verification ferait deplacer retroactivement l echeance de tous les joueurs deja partis des
+     * qu un administrateur change la valeur.
+     */
+    private function cooldownDeadline(): Carbon
+    {
+        return now()->addDays($this->settingsService->allianceCooldownDays());
+    }
+
+    /**
+     * Refuse tant que l echeance persistee n est pas passee.
+     *
+     * ## Les trois departs, et celui qui manquait
+     *
+     * Quitter, etre exclu, voir son alliance dissoute : le plan approuve du 9 septembre 2026 les
+     * nomme ensemble. Seul le depart volontaire posait une date ; un joueur exclu pouvait rejoindre
+     * une autre alliance a la seconde suivante.
+     *
+     * ## Ce que le message dit
+     *
+     * Le jour **et** la date. « Encore deux jours » sans date oblige a compter, et un joueur qui se
+     * reconnecte le lendemain ne sait plus quand il a lu ce message.
+     *
+     * @throws Exception
+     */
+    private function refuseWhileTheCooldownRuns(User $user): void
+    {
+        $echeance = $user->alliance_cooldown_until;
+
+        if ($echeance === null || !now()->isBefore($echeance)) {
+            return;
+        }
+
+        throw new Exception(__('t_ingame.alliance.err_wait_until', [
+            'days' => (string)(int)ceil(now()->diffInHours($echeance) / 24),
+            'date' => $echeance->format('d/m/Y H:i'),
+        ]));
     }
 
     /**

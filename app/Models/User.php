@@ -167,6 +167,7 @@ class User extends Authenticatable
         'character_class_free_used' => 'boolean',
         'character_class_changed_at' => 'datetime',
         'alliance_left_at' => 'datetime',
+        'alliance_cooldown_until' => 'datetime',
         'commander_until' => 'datetime',
         'admiral_until' => 'datetime',
         'engineer_until' => 'datetime',
