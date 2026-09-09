@@ -57,6 +57,7 @@ use Illuminate\Support\Carbon;
  * @property int $terraformer
  * @property int $alliance_depot
  * @property int $missile_silo
+ * @property int $surveillance_network
  * @property int $space_dock
  * @property int $light_fighter
  * @property int $heavy_fighter

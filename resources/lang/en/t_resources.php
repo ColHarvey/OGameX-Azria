@@ -147,6 +147,11 @@ To use the Phalanx, click on any planet in the Galaxy View within your sensors r
     // Research objects (from ResearchObjects.php)
     // -------------------------------------------------------------------------
 
+    'surveillance_network' => [
+        'title' => 'Surveillance Network',
+        'description' => 'A network of antennas and sensors that spots foreign patrols stationed in the system, and tells you the more about them the further it is developed.',
+        'description_long' => 'The Surveillance Network listens to the system from the planet that carries it. It does not see fleets in transit: it spots the patrols that linger there, and takes some time to do so — the less time the further it is developed. At the first level it reports a contact and its position; the levels above add the identity of its owner, its heading inside the system, an estimate of its size, then its exact strength. It never reveals a fleet composition, its fuel reserve or its cargo. Losing the network means losing the intelligence it alone allowed: what a player sees is always what their best network in service gives them, never the sum of several. Alerts about their own fleets depend on no building at all.',
+    ],
     'energy_technology' => [
         'title'            => 'Energy Technology',
         'description'      => 'The command of different types of energy is necessary for many new technologies.',

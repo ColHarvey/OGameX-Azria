@@ -47,6 +47,16 @@ class FacilitiesController extends AbstractBuildingsController
             $this->objects = [
                 ['robot_factory', 'shipyard', 'research_lab', 'alliance_depot', 'missile_silo', 'nano_factory', 'terraformer', 'space_dock'],
             ];
+
+            // **Le catalogue le connait toujours ; la page ne l offre que si les patrouilles sont
+            // armees.** Les deux ne se confondent pas : un objet retire du catalogue ferait
+            // disparaitre le niveau deja construit, sa file et son decompte de points. Ici seule
+            // l offre de construction est conditionnee — proposer un reseau de surveillance avant
+            // qu il existe des patrouilles a surveiller n aurait aucun sens, et l interrupteur est
+            // baisse tant que le chantier n est pas complet.
+            if (resolve(SettingsService::class)->patrolsEnabled()) {
+                $this->objects[0][] = 'surveillance_network';
+            }
         } elseif ($this->planet->isMoon()) {
             $this->header_filename_objects = [41, 42, 43];
             $this->objects = [

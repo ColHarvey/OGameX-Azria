@@ -120,6 +120,11 @@ Pour utiliser le Phalanx, cliquez sur n’importe quelle planète dans la vue Ga
         'description' => 'Les portes de saut sont d\'énormes émetteurs-récepteurs capables d\'envoyer même la plus grande flotte en un rien de temps vers une porte de saut distante.',
         'description_long' => 'Un Porte de saut spatial est un système d\'émetteurs-récepteurs géants capables d\'envoyer même les plus grandes flottes vers une porte de réception n\'importe où dans l\'univers sans perte de temps. Utilisant une technologie similaire à celle d’un Worm Hole pour réaliser le saut, le deutérium n’est pas nécessaire. Une période de recharge de quelques minutes doit s\'écouler entre les sauts pour permettre la régénération. Le transport de ressources à travers la Porte n’est pas non plus possible. À chaque niveau de mise à niveau, le temps de recharge de la porte de saut peut être réduit.',
     ],
+    'surveillance_network' => [
+        'title' => 'Réseau de surveillance',
+        'description' => 'Un réseau d’antennes et de capteurs qui repère les patrouilles étrangères stationnées dans le système, et en dit d’autant plus qu’il est développé.',
+        'description_long' => 'Le Réseau de surveillance écoute le système depuis la planète qui le porte. Il ne voit pas les flottes en route : il repère les patrouilles qui s’y attardent, et met un certain temps à le faire — d’autant moins qu’il est développé. Au premier niveau il signale un contact et sa position ; les niveaux suivants ajoutent l’identité de son propriétaire, sa direction à l’intérieur du système, une estimation de sa taille, puis son effectif exact. Il ne révèle jamais la composition d’une flotte, sa réserve ni sa cargaison. Perdre le réseau, c’est perdre le renseignement qu’il seul autorisait : ce que le joueur voit est toujours ce que son meilleur détecteur en service lui donne, jamais la somme de plusieurs. Les alertes qui concernent ses propres flottes ne dépendent d’aucun bâtiment.',
+    ],
     'energy_technology' => [
         'title' => 'Technologie Énergie',
         'description' => 'La maîtrise de différents types d’énergie est nécessaire à de nombreuses nouvelles technologies.',

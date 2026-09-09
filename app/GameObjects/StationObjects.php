@@ -102,6 +102,36 @@ class StationObjects
 
         $buildingObjectsNew[] = $missileSilo;
 
+        // --- Reseau de surveillance ---
+        //
+        // **L identifiant 45 est libre** : les installations vont de 14 a 44, et aucun autre objet du
+        // jeu ne le porte. `getObjectById()` rend le premier objet qui repond, sans signaler un
+        // doublon : un identifiant deja pris volerait silencieusement l objet existant.
+        //
+        // **Le nom machine est impose par la colonne** que la migration a posee sur `planets` :
+        // `getObjectLevel()` lit `$planet->{machine_name}`. Un autre nom lirait une propriete
+        // inexistante, rendrait zero, et le batiment resterait a jamais au niveau zero sans erreur.
+        //
+        // Le batiment n est propose a la construction que si `patrols_enabled` est arme : le
+        // catalogue le connait toujours, la page des installations ne l offre pas.
+        $surveillanceNetwork = new StationObject();
+        $surveillanceNetwork->id = 45;
+        $surveillanceNetwork->title = __('t_resources.surveillance_network.title');
+        $surveillanceNetwork->machine_name = 'surveillance_network';
+        $surveillanceNetwork->class_name = 'surveillanceNetwork';
+        $surveillanceNetwork->description = __('t_resources.surveillance_network.description');
+        $surveillanceNetwork->description_long = __('t_resources.surveillance_network.description_long');
+        $surveillanceNetwork->requirements = [
+            new GameObjectRequirement('espionage_technology', 4),
+            new GameObjectRequirement('computer_technology', 2)
+        ];
+        $surveillanceNetwork->price = new GameObjectPrice(30000, 60000, 15000, 0, 2);
+        $surveillanceNetwork->assets = new GameObjectAssets();
+        $surveillanceNetwork->assets->imgMicro = 'surveillance_network_micro.jpg';
+        $surveillanceNetwork->assets->imgSmall = 'surveillance_network_small.jpg';
+
+        $buildingObjectsNew[] = $surveillanceNetwork;
+
         // --- Nanite Factory ---
         $naniteFactory = new StationObject();
         $naniteFactory->id = 15;
