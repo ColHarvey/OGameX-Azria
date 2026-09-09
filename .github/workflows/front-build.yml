@@ -23,6 +23,7 @@ on:
     paths:
       - 'resources/css/**'
       - 'resources/js/**'
+      - 'tests/js/**'
       - 'public/build/**'
       - 'package.json'
       - 'package-lock.json'
@@ -73,6 +74,18 @@ jobs:
           cp -r public/build /tmp/commite/build
           sha256sum public/build/manifest.json | tee /tmp/commite/manifest.sha256
           ls -1 public/build/assets | sort | tee /tmp/commite/assets.txt
+
+      # **Le module de la carte est eprouve avant d etre construit.** Un bundle produit a partir d un
+      # module casse n apprend rien ; et ces essais chargent le module REEL dans un document jsdom
+      # plutot que des fonctions extraites, qui pourraient etre justes et n etre appelees par
+      # personne. Ce qu ils jugent est le DOM, pas la presence d une ligne de code.
+      #
+      # `--test-force-exit` est necessaire : le module arme des minuteries (orbites, veille des
+      # compteurs) qui gardent la boucle d evenements vivante meme apres le dernier essai.
+      #
+      # Le motif est developpe par le shell : `node --test <dossier>` refuse un repertoire.
+      - name: Eprouver le module de la carte
+        run: node --test --test-force-exit tests/js/*.test.js
 
       - name: Construire
         run: npm run build

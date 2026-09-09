@@ -9,6 +9,7 @@
     },
     "devDependencies": {
         "axios": "^1.19.0",
+        "jsdom": "^30.0.1",
         "laravel-echo": "^2.4.0",
         "laravel-vite-plugin": "^3.2",
         "pusher-js": "^8.6.0",
