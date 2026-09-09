@@ -158,16 +158,28 @@ final class PhotographedDefenderTest extends FleetDispatchTestCase
         $proprietaire = (int)DB::table('planets')->where('id', $cible)->value('user_id');
 
         /*
-         * **Le montage etablit sa condition : aucune file de recherche sur la cible.**
+         * **Le montage etablit sa condition : aucune file de recherche sur AUCUN corps du proprietaire.**
          *
          * La cible est la planete propre partagee du processus, et chaque essai de cette classe y
          * insere des files par `aResearchQueue()`. Une file laissee par l'essai precedent reste
          * « engagee avant l'ouverture, achevee avant la fermeture » pour le suivant — dont
-         * l'horloge a avance — et monte le niveau gele a 4 la ou l'ouverture vaut 3. Rouge en
-         * parallele, vert seul : seul, chaque essai decroche une cible differente. Vider ici rend
-         * l'essai independant de l'ordre des processus.
+         * l'horloge a avance — et monte le niveau gele a 4 la ou l'ouverture vaut 3.
+         *
+         * **La portee du nettoyage doit etre celle de la lecture qu'il neutralise.** Vider la seule
+         * cible ne suffisait pas : `CausalEventReader::bodiesOf()` consulte **tous** les corps du
+         * proprietaire, et ce proprietaire en possede au moins deux par construction —
+         * `getNearbyForeignCleanPlanet()` cree une planete supplementaire au proprietaire de la
+         * planete etrangere partagee. Une file laissee sur cet autre corps echappait au nettoyage et
+         * entrait dans la photographie.
+         *
+         * Mecanisme reproduit, non deduit : file parasite sur l'autre corps → niveau gele 4 ;
+         * meme montage avec ce nettoyage elargi → 3. On corrige le banc, jamais la lecture : le jeu
+         * a raison de consulter tous les corps d'un joueur, une recherche n'appartenant pas a une
+         * planete.
          */
-        DB::table('research_queues')->where('planet_id', $cible)->delete();
+        DB::table('research_queues')
+            ->whereIn('planet_id', DB::table('planets')->where('user_id', $proprietaire)->pluck('id')->all())
+            ->delete();
         $joueur = resolve(PlayerServiceFactory::class)->make($proprietaire, true);
         foreach (['weapon_technology', 'shielding_technology'] as $technologie) {
             $joueur->setResearchLevel($technologie, self::NIVEAU_OUVERTURE);
