@@ -25,8 +25,17 @@ use Tests\FleetDispatchTestCase;
  *
  * Un rouge du bac MariaDB l a montre le 9 septembre 2026 : `MissileVersusClosureRaceTest`, une fois,
  * puis vert a la relance sur le meme commit. La cause a ete etablie par lecture, et ce temoin la
- * reproduit **de facon deterministe** : tenir le jeton, c est ecrire sa colonne — exactement ce que
- * fait l autre travailleur.
+ * reproduit **de facon deterministe** : tenir le jeton, c est ecrire sa colonne.
+ *
+ * ## Ce que ce temoin ne reproduit pas, et il faut le dire
+ *
+ * **L etat bloquant, oui ; la concurrence, non.** Ecrire la colonne place le monde dans l etat ou
+ * un autre travailleur tient l arrivee, mais aucun second processus ne tourne ici. Ce qui est etabli
+ * est donc le **retrait** et la **reprise**, pas leur comportement quand deux travailleurs se
+ * disputent vraiment la mission — cela appartient a `MissileVersusClosureRaceTest`, au bac MariaDB.
+ *
+ * Precision de Codex, retenue : un temoin qui melangerait les deux ferait croire qu il prouve la
+ * course alors qu il ne prouve que ses consequences.
  *
  * ## Les quatre exigences, telles que Codex les pose
  *
@@ -37,6 +46,11 @@ use Tests\FleetDispatchTestCase;
  * 4. « tenue ailleurs » est une issue **explicite**, distincte d appliquee, annulee, differee.
  *
  * La quatrieme a ses temoins dans `MissionProcessingClaimTest`. Les trois autres sont ici.
+ *
+ * **Ce qui n est pas une garantie eprouvee** : la branche qui refuse un differe dans une fermeture.
+ * Elle est inatteignable par construction — l instance est tenue en `Rallying` sous verrou — et
+ * aucune mutation ne la tue. Elle est gardee comme **filet defensif non couvert**, et ne doit pas
+ * etre comptee parmi les garanties de cette classe.
  */
 class ClosureWithdrawsWhenAnArrivalIsHeldTest extends FleetDispatchTestCase
 {
