@@ -3486,6 +3486,61 @@
         }
     }
 
+    var connexionPerdue = false;
+
+    /*
+     * Une connexion qui tombe puis revient, sans que l onglet ait bouge.
+     *
+     * **Ce cas ne produit aucun `visibilitychange`.** Un onglet reste visible pendant une coupure
+     * de reseau, et la resynchronisation au retour au premier plan ne le couvre donc pas. Or c est
+     * exactement pendant une coupure qu une revocation peut passer inapercue : le canal ne porte
+     * plus rien, et l ecran garde ce qu il avait.
+     *
+     * Deux moments, deux gestes. **A la perte**, on masque : tant que le canal est mort, plus rien
+     * ne peut confirmer que ces contacts restent autorises, et un renseignement inverifiable ne
+     * s affiche pas. **Au retour**, on redemande : c est le serveur qui dit ce qui subsiste, jamais
+     * la memoire de l onglet.
+     *
+     * Deux sources, parce qu aucune n est complete : l evenement `online` du navigateur voit la
+     * carte reseau, la connexion du diffuseur voit le canal lui-meme — une coupure serveur ne
+     * touche pas la premiere.
+     */
+    function surveillerLaConnexion(carte) {
+        var reprendre = function () {
+            if (!connexionPerdue) {
+                return;
+            }
+
+            connexionPerdue = false;
+
+            if (carte.gtSysteme) {
+                chargerLesFlottes(carte, carte.gtSysteme.galaxie, carte.gtSysteme.systeme);
+            }
+        };
+
+        var perdre = function () {
+            connexionPerdue = true;
+            invaliderLaSurveillance(carte);
+        };
+
+        window.addEventListener('online', reprendre);
+        window.addEventListener('offline', perdre);
+
+        var connexion = window.Echo && window.Echo.connector && window.Echo.connector.pusher
+            ? window.Echo.connector.pusher.connection
+            : null;
+
+        if (!connexion || typeof connexion.bind !== 'function') {
+            return;
+        }
+
+        connexion.bind('connected', reprendre);
+
+        ['unavailable', 'disconnected', 'failed'].forEach(function (etat) {
+            connexion.bind(etat, perdre);
+        });
+    }
+
     function ecouterLeJoueur(carte) {
         if (joueurAbonne || typeof window.Echo === 'undefined' || typeof window.Echo.private !== 'function') {
             return;
@@ -3531,6 +3586,7 @@
         chargerLesFlottes(carte, galaxie, systeme);
         ecouterLeSysteme(carte, galaxie, systeme);
         ecouterLeJoueur(carte);
+        surveillerLaConnexion(carte);
         demarrerLaVeilleDesCompteurs(carte);
     }
 
