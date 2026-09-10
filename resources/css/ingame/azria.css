@@ -491,3 +491,29 @@
     color: #8fa0bd;
     text-decoration: underline;
 }
+
+/*
+ * Les ruines d'un corps detruit, dans la liste de la Galaxie.
+ *
+ * ## Le selecteur est celui de la base hostile, a l'identique
+ *
+ * `microplanet` n'a de fond que sous `#galaxyContent .ctContentRow .cellPlanet` : hors du tableau
+ * la classe seule ne peint rien. La regle du jeu pour `npc_pirate` porte donc trois selecteurs — le
+ * tableau, l'infobulle, puis la classe nue pour tout autre contexte — et celle-ci les reprend un
+ * pour un. En retirer un laisserait la vignette absente a un endroit precis, sans erreur.
+ *
+ * `azria.css` est importe en dernier par `ingame.css` : a specificite egale avec la feuille du jeu,
+ * c'est cette regle qui gagne. Rien ici ne depend de `!important`.
+ *
+ * La vignette fait 76x66 et se rend en 38x33, comme `pirate_base.png` : la source est doublee pour
+ * les ecrans denses. La carte tactique, elle, ne passe pas par cette regle — elle construit
+ * `/img/planets/medium/destroyed_debris.png` depuis le meme nom de classe.
+ */
+#galaxyContent .ctContentRow .cellPlanet .microplanet.destroyed_debris,
+.planetTooltip.microplanet.destroyed_debris,
+.microplanet.destroyed_debris {
+    background-image: url("/img/planets/destroyed/destroyed_debris.png");
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: 38px 33px;
+}

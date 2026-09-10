@@ -729,11 +729,27 @@ class GalaxyController extends OGameController
             ]
         ];
 
+        // **Un champ de debris survit au corps qui l'a laisse.** Il vit sur les coordonnees, pas
+        // sur la planete : la purge quotidienne efface la ligne, les debris restent. Le rendu sait
+        // deja traiter une position qui ne porte qu'un champ — il la marque libre et dessine les
+        // debris (`shouldLoadPlayerToo` reste faux, donc aucune action n'est demandee au bloc
+        // joueur) — mais le serveur ne les lui envoyait jamais. Les debris disparaissaient donc de
+        // la vue a l'instant precis ou la position devenait recoltable et colonisable.
+        $debrisField = app(DebrisFieldService::class);
+        $bodies = [];
+
+        if (
+            $debrisField->loadForCoordinates(new Coordinate($galaxy, $system, $position))
+            && $debrisField->getResources()->any()
+        ) {
+            $bodies[] = $this->createDebrisFieldArray($debrisField);
+        }
+
         return [
             'actions' => [],
             'availableMissions' => $missions_available,
             'galaxy' => $galaxy,
-            'planets' => [],
+            'planets' => $bodies,
             'player' => [
                 'playerId' => 99999,
                 'playerName' => __('t_ingame.fleet.deep_space')
@@ -970,6 +986,19 @@ class GalaxyController extends OGameController
      *
      * Un cas particulier ne se dit pas en retirant des clefs. Une vue lit une forme ; elle doit la
      * trouver, avec des valeurs qui disent « rien a faire ici ».
+     *
+     * ## Et cette regle s arrete a cette vue
+     *
+     * **Ne pas la porter aux renseignements de surveillance**, ou un fait auquel le joueur n a pas
+     * droit doit rester **absent**, jamais present a `false` ou a vide. Ici la forme constante sert
+     * un rendu qui deconstruit sans verifier, et tout ce qu elle porte est deja public : la ligne
+     * dit qu il n y a rien a faire sur un corps que tout le monde voit detruit. La-bas, une clef
+     * presente apprendrait au lecteur qu il y a quelque chose a cet endroit — c est precisement le
+     * renseignement qu on lui refuse. Deux vues, deux contrats opposes, chacun pour sa raison.
+     *
+     * Et « tout a faux » ne vaut que pour les indicateurs de disponibilite : les blocs restent des
+     * blocs, les libelles des chaines, les rangs des nombres ou `null`. `GalaxyDestroyedBodyTest`
+     * compare les deux, la forme et les types.
      *
      * @return array<string, mixed>
      */
@@ -1348,6 +1377,15 @@ class GalaxyController extends OGameController
      */
     private function galaxyImageFor(PlanetService $planet): string
     {
+        // **Des ruines, le temps que la position se libere.** Un corps detruit garde sa ligne
+        // jusqu'a la purge quotidienne ; pendant cette fenetre il ne montre plus la planete qui
+        // n'existe plus, mais le champ de debris qui l'a remplacee. Le nom de la classe sert des
+        // deux cotes : la CSS l'habille dans la liste, et la carte tactique va chercher
+        // `/img/planets/medium/destroyed_debris.png` sans avoir besoin d'un cas particulier.
+        if ($planet->isDestroyed()) {
+            return 'destroyed_debris';
+        }
+
         $owner = $planet->getPlayer();
 
         if ($owner !== null && $owner->getUser()->is_npc) {
