@@ -493,7 +493,20 @@ abstract class GameMission
             // Target planet was relocated — return fleet (or cancel if no return trip).
             // Only applies to mission types that normally target an existing planet/moon.
             // Colonize (7), recycle (8), patrol (11) and expedition (15) legitimately have null planet_id_to.
-            if ($mission->planet_id_to === null && !in_array($mission->mission_type, [7, 8, 11, 15], true)) {
+            // **Une mission qui vise un point de l espace n a jamais eu de corps a l arrivee.**
+            // Elle se reconnait a `type_to`, que le lanceur pose — c est deja le discriminant que
+            // l administration emploie pour ne pas la declarer bloquee.
+            //
+            // La confondre avec une planete deplacee renvoyait **toute attaque spatiale** chez elle
+            // sans combat : `processArrival()` n etait jamais atteint, et le combat en espace libre
+            // ne pouvait pas se produire. Les essais qui appelaient la bataille directement ne
+            // pouvaient pas le voir.
+            $viseUnPointDeLEspace = (int)$mission->type_to === PlanetType::SpatialPoint->value;
+
+            if ($mission->planet_id_to === null
+                && !$viseUnPointDeLEspace
+                && !in_array($mission->mission_type, [7, 8, 11, 15], true)
+            ) {
                 $mission->processed = 1;
                 $mission->save();
                 if (static::$hasReturnMission) {

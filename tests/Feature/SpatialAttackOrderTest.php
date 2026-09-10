@@ -3,11 +3,20 @@
 namespace Tests\Feature;
 
 use Illuminate\Support\Facades\DB;
+use OGame\Factories\PlayerServiceFactory;
+use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Models\Enums\PlanetType;
 use OGame\Models\Patrol;
+use OGame\Models\Resources;
 use OGame\Models\User;
 use OGame\Patrol\Enums\PatrolState;
 use OGame\Patrol\Exceptions\PatrolOrderRefused;
+use OGame\Patrol\FrozenPatrolTarget;
 use OGame\Patrol\PatrolAttackEligibility;
+use OGame\Patrol\PatrolDestination;
+use OGame\Patrol\PatrolPricing;
+use OGame\Patrol\SpatialAttackOrder;
+use OGame\Services\ObjectService;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
 
@@ -275,6 +284,96 @@ class SpatialAttackOrderTest extends AccountTestCase
             $missionsAvant,
             (int)DB::table('fleet_missions')->where('user_id', $this->currentUserId)->count(),
             'Une attaque refusee a quand meme cree une mission.'
+        );
+    }
+
+    /**
+     * **Une attaque part vraiment**, et paie ce qu elle annonce.
+     *
+     * ## Pourquoi cet essai est le plus important de la classe
+     *
+     * Les six qui precedent eprouvent des refus. Ils sont necessaires — la surveillance existe pour
+     * qu on ne puisse pas viser ce qu on ne detecte pas — mais aucun ne demande a une attaque de
+     * partir, et cette forme laisse passer un blocage **total**.
+     *
+     * C est ce qui s est produit : `SpatialAttackOrder::launch()` demande son devis avec une reserve
+     * de zero — une attaque ne stationne pas —, et `PatrolPricing::quote()` refusait des que
+     * `reserve - cout` etait negatif, ce qui est le cas des que le trajet coute quelque chose.
+     * **Aucune attaque spatiale ne pouvait aboutir**, et la classe restait verte.
+     *
+     * ## La regle du carburant, epinglee
+     *
+     * Une attaque paie **l aller et le retour au depart**, comme toute attaque du jeu. Ne prendre que
+     * l aller rendrait le retour gratuit ; la flotte ne stationnant pas, il n y a aucune reserve pour
+     * le payer plus tard.
+     */
+    public function testUneAttaquePartVraimentEtPaieAllerEtRetour(): void
+    {
+        $proprietaire = (int)User::factory()->create()->id;
+
+        // **Dans le systeme de l attaquant** : le seul cas reel, et le seul trajet payable.
+        $chezMoi = $this->planetService->getPlanetCoordinates();
+        $cible = $this->unePatrouilleDe($proprietaire);
+        $cible->forceFill(['galaxy' => $chezMoi->galaxy, 'system' => $chezMoi->system])->save();
+
+        $this->planetService->addUnit('battle_ship', 30);
+        $this->planetService->addResources(new Resources(0, 0, 5_000_000, 0));
+        $this->planetService->reloadPlanet();
+
+        $vaisseauxAvant = $this->planetService->getShipUnits()->getAmountByMachineName('battle_ship');
+        $deuteriumAvant = (int)$this->planetService->deuterium()->get();
+
+        $flotte = new UnitCollection();
+        $flotte->addUnit(ObjectService::getUnitObjectByMachineName('battle_ship'), 30);
+
+        $gelee = FrozenPatrolTarget::of($cible);
+        $tarif = resolve(PatrolPricing::class);
+        $devis = $tarif->quote(
+            resolve(PlayerServiceFactory::class)->make($this->currentUserId, true),
+            $flotte,
+            0.0,
+            $chezMoi->galaxy,
+            $chezMoi->system,
+            $tarif->geometry()->bodyPoint($chezMoi->position),
+            PatrolDestination::spatialPoint($tarif->geometry(), $gelee->galaxy, $gelee->system, $gelee->point()),
+            10.0,
+            0,
+            $chezMoi,
+            false,
+        );
+
+        $this->assertTrue($devis->isPossible(), 'Le devis d une attaque refuse encore : ' . (string)$devis->refusal);
+
+        $mission = resolve(SpatialAttackOrder::class)->launch(
+            $this->planetService,
+            $flotte,
+            $gelee,
+            10.0,
+            (int)now()->timestamp
+        );
+
+        $this->assertSame(1, (int)$mission->mission_type, 'Une attaque spatiale est une attaque de genre 1.');
+        $this->assertNull($mission->planet_id_to, 'Elle ne vise aucun corps.');
+        $this->assertSame(PlanetType::SpatialPoint->value, (int)$mission->type_to, 'Sans cette colonne, l arrivee la prend pour une planete deplacee.');
+        $this->assertSame((int)$cible->id, (int)$mission->target_patrol_id);
+
+        $this->planetService->reloadPlanet();
+
+        $this->assertSame(
+            $vaisseauxAvant - 30,
+            $this->planetService->getShipUnits()->getAmountByMachineName('battle_ship'),
+            'Les vaisseaux doivent avoir quitte le corps.'
+        );
+
+        // **Aller plus retour, preleve au depart.**
+        $attendu = $devis->fuelCost + $devis->safetyReturnCost;
+
+        $this->assertGreaterThan(0, $attendu, 'Un trajet gratuit ferait coincider le juste et le faux.');
+        $this->assertSame($attendu, (int)$mission->deuterium_consumption, 'La mission doit porter le carburant de l aller et du retour.');
+        $this->assertSame(
+            $deuteriumAvant - $attendu,
+            (int)$this->planetService->deuterium()->get(),
+            'Le corps doit avoir paye exactement l aller et le retour.'
         );
     }
 

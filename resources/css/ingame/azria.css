@@ -515,3 +515,112 @@
     background-position: 0 0;
     background-size: cover;
 }
+
+
+/*
+ * ## Le chantier spatial : reparer les survivants
+ *
+ * Le panneau vit dans une `content-box-s` de la page Installations. Il n avait aucune ligne de
+ * style : les deux listes seraient sorties avec leurs puces, les paliers colles au nom du vaisseau,
+ * et le compte a rebours perdu au fil du texte.
+ *
+ * **Tout porte `#hullRepairBox`.** Une regle de classe se fait battre par une regle d identite du
+ * jeu, et le style disparait en silence — c est arrive trois fois ici. Le conteneur a deja son
+ * identifiant ; s en servir ferme la question.
+ */
+#hullRepairBox .hullRepairFleet,
+#hullRepairBox .hullRepairLevels,
+#hullRepairBox .hullRepairHeld {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+/* Une ligne par type de vaisseau, separee de la suivante : « 20 croiseurs, dont 8 endommages ». */
+#hullRepairBox .hullRepairFleet > li {
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+#hullRepairBox .hullRepairFleet > li:last-child {
+    border-bottom: none;
+}
+
+/*
+ * Le detail par palier : decale, plus discret que le total. **Jamais une moyenne** — douze intacts
+ * et huit a moitie detruits ne font pas vingt vaisseaux a 82 % —, donc chaque palier a sa ligne, et
+ * le style doit rendre cette liste lisible plutot que la resumer.
+ */
+#hullRepairBox .hullRepairLevels {
+    margin-top: 3px;
+    padding-left: 14px;
+    color: #9099a4;
+    font-size: 11px;
+}
+
+#hullRepairBox .hullRepairLevels > li {
+    padding: 1px 0;
+    /* Les nombres s alignent en colonne quand plusieurs paliers se suivent. */
+    font-variant-numeric: tabular-nums;
+}
+
+/* Ce que le dock retient pendant qu il repare. */
+#hullRepairBox .hullRepairHeld > li {
+    padding: 2px 0;
+    color: #b9c3cf;
+    font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Le compte a rebours : c est le seul nombre que le joueur revient regarder, il se lit donc d un
+ * coup d oeil. `simpleCountdown` reecrit le contenu de `#hullRepairTimer` a la seconde.
+ */
+#hullRepairBox .hullRepairCountdown {
+    margin: 8px 0 4px;
+    font-size: 15px;
+    font-weight: bold;
+    color: #d3dce6;
+    font-variant-numeric: tabular-nums;
+}
+
+/*
+ * Le remboursement d une annulation, et la raison d une indisponibilite : deux informations qu on
+ * lit avant de decider, jamais des alertes. Elles restent discretes.
+ */
+#hullRepairBox .hullRepairRefund,
+#hullRepairBox .hullRepairUnavailable {
+    margin: 6px 0;
+    color: #8a939f;
+    font-size: 11px;
+}
+
+#hullRepairBox .hullRepairUnavailable {
+    font-style: italic;
+}
+
+/* Le devis, une fois rendu par le serveur : c est un prix, il doit se distinguer du texte. */
+#hullRepairBox .hullRepairCost {
+    margin: 8px 0 6px;
+    color: #d3dce6;
+    font-variant-numeric: tabular-nums;
+}
+
+#hullRepairBox #hullRepairQuoteResult {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+#hullRepairBox .btn_blue {
+    margin-top: 6px;
+}
+
+/*
+ * **Un bouton desarme se voit.** Le navigateur le desarme pendant le vol d une requete pour qu une
+ * double soumission ne parte pas ; sans marque visuelle, le joueur reclique dans le vide et croit
+ * que la page ne repond pas.
+ */
+#hullRepairBox .btn_blue[disabled] {
+    opacity: 0.5;
+    cursor: default;
+}

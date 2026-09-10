@@ -105,6 +105,9 @@ final class SpatialAttackOrder
             $speedPercent,
             0,
             $depart,
+            // **Cette flotte ne stationne pas.** Le devis garde ses nombres et laisse tomber les deux
+            // refus qui protegent une patrouille posee : sans reserve, ils refuseraient toujours.
+            false,
         );
 
         if (!$devis->isPossible()) {
@@ -123,8 +126,12 @@ final class SpatialAttackOrder
                 throw new PatrolOrderRefused('no_fleet_slot');
             }
 
-            // Le carburant part du corps, comme pour toute mission.
-            $aRetirer = new Resources(0, 0, $devis->fuelCost, 0);
+            // **Le carburant de l aller ET du retour, preleve au depart**, comme toute attaque du jeu.
+            // Ne prendre que l aller rendrait le retour gratuit — une divergence avec le reste du jeu
+            // que rien ne justifie. La flotte ne stationnant pas, il n y a pas de reserve pour le
+            // payer plus tard.
+            $carburant = $devis->fuelCost + $devis->safetyReturnCost;
+            $aRetirer = new Resources(0, 0, $carburant, 0);
 
             // **Le point unique des departs** : il applique la regle des plus intactes, refuse les
             // unites tenues au dock, et rend les degats emportes.
@@ -168,7 +175,7 @@ final class SpatialAttackOrder
             $mission->metal = 0;
             $mission->crystal = 0;
             $mission->deuterium = 0;
-            $mission->deuterium_consumption = $devis->fuelCost;
+            $mission->deuterium_consumption = $carburant;
 
             foreach ($units->units as $unite) {
                 $mission->{$unite->unitObject->machine_name} = $unite->amount;

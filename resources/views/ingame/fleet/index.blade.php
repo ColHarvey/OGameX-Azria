@@ -916,8 +916,8 @@
                                                 <li class="technology {{ $object->object->class_name }} interactive hasDetails tooltip hideTooltipOnMouseenter js_hideTipOnMobile ipiHintable"
                                                     data-technology="{{ $object->object->id }}"
                                                     data-status="{{ $object->amount == 0 ? 'off' : 'on' }}"
-                                                    data-is-spaceprovider="" aria-label="{{ $object->object->title }}"
-                                                    title="{{ $object->object->title }} ({{ $object->amount }})"
+                                                    data-is-spaceprovider="" aria-label="{{ $object->object->title }}{{ $object->damaged > 0 ? ', ' . __('t_ingame.fleet.damaged_suffix', ['count' => $object->damaged]) : '' }}" data-damaged="{{ $object->damaged }}"
+                                                    title="{{ $object->object->title }} ({{ $object->amount }}){{ $object->damaged > 0 ? ' — ' . __('t_ingame.fleet.damaged_suffix', ['count' => $object->damaged]) : '' }}"
                                                     data-ipi-hint="ipiFleetselect{{ $object->object->class_name }}">
 												<span class="icon sprite sprite_small small {{ $object->object->class_name }}">
 													<span class="amount" data-value="{{ $object->amount }}"
@@ -940,8 +940,8 @@
                                                 <li class="technology {{ $object->object->class_name }} interactive hasDetails tooltip hideTooltipOnMouseenter js_hideTipOnMobile ipiHintable"
                                                     data-technology="{{ $object->object->id }}"
                                                     data-status="{{ $object->amount == 0 ? 'off' : 'on' }}"
-                                                    data-is-spaceprovider="" aria-label="{{ $object->object->title }}"
-                                                    title="{{ $object->object->title }} ({{ $object->amount }})"
+                                                    data-is-spaceprovider="" aria-label="{{ $object->object->title }}{{ $object->damaged > 0 ? ', ' . __('t_ingame.fleet.damaged_suffix', ['count' => $object->damaged]) : '' }}" data-damaged="{{ $object->damaged }}"
+                                                    title="{{ $object->object->title }} ({{ $object->amount }}){{ $object->damaged > 0 ? ' — ' . __('t_ingame.fleet.damaged_suffix', ['count' => $object->damaged]) : '' }}"
                                                     data-ipi-hint="ipiFleetselect{{ $object->object->class_name }}">
 
     <span class="icon sprite sprite_small small {{ $object->object->class_name }}">

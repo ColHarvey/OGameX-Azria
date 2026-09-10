@@ -490,6 +490,17 @@
                                 </div>
                                 <div class="smallFont">{{ __('t_ingame.admin.patrols_enabled_desc') }}</div>
                             </div>
+                            {{-- Chantier des degats de coque (journal §118) : son propre interrupteur. --}}
+                            <div class="fieldwrapper">
+                                <label class="styled textBeefy">{{ __('t_ingame.admin.hull_damage_enabled') }}</label>
+                                <div class="thefield">
+                                    <square-checkbox class="square-checkbox">
+                                        <input type="checkbox" id="square-checkBoxHullDamageEnabled" name="hull_damage_enabled" value="1" {{ $hull_damage_enabled ? 'checked' : '' }}>
+                                        <label for="square-checkBoxHullDamageEnabled"></label>
+                                    </square-checkbox>
+                                </div>
+                                <div class="smallFont">{{ __('t_ingame.admin.hull_damage_enabled_desc') }}</div>
+                            </div>
                             <div class="fieldwrapper">
                                 <label class="styled textBeefy">{{ __('t_ingame.admin.patrol_manoeuvre_delay') }}</label>
                                 <div class="thefield">

@@ -2,7 +2,9 @@
 
 namespace Tests\Feature;
 
+use Illuminate\Support\Facades\DB;
 use OGame\Factories\PlayerServiceFactory;
+use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Hull\DamagedHulls;
 use OGame\Models\FleetMission;
 use OGame\Models\Patrol;
@@ -10,7 +12,10 @@ use OGame\Models\Resources;
 use OGame\Patrol\Combat\SpatialBattle;
 use OGame\Patrol\Combat\SpatialSettlement;
 use OGame\Patrol\Enums\PatrolState;
+use OGame\Patrol\FrozenPatrolTarget;
 use OGame\Patrol\Geometry\SpatialPoint;
+use OGame\Patrol\SpatialAttackOrder;
+use OGame\Services\ObjectService;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
 
@@ -51,7 +56,7 @@ class SpatialBattleTest extends AccountTestCase
      *
      * @return array{0: Patrol, 1: FleetMission}
      */
-    private function unePatrouillePosee(array $unites, int $x = 120, int $y = -80): array
+    private function unePatrouillePosee(array $unites, int $x = 120, int $y = -80, int $galaxie = 4, int $systeme = 77): array
     {
         $defenseur = $this->getSecondPlayerId();
 
@@ -59,8 +64,8 @@ class SpatialBattleTest extends AccountTestCase
             'user_id' => $defenseur,
             'home_planet_id' => null,
             'state' => PatrolState::Stationed,
-            'galaxy' => 4,
-            'system' => 77,
+            'galaxy' => $galaxie,
+            'system' => $systeme,
             'x' => $x,
             'y' => $y,
             'fuel_reserve' => 5000.0,
@@ -72,8 +77,8 @@ class SpatialBattleTest extends AccountTestCase
         $segment->user_id = $defenseur;
         $segment->patrol_id = (int)$patrouille->id;
         $segment->mission_type = 11;
-        $segment->galaxy_to = 4;
-        $segment->system_to = 77;
+        $segment->galaxy_to = $galaxie;
+        $segment->system_to = $systeme;
         $segment->x_to = $x;
         $segment->y_to = $y;
         $segment->time_departure = (int)now()->timestamp - 3600;
@@ -129,6 +134,115 @@ class SpatialBattleTest extends AccountTestCase
         $mission->save();
 
         return $mission;
+    }
+
+    /**
+     * **L arrivee traverse le vrai travailleur, avec le combat durable arme.**
+     *
+     * ## Pourquoi cet essai existe, et pourquoi il precede l activation
+     *
+     * Les autres essais de cette classe appellent la bataille et son reglement directement. Ils
+     * etablissent ce que fait la bataille ; ils n etablissent pas que l arrivee **y parvient**.
+     *
+     * Et le chemin qui y mene n est pas anodin. La production tourne avec
+     * `persistent_combat_enabled` a 1. Une attaque spatiale est une attaque de **genre 1** :
+     * `PlayerService::isGovernedByTheCombatGate()` classe par genre, sans regarder la cible, donc
+     * elle range cette mission parmi celles « gouvernees par le combat » et la fait passer par
+     * `FleetMovementGate`. Or l ordre des verrous de cette porte commence par une **barriere ancree
+     * sur un corps celeste** — et cette mission n a pas de corps a l arrivee (`planet_id_to` est
+     * vide).
+     *
+     * La porte prevoit ce cas et ne prend aucune barriere quand la cible est nulle. **Mais cela se
+     * lisait dans le code, et rien ne l executait.** Armer les patrouilles sur une lecture de code
+     * aurait mis cette lecture en production.
+     *
+     * ## Ce que l essai exige
+     *
+     * Que la bataille ait eu lieu — par ses effets, jamais par un appel direct —, que la mission
+     * soit traitee, que la flotte reparte, et **qu aucun combat durable n ait ete ouvert** : le
+     * chemin spatial est distinct, et une instance creee ici voudrait dire que la mission est partie
+     * dans la mecanique des corps celestes.
+     */
+    public function testUneAttaqueSpatialeArriveParLeTravailleurQuandLeCombatDurableEstArme(): void
+    {
+        // **Dans le systeme de l attaquant** : c est le seul cas reel, la surveillance ne voyant
+        // que les patrouilles des systemes ou le joueur possede un corps. C est aussi ce qui rend
+        // le trajet payable — une attaque a trois galaxies de la n a pas de carburant.
+        $chezMoi = $this->planetService->getPlanetCoordinates();
+        [$patrouille] = $this->unePatrouillePosee(['light_fighter' => 5], 120, -80, $chezMoi->galaxy, $chezMoi->system);
+
+        // **Le vrai lanceur, pas une ligne fabriquee a la main.** Les essais voisins montent la
+        // mission eux-memes, ce qui convient pour eprouver la bataille ; ici c est le trajet complet
+        // qui est en cause, et une mission fabriquee a la main n a pas les colonnes que le lanceur
+        // pose — `type_to` et `position_to`, dont depend la creation du retour.
+        $this->planetService->addUnit('battle_ship', 60);
+        $this->planetService->addResources(new Resources(0, 0, 5_000_000, 0));
+        $this->planetService->reloadPlanet();
+
+        $flotte = new UnitCollection();
+        $flotte->addUnit(ObjectService::getUnitObjectByMachineName('battle_ship'), 60);
+
+        // **Compte en ecart, jamais a zero** : la base d un processus garde les combats de ses
+        // voisins.
+        $instancesAvant = (int)DB::table('combat_instances')->count();
+        $missionsAvant = (int)DB::table('fleet_missions')->where('user_id', $this->currentUserId)->count();
+
+        $attaque = resolve(SpatialAttackOrder::class)->launch(
+            $this->planetService,
+            $flotte,
+            FrozenPatrolTarget::of($patrouille),
+            10.0,
+            (int)now()->timestamp
+        );
+
+        // Le vol n est pas l objet de cet essai : l arrivee est ramenee dans le passe pour que le
+        // travailleur ait quelque chose a traiter.
+        DB::table('fleet_missions')
+            ->where('id', $attaque->id)
+            ->update(['time_arrival' => (int)now()->timestamp - 1]);
+
+        resolve(SettingsService::class)->set('persistent_combat_enabled', '1');
+
+        try {
+            // Le vrai point d entree du jeu : ce que fait une page du joueur attaquant.
+            resolve(PlayerServiceFactory::class)->make($this->currentUserId, true)->updateFleetMissions();
+        } finally {
+            resolve(SettingsService::class)->set('persistent_combat_enabled', '0');
+        }
+
+        $relue = FleetMission::find($attaque->id);
+        $this->assertNotNull($relue, 'La mission attaquante doit rester en base.');
+        $this->assertSame(1, (int)$relue->processed, 'Le travailleur n a pas traite l arrivee spatiale : la flotte resterait en vol.');
+
+        $patrouille->refresh();
+
+        $this->assertSame(
+            PatrolState::Destroyed->value,
+            $patrouille->state->value ?? $patrouille->state,
+            'La bataille n a pas eu lieu : soixante vaisseaux de bataille contre cinq chasseurs legers ne laissent rien.'
+        );
+
+        // **Aucun combat durable ouvert.** Le chemin spatial est distinct de celui des corps.
+        $this->assertSame(
+            $instancesAvant,
+            (int)DB::table('combat_instances')->count(),
+            'Une attaque spatiale a ouvert un combat durable : elle est partie dans la mecanique des corps celestes.'
+        );
+
+        // La flotte repart : l aller plus un retour, et un seul.
+        $this->assertSame(
+            $missionsAvant + 2,
+            (int)DB::table('fleet_missions')->where('user_id', $this->currentUserId)->count(),
+            'La flotte victorieuse doit repartir, et une seule fois.'
+        );
+
+        $retour = FleetMission::where('parent_id', $attaque->id)->first();
+        $this->assertNotNull($retour, 'Aucun retour : la flotte est perdue en chemin.');
+        $this->assertSame(
+            $this->planetService->getPlanetId(),
+            (int)$retour->planet_id_to,
+            'Le retour doit viser le corps de depart.'
+        );
     }
 
     public function testUneFlotteEcrasanteDetruitUnePatrouilleEtLaisseSesDebrisSurLePoint(): void

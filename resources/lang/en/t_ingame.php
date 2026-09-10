@@ -240,6 +240,7 @@ return [
 
         // Step 1 – ship selection
         'combat_ships'             => 'Combat ships',
+        'damaged_suffix'          => ':count damaged',
         'civil_ships'              => 'Civil ships',
         'standard_fleets'          => 'Standard fleets',
         'edit_standard_fleets'     => 'Edit standard fleets',
@@ -1774,6 +1775,8 @@ Improved fleet escape rate',
         'alliance_offensive_protection_enabled_desc' => 'No offensive between members of the same alliance: attack, ACS attack, missiles and moon destruction are refused at launch and on arrival. Espionage stays allowed.',
         'patrols_enabled' => 'Patrols enabled:',
         'patrols_enabled_desc' => 'Switch for the patrols, stationing and surveillance project. Off, nothing changes in game.',
+        'hull_damage_enabled' => 'Hull damage enabled:',
+        'hull_damage_enabled_desc' => 'Ships keep the hull they leave a battle with, and the space dock can repair them for a price. Off, nothing is erased: existing damage and running repairs are kept.',
         'patrol_manoeuvre_delay' => 'In-flight manoeuvre delay (seconds):',
         'patrol_manoeuvre_delay_desc' => 'Counted from the confirmation; the new leg departs from the position reached at the end of the delay.',
         'patrol_upkeep_divisor' => 'Stationing consumption divisor:',

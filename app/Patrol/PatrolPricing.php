@@ -89,6 +89,7 @@ final class PatrolPricing
         float $speedPercent,
         int $orderVersion,
         Coordinate $home,
+        bool $fleetWillStation = true,
     ): PatrolQuote {
         $distance = $this->distanceBetween($galaxyFrom, $systemFrom, $from, $to);
 
@@ -142,12 +143,22 @@ final class PatrolPricing
 
         // **Le refus vient apres le calcul, jamais a la place.** Un joueur a qui l on dit seulement
         // « impossible » ne sait pas de combien il manque ; le devis garde donc ses nombres.
+        // **Les deux refus qui suivent sont des regles de stationnement.** Ils protegent une
+        // patrouille qu on poserait sans de quoi revenir : elle serait condamnee au secours, et la
+        // revue 120 l interdit.
+        //
+        // Une flotte qui ne reste pas — une attaque, qui frappe et repart — n a pas de reserve du
+        // tout : son carburant est preleve sur le corps au depart, comme celui de toute mission.
+        // Lui appliquer ces regles la refusait **toujours**, `0 - cout` etant negatif des que le
+        // trajet coute quelque chose.
+        if (!$fleetWillStation) {
+            return $devis;
+        }
+
         if ($reserveArrivee < 0) {
             return $devis->refusedBecause('not_enough_fuel');
         }
 
-        // **La reserve de retour est protegee avant le depart, pas apres.** Un ordre qui poserait la
-        // patrouille sans de quoi revenir la condamnerait au secours ; la revue 120 l interdit.
         if ($reserveArrivee < $coutRetour) {
             return $devis->refusedBecause('no_return_reserve');
         }

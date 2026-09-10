@@ -75,6 +75,29 @@ class HullRepairTest extends AccountTestCase
         return $unites;
     }
 
+    /**
+     * **La page Flotte dit combien sont abimes.**
+     *
+     * Le controleur calculait ce compte et le posait sur le modele de vue ; **aucun gabarit ne le
+     * rendait**. Le renseignement etait produit et jete — la meme forme de defaut que les contacts
+     * de surveillance sans style : calcule, protege, transmis, invisible.
+     *
+     * Il voyage a cote du total, jamais a la place, et jamais en moyenne : douze intacts et huit a
+     * moitie detruits ne font pas vingt vaisseaux a 82 %.
+     */
+    public function testLaPageFlotteDitCombienSontAbimes(): void
+    {
+        $this->unCorpsAvecDesCroiseursAbimes(20, 8, 5000);
+
+        $reponse = $this->get(route('fleet.index'));
+
+        $reponse->assertStatus(200);
+
+        // La forme exacte que le gabarit compose, dans l infobulle et l etiquette d accessibilite.
+        $reponse->assertSee(__('t_ingame.fleet.damaged_suffix', ['count' => 8]), false);
+        $reponse->assertSee('data-damaged="8"', false);
+    }
+
     public function testLeDevisSuitLesDegatsEtNonLeNombre(): void
     {
         $this->unCorpsAvecDesCroiseursAbimes(20, 8, 5000);
