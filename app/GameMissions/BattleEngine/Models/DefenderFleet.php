@@ -166,6 +166,10 @@ class DefenderFleet
         $defender->ownerId = $mission->user_id;
         $defender->fleetMission = $mission;
 
+        // Le pendant exact du cote attaquant : un renfort ACS abime tient la position dans l etat
+        // ou la derniere bataille l a laisse, et non remis a neuf par le voyage.
+        $defender->damagedHulls = DamagedHulls::fromStorage($mission->damaged_hulls);
+
         return $defender;
     }
 

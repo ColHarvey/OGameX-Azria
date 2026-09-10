@@ -95,6 +95,17 @@ class AttackerFleet
         $attacker->isInitiator = $isInitiator;
         $attacker->fleetMission = $mission;
 
+        // **Les coques entamees que cette flotte transporte** (journal §118).
+        //
+        // Sans cette ligne, tout le reste du chantier ne servait a rien pour une flotte en
+        // mouvement : le reglement ecrivait bien les degats sur la mission, le retour les heritait,
+        // l atterrissage les fusionnait — et le combat suivant les **ignorait**, faisant repartir au
+        // feu une flotte a moitie detruite comme si elle sortait du chantier naval.
+        //
+        // Le defaut etait invisible de bout en bout : les effectifs restaient justes partout, la
+        // colonne portait les bonnes valeurs, et seule l issue des batailles etait fausse.
+        $attacker->damagedHulls = DamagedHulls::fromStorage($mission->damaged_hulls);
+
         return $attacker;
     }
 

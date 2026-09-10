@@ -3,11 +3,16 @@
 namespace Tests\Feature;
 
 use Illuminate\Support\Facades\Date;
+use OGame\Factories\PlayerServiceFactory;
+use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
+use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Hull\DamagedHulls;
 use OGame\Hull\HullRepairService;
+use OGame\Models\FleetMission;
 use OGame\Models\HullRepairOrder;
 use OGame\Models\Resources;
+use OGame\Services\FleetMissionService;
 use OGame\Services\JumpGateService;
 use OGame\Services\ObjectService;
 use OGame\Services\SettingsService;
@@ -484,6 +489,59 @@ class HullRepairTest extends AccountTestCase
         $this->assertCount(
             $restants,
             $this->planetService->damagedHulls()->damageSequenceFor('cruiser', $restants)
+        );
+    }
+
+    /**
+     * **Une flotte abimee repart au combat abimee.**
+     *
+     * C est la ligne qui relie tout le reste : le reglement ecrit les degats sur la mission, le
+     * retour les herite, l atterrissage les fusionne — et si la construction de la flotte de combat
+     * ne les relisait pas, **tout cela ne servirait a rien**. Le defaut serait invisible de bout en
+     * bout : effectifs justes partout, colonne correcte, et seule l issue des batailles fausse.
+     */
+    public function testUneFlotteAbimeeRepartAuCombatAbimee(): void
+    {
+        $mission = new FleetMission();
+        $mission->damaged_hulls = DamagedHulls::of(['cruiser' => [5000 => 8, 2500 => 4]])->toStorage();
+        $mission->id = 4242;
+        $mission->user_id = $this->currentUserId;
+        $mission->cruiser = 20;
+
+        // La cargaison est lue au montage de la flotte : sans elle, `Resources` refuse un `null`.
+        $mission->metal = 0;
+        $mission->crystal = 0;
+        $mission->deuterium = 0;
+
+        $attaquante = AttackerFleet::fromFleetMission(
+            $mission,
+            resolve(FleetMissionService::class),
+            resolve(PlayerServiceFactory::class),
+            true
+        );
+
+        $this->assertSame(
+            12,
+            $attaquante->damagedHulls()->damagedCountOf('cruiser'),
+            'La flotte attaquante entre au combat sans les degats que sa mission transporte.'
+        );
+
+        // Et l ordre d entree suit la regle : les intactes en tete, puis les moins abimees.
+        $this->assertSame(
+            [0, 0, 0, 0, 0, 0, 0, 0, 2500, 2500, 2500, 2500, 5000, 5000, 5000, 5000, 5000, 5000, 5000, 5000],
+            $attaquante->damagedHulls()->damageSequenceFor('cruiser', 20)
+        );
+
+        $defensive = DefenderFleet::fromFleetMission(
+            $mission,
+            resolve(FleetMissionService::class),
+            resolve(PlayerServiceFactory::class)
+        );
+
+        $this->assertSame(
+            12,
+            $defensive->damagedHulls()->damagedCountOf('cruiser'),
+            'Un renfort defensif tient la position sans ses degats.'
         );
     }
 
