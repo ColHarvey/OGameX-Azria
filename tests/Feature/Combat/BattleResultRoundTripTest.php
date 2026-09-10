@@ -5,6 +5,7 @@ namespace Tests\Feature\Combat;
 use OGame\Combat\Allocation\ExactLootAllocationV1;
 use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Allocation\FrozenLootPotential;
+use OGame\Combat\Exceptions\CorruptedBattleResult;
 use OGame\Combat\Replay\BattleResultCodec;
 use OGame\Combat\Replay\CombatResultIdentity;
 use OGame\Combat\Services\CombatDurationEstimator;
@@ -122,6 +123,99 @@ class BattleResultRoundTripTest extends FleetDispatchTestCase
             $relu->resourceDiagnostics->count(),
             'The diagnostics did not survive the round trip.'
         );
+    }
+
+    /**
+     * **Un combat gelé sous le schéma 4 se règle encore.**
+     *
+     * C'est la stratégie de transition du chantier des coques (journal §118) : le combat persistant
+     * tourne en production, et refuser l'ancien schéma rendrait illisible tout combat ouvert au
+     * moment du déploiement — le règlement échouerait cinq fois avant d'être mis de côté.
+     *
+     * L'essai **fabrique** un document du schéma 4 en retirant la clef neuve, au lieu d'en chercher
+     * un : un document trouvé par hasard ne prouverait pas la règle.
+     */
+    public function testABattleFrozenUnderTheOlderSchemaStillReadsBack(): void
+    {
+        $original = $this->aRealResult();
+        $document = BattleResultCodec::toStorage($original, $this->anIdentity());
+
+        // **Le juste et le faux ne doivent pas coincider.** Si cette bataille ne laissait aucune
+        // coque entamee, l essai passerait meme avec une relecture cassee : il comparerait du vide
+        // a du vide. On exige donc que le document du schema 5 en porte, avant de le degrader.
+        $entamees = 0;
+
+        foreach (['attacker_fleet_results', 'defender_fleet_results'] as $camp) {
+            foreach ($document[$camp] as $flotte) {
+                foreach ($flotte['survivor_hulls'] ?? [] as $paliers) {
+                    $entamees += array_sum($paliers);
+                }
+            }
+        }
+
+        $this->assertGreaterThan(
+            0,
+            $entamees,
+            'Cette bataille ne laisse aucune coque entamee : la degrader ne prouverait rien.'
+        );
+
+        // On redescend le document au schéma 4 : la version, et la clef que la version 5 a ajoutée.
+        $document['schema'] = 4;
+
+        foreach (['attacker_fleet_results', 'defender_fleet_results'] as $camp) {
+            foreach ($document[$camp] as $rang => $flotte) {
+                unset($flotte['survivor_hulls']);
+                $document[$camp][$rang] = $flotte;
+            }
+        }
+
+        $relu = BattleResultCodec::fromStorage($this->throughJson($document));
+
+        // Il se relit — et les coques y valent « aucun dégât », qui est la valeur juste pour un
+        // combat figé avant que les dégâts existent, pas un repli.
+        foreach ($relu->attackerFleetResults as $flotte) {
+            $this->assertTrue(
+                $flotte->survivorHulls()->isEmpty(),
+                'Un combat du schéma 4 ne porte aucune coque entamée.'
+            );
+        }
+
+        foreach ($relu->defenderFleetResults as $flotte) {
+            $this->assertTrue($flotte->survivorHulls()->isEmpty());
+        }
+    }
+
+    /**
+     * **Un schéma que personne ne connaît reste refusé.**
+     *
+     * Élargir la relecture au schéma 4 ne devait pas ouvrir la porte à tous : c'est une exception
+     * nommée, pas un assouplissement.
+     */
+    public function testAnUnknownSchemaIsStillRefused(): void
+    {
+        $document = BattleResultCodec::toStorage($this->aRealResult(), $this->anIdentity());
+        $document['schema'] = 3;
+
+        $this->expectException(CorruptedBattleResult::class);
+        BattleResultCodec::fromStorage($this->throughJson($document));
+    }
+
+    private function anIdentity(): CombatResultIdentity
+    {
+        return CombatResultIdentity::fromStorage([
+            'combat_instance_id' => 1,
+            'target_body_id' => 2,
+            'initiator_mission_id' => 3,
+            'participants' => [CombatParticipantKey::forFleet(3)],
+            'frozen_facts_fingerprint' => 'empreinte',
+            'versions' => [
+                'causal_order' => 'v1',
+                'loot_allocator' => 'v1',
+                'loot_policy' => 'v1',
+                'moon_destruction' => 'v1',
+                'projection' => 'v1',
+            ],
+        ]);
     }
 
     /**

@@ -11,6 +11,7 @@ use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameMissions\BattleEngine\Models\BattleResultRound;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleetResult;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Hull\DamagedHulls;
 use OGame\Models\Resources;
 use OGame\Services\ObjectService;
 use RuntimeException;
@@ -59,8 +60,29 @@ final class BattleResultCodec
      * participant des deux camps, sous la clef typee des inscriptions au combat : la garnison est
      * le corps, chaque flotte sa mission. Un document du schema 3 se refuse : dire apres coup de
      * quelle flotte venait chaque perte reviendrait a inventer une chronologie.
+     *
+     * Le schema 5 ajoute, par flotte, les coques entamees que gardent les survivants (journal §118).
+     *
+     * **Et c'est le premier schema dont le predecesseur se relit encore**, volontairement. Les autres
+     * refusaient l'ancien parce que la donnee manquante ne se devine pas apres coup ; celle-ci se
+     * devine, et sa valeur est evidente : un combat gele avant que les degats existent n'a laisse
+     * aucune coque entamee. Refuser le schema 4 rendrait illisible **tout combat durable ouvert au
+     * moment du deploiement** — le combat persistant tourne en production —, et le reglement
+     * echouerait cinq fois avant d'etre mis de cote. C'est la strategie de transition explicite que
+     * le cahier des charges exige, plutot qu'une remise a zero.
      */
-    public const int SCHEMA = 4;
+    public const int SCHEMA = 5;
+
+    /**
+     * Les schemas qu'une relecture accepte.
+     *
+     * Le 4 se relit sans ses coques : un combat fige avant cette regle n'en portait aucune, et
+     * `DamagedHulls::none()` est la valeur juste, pas un repli. **L'ecriture, elle, se fait toujours
+     * au schema courant** : rien ne produit plus de document du schema 4.
+     *
+     * @var array<int, int>
+     */
+    private const array READABLE_SCHEMAS = [4, 5];
 
     private const array KEYS = [
         'schema',
@@ -122,6 +144,7 @@ final class BattleResultCodec
         'starting_cargo_capacity',
         'surviving_cargo_capacity',
         'completely_destroyed',
+        'survivor_hulls',
     ];
 
     private const array DEFENDER_FLEET_KEYS = [
@@ -133,6 +156,7 @@ final class BattleResultCodec
         'starting_cargo_capacity',
         'surviving_cargo_capacity',
         'completely_destroyed',
+        'survivor_hulls',
     ];
 
     private const array ROUND_KEYS = [
@@ -182,6 +206,7 @@ final class BattleResultCodec
                 'starting_cargo_capacity' => $flotte->startingCargoCapacity,
                 'surviving_cargo_capacity' => $flotte->survivingCargoCapacity,
                 'completely_destroyed' => $flotte->completelyDestroyed,
+                'survivor_hulls' => $flotte->survivorHulls()->toStorage(),
             ];
         }
 
@@ -196,6 +221,7 @@ final class BattleResultCodec
                 'starting_cargo_capacity' => $flotte->startingCargoCapacity,
                 'surviving_cargo_capacity' => $flotte->survivingCargoCapacity,
                 'completely_destroyed' => $flotte->completelyDestroyed,
+                'survivor_hulls' => $flotte->survivorHulls()->toStorage(),
             ];
         }
 
@@ -318,8 +344,12 @@ final class BattleResultCodec
         // est corrompue n'est pas un resultat fige : personne ne saurait de quel combat il parle.
         CombatResultIdentity::fromStorage(self::present($stored, 'identity', 'resultat'));
 
-        if ($schema !== self::SCHEMA) {
-            throw new CorruptedBattleResult('le schema ' . $schema . ' est inconnu, seul le schema ' . self::SCHEMA . ' se relit', $stored);
+        if (!in_array($schema, self::READABLE_SCHEMAS, true)) {
+            throw new CorruptedBattleResult(
+                'le schema ' . $schema . ' est inconnu, seuls les schemas '
+                . implode(' et ', array_map('strval', self::READABLE_SCHEMAS)) . ' se relisent',
+                $stored
+            );
         }
 
         $result = new BattleResult();
@@ -408,6 +438,11 @@ final class BattleResultCodec
         $flotte->survivingCargoCapacity = self::capacity($document, 'surviving_cargo_capacity', $path);
         $flotte->completelyDestroyed = self::bool($document, 'completely_destroyed', $path);
 
+        // **Optionnel, et c est la transition du schema 4.** Un combat gele avant que les degats
+        // existent n a laisse aucune coque entamee : l absence de la clef vaut 'aucun degat', ce qui
+        // est la valeur juste et non un repli. Un document du schema 5 la porte toujours.
+        $flotte->survivorHulls = DamagedHulls::fromStorage($document['survivor_hulls'] ?? null);
+
         return $flotte;
     }
 
@@ -428,6 +463,11 @@ final class BattleResultCodec
         $flotte->startingCargoCapacity = self::capacity($document, 'starting_cargo_capacity', $path);
         $flotte->survivingCargoCapacity = self::capacity($document, 'surviving_cargo_capacity', $path);
         $flotte->completelyDestroyed = self::bool($document, 'completely_destroyed', $path);
+
+        // **Optionnel, et c est la transition du schema 4.** Un combat gele avant que les degats
+        // existent n a laisse aucune coque entamee : l absence de la clef vaut 'aucun degat', ce qui
+        // est la valeur juste et non un repli. Un document du schema 5 la porte toujours.
+        $flotte->survivorHulls = DamagedHulls::fromStorage($document['survivor_hulls'] ?? null);
 
         return $flotte;
     }
