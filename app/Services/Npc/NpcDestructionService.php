@@ -17,11 +17,14 @@ use RuntimeException;
  * Une base pilotee par le serveur est vaincue lorsque, a l'issue d'un combat :
  *
  *   1. l'attaquant a des survivants — sans quoi il n'a rien gagne ;
- *   2. et la defense adverse a ete integralement balayee pendant la bataille, defenses
- *      et vaisseaux compris, avant que la reparation d'apres-combat n'intervienne.
+ *   2. la defense adverse a ete integralement balayee pendant la bataille, defenses
+ *      et vaisseaux compris, avant que la reparation d'apres-combat n'intervienne ;
+ *   3. et il reste au moins une Etoile de la Mort dans la flotte survivante.
  *
- * Il n'y a pas de troisieme condition a verifier : si tout est a zero, c'est qu'une
- * attaque gagnante a necessairement eu lieu.
+ * La troisieme est une decision de Keven du 9 septembre 2026, prise apres qu'une base soit
+ * tombee sous une flotte ordinaire. Balayer la defense ouvre la voie ; seule l'Etoile de la
+ * Mort abat le corps. Voir `carriesADeathstar()` pour le choix de la flotte survivante
+ * plutot que de la flotte au depart.
  *
  * ------------------------------------------------------------------------------------
  * POURQUOI LA REPARATION NE S'APPLIQUE PAS A UNE BASE VAINCUE
@@ -103,7 +106,33 @@ class NpcDestructionService
         $attackerSurvived = $battleResult->attackerUnitsResult->getAmount() > 0;
         $defenceWiped = $battleResult->defenderUnitsResult->getAmount() === 0;
 
-        return $attackerSurvived && $defenceWiped;
+        return $attackerSurvived && $defenceWiped && $this->carriesADeathstar($battleResult);
+    }
+
+    /**
+     * Get whether the winning fleet still has an Etoile de la Mort to finish the job with.
+     *
+     * ------------------------------------------------------------------------------------
+     * DECISION DE KEVEN, 9 SEPTEMBRE 2026
+     *
+     * Balayer la defense ne suffit plus a faire tomber une base : il faut une Etoile de la
+     * Mort. La regle a ete demandee apres qu'une base soit tombee sous une flotte ordinaire,
+     * ce que Keven a juge faux pour son serveur.
+     *
+     * ------------------------------------------------------------------------------------
+     * POURQUOI SURVIVANTE, ET NON SIMPLEMENT PRESENTE AU DEPART
+     *
+     * Le vaisseau qui donne le coup de grace doit encore etre la pour le donner. Une Etoile
+     * detruite pendant la bataille n'a rien acheve ; compter sa presence au depart ferait
+     * tomber la base grace a un vaisseau qui n'a pas survecu a l'assaut.
+     *
+     * C'est aussi le choix strict : il refuse des destructions que l'autre lecture
+     * accepterait, jamais l'inverse. Si Keven prefere l'autre, la ligne a changer est
+     * `attackerUnitsResult` -> `attackerUnitsStart`, et rien d'autre.
+     */
+    private function carriesADeathstar(BattleResult $battleResult): bool
+    {
+        return $battleResult->attackerUnitsResult->getAmountByMachineName('deathstar') > 0;
     }
 
     /**
