@@ -118,7 +118,7 @@ class GalaxyDestroyedBodyTest extends AccountTestCase
     {
         $planete = Planet::query()->where('user_id', $this->currentUserId)->firstOrFail();
 
-        $voisin = $this->createUserWithASingleBody($planete->galaxy, $planete->system, $planete->planet === 14 ? 13 : 14);
+        $voisin = $this->createUserWithASingleBody($planete->galaxy, $planete->system, $this->aFreePositionIn((int)$planete->galaxy, (int)$planete->system));
 
         DB::table('planets')->where('id', $voisin)->update(['destroyed' => (int)Date::now()->timestamp]);
 
@@ -148,7 +148,7 @@ class GalaxyDestroyedBodyTest extends AccountTestCase
             'user_id' => $pirate->id,
             'galaxy' => $planete->galaxy,
             'system' => $planete->system,
-            'planet' => $planete->planet === 12 ? 11 : 12,
+            'planet' => $this->aFreePositionIn((int)$planete->galaxy, (int)$planete->system),
             'planet_type' => PlanetType::Planet->value,
             'destroyed' => (int)Date::now()->timestamp,
         ]);
@@ -162,6 +162,33 @@ class GalaxyDestroyedBodyTest extends AccountTestCase
         $reponse->assertJsonPath('success', true);
 
         Planet::query()->whereKey($base->id)->delete();
+    }
+
+    /**
+     * Une position libre de ce systeme — **choisie, pas supposee**.
+     *
+     * La base d un processus garde les corps des essais precedents, et la repartition des classes
+     * entre processus change des qu on en ajoute une. Une position ecrite en dur finit donc par se
+     * heurter a l unicite `(galaxie, systeme, position, type)`, et l essai rougit pour une raison
+     * qui n est pas la sienne — c est arrive le 10 septembre 2026, sur la position 12.
+     */
+    private function aFreePositionIn(int $galaxie, int $systeme): int
+    {
+        $prises = Planet::query()
+            ->where('galaxy', $galaxie)
+            ->where('system', $systeme)
+            ->where('planet_type', PlanetType::Planet->value)
+            ->pluck('planet')
+            ->map(static fn (mixed $p): int => (int)$p)
+            ->all();
+
+        for ($position = 4; $position <= 12; $position++) {
+            if (!in_array($position, $prises, true)) {
+                return $position;
+            }
+        }
+
+        $this->fail('No free position was left in ' . $galaxie . ':' . $systeme . ' for this witness.');
     }
 
     /**

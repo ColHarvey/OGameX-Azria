@@ -52,4 +52,20 @@ class PatrolCombatBarrier extends Model
     {
         return $this->belongsTo(Patrol::class, 'patrol_id');
     }
+
+    /**
+     * Si cet instant d effet appartient encore a ce combat.
+     *
+     * Meme regle que sur la barriere du corps celeste, et pour les memes raisons : **l instant
+     * compare est l heure planifiee de l effet, jamais celle du traitement**, sans quoi un
+     * travailleur en retard ferait changer de combat un evenement qui appartenait a celui-ci.
+     *
+     * La borne est **fermee du meme cote que partout ailleurs** : une egalite compte pour « apres »,
+     * donc pour le combat suivant. En espace libre la fenetre est nulle — personne ne peut rejoindre
+     * dans cette version — et cette methode rend donc faux des l instant d ouverture.
+     */
+    public function ownsEffectAt(int $plannedAt): bool
+    {
+        return $plannedAt < $this->owned_through_effect_at;
+    }
 }

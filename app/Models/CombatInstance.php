@@ -38,10 +38,13 @@ use OGame\Combat\Enums\CombatState;
  * @property int $mission_id
  * @property int|null $union_id
  * @property int|null $target_planet_id
+ * @property int|null $target_patrol_id La patrouille visee, pour un combat en espace libre.
  * @property int $target_type
  * @property int $galaxy
  * @property int $system
  * @property int $position
+ * @property int|null $point_x L abscisse interne du point tenu, pour un combat en espace libre.
+ * @property int|null $point_y L ordonnee interne du point tenu, pour un combat en espace libre.
  * @property int|null $started_at
  * @property int|null $ends_at
  * @property int $duration_seconds
@@ -109,10 +112,13 @@ use OGame\Combat\Enums\CombatState;
     'mission_id',
     'union_id',
     'target_planet_id',
+    'target_patrol_id',
     'target_type',
     'galaxy',
     'system',
     'position',
+    'point_x',
+    'point_y',
     'started_at',
     'ends_at',
     'duration_seconds',
