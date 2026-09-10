@@ -91,7 +91,19 @@ class DestroyedPlanetTest extends AccountTestCase
         $this->assertTrue($destroyedRow['planets'][0]['isDestroyed'] ?? false);
         $this->assertSame(__('t_galaxy.planet.destroyed'), $destroyedRow['planets'][0]['planetName'] ?? null);
         $this->assertSame([], $destroyedRow['planets'][0]['availableMissions'] ?? ['not-empty']);
-        $this->assertSame([], $destroyedRow['actions'] ?? ['not-empty']);
+        /*
+         * **L intention est la bonne, la forme etait la mauvaise.** Cette assertion exigeait un
+         * tableau vide — et c est exactement ce qui cassait la Galaxie en jeu le 9 septembre 2026 :
+         * le rendu herite lit `actions.canEspionage` puis `player.actions.message.available`, et une
+         * forme amputee l arrete net, laissant le chargement tourner sans fin.
+         *
+         * Ce qu il faut exiger n est pas l absence de clefs, c est l absence d actions offertes.
+         */
+        $this->assertFalse($destroyedRow['actions']['canEspionage'], 'A destroyed planet can be spied on.');
+        $this->assertFalse($destroyedRow['actions']['canMissileAttack'], 'A destroyed planet can be hit by missiles.');
+        $this->assertFalse($destroyedRow['actions']['canBuddyRequests'], 'A destroyed planet offers a buddy request.');
+        $this->assertFalse($destroyedRow['actions']['canPhalanx'], 'A destroyed planet can be phalanxed.');
+        $this->assertFalse($destroyedRow['player']['actions']['message']['available'], 'A destroyed planet offers to write to its former owner.');
     }
 
     /**

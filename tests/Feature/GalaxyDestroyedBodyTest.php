@@ -87,6 +87,143 @@ class GalaxyDestroyedBodyTest extends AccountTestCase
         Planet::query()->whereKey($lune->id)->delete();
     }
 
+    /**
+     * **La ligne d un corps detruit porte les memes clefs qu une ligne vivante.**
+     *
+     * ## Pourquoi un temoin de famille, et pas une assertion de plus
+     *
+     * Le meme defaut s est produit deux fois en une soiree, sur deux champs differents :
+     * `activity` valait `null`, puis `player` etait reduit a deux clefs. A chaque fois, la vue
+     * heritee lisait une forme qu elle croyait constante :
+     *
+     * ```
+     * at getActivityStar  → Cannot read properties of null (reading 'showActivity')
+     * at getActions       → Cannot read properties of undefined (reading 'message')
+     * ```
+     *
+     * Et a chaque fois, la suivante attendait derriere — `actions.buddies.available` apres
+     * `actions.message`. Verifier champ par champ, c est courir apres. Ce temoin compare donc les
+     * **structures** : tout ce qu une ligne vivante porte, une ligne detruite le porte aussi, jusque
+     * dans les sous-blocs. Les valeurs, elles, ont le droit d etre inertes.
+     *
+     * ## Pourquoi une position vide ne suffisait pas a le voir
+     *
+     * Elle porte le meme `player` reduit — et elle passe, parce que sans planete dans la ligne la vue
+     * n appelle jamais `getActions()`. Seul un corps **detruit** declenche la lecture. Le temoin
+     * compare donc bien deux lignes **avec un corps**.
+     */
+    public function testADestroyedRowCarriesTheSameShapeAsALivingOne(): void
+    {
+        $vivante = Planet::query()->where('user_id', $this->currentUserId)->firstOrFail();
+
+        $voisin = \OGame\Models\User::factory()->create();
+        $detruite = Planet::factory()->create([
+            'user_id' => $voisin->id,
+            'galaxy' => $vivante->galaxy,
+            'system' => $vivante->system,
+            'planet' => $this->aFreePositionIn((int)$vivante->galaxy, (int)$vivante->system),
+            'planet_type' => PlanetType::Planet->value,
+            'destroyed' => (int)Date::now()->timestamp,
+        ]);
+
+        $reponse = $this->post('/ajax/galaxy', [
+            'galaxy' => $vivante->galaxy,
+            'system' => $vivante->system,
+        ]);
+
+        $reponse->assertStatus(200);
+
+        $lignes = $reponse->json('system.galaxyContent');
+        $this->assertIsArray($lignes);
+
+        $ligneVivante = $this->rowAt($lignes, (int)$vivante->planet);
+        $ligneDetruite = $this->rowAt($lignes, (int)$detruite->planet);
+
+        $this->assertSame(
+            $this->shapeOf($ligneVivante['player'] ?? []),
+            $this->shapeOf($ligneDetruite['player'] ?? []),
+            'The player block of a destroyed body has not the same shape as a living one: the galaxy '
+            . 'renderer destructures it and stops on the first missing key.'
+        );
+
+        $this->assertSame(
+            $this->shapeOf($ligneVivante['actions'] ?? []),
+            $this->shapeOf($ligneDetruite['actions'] ?? []),
+            'The actions of a destroyed body have not the same shape as a living one.'
+        );
+
+        // Et les valeurs disent bien « rien a faire ici ».
+        $this->assertFalse($ligneDetruite['player']['actions']['message']['available'], 'A destroyed body offers to write to its owner.');
+        $this->assertFalse($ligneDetruite['actions']['canEspionage'], 'A destroyed body offers to be spied on.');
+
+        Planet::query()->whereKey($detruite->id)->delete();
+    }
+
+    /**
+     * Une position libre de ce systeme — **choisie, pas supposee**.
+     *
+     * La base d un processus garde les corps des essais precedents : une position ecrite en dur
+     * finit par se heurter a l unicite, et l essai rougit pour une raison qui n est pas la sienne.
+     */
+    private function aFreePositionIn(int $galaxie, int $systeme): int
+    {
+        $prises = Planet::query()
+            ->where('galaxy', $galaxie)
+            ->where('system', $systeme)
+            ->where('planet_type', PlanetType::Planet->value)
+            ->pluck('planet')
+            ->map(static fn (mixed $p): int => (int)$p)
+            ->all();
+
+        for ($position = 4; $position <= 12; $position++) {
+            if (!in_array($position, $prises, true)) {
+                return $position;
+            }
+        }
+
+        $this->fail('No free position in the system: the fixture cannot be built.');
+    }
+
+    /**
+     * La ligne de cette position.
+     *
+     * @param array<int, mixed> $lignes
+     * @return array<string, mixed>
+     */
+    private function rowAt(array $lignes, int $position): array
+    {
+        foreach ($lignes as $ligne) {
+            if ((int)($ligne['position'] ?? 0) === $position) {
+                return $ligne;
+            }
+        }
+
+        $this->fail('No row at position ' . $position . ': the fixture is not the one this witness needs.');
+    }
+
+    /**
+     * Les clefs d une structure, en profondeur et triees — jamais les valeurs.
+     *
+     * @param mixed $valeur
+     * @return mixed
+     */
+    private function shapeOf(mixed $valeur): mixed
+    {
+        if (!is_array($valeur)) {
+            return '?';
+        }
+
+        $forme = [];
+
+        foreach ($valeur as $clef => $sous) {
+            $forme[$clef] = $this->shapeOf($sous);
+        }
+
+        ksort($forme);
+
+        return $forme;
+    }
+
     public function testASystemHoldingADestroyedPlanetStillLoads(): void
     {
         $planete = Planet::query()->where('user_id', $this->currentUserId)->firstOrFail();
@@ -118,7 +255,7 @@ class GalaxyDestroyedBodyTest extends AccountTestCase
     {
         $planete = Planet::query()->where('user_id', $this->currentUserId)->firstOrFail();
 
-        $voisin = $this->createUserWithASingleBody($planete->galaxy, $planete->system, $planete->planet === 14 ? 13 : 14);
+        $voisin = $this->createUserWithASingleBody((int)$planete->galaxy, (int)$planete->system, $this->aFreePositionIn((int)$planete->galaxy, (int)$planete->system));
 
         DB::table('planets')->where('id', $voisin)->update(['destroyed' => (int)Date::now()->timestamp]);
 
@@ -148,7 +285,7 @@ class GalaxyDestroyedBodyTest extends AccountTestCase
             'user_id' => $pirate->id,
             'galaxy' => $planete->galaxy,
             'system' => $planete->system,
-            'planet' => $planete->planet === 12 ? 11 : 12,
+            'planet' => $this->aFreePositionIn((int)$planete->galaxy, (int)$planete->system),
             'planet_type' => PlanetType::Planet->value,
             'destroyed' => (int)Date::now()->timestamp,
         ]);

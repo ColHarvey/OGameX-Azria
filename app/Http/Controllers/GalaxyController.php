@@ -164,12 +164,12 @@ class GalaxyController extends OGameController
         $planetPlayer = $planet->getPlayer();
 
         return [
-            'actions' => $isDestroyed ? [] : $this->getPlanetActions($planet, $galaxy, $system, $position, $phalanxService),
+            'actions' => $isDestroyed ? self::noPlanetActions() : $this->getPlanetActions($planet, $galaxy, $system, $position, $phalanxService),
             'availableMissions' => [],
             'galaxy' => $galaxy,
             'planets' => $planets_array,
             'player' => $isDestroyed
-                ? ['playerId' => 99999, 'playerName' => 'Deep space']
+                ? self::deepSpacePlayer()
                 : ($planetPlayer !== null ? $this->getPlayerInfo($planetPlayer) : []),
             'position' => $position,
             'positionFilters' => '',
@@ -912,6 +912,110 @@ class GalaxyController extends OGameController
             'showMinutes' => true,
             'idleTime' => null,
             'showActivity' => false,
+        ];
+    }
+
+    /**
+     * Les actions d une ligne dont il n y a plus rien a faire — la meme forme, tout a faux.
+     *
+     * ## Pourquoi une forme complete plutot qu un tableau vide
+     *
+     * La vue lit `actions.canEspionage`, `actions.canMissileAttack`, `actions.missileAttackLink`.
+     * Un tableau vide ne la fait pas tomber — lire une propriete absente rend `undefined` — mais il
+     * la fait **raisonner a l envers** : `canEspionage === false` affiche l icone grisee, tandis
+     * qu `undefined` la conduit a fabriquer un lien d espionnage sur un corps qui n existe plus.
+     *
+     * @return array<string, mixed>
+     */
+    private static function noPlanetActions(): array
+    {
+        return [
+            'canBeIgnored' => false,
+            'canBuddyRequests' => false,
+            'canEspionage' => false,
+            'canMissileAttack' => false,
+            'canPhalanx' => false,
+            'phalanxActive' => false,
+            'phalanxInactive' => false,
+            'phalanxInactiveReason' => '',
+            'canSendProbes' => false,
+            'canWrite' => false,
+            'discoveryUnlocked' => '',
+            'missileAttackLink' => '#',
+        ];
+    }
+
+    /**
+     * L espace profond a la place d un joueur — **avec toutes ses clefs**, et toutes inertes.
+     *
+     * ## Le defaut que cette forme ferme, vu en jeu le 9 septembre 2026
+     *
+     * Un corps detruit envoyait `player` reduit a deux clefs. Le rendu herite de la Galaxie
+     * deconstruit ce bloc sans le verifier :
+     *
+     * ```
+     * let { actions } = player;
+     * ...
+     * if (actions.message.available) {
+     * ```
+     *
+     * D ou `Cannot read properties of undefined (reading 'message')`, le rendu du systeme arrete, et
+     * un chargement qui tourne sans fin. La suivante aurait ete `actions.buddies.available`.
+     *
+     * **Une position vide, elle, passait** : sans planete dans la ligne, la vue n appelle jamais
+     * `getActions()`. C est la presence d un corps qui declenche la lecture — donc seul un corps
+     * **detruit** tombait.
+     *
+     * ## La regle qui en sort
+     *
+     * Un cas particulier ne se dit pas en retirant des clefs. Une vue lit une forme ; elle doit la
+     * trouver, avec des valeurs qui disent « rien a faire ici ».
+     *
+     * @return array<string, mixed>
+     */
+    private static function deepSpacePlayer(): array
+    {
+        $inerte = [
+            'available' => false,
+            'playerId' => 99999,
+            'link' => 'javascript:void(0);',
+            'title' => '',
+            'playerName' => 'Deep space',
+        ];
+
+        return [
+            'actions' => [
+                'alliance' => ['available' => false],
+                'buddies' => $inerte,
+                'ignore' => $inerte,
+                'support' => $inerte,
+                'highscore' => ['available' => false, 'rank' => null, 'title' => '', 'link' => '#'],
+                // Le bloc du message ne porte pas de nom de joueur, la ou les autres en portent un :
+                // la forme suit celle d une ligne vivante, clef pour clef.
+                'message' => [
+                    'available' => false,
+                    'disabledChatBar' => false,
+                    'title' => '',
+                    'link' => 'javascript:void(0);',
+                    'playerId' => 99999,
+                ],
+            ],
+            'playerId' => 99999,
+            'playerName' => 'Deep space',
+            'isAdmin' => false,
+            'isPirate' => false,
+            'isInactive' => false,
+            'isLongInactive' => false,
+            'isNewbie' => false,
+            'isStrong' => false,
+            'isOnVacation' => false,
+            'allianceId' => null,
+            'allianceTag' => null,
+            'allianceName' => null,
+            'isAllianceMember' => false,
+            'isBanned' => false,
+            'isHonorableTarget' => false,
+            'isOutlaw' => false,
         ];
     }
 
