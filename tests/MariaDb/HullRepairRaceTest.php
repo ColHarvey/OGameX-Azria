@@ -359,17 +359,28 @@ final class HullRepairRaceTest extends TestCase
                         return 'reglement:ordre disparu';
                     }
 
-                    // `settle()` et non `settleDue()` : la base du bac est partagee, et un ordre echu
-                    // laisse par une classe voisine ferait mentir un comptage. Le travailleur appelle
-                    // exactement cette methode-la.
-                    return 'reglement:' . ($reparations->settle($relu, $echeance) ? 'oui' : 'non');
+                    try {
+                        // `settle()` et non `settleDue()` : la base du bac est partagee, et un ordre
+                        // echu laisse par une classe voisine ferait mentir un comptage. Le
+                        // travailleur appelle exactement cette methode-la.
+                        return 'reglement:' . ($reparations->settle($relu, $echeance) ? 'oui' : 'non');
+                    } catch (Throwable $echec) {
+                        // **Rapporte, jamais leve** : une exception qui remonte au harnais fait
+                        // echouer l essai avant que le parent ait pu demander a la base quel cycle
+                        // elle a rompu.
+                        return 'reglement:erreur:' . $echec::class . ' : ' . $echec->getMessage();
+                    }
                 }
 
-                return 'combat:' . ($reparations->endAnyRunningOn(
-                    $corps,
-                    HullRepairOrder::BECAUSE_COMBAT,
-                    $miParcours
-                ) ? 'oui' : 'non');
+                try {
+                    return 'combat:' . ($reparations->endAnyRunningOn(
+                        $corps,
+                        HullRepairOrder::BECAUSE_COMBAT,
+                        $miParcours
+                    ) ? 'oui' : 'non');
+                } catch (Throwable $echec) {
+                    return 'combat:erreur:' . $echec::class . ' : ' . $echec->getMessage();
+                }
             },
             function () use ($temoin): void {
                 // **Les deux sont venus attendre l ordre, et la base le dit.** La duree separe
@@ -393,6 +404,9 @@ final class HullRepairRaceTest extends TestCase
         );
 
         $trace = implode(' | ', $issues);
+
+        $this->assertNoDeadlock($trace);
+        $this->assertStringNotContainsString('erreur:', $trace, 'Un des deux chemins a echoue ; les issues : ' . $trace);
 
         $aRegle = str_contains($trace, 'reglement:oui');
         $aCloture = str_contains($trace, 'combat:oui');
@@ -561,10 +575,8 @@ final class HullRepairRaceTest extends TestCase
 
         $trace = implode(' | ', $issues);
 
-        // **Aucun interblocage.** C est la raison d etre de cette course, et le message de MariaDB
-        // est explicite : « Deadlock found when trying to get lock », SQLSTATE 40001, erreur 1213.
-        $this->assertStringNotContainsStringIgnoringCase('deadlock', $trace, 'Un interblocage a eu lieu ; les issues : ' . $trace);
-        $this->assertStringNotContainsString('1213', $trace, 'Un interblocage a eu lieu ; les issues : ' . $trace);
+        // **Aucun interblocage.** C est la raison d etre de cette course.
+        $this->assertNoDeadlock($trace);
         $this->assertStringNotContainsString('erreur:', $trace, 'Un des deux chemins a echoue ; les issues : ' . $trace);
         $this->assertStringNotContainsString('jalon jamais pose', $trace, 'La bataille n a jamais tenu le corps : rien ne s est chevauche.');
 
@@ -596,6 +608,50 @@ final class HullRepairRaceTest extends TestCase
             (int)DB::table('planets')->where('id', $corps)->value('metal'),
             'Le remboursement doit etre celui du vainqueur, verse une seule fois ; les issues : ' . $trace
         );
+    }
+
+    /**
+     * Refuse un interblocage, **en le decrivant**.
+     *
+     * Le message de MariaDB est explicite — « Deadlock found when trying to get lock », SQLSTATE
+     * 40001, erreur 1213 — mais il ne dit ni quelles transactions, ni ce que chacune tenait, ni ce
+     * qu elle attendait. Le moteur, lui, le garde : `SHOW ENGINE INNODB STATUS` en donne la section
+     * `LATEST DETECTED DEADLOCK`. Sans elle, le premier rouge de cette classe a coute une demi-heure
+     * de raisonnement a vide sur un cycle qu il suffisait de lire.
+     */
+    private function assertNoDeadlock(string $trace): void
+    {
+        if (!str_contains(strtolower($trace), 'deadlock') && !str_contains($trace, '1213')) {
+            return;
+        }
+
+        $this->fail(
+            'Un interblocage a eu lieu ; les issues : ' . $trace . "\n\n"
+            . "Ce que le moteur en dit :\n" . $this->latestDeadlockReport()
+        );
+    }
+
+    /**
+     * La section `LATEST DETECTED DEADLOCK` du moteur, ou ce qui explique qu elle manque.
+     */
+    private function latestDeadlockReport(): string
+    {
+        try {
+            $etat = DB::selectOne('SHOW ENGINE INNODB STATUS');
+        } catch (Throwable $refus) {
+            return 'illisible (' . $refus->getMessage() . ') — le droit PROCESS est necessaire.';
+        }
+
+        $texte = is_object($etat) && property_exists($etat, 'Status') ? (string)$etat->Status : '';
+        $debut = strpos($texte, 'LATEST DETECTED DEADLOCK');
+
+        if ($debut === false) {
+            return 'le moteur ne garde aucun interblocage recent.';
+        }
+
+        $fin = strpos($texte, '------------\nTRANSACTIONS', $debut);
+
+        return trim(substr($texte, $debut, $fin === false ? 4000 : $fin - $debut));
     }
 
     /**

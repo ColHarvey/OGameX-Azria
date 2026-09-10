@@ -251,6 +251,16 @@ final class HullRepairService
     public function settle(HullRepairOrder $ordre, int $maintenant): bool
     {
         return DB::transaction(function () use ($ordre, $maintenant): bool {
+            // **Le corps avant l ordre, ici aussi.** Le SQL de ce reglement ne nomme qu une table,
+            // et cela ne suffit pas : la course du bac a montre un interblocage entre ce chemin et
+            // la cloture d une bataille, qui tient deja la ligne du corps quand elle vient demander
+            // l ordre. Un chemin qui met fin a un ordre prend donc les deux verrous du dock dans
+            // l ordre global — `planets`, puis `hull_repair_orders` — sans exception.
+            //
+            // La garde ne change pas : c est toujours la mise a jour **conditionnelle sur le
+            // statut** qui decide, et le verrou du corps ne fait que fixer l ordre d acquisition.
+            Planet::where('id', $ordre->planet_id)->lockForUpdate()->first();
+
             $pris = HullRepairOrder::where('id', $ordre->id)
                 ->where('status', HullRepairOrder::STATUS_REPAIRING)
                 ->update([

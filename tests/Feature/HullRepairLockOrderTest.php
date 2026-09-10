@@ -108,6 +108,59 @@ class HullRepairLockOrderTest extends AccountTestCase
     }
 
     /**
+     * **Le reglement aussi**, dont le SQL ne nomme pourtant qu une table.
+     *
+     * C est la lecon du premier rouge du bac : ce chemin ne verrouillait que l ordre, et cela
+     * paraissait suffire puisqu il n ecrit rien ailleurs. Il interbloquait quand meme avec la
+     * cloture d une bataille, qui tient deja le corps. Un chemin qui met fin a un ordre prend les
+     * deux verrous du dock dans l ordre global, sans exception — meme quand il n en emploie qu un.
+     */
+    public function testASettlementTakesTheBodyBeforeTheOrder(): void
+    {
+        $this->planetService->addUnit('cruiser', 20);
+        $this->planetService->setObjectLevel(36, 5, true);
+        $this->planetService->writeDamagedHulls(DamagedHulls::of(['cruiser' => [5000 => 8]]));
+        $this->planetService->addResources(new Resources(5_000_000, 5_000_000, 5_000_000, 0));
+
+        $reparations = resolve(HullRepairService::class);
+        $ordre = $reparations->confirm(
+            $this->planetService,
+            DamagedHulls::of(['cruiser' => [5000 => 8]]),
+            '',
+            (int)Date::now()->timestamp
+        );
+
+        $suivies = ['planets', 'hull_repair_orders'];
+        $vues = [];
+
+        DB::listen(function (QueryExecuted $requete) use (&$vues, $suivies): void {
+            $sql = str_replace('`', '"', $requete->sql);
+
+            foreach ($suivies as $table) {
+                if (str_contains($sql, '"' . $table . '"') && !in_array($table, $vues, true)) {
+                    $vues[] = $table;
+                }
+            }
+        });
+
+        $this->assertTrue(
+            $reparations->settle($ordre, (int)$ordre->completed_at),
+            'Le reglement devait aboutir : sans lui, l ordre des instructions ne dit rien.'
+        );
+
+        $this->assertSame(
+            'planets',
+            $vues[0] ?? null,
+            'Le reglement doit atteindre le corps en premier ; il a commence par : ' . implode(' → ', $vues)
+        );
+        $this->assertSame(
+            'hull_repair_orders',
+            $vues[1] ?? null,
+            'L ordre doit venir juste apres le corps ; la sequence observee : ' . implode(' → ', $vues)
+        );
+    }
+
+    /**
      * Et la confirmation, qui fixe le sens de tout le reste, garde le sien.
      *
      * Elle est la reference : c est parce qu elle prend le corps en premier — elle doit relire le
