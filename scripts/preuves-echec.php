@@ -23,9 +23,13 @@
  *
  * **Et une liste connue ne couvre pas la colonne de demain.** Une migration peut en ajouter une,
  * et le nettoyage passerait a cote — sa verification aussi, puisqu'elle relit les memes noms.
- * D'ou le detecteur de liste perimee plus bas : toute colonne dont le nom evoque un secret et
- * qui n'est ni videe ni supprimee **arrete la collecte**, en la nommant. La liste ne s'entretient
- * donc pas par vigilance : elle se rappelle a nous.
+ * D'ou le detecteur plus bas : toute colonne dont le nom evoque un secret et qui n'est ni videe
+ * ni supprimee **arrete la collecte**, en la nommant.
+ *
+ * **Ce detecteur est un filet heuristique, et rien de plus.** Il juge des **noms**, pas des
+ * contenus : un secret range dans une colonne au nom banal — `notes`, `payload`, `valeur` — lui
+ * echappe entierement. Il aide a garder la liste a jour ; il ne dispense d'aucune vigilance, et
+ * la relecture humaine reste due avant d'elargir ce qui part.
  *
  * Rien de tout cela n'est utile a un diagnostic d'ordre d'execution : ce qu'on cherche est l'etat
  * de jeu que les voisins ont laisse, jamais l'authentification.
@@ -113,11 +117,16 @@ foreach (glob($racine . '/database/database*.sqlite') ?: [] as $base) {
         exit(1);
     }
 
-    // **L'original ne doit jamais bouger.** Tout se fait sur la copie ; ces deux empreintes le
-    // verifient au lieu de l'affirmer, parce qu'une base modifiee ici fausserait le diagnostic
-    // qu'elle sert a rendre possible.
-    $tailleAvant = filesize($base);
-    $dateAvant = filemtime($base);
+    // **L'original ne doit jamais bouger.** Tout se fait sur la copie, et cette empreinte le
+    // verifie au lieu de l'affirmer : une base modifiee ici fausserait le diagnostic qu'elle sert
+    // a rendre possible.
+    //
+    // **Une taille et une date identiques ne prouveraient rien** — un octet change au meme endroit
+    // les laisse intactes. C'est le contenu qui est compare, par `sha256`.
+    //
+    // La comparaison n'a de sens que parce qu'elle a lieu **apres** la suite : plus aucun processus
+    // n'ecrit dans ces bases quand ce script tourne. Pendant un passage, elle ne dirait rien.
+    $empreinteAvant = hash_file('sha256', $base);
 
     $pdo = new PDO('sqlite:' . $copie);
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -223,7 +232,7 @@ foreach (glob($racine . '/database/database*.sqlite') ?: [] as $base) {
         exit(1);
     }
 
-    if (filesize($base) !== $tailleAvant || filemtime($base) !== $dateAvant) {
+    if (hash_file('sha256', $base) !== $empreinteAvant) {
         fwrite(STDERR, 'La base d origine a ete modifiee par la collecte : ' . basename($base) . "\n");
         exit(1);
     }
