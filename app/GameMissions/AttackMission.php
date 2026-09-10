@@ -3,6 +3,7 @@
 namespace OGame\GameMissions;
 
 use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Facades\DB;
 use OGame\Alliance\AllianceOffensiveGuard;
 use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Application\LiveCombatApplicationContext;
@@ -31,13 +32,17 @@ use OGame\GameMissions\Models\ResolvedReturnDestination;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
+use OGame\Models\Patrol;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
+use OGame\Patrol\Combat\SpatialBattle;
+use OGame\Patrol\Combat\SpatialSettlement;
+use OGame\Patrol\FrozenPatrolTarget;
+use OGame\Patrol\PatrolTargetLock;
 use OGame\Services\CharacterClassService;
 use OGame\Services\PlanetService;
 use OGame\Services\WreckFieldService;
 use RuntimeException;
-use Throwable;
 
 class AttackMission extends GameMission
 {
@@ -181,12 +186,122 @@ class AttackMission extends GameMission
      * @inheritdoc
      * @throws Throwable
      */
+    /**
+     * Une attaque arrivee sur un point de l espace, contre une patrouille.
+     *
+     * ------------------------------------------------------------------------------------
+     * TROIS ISSUES, ET AUCUNE N EST UN ECHEC
+     *
+     * La cible a ete **gelee au lancement** — identite, proprietaire et emplacement — et le monde a
+     * continue de tourner pendant le vol. A l arrivee, trois choses peuvent etre vraies :
+     *
+     *   - **elle est la** : la bataille se joue ;
+     *   - **elle a bouge** : la flotte arrive sur un point vide et rentre. Elle ne poursuit pas —
+     *     poursuivre ferait d une attaque un missile a tete chercheuse, et la surveillance perdrait
+     *     tout son sens ;
+     *   - **elle n existe plus** : rentree, detruite par un autre, ou son compte supprime. Meme
+     *     issue, sans combat.
+     *
+     * Les deux dernieres ne sont pas des pannes : ce sont des resultats de jeu, et la flotte repart
+     * avec tout ce qu elle avait.
+     *
+     * ------------------------------------------------------------------------------------
+     * LA CIBLE EST RELUE SOUS VERROU
+     *
+     * Entre la lecture et la bataille, la patrouille pourrait repartir, etre attaquee par un
+     * troisieme joueur, ou rentrer. La ligne est donc tenue pendant tout le reglement — c est le
+     * meme geste que la barriere d un corps celeste, sur une ressource plus petite.
+     */
+    private function resolveSpatialAttack(FleetMission $mission): void
+    {
+        $gelee = new FrozenPatrolTarget(
+            (int)$mission->target_patrol_id,
+            // Le proprietaire gele voyage avec la mission : c est lui qui a ete vise, et une
+            // patrouille qui aurait change de mains n est plus la meme cible.
+            (int)($mission->target_patrol_owner_id ?? 0),
+            (int)$mission->galaxy_to,
+            (int)$mission->system_to,
+            (int)$mission->x_to,
+            (int)$mission->y_to,
+        );
+
+        DB::transaction(function () use ($mission, $gelee): void {
+            /** @var Patrol|null $vivante */
+            $vivante = Patrol::where('id', $gelee->patrolId)->lockForUpdate()->first();
+            $verdict = PatrolTargetLock::decide($gelee, $vivante);
+
+            if (!$verdict->opensTheCombat() || $vivante === null) {
+                $this->sendTheFleetHomeUntouched($mission);
+
+                return;
+            }
+
+            $segment = $vivante->current_mission_id === null
+                ? null
+                : FleetMission::where('id', $vivante->current_mission_id)->lockForUpdate()->first();
+
+            // **Une patrouille sans segment n a rien au point.** Ses unites sont ailleurs — parties
+            // attaquer, ou deja rentrees — et il n y a personne a combattre ici.
+            if ($segment === null) {
+                $this->sendTheFleetHomeUntouched($mission);
+
+                return;
+            }
+
+            $bataille = resolve(SpatialBattle::class);
+            $resultat = $bataille->fight($mission, $vivante, $segment);
+
+            resolve(SpatialSettlement::class)->settle(
+                $resultat,
+                $mission,
+                $vivante,
+                $segment,
+                function (FleetMission $aller, Resources $ramene, UnitCollection $survivants): void {
+                    $this->startReturn($aller, $ramene, $survivants);
+                }
+            );
+        });
+    }
+
+    /**
+     * La flotte repart sans avoir combattu, avec exactement ce qu elle avait.
+     *
+     * Elle a fait le voyage pour rien, et c est le resultat : le carburant est deja paye, la cible
+     * n est plus la. Rien n est detruit, rien n est pris.
+     */
+    private function sendTheFleetHomeUntouched(FleetMission $mission): void
+    {
+        $mission->processed = 1;
+        $mission->save();
+
+        $this->startReturn(
+            $mission,
+            $this->fleetMissionService->getResources($mission),
+            $this->fleetMissionService->getFleetUnits($mission)
+        );
+    }
+
     protected function processArrival(FleetMission $mission): void
     {
         // In a union, only the initiator (slot 1) should execute the battle.
         // Non-initiator missions are collected by collectAttackingFleets() and their
         // return missions are handled by the multi-attacker processing block.
         if ($mission->isInUnion() && $mission->union_slot !== 1) {
+            return;
+        }
+
+        // **Une attaque peut viser un point de l espace, pas un corps** (chantier des patrouilles).
+        //
+        // Elle se reconnait a `target_patrol_id`, fige au lancement avec l emplacement vise. Le
+        // chemin est entierement distinct : il n y a ni stock au sol, ni garnison, ni lune, ni champ
+        // de debris planetaire — et la cible peut avoir bouge depuis le depart, ce qu aucune attaque
+        // ordinaire n a a considerer.
+        //
+        // Le raccordement vit derriere `patrols_enabled` : sans lui, aucune mission ne porte cette
+        // colonne, et cette branche n est jamais atteinte.
+        if ($mission->target_patrol_id !== null) {
+            $this->resolveSpatialAttack($mission);
+
             return;
         }
 

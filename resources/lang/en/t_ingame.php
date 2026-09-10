@@ -1761,6 +1761,8 @@ Improved fleet escape rate',
         'state_attacking' => 'Attacking',
         'state_immobilised' => 'Immobilised',
         'state_finished' => 'Finished',
+        // Destroyed in open space: distinct from "Finished", which means it came home.
+        'state_destroyed' => 'Destroyed',
     ],
     'admin' => [
         'alliance_offensive_protection_enabled' => 'Alliance protection',

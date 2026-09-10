@@ -53,6 +53,12 @@ class LootPolicyUsageTest extends UnitTestCase
             // depart de l'attaquant, qu'un contexte ordinaire viderait.
             'app/GameMissions/ExpeditionMission.php' => NoLootReason::NpcEncounter,
 
+            // Une bataille en espace libre pille, mais **seulement la cargaison** : il n'y a pas de
+            // sol, donc pas de stock a prendre, et la reserve de carburant de la patrouille vit sur
+            // sa propre ligne — hors de portee du butin, et volontairement : sans carburant une
+            // patrouille ne rentrerait jamais.
+            'app/Patrol/Combat/SpatialBattle.php' => null,
+
             // L'outil de mesure ne prend rien nulle part.
             'app/Console/Commands/Test/TestBattleEnginePerformance.php' => NoLootReason::SyntheticBenchmark,
         ];

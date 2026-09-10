@@ -127,6 +127,10 @@ final readonly class ExpectedReturn
             // avait un. La cible patrouille, elle, ne suit jamais un retour.
             'patrol_id' => $aller->patrol_id === null ? null : (int)$aller->patrol_id,
             'target_patrol_id' => null,
+            // **Un retour ne vise plus rien.** Le proprietaire gele de la cible appartient a l aller
+            // — c est lui qui dit qui etait vise, et le verdict d arrivee le compare. Le laisser sur
+            // le retour ferait croire qu une flotte qui rentre garde une cible.
+            'target_patrol_owner_id' => null,
             'x_from' => $aller->x_to === null ? null : (int)$aller->x_to,
             'y_from' => $aller->y_to === null ? null : (int)$aller->y_to,
 

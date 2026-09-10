@@ -35,6 +35,17 @@ enum PatrolState: string
     case Finished = 'finished';
 
     /**
+     * La patrouille a ete detruite en espace libre.
+     *
+     * **Distinct de `Finished`, et ce n est pas une nuance de vocabulaire.** Une patrouille terminee
+     * est rentree : ses vaisseaux sont sur un corps, sa reserve a ete rendue. Une patrouille
+     * detruite n a rien rendu du tout — sa reserve est morte avec elle —, et le joueur doit lire la
+     * difference. Les confondre ferait aussi mentir tout compteur qui distingue « rentrees » et
+     * « perdues ».
+     */
+    case Destroyed = 'destroyed';
+
+    /**
      * La patrouille existe encore dans l espace.
      */
     public function isAlive(): bool

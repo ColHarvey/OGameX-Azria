@@ -1433,6 +1433,8 @@ Taux d\'évasion de la flotte amélioré',
         'state_attacking' => 'En attaque',
         'state_immobilised' => 'Immobilisée',
         'state_finished' => 'Terminée',
+        // Detruite en espace libre : distinct de « Terminee », qui veut dire rentree.
+        'state_destroyed' => 'Détruite',
     ],
     'admin' => [
         'alliance_offensive_protection_enabled' => 'Protection d’alliance',
