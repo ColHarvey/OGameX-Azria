@@ -1268,3 +1268,129 @@
         transition: none;
     }
 }
+
+/*
+ * ## Les contacts de surveillance
+ *
+ * Ils existaient dans le rendu depuis le chantier de la surveillance, **sans une ligne de style** :
+ * le marqueur etait pose sur la carte et restait invisible. Le renseignement etait calcule, protege,
+ * transmis — et personne ne le voyait.
+ *
+ * ### Un contact n'est pas une flotte, et ne doit pas y ressembler
+ *
+ * Une flotte amie porte son dessin et sa trajectoire : on sait ce qu'elle est. Un contact est une
+ * **detection**, c'est-a-dire une incertitude qui a une position. Le vocabulaire graphique le dit :
+ * un cercle ouvert plutot qu'une forme pleine, une teinte d'alerte plutot que le cyan des siens, et
+ * un halo qui respire — ce qu'on suit sur un ecran radar, pas ce qu'on regarde par un hublot.
+ *
+ * ### Le palier se lit sur le marqueur
+ *
+ * `data-tier` porte ce que le joueur a le droit de savoir. Au premier palier il y a « quelque chose
+ * la » : le cercle est seul et faible. Aux paliers superieurs le contact se precise, et le marqueur
+ * gagne en presence. **Aucun palier n'ajoute d'information dans le style** — c'est la fiche qui dit
+ * quoi ; le style dit seulement a quel point on en sait.
+ */
+#galaxyTactical .gtSurveillanceContact {
+    position: absolute;
+    width: 18px;
+    height: 18px;
+    margin-left: -9px;
+    margin-top: -9px;
+    border: 1px solid rgba(255, 138, 92, 0.75);
+    border-radius: 50%;
+    background: radial-gradient(circle at 50% 50%, rgba(255, 138, 92, 0.28) 0%, rgba(255, 138, 92, 0) 70%);
+    cursor: pointer;
+    pointer-events: auto;
+    animation: gtContactSweep 3.2s ease-in-out infinite;
+}
+
+/*
+ * Le balayage : l'opacite seule, jamais la taille. Un marqueur qui grandit et retrecit deplacerait
+ * la cible sous le curseur du joueur.
+ */
+@keyframes gtContactSweep {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 1; }
+}
+
+/* Plus le palier est haut, plus le contact est franc. */
+#galaxyTactical .gtSurveillanceContact[data-tier="2"] {
+    width: 20px;
+    height: 20px;
+    margin-left: -10px;
+    margin-top: -10px;
+    border-color: rgba(255, 138, 92, 0.9);
+}
+
+#galaxyTactical .gtSurveillanceContact[data-tier="3"] {
+    width: 22px;
+    height: 22px;
+    margin-left: -11px;
+    margin-top: -11px;
+    border-width: 2px;
+    border-color: rgba(255, 105, 63, 1);
+    background: radial-gradient(circle at 50% 50%, rgba(255, 105, 63, 0.35) 0%, rgba(255, 105, 63, 0) 72%);
+}
+
+/* Le point central : ce qui a ete detecte, par opposition au halo qui est la portee. */
+#galaxyTactical .gtSurveillanceContact::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 4px;
+    height: 4px;
+    margin-left: -2px;
+    margin-top: -2px;
+    border-radius: 50%;
+    background: rgba(255, 196, 168, 0.95);
+}
+
+#galaxyTactical .gtSurveillanceContact:hover,
+#galaxyTactical .gtSurveillanceContact:focus-visible {
+    border-color: rgba(255, 210, 190, 1);
+    box-shadow: 0 0 8px rgba(255, 105, 63, 0.65);
+    outline: none;
+}
+
+/* Le contact que la fiche decrit en ce moment. */
+#galaxyTactical .gtSurveillanceContact.gtSelected {
+    border-color: rgba(255, 236, 224, 1);
+    box-shadow: 0 0 10px rgba(255, 138, 92, 0.9);
+    animation: none;
+}
+
+/*
+ * ## La fiche d'un contact
+ *
+ * Elle reprend la fiche des corps — meme cadre, meme fermeture, meme place — parce qu'un joueur ne
+ * doit pas apprendre deux interfaces. Ce qui change est la couleur d'accent : ce panneau parle de
+ * quelque chose qui n'est pas a lui.
+ */
+#galaxyTactical .gtCard--contact .gtCardHead {
+    border-bottom-color: rgba(255, 138, 92, 0.45);
+}
+
+#galaxyTactical .gtCard--contact .gtCardKind {
+    color: rgba(255, 168, 132, 0.95);
+}
+
+/*
+ * Ce que le palier ne dit pas reste **absent**, jamais affiche a vide. Une ligne « proprietaire : ? »
+ * apprendrait qu'il y a un proprietaire a connaitre ; c'est la regle de tout le chantier de
+ * surveillance, et elle vaut aussi pour le style.
+ */
+#galaxyTactical .gtContactUnknown {
+    display: none;
+}
+
+/* Le bouton d'attaque d'un contact : la meme forme que les autres actions, la teinte d'alerte. */
+#galaxyTactical .gtCard--contact .gtAction--attack {
+    border-color: rgba(255, 105, 63, 0.55);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #galaxyTactical .gtSurveillanceContact {
+        animation: none;
+    }
+}

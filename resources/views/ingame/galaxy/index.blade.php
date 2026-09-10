@@ -47,6 +47,7 @@
             var galaxyPatrolLaunchUrl = "{{ route('galaxy.patrol.launch') }}";
             var galaxyPatrolMoveUrl = "{{ route('galaxy.patrol.move', ['patrol' => 0]) }}";
             var galaxyPatrolRecallUrl = "{{ route('galaxy.patrol.recall', ['patrol' => 0]) }}";
+            var galaxyPatrolAttackUrl = "{{ route('galaxy.patrol.attack') }}";
             var galaxyCurrentPlanetId = {{ $current_planet_id }};
             var galaxyPatrolGridUnits = {{ $patrol_grid_units }};
             var galaxyPatrolShips = @json($patrol_ships);
@@ -177,6 +178,12 @@
                     'surveillanceStationed' => __('t_ingame.galaxy.tactical_surveillance_stationed'),
                     'surveillanceMoving' => __('t_ingame.galaxy.tactical_surveillance_moving'),
                     'surveillanceLeaving' => __('t_ingame.galaxy.tactical_surveillance_leaving'),
+                    // Le panneau d'attaque d'un contact : le libelle du bouton, et chaque refus.
+                    'surveillanceOwner' => __('t_ingame.galaxy.tactical_surveillance_owner'),
+                    'surveillanceAttack' => __('t_ingame.galaxy.tactical_surveillance_attack'),
+                    'surveillanceNoShips' => __('t_ingame.galaxy.tactical_surveillance_no_ships'),
+                    'surveillanceSent' => __('t_ingame.galaxy.tactical_surveillance_sent'),
+                    'surveillanceRefused' => __('t_ingame.galaxy.tactical_surveillance_refused'),
                     'patrolReserve' => __('t_ingame.galaxy.tactical_patrol_reserve'),
                     'patrolUpkeep' => __('t_ingame.galaxy.tactical_patrol_upkeep'),
                     'patrolSafetyReturn' => __('t_ingame.galaxy.tactical_patrol_safety_return'),

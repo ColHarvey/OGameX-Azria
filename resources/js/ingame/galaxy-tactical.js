@@ -2299,11 +2299,194 @@
             marqueur.setAttribute('data-tier', String(contact.tier));
             marqueur.setAttribute('aria-label', intitule);
             marqueur.title = intitule;
+            marqueur.setAttribute('role', 'button');
+            marqueur.setAttribute('tabindex', '0');
+            marqueur.addEventListener('click', function (evenement) {
+                evenement.stopPropagation();
+                choisirLeContact(carte, contact, marqueur);
+            });
+
             marqueur.style.left = String(contact.position.x) + 'px';
             marqueur.style.top = String(contact.position.y) + 'px';
 
             couche.appendChild(marqueur);
         });
+    }
+
+    /*
+     * ## Attaquer un contact
+     *
+     * Le joueur clique un marqueur de detection, une fiche s'ouvre, et le bouton d'attaque envoie sa
+     * flotte. Ce qui compte est ce que la requete **ne** porte **pas** : jamais l'identifiant de la
+     * patrouille, seulement celui du contact.
+     *
+     * ### Pourquoi le contact et pas la patrouille
+     *
+     * Un identifiant de patrouille suivrait sa cible d'un systeme a l'autre et d'une couverture a la
+     * suivante. Un joueur qui l'aurait vu une fois pourrait viser ce qu'il ne detecte plus — et
+     * apprendre qu'une patrouille existe encore rien qu'en essayant de l'attaquer. La clef du
+     * contact, elle, nait avec l'acquisition et meurt avec elle : hors couverture, elle ne vaut rien.
+     *
+     * Le serveur resout donc le contact pour ce joueur-la, et la patrouille reste invisible du
+     * navigateur d'un bout a l'autre.
+     *
+     * ### La composition vient de la meme liste que les patrouilles
+     *
+     * Aucune seconde interface de selection : `galaxyPatrolShips` porte deja les vaisseaux du corps
+     * actif, et les champs `am<id>` sont ceux de la page Flotte. Deux compositions differentes pour
+     * deux departs auraient diverge.
+     */
+    function choisirLeContact(carte, contact, marqueur) {
+        var f = fiche(carte);
+
+        /* Recliquer le contact ouvert le referme. */
+        if (!f.hidden && f.gtContact && Number(f.gtContact.contact_id) === Number(contact.contact_id)) {
+            deselectionner(carte, true);
+
+            return;
+        }
+
+        deselectionner(carte, false);
+
+        var titre = f.querySelector('.gtCardTitle');
+        var coords = f.querySelector('.gtCardCoords');
+        var contenant = f.querySelector('.gtCardBody');
+
+        f.setAttribute('data-corps', 'contact');
+        f.classList.add('gtCard--contact');
+
+        if (coords && contact.position) {
+            coords.textContent = '[' + contact.position.galaxy + ':' + contact.position.system + ']'
+                + ' · X ' + contact.position.x + ' · Y ' + contact.position.y;
+        }
+
+        contenant.innerHTML = '';
+
+        /*
+         * **Ce que le palier ne revele pas n'est pas affiche du tout.** Une ligne vide apprendrait
+         * qu'il y a quelque chose a savoir : c'est la regle de tout le chantier de surveillance, et
+         * elle vaut ici comme dans la charge utile.
+         */
+        if (contact.owner && contact.owner.name) {
+            var proprietaire = element('div', 'gtCardNote');
+            proprietaire.textContent = locaFiche('surveillanceOwner', 'Proprietaire') + ' : ' + contact.owner.name;
+            contenant.appendChild(proprietaire);
+        }
+
+        var etat = element('div', 'gtCardNote');
+        etat.textContent = intituleDuContact(contact);
+        contenant.appendChild(etat);
+
+        contenant.appendChild(compositionDAttaque(carte, contact));
+
+        if (titre) {
+            titre.textContent = locaFiche('surveillanceContact', 'Contact');
+        }
+
+        f.gtContact = contact;
+        f.gtPatrouille = null;
+        f.hidden = false;
+        f.gtBloc = marqueur || null;
+
+        if (marqueur) {
+            marqueur.classList.add('gtSelected');
+            placer(f, marqueur);
+        }
+    }
+
+    /*
+     * La boite de composition et le bouton d'envoi.
+     *
+     * Le bouton est desarme pendant le vol de la requete : une double soumission enverrait deux
+     * flottes, et la seconde partirait sur une cible que la premiere a peut-etre deja detruite.
+     */
+    function compositionDAttaque(carte, contact) {
+        var boite = element('div', 'gtCardActions');
+        var champs = element('div', 'gtContactShips');
+        var disponibles = typeof galaxyPatrolShips !== 'undefined' ? galaxyPatrolShips : [];
+
+        disponibles.forEach(function (vaisseau) {
+            if (!vaisseau || !vaisseau.amount) {
+                return;
+            }
+
+            var ligne = element('label', 'gtContactShipRow');
+            var nom = element('span', 'gtContactShipName');
+            nom.textContent = vaisseau.title + ' (' + vaisseau.amount + ')';
+
+            var champ = document.createElement('input');
+            champ.type = 'number';
+            champ.min = '0';
+            champ.max = String(vaisseau.amount);
+            champ.value = '0';
+            champ.className = 'gtContactShipInput';
+            champ.setAttribute('data-ship-id', String(vaisseau.id));
+
+            ligne.appendChild(nom);
+            ligne.appendChild(champ);
+            champs.appendChild(ligne);
+        });
+
+        boite.appendChild(champs);
+
+        var bouton = element('button', 'gtAction gtAction--attack');
+        bouton.type = 'button';
+        bouton.textContent = locaFiche('surveillanceAttack', 'Attaquer');
+
+        var raison = element('div', 'gtActionReason');
+        raison.hidden = true;
+
+        bouton.addEventListener('click', function () {
+            var corps = { contact_id: contact.contact_id };
+            var total = 0;
+
+            champs.querySelectorAll('.gtContactShipInput').forEach(function (champ) {
+                var nombre = Math.max(0, parseInt(champ.value, 10) || 0);
+
+                if (nombre > 0) {
+                    corps['am' + champ.getAttribute('data-ship-id')] = nombre;
+                    total += nombre;
+                }
+            });
+
+            if (total === 0) {
+                raison.hidden = false;
+                raison.textContent = locaFiche('surveillanceNoShips', 'Choisissez au moins un vaisseau.');
+
+                return;
+            }
+
+            if (!window.jQuery || typeof galaxyPatrolAttackUrl === 'undefined') {
+                return;
+            }
+
+            bouton.disabled = true;
+            raison.hidden = true;
+
+            window.jQuery.post(galaxyPatrolAttackUrl, corps, null, 'json')
+                .done(function () {
+                    /*
+                     * La flotte est partie : la fiche se ferme, et le joueur lit sa confirmation la
+                     * ou le jeu annonce deja tous ses envois.
+                     */
+                    deselectionner(carte, true);
+
+                    if (typeof window.fadeBox === 'function') {
+                        window.fadeBox(locaFiche('surveillanceSent', 'Flotte envoyee.'), false);
+                    }
+                })
+                .fail(function (reponse) {
+                    bouton.disabled = false;
+                    raison.hidden = false;
+                    raison.textContent = raisonDeLaReponse(reponse)
+                        || locaFiche('surveillanceRefused', 'Cette attaque a ete refusee.');
+                });
+        });
+
+        boite.appendChild(bouton);
+        boite.appendChild(raison);
+
+        return boite;
     }
 
     /*
