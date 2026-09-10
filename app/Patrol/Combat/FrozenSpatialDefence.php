@@ -30,8 +30,20 @@ use OGame\Services\ObjectService;
  * a eu la main — et un joueur pourrait renforcer ses tirs **retroactivement** en terminant
  * une recherche pendant le combat.
  *
- * Le bonus de classe est photographie **tel qu il vaut**, pas la classe : c est la valeur
- * que le moteur additionne, et c est elle qui doit rester stable.
+ * ------------------------------------------------------------------------------------
+ * LA CLASSE **ET** SON BONUS DERIVE, ET LES DEUX SERVENT
+ *
+ * Le bonus de combat est photographie tel qu il vaut : c est le nombre que le moteur
+ * additionne aux niveaux **rapportes**, et il doit rester stable.
+ *
+ * Mais le bonus ne suffit pas. Le moteur ne demande pas seulement « combien » : il demande
+ * « ce joueur est-il General » pour la manoeuvre de Hamill, et « quel fret pour lui » pour
+ * un transporteur. Ces questions se posent a la **classe**, pas a un nombre.
+ *
+ * La premiere version ne gelait que le bonus, et c etait un gel incomplet : au rechargement,
+ * un defenseur perdait sa classe et donc ses capacites. **Les deux sont donc portes**, et
+ * aucun bonus n est ajoute nulle part — les controles existants lisent simplement la
+ * photographie au lieu du monde vivant, ce qui evite toute application en double.
  *
  * ------------------------------------------------------------------------------------
  * LA RESERVE ET LA CARGAISON SONT DEUX CHOSES
@@ -68,6 +80,7 @@ final readonly class FrozenSpatialDefence
         public array $cargo,
         public int $fuelReserve,
         public PhotographedDefender $defender,
+        public int|null $characterClass,
     ) {
     }
 
@@ -86,6 +99,7 @@ final readonly class FrozenSpatialDefence
             'units' => $this->units->toArray(),
             'cargo' => $this->cargo,
             'fuel_reserve' => $this->fuelReserve,
+            'character_class' => $this->characterClass,
             'defender' => $this->defender->toFrozenFacts(),
         ];
     }
@@ -120,6 +134,7 @@ final readonly class FrozenSpatialDefence
             ],
             FrozenFact::int($facts, 'fuel_reserve'),
             PhotographedDefender::fromFrozenFacts(FrozenFact::array($facts, 'defender')),
+            FrozenFact::intOrNull($facts, 'character_class'),
         );
     }
 

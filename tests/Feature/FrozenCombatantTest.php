@@ -3,12 +3,14 @@
 namespace Tests\Feature;
 
 use OGame\Combat\Replay\BattleFieldStateCodec;
+use OGame\Enums\CharacterClass;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameMissions\BattleEngine\Draws\SeededDraws;
 use OGame\GameMissions\BattleEngine\Models\BattleUnit;
 use OGame\GameMissions\BattleEngine\State\BattleFieldState;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Patrol\Combat\FrozenCombatant;
+use OGame\Services\CharacterClassService;
 use OGame\Services\ObjectService;
 use OGame\Services\PlayerService;
 use RuntimeException;
@@ -128,6 +130,59 @@ class FrozenCombatantTest extends AccountTestCase
         $this->assertSame($unite->originalHullPlating, $relu->attackerUnits[0]->originalHullPlating);
         $this->assertSame($this->currentUserId, $relu->attackerUnits[0]->ownerId, 'The unit lost the owner it must be returned to.');
         $this->assertSame(77, $relu->attackerUnits[0]->fleetMissionId, 'The unit lost the fleet it belongs to.');
+    }
+
+    /**
+     * **La classe gelee repond aux controles du moteur, et son bonus n est ajoute qu une fois.**
+     *
+     * ## Pourquoi geler la classe plutot que ses effets
+     *
+     * Le moteur pose trois questions differentes : « est-il General » pour la manoeuvre de Hamill,
+     * « quel supplement de combat » pour les niveaux rapportes, « quel fret » pour un transporteur.
+     * Toutes trois s adressent au `User`. Geler la **classe** les fait donc repondre depuis la
+     * photographie **sans qu aucun bonus soit ajoute nulle part** : on ne touche a aucun site
+     * d application, on change seulement ce qu ils lisent.
+     *
+     * C est la garde contre l application en double : le supplement derive de la classe gelee est
+     * exactement celui que la photographie porte, et il **n entre pas** dans les niveaux bruts —
+     * comme dans le chemin vivant.
+     */
+    public function testTheFrozenClassAnswersTheEngineAndItsBonusIsCountedOnce(): void
+    {
+        $general = new FrozenCombatant($this->currentUserId, 7, 5, 3, 2, CharacterClass::GENERAL->value);
+        $classes = resolve(CharacterClassService::class);
+
+        $this->assertTrue(
+            $classes->isGeneral($general->getUser()),
+            'A frozen General is not seen as one: the Hamill manoeuvre would never fire in free space.'
+        );
+
+        $this->assertSame(
+            $general->classCombatBonus(),
+            $classes->getAdditionalCombatResearchLevels($general->getUser()),
+            'The bonus derived from the frozen class differs from the one the photograph carries: '
+            . 'one of the two is wrong, and a battle would apply the wrong number.'
+        );
+
+        // **Le bonus n entre pas dans les niveaux bruts.** Le chemin vivant ne l y met pas non plus :
+        // l ajouter ici le compterait deux fois, une dans les unites et une dans le rapport.
+        $this->assertSame(
+            7,
+            $general->getResearchLevel('weapon_technology'),
+            'The class bonus was added to the raw weapon level: it would be counted twice.'
+        );
+    }
+
+    /**
+     * Sans classe, aucun controle ne s active — et rien ne se derive.
+     */
+    public function testACombatantWithoutAClassTriggersNothing(): void
+    {
+        $sansClasse = new FrozenCombatant($this->currentUserId, 7, 5, 3, 0, null);
+        $classes = resolve(CharacterClassService::class);
+
+        $this->assertFalse($classes->isGeneral($sansClasse->getUser()));
+        $this->assertSame(0, $classes->getAdditionalCombatResearchLevels($sansClasse->getUser()));
     }
 
     /**

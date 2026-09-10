@@ -2,6 +2,7 @@
 
 namespace OGame\Patrol\Combat;
 
+use OGame\Models\User;
 use OGame\Services\PlayerService;
 use RuntimeException;
 
@@ -56,16 +57,63 @@ final class FrozenCombatant extends PlayerService
      * @param int $armorLevel Le niveau de blindage gele.
      * @param int $classCombatBonus Le bonus de classe, gele lui aussi, mais non additionne ici.
      */
+    /**
+     * Le porteur de la classe gelee. **Il n est pas un compte** : il ne vit pas en base, et rien
+     * n est jamais ecrit sur lui. Il existe parce que le moteur pose ses questions de classe a un
+     * `User`, et qu il doit les poser a la photographie.
+     */
+    private readonly User $frozenUser;
+
     public function __construct(
         private readonly int $ownerId,
         private readonly int $weaponLevel,
         private readonly int $shieldLevel,
         private readonly int $armorLevel,
         private readonly int $classCombatBonus,
+        int|null $characterClass = null,
     ) {
         // Le zero est la seule forme du constructeur parent qui ne charge aucun compte : elle
         // fabrique un utilisateur fictif, et rien n est lu en base.
         parent::__construct(0);
+
+        $porteur = new User();
+        $porteur->id = $ownerId;
+        $porteur->character_class = $characterClass;
+
+        $this->frozenUser = $porteur;
+    }
+
+    /**
+     * L utilisateur que le moteur interroge sur la classe — et qui repond depuis la photographie.
+     *
+     * ------------------------------------------------------------------------------------
+     * POURQUOI PASSER PAR LA CLASSE, ET NON PAR SES EFFETS
+     *
+     * Le moteur ne demande pas « ce joueur a-t-il un bonus » : il demande « ce joueur est-il
+     * General », « quel supplement de combat sa classe donne-t-elle », « quel fret un
+     * transporteur porte-t-il pour lui ». Trois questions, trois points d application, tous
+     * poses au `User`.
+     *
+     * Geler la **classe** fait donc repondre ces trois controles depuis la photographie, sans
+     * qu aucun bonus soit ajoute nulle part. C est le seul moyen d etre sur de ne pas
+     * **appliquer deux fois** un supplement deja compris dans une caracteristique derivee :
+     * on ne touche a aucun site d application, on change seulement ce qu ils lisent.
+     *
+     * ------------------------------------------------------------------------------------
+     * LE DEFAUT QUE CELA FERME, DECOUVERT LE 10 SEPTEMBRE 2026
+     *
+     * Sans cela, un combattant gele portait un utilisateur fictif dont la classe valait `null` :
+     * `isGeneral()` rendait toujours faux, et **la manoeuvre de Hamill ne pouvait pas se
+     * declencher** dans un combat en espace libre. Un General attaquant avec des chasseurs
+     * legers contre une Etoile de la Mort perdait sa manoeuvre **en silence**, sans qu aucune
+     * decision ne l ait retiree.
+     *
+     * Le gel des seuls niveaux etait donc incomplet : tout ce que le moteur decide depuis la
+     * classe lui echappait.
+     */
+    public function getUser(): User
+    {
+        return $this->frozenUser;
     }
 
     /**

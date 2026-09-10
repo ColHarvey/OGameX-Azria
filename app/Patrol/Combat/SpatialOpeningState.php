@@ -162,6 +162,10 @@ final class SpatialOpeningState
                 // plancher du jeu, que le moteur applique par `max(1, …)`.
                 0,
             ),
+            // **La classe, et pas seulement son bonus.** Le moteur demande a la classe si le
+            // joueur est General — pour la manoeuvre de Hamill — et quel fret ses transporteurs
+            // portent. Sans elle, un defenseur recharge perdrait ces capacites en silence.
+            $proprietaire->getUser()->character_class,
         );
     }
 

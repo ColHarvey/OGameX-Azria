@@ -3,15 +3,18 @@
 namespace Tests\Feature;
 
 use OGame\Combat\Enums\CombatState;
+use OGame\Enums\CharacterClass;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\Models\CombatInstance;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\Patrol;
 use OGame\Patrol\Combat\CorruptedSpatialDefence;
+use OGame\Patrol\Combat\FrozenCombatant;
 use OGame\Patrol\Combat\FrozenSpatialDefence;
 use OGame\Patrol\Combat\SpatialOpeningState;
 use OGame\Patrol\Enums\PatrolState;
+use OGame\Services\CharacterClassService;
 use Tests\AccountTestCase;
 
 /**
@@ -179,6 +182,76 @@ class SpatialOpeningStateTest extends AccountTestCase
             $avant,
             new SpatialOpeningState()->rawStateOf($recharge),
             'The opening state document itself changed between the capture and the reload.'
+        );
+    }
+
+    /**
+     * **La classe d entree tient, meme si le joueur en change.**
+     *
+     * ## Le defaut que ce temoin ferme, decouvert le 10 septembre 2026
+     *
+     * La premiere version ne gelait que les trois niveaux et le bonus **derive** de la classe. Or
+     * le moteur ne demande pas seulement « combien » : il demande « ce joueur est-il General » pour
+     * la manoeuvre de Hamill, et « quel fret » pour un transporteur — deux questions posees a la
+     * classe, pas a un nombre.
+     *
+     * Un defenseur recharge perdait donc ses capacites **en silence** : aucune erreur, seulement
+     * une manoeuvre qui ne se declenchait plus.
+     *
+     * ## Ce que l essai mesure, et pourquoi il mesure aussi le vivant
+     *
+     * La classe change apres le gel, l instance est **rechargee depuis la base**, et la
+     * photographie rend toujours la classe d entree. Le controle du joueur vivant est la pour que
+     * « rien n a bouge » ne puisse pas vouloir dire « rien ne pouvait bouger ».
+     */
+    public function testTheEntryClassSurvivesAChangeOfClass(): void
+    {
+        $patrouille = $this->patrouille();
+        $flotte = $this->flotte();
+        $combat = $this->combat();
+
+        $utilisateur = $this->planetService->getPlayer()?->getUser();
+        $this->assertNotNull($utilisateur);
+        $utilisateur->character_class = CharacterClass::GENERAL->value;
+        $utilisateur->save();
+
+        new SpatialOpeningState()->capture($combat, $patrouille, $flotte, 1_700_000_000);
+
+        // --- Le joueur change de classe apres le gel ---
+        $utilisateur->character_class = CharacterClass::COLLECTOR->value;
+        $utilisateur->save();
+
+        $vivant = resolve(PlayerServiceFactory::class)->make($this->currentUserId, true);
+        $classes = resolve(CharacterClassService::class);
+
+        $this->assertFalse(
+            $classes->isGeneral($vivant->getUser()),
+            'The living player is still a General: this witness could not see a change of class.'
+        );
+
+        // --- Et la photographie, relue depuis la base, garde la classe d entree ---
+        $recharge = CombatInstance::query()->findOrFail($combat->id);
+        $gele = new SpatialOpeningState()->protectedDefenceOf($recharge);
+
+        $this->assertSame(
+            CharacterClass::GENERAL->value,
+            $gele->characterClass,
+            'The frozen defence followed the living class: a battle already engaged would change its capabilities.'
+        );
+
+        // Et les capacites suivent la photographie, pas le monde : c est le fait qui compte.
+        $combattant = new FrozenCombatant(
+            $gele->ownerId,
+            $gele->defender->weaponLevel,
+            $gele->defender->shieldLevel,
+            $gele->defender->armorLevel,
+            $gele->defender->classCombatBonus,
+            $gele->characterClass,
+        );
+
+        $this->assertTrue(
+            $classes->isGeneral($combattant->getUser()),
+            'A combatant rebuilt from the photograph lost the class it entered with: the Hamill manoeuvre would vanish.'
         );
     }
 
