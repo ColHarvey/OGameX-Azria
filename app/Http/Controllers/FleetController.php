@@ -74,6 +74,10 @@ class FleetController extends OGameController
         // La garde reste au depart ; ceci n est que la politesse de ne pas proposer l impossible.
         $tenuesAuDock = $planet->unitsHeldAtDock();
 
+        // L etat des coques du corps, lu une fois : la boucle ci-dessous y prend le compte
+        // d abimees de chaque type.
+        $degatsDuCorps = $planet->damagedHulls();
+
         foreach ($screen_objects as $key_row => $objects_row) {
             foreach ($objects_row as $object_machine_name) {
                 $count++;
@@ -87,6 +91,15 @@ class FleetController extends OGameController
                 $view_model->object = $object;
                 $view_model->count = $count;
                 $view_model->amount = $amount;
+
+                // **« 20 croiseurs, dont 8 endommages »** (§8 du cahier des charges) : le nombre
+                // d abimees voyage a cote du total, sans jamais devenir une moyenne. Ce qui est tenu
+                // au dock est deja soustrait de `amount` ci-dessus ; ce compte-ci decrit ce qui
+                // reste disponible.
+                $view_model->damaged = min(
+                    $amount,
+                    $degatsDuCorps->damagedCountOf($object_machine_name)
+                );
 
                 $units[$key_row][$object->id] = $view_model;
             }

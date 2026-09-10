@@ -3,12 +3,10 @@
 namespace Tests\Feature;
 
 use Illuminate\Support\Facades\DB;
-use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Patrol;
 use OGame\Patrol\Enums\PatrolState;
 use OGame\Patrol\Exceptions\PatrolOrderRefused;
 use OGame\Patrol\PatrolAttackEligibility;
-use OGame\Services\ObjectService;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
 
@@ -176,13 +174,5 @@ class SpatialAttackOrderTest extends AccountTestCase
             'contact_id' => $contact,
             'am204' => 5,
         ])->assertStatus(409);
-    }
-
-    private function croiseurs(int $combien): UnitCollection
-    {
-        $unites = new UnitCollection();
-        $unites->addUnit(ObjectService::getUnitObjectByMachineName('cruiser'), $combien);
-
-        return $unites;
     }
 }
