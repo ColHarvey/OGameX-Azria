@@ -225,8 +225,19 @@ jobs:
       # base SQLite et ses ressources ; rien ne contourne la remise a zero protegee. Le nombre de
       # processus est celui des coeurs du runner, pas les seize du poste local. La duree murale est
       # mesuree et publiee, avec le JUnit agrege — c'est lui qui compte les essais, pas la console.
+      # **Le journal de repartition est arme ici, et seulement ici.**
+      #
+      # ParaTest distribue les classes aux processus a mesure qu'ils se liberent : la repartition
+      # depend du minutage et le JUnit agrege la perd. Quand un essai rougit parce qu'un voisin lui
+      # a laisse un etat, le rapport dit **lequel** a rougi, jamais **qui** etait ses voisins ni dans
+      # quel ordre ils sont passes — et le rouge est alors observe, jamais rejouable.
+      #
+      # L'extension est inerte tant que cette variable ne nomme pas un dossier ; l'armer coute
+      # quelques fichiers texte et rend le prochain echec exploitable.
       - name: Executer la suite complete
         shell: bash
+        env:
+          OGAMEX_TEST_JOURNAL: storage/logs/repartition
         run: |
           set -o pipefail
           debut=$(date +%s)
@@ -234,6 +245,49 @@ jobs:
           code=$?
           echo "DUREE_SUITE=$(( $(date +%s) - debut ))" >> "$GITHUB_ENV"
           exit $code
+
+      # **Les preuves d'un echec ne survivent pas au coureur.** Les bases du banc sont detruites avec
+      # la machine : sans cette collecte, un rouge intermittent ne laisse que son message.
+      #
+      # Ce qui part, et rien d'autre : les bases **du banc** (`database/database*.sqlite`, creees et
+      # remises a zero par `scripts/suite.php`, ne portant que des comptes generes), le journal de
+      # repartition, et le contexte d'execution. Le `.env` n'est pas dans la liste et ne peut pas y
+      # entrer : les chemins sont nommes un par un, jamais par un motif large.
+      #
+      # L'inventaire est ecrit dans le resume du job pour que ce qui part soit **lisible** avant
+      # d'etre telecharge, plutot qu'affirme ici.
+      - name: Rassembler les preuves de l echec
+        if: failure()
+        shell: bash
+        run: |
+          mkdir -p storage/logs/contexte
+          {
+            echo "sha=${{ github.sha }}"
+            echo "coeurs=$(nproc)"
+            echo "php=$(php -r 'echo PHP_VERSION;')"
+            echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > storage/logs/contexte/execution.txt
+          {
+            echo "### Preuves conservees pour cet echec"
+            echo ""
+            echo '```'
+            ls -l database/database*.sqlite 2>/dev/null | awk '{print $5, $9}' || echo "(aucune base)"
+            ls -l storage/logs/repartition 2>/dev/null | awk '{print $5, $9}' || echo "(aucun journal de repartition)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publier les preuves de l echec
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: echec-suite-${{ github.sha }}
+          if-no-files-found: warn
+          # Courte : ces bases ne servent qu'au diagnostic immediat de ce rouge-ci.
+          retention-days: 3
+          path: |
+            database/database*.sqlite
+            storage/logs/repartition/
+            storage/logs/contexte/
 
       # **Le JUnit agrege compte toute la suite** : 2 188 essais au 4 septembre 2026, et aucun ignore
       # — la bibliotheque existe ici, donc les essais Rust s'executent dans la suite aussi. Un

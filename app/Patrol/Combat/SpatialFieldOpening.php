@@ -46,11 +46,27 @@ use OGame\GameObjects\Models\Units\UnitCollection;
  * production — sans decision, et sans que personne ne s en apercoive.
  *
  * ------------------------------------------------------------------------------------
- * CE QU ELLE NE FAIT PAS
+ * CE QU ELLE NE FAIT PAS — ET CE QU ELLE FAIT QUAND MEME
  *
- * Aucun round, aucune perte, aucun debris, aucun butin, aucun rapport. L etat rendu porte
- * `roundsPlayed = 0` et deux accumulateurs vides ; c est l avanceur qui jouera, et c est
- * entre deux de ses pas que les renforts entreront.
+ * Aucun round n est joue : l etat rendu porte `roundsPlayed = 0`, et c est l avanceur qui
+ * jouera, entre deux pas duquel les renforts entreront. Aucun debris, aucun butin, aucun
+ * rapport : rien n est ecrit hors de l etat.
+ *
+ * **Mais zero round ne veut pas dire zero effet de combat**, et l ecrire ainsi serait faux.
+ * L ouverture joue la **manoeuvre de Hamill** : un General attaquant avec des chasseurs
+ * legers peut y detruire une Etoile de la Mort avant le premier tir. Cette ouverture
+ * **consomme donc des tirages** de la bande de bataille, et peut retirer une unite.
+ *
+ * Deux consequences pour la reprise, et elles sont distinctes :
+ *
+ *   - l **effet** doit etre conserve — l Etoile detruite ne revient pas, et la survivante ne
+ *     se fait pas detruire une seconde fois ;
+ *   - la **position des deux bandes** doit reprendre la ou elle s est arretee, jamais au mot
+ *     initial de la graine, sans quoi toute la suite des tirages se decale.
+ *
+ * Rejouer la manoeuvre au rechargement produirait une seconde manoeuvre que personne n a
+ * decidee. Le temoin qui l etablit demande un **autre processus** : une reprise en memoire
+ * pourrait passer en gardant vivant ce que la persistance a perdu.
  */
 final class SpatialFieldOpening extends PhpBattleEngine
 {
