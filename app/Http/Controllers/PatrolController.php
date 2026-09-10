@@ -5,6 +5,7 @@ namespace OGame\Http\Controllers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Facades\DB;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
@@ -13,10 +14,12 @@ use OGame\Models\Planet;
 use OGame\Models\Resources;
 use OGame\Patrol\Exceptions\PatrolOrderRefused;
 use OGame\Patrol\Geometry\SpatialPoint;
+use OGame\Patrol\PatrolAttackEligibility;
 use OGame\Patrol\PatrolDestination;
 use OGame\Patrol\PatrolOrders;
 use OGame\Patrol\PatrolPricing;
 use OGame\Patrol\PatrolQuote;
+use OGame\Patrol\SpatialAttackOrder;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
@@ -249,6 +252,102 @@ class PatrolController extends OGameController
         }
 
         return $this->done($patrouille, $now, 'order_launched');
+    }
+
+    /**
+     * Lance une attaque contre une patrouille detectee.
+     *
+     * ------------------------------------------------------------------------------------
+     * LE JOUEUR NE NOMME JAMAIS UNE PATROUILLE, IL NOMME UN CONTACT
+     *
+     * C est la protection centrale de tout le chantier de surveillance, et elle se joue ici.
+     * `contact_id` est la clef d une **ligne de detection** : elle nait avec l acquisition, meurt
+     * avec elle, et n existe que pour cet observateur. Un identifiant de patrouille, lui, suivrait sa
+     * cible d un systeme a l autre et d une couverture a la suivante — il permettrait de viser ce
+     * qu on ne detecte plus, et de savoir qu une patrouille existe encore en essayant de l attaquer.
+     *
+     * Le serveur resout donc le contact **pour ce joueur**, et la patrouille reste invisible du
+     * client d un bout a l autre.
+     *
+     * ------------------------------------------------------------------------------------
+     * LA CIBLE EST GELEE AU DEPART, ET COMPAREE A L ARRIVEE
+     *
+     * Identite, proprietaire et emplacement partent avec la mission. `PatrolTargetLock` les compare
+     * a l arrivee : une patrouille qui a bouge, change de mains ou disparu n est plus la cible, et la
+     * flotte rentre sans combattre. Sans ce gel, une attaque poursuivrait sa proie — et la
+     * surveillance ne servirait plus a rien.
+     */
+    public function attack(Request $request, PlayerService $player): JsonResponse
+    {
+        $now = (int)Date::now()->timestamp;
+        $origine = $this->originFrom($request, $player);
+
+        if (is_string($origine)) {
+            return $this->refused($origine, 409);
+        }
+
+        $cible = $this->patrolBehindTheContact($request, $player, $now);
+
+        if ($cible === null) {
+            // **Le meme refus que « non detectee »**, et c est voulu : distinguer « ce contact n est
+            // pas a toi » de « cette patrouille n existe plus » apprendrait quelque chose sur une
+            // cible qu on n a pas le droit de connaitre.
+            return $this->refused('t_ingame.patrol.refusal_target_not_detected', 409);
+        }
+
+        try {
+            $gelee = resolve(PatrolAttackEligibility::class)->frozenTargetFor($player->getId(), $cible, $now);
+        } catch (PatrolOrderRefused $refus) {
+            return $this->refused($refus->reason, 409);
+        }
+
+        try {
+            $mission = resolve(SpatialAttackOrder::class)->launch(
+                $origine,
+                $this->unitsFrom($request),
+                $gelee,
+                $this->speedFrom($request),
+                $now
+            );
+        } catch (PatrolOrderRefused $refus) {
+            return $this->refused($refus->reason, 409);
+        }
+
+        return response()->json([
+            'success' => true,
+            'mission_id' => (int)$mission->id,
+            'arrives_in' => max(0, (int)$mission->time_arrival - $now),
+        ]);
+    }
+
+    /**
+     * La patrouille derriere un contact, **si ce contact appartient bien a ce joueur**.
+     *
+     * Rend `null` des que quelque chose ne va pas — contact inconnu, revoque, pas encore visible,
+     * ou appartenant a un autre observateur. L appelant n en dit jamais la raison exacte.
+     */
+    private function patrolBehindTheContact(Request $request, PlayerService $player, int $now): Patrol|null
+    {
+        $contact = (int)$request->input('contact_id', 0);
+
+        if ($contact <= 0) {
+            return null;
+        }
+
+        $ligne = DB::table('surveillance_contacts')
+            ->where('id', $contact)
+            // **Le proprietaire du contact, dans la requete elle-meme.** Le verifier apres coup
+            // laisserait une fenetre ou l on a deja lu la patrouille d un autre.
+            ->where('observer_user_id', $player->getId())
+            ->whereNull('revoked_at')
+            ->where('visible_from', '<=', $now)
+            ->first();
+
+        if ($ligne === null) {
+            return null;
+        }
+
+        return Patrol::query()->find((int)$ligne->patrol_id);
     }
 
     /**
