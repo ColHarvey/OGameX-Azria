@@ -12,6 +12,7 @@ use OGame\Models\FleetMission;
 use OGame\Models\Planet;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\PlanetMove;
+use OGame\Models\Resources;
 use RuntimeException;
 
 class PlanetMoveService
@@ -295,10 +296,22 @@ class PlanetMoveService
             $mission->{$unit->unitObject->machine_name} = $unit->amount;
         }
 
-        $mission->save();
+        // **Les coques entamees demenagent avec la flotte** (journal §118).
+        //
+        // Le retrait passe par le point unique des departs : sans lui, le demenagement rendrait la
+        // flotte neuve a l arrivee — un soin gratuit de plus, comme la porte de saut en offrait un.
+        // La mission etant un deploiement, `landFleetOn()` fusionnera ces degats a destination.
+        $degatsEmportes = $planet->detachUnitsForDeparture(new Resources(0, 0, 0, 0), $shipUnits);
 
-        // Remove ships from the planet.
-        $planet->removeUnits($shipUnits, true);
+        if ($degatsEmportes === null) {
+            throw new RuntimeException('The planet no longer holds the ships this move was planned with.');
+        }
+
+        if (!$degatsEmportes->isEmpty()) {
+            $mission->damaged_hulls = $degatsEmportes->toStorage();
+        }
+
+        $mission->save();
     }
 
     /**

@@ -64,6 +64,16 @@ class FleetController extends OGameController
         $units = [];
         $count = 0;
 
+        // **Ce que le dock immobilise ne se propose pas au depart** (journal §118).
+        //
+        // Les unites en reparation restent presentes sur le corps — elles se battent si on l attaque
+        // — mais elles ne peuvent pas repartir, et `detachUnitsForDeparture()` les refuse. Les
+        // afficher comme disponibles ferait composer une flotte que le serveur rejetterait ensuite :
+        // la garde tiendrait, mais le joueur ne comprendrait pas pourquoi.
+        //
+        // La garde reste au depart ; ceci n est que la politesse de ne pas proposer l impossible.
+        $tenuesAuDock = $planet->unitsHeldAtDock();
+
         foreach ($screen_objects as $key_row => $objects_row) {
             foreach ($objects_row as $object_machine_name) {
                 $count++;
@@ -71,7 +81,7 @@ class FleetController extends OGameController
                 $object = ObjectService::getUnitObjectByMachineName($object_machine_name);
 
                 // Get current level of building
-                $amount = $planet->getObjectAmount($object_machine_name);
+                $amount = max(0, $planet->getObjectAmount($object_machine_name) - ($tenuesAuDock[$object_machine_name] ?? 0));
 
                 $view_model = new UnitViewModel();
                 $view_model->object = $object;
