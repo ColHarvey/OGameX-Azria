@@ -289,6 +289,20 @@ final class HullRepairService
     public function endEarly(HullRepairOrder $ordre, string $parceQue, int $maintenant): bool
     {
         return DB::transaction(function () use ($ordre, $parceQue, $maintenant): bool {
+            // **Le corps avant l ordre, toujours.** C est l ordre global des verrous du dock, et il
+            // n est pas une preference de style : le reglement d une bataille tient deja la ligne du
+            // corps quand il vient clore le chantier (`CombatSettlementService` verrouille les corps
+            // avant `resolve()`, et `resolve()` appelle `endAnyRunningOn()`). Une fin anticipee qui
+            // prendrait l ordre d abord et le corps ensuite ferait, avec ce reglement-la, un
+            // interblocage ABBA — chacun tenant ce que l autre attend. MariaDB en tue un ; ici, ce
+            // serait le reglement d un combat, mis en echec par une annulation de reparation
+            // arrivee au mauvais instant.
+            //
+            // Le corps d un ordre ne change jamais — `planet_id` est ecrit a la creation et aucun
+            // chemin ne le reecrit —, donc le lire avant le verrou de l ordre est sur.
+            /** @var Planet|null $ligne */
+            $ligne = Planet::where('id', $ordre->planet_id)->lockForUpdate()->first();
+
             /** @var HullRepairOrder|null $relu */
             $relu = HullRepairOrder::where('id', $ordre->id)->lockForUpdate()->first();
 
@@ -308,9 +322,6 @@ final class HullRepairService
 
                 return true;
             }
-
-            /** @var Planet|null $ligne */
-            $ligne = Planet::where('id', $relu->planet_id)->lockForUpdate()->first();
 
             if ($ligne !== null) {
                 // Les unites reviennent avec la coque **atteinte** : les degats de depart, reduits

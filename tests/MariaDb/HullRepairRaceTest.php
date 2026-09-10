@@ -32,7 +32,7 @@ use Throwable;
  *
  * ## Ce qui appartient au bac, et pourquoi
  *
- * Trois choses qu une seule connexion ne peut pas dire.
+ * Cinq choses qu une seule connexion ne peut pas dire.
  *
  * **Deux confirmations reellement simultanees.** La regle « un ordre a la fois par planete » n est
  * pas une verification applicative — `if (exists())` serait passe par les deux — mais une colonne
@@ -47,6 +47,16 @@ use Throwable;
  * **Une confirmation contre un depart.** Les unites confiees au dock ne doivent pas pouvoir partir.
  * Les deux chemins verrouillent la meme ligne de `planets` ; l ordre dans lequel ils l obtiennent
  * decide, et aucun des deux ne doit produire un etat ou l unite existe deux fois.
+ *
+ * **Un reglement contre une cloture par combat.** Les deux se produisent dans le jeu a la meme
+ * seconde, et ils ne veulent pas la meme chose : l un rend des unites intactes sans rien rembourser,
+ * l autre fige la coque a mi-parcours et rend la part non faite. Un etat mixte — regle **et**
+ * rembourse — est exactement ce qu une absence de serialisation produirait.
+ *
+ * **Une cloture par combat contre une annulation du joueur.** Elle a trouve un defaut reel : la fin
+ * anticipee prenait l ordre puis le corps, quand le reglement d une bataille tient deja le corps.
+ * Deux ordres de verrous opposes, un interblocage ABBA, et le perdant aurait ete le reglement de la
+ * bataille.
  */
 #[Group('mariadb')]
 final class HullRepairRaceTest extends TestCase
@@ -261,6 +271,270 @@ final class HullRepairRaceTest extends TestCase
                 'Le dock ne peut pas tenir plus d unites que le corps n en porte.'
             );
         }
+    }
+
+    /**
+     * Un reglement et une cloture par combat se disputent le meme ordre : **un seul effet**.
+     *
+     * ## Le chevauchement, et pourquoi il doit porter sur deux instants differents
+     *
+     * Les deux chemins existent dans le jeu et peuvent se produire a la meme seconde : le
+     * travailleur regle les ordres echus, et une bataille qui s ouvre sur le corps clot le chantier
+     * (`CombatResolutionService`, decision 8 du 10 septembre 2026). Les faire tomber sur le **meme**
+     * instant ne prouverait rien : passe l echeance, la fin anticipee devient elle-meme un reglement
+     * (`$part >= 1.0`), et les deux issues coincident — le juste et le faux seraient
+     * indiscernables.
+     *
+     * Ils portent donc sur deux instants qui les font **diverger**, comme deux processus qui lisent
+     * l horloge de part et d autre de l echeance : le travailleur regle a l echeance — unites
+     * intactes, rien de rembourse — pendant que la bataille clot a mi-parcours — coque figee a
+     * mi-chemin, moitie du prix rendue.
+     *
+     * ## Ce qui est verifie, et ou
+     *
+     * **En base, pas dans la reponse.** Le statut final, la raison de fin, les degats poses sur le
+     * corps et le solde de metal doivent decrire **le meme vainqueur**. Un etat mixte — regle et
+     * rembourse, ou annule et rendu intact — est exactement ce qu une absence de serialisation
+     * produirait, et rien d autre ne le montre.
+     */
+    public function testASettlementAndACombatClosureLeaveOneCoherentState(): void
+    {
+        [$corps] = $this->aBodyWithDamagedCruisers(20, 8, 5000);
+
+        $planete = resolve(PlanetServiceFactory::class)->make($corps, true);
+        $this->assertNotNull($planete, 'Le corps monte doit se charger.');
+
+        $ordre = resolve(HullRepairService::class)->confirm(
+            $planete,
+            DamagedHulls::of(['cruiser' => [5000 => 8]]),
+            '',
+            (int)now()->timestamp
+        );
+
+        $debut = (int)$ordre->started_at;
+        $echeance = (int)$ordre->completed_at;
+        $duree = $echeance - $debut;
+
+        $this->assertGreaterThan(1, $duree, 'Une reparation instantanee ne laisse aucun instant intermediaire a departager.');
+
+        $miParcours = $debut + intdiv($duree, 2);
+        $part = ($miParcours - $debut) / $duree;
+
+        // Le solde d apres la confirmation : c est de lui que se mesure un remboursement.
+        $metalApres = (int)DB::table('planets')->where('id', $corps)->value('metal');
+        $rembourseSiCloture = (int)floor((int)$ordre->cost_metal * (1.0 - $part));
+        $degatsSiCloture = (int)round(5000 * (1.0 - $part));
+
+        $this->assertGreaterThan(0, $rembourseSiCloture, 'Sans remboursement attendu, les deux issues auraient le meme solde.');
+
+        $identifiant = (int)$ordre->id;
+
+        $issues = $this->inParallel(2, static function (int $rang) use ($corps, $identifiant, $echeance, $miParcours): string {
+            $reparations = resolve(HullRepairService::class);
+
+            if ($rang === 0) {
+                /** @var HullRepairOrder|null $relu */
+                $relu = HullRepairOrder::where('id', $identifiant)->first();
+
+                if ($relu === null) {
+                    return 'reglement:ordre disparu';
+                }
+
+                // `settle()` et non `settleDue()` : la base du bac est partagee, et un ordre echu
+                // laisse par une classe voisine ferait mentir un comptage. Le travailleur appelle
+                // exactement cette methode-la.
+                return 'reglement:' . ($reparations->settle($relu, $echeance) ? 'oui' : 'non');
+            }
+
+            return 'combat:' . ($reparations->endAnyRunningOn(
+                $corps,
+                HullRepairOrder::BECAUSE_COMBAT,
+                $miParcours
+            ) ? 'oui' : 'non');
+        });
+
+        $trace = implode(' | ', $issues);
+
+        $aRegle = str_contains($trace, 'reglement:oui');
+        $aCloture = str_contains($trace, 'combat:oui');
+
+        $this->assertTrue($aRegle || $aCloture, 'Aucun des deux chemins n a agi ; les issues : ' . $trace);
+        $this->assertFalse($aRegle && $aCloture, 'Les deux chemins ont agi sur le meme ordre ; les issues : ' . $trace);
+
+        $ligne = DB::table('hull_repair_orders')->where('id', $identifiant)->first();
+        $this->assertNotNull($ligne, 'L ordre reste en base.');
+        $this->assertNull($ligne->active_on_planet_id, 'Le verrou du dock doit etre relache dans les deux issues.');
+
+        $metalFinal = (int)DB::table('planets')->where('id', $corps)->value('metal');
+        $degatsFinaux = DamagedHulls::fromStorage(
+            DB::table('planets')->where('id', $corps)->value('damaged_hulls')
+        );
+
+        // L effectif ne bouge dans aucune des deux issues : les unites ne quittent jamais le corps.
+        $this->assertSame(
+            20,
+            (int)DB::table('planets')->where('id', $corps)->value('cruiser'),
+            'Cette course ne cree ni ne detruit d unite ; les issues : ' . $trace
+        );
+
+        if ($aRegle) {
+            $this->assertSame(HullRepairOrder::STATUS_SETTLED, $ligne->status, 'Le reglement a gagne, le statut doit le dire.');
+            $this->assertNull($ligne->ended_because, 'Un reglement n a pas de raison de fin anticipee.');
+            $this->assertSame($metalApres, $metalFinal, 'Un ordre regle ne rembourse rien ; les issues : ' . $trace);
+            $this->assertTrue($degatsFinaux->isEmpty(), 'Un ordre regle rend des unites intactes ; les issues : ' . $trace);
+
+            return;
+        }
+
+        $this->assertSame(HullRepairOrder::STATUS_CANCELLED, $ligne->status, 'La cloture a gagne, le statut doit le dire.');
+        $this->assertSame(HullRepairOrder::BECAUSE_COMBAT, $ligne->ended_because, 'La raison de fin doit nommer le combat.');
+        $this->assertSame(
+            $metalApres + $rembourseSiCloture,
+            $metalFinal,
+            'La part non faite doit etre rendue une fois, exactement ; les issues : ' . $trace
+        );
+        $this->assertSame(
+            [$degatsSiCloture => 8],
+            $degatsFinaux->levelsOf('cruiser'),
+            'Les huit croiseurs reviennent avec la coque figee a mi-parcours ; les issues : ' . $trace
+        );
+    }
+
+    /**
+     * Une cloture par combat et une annulation du joueur : **elles ne s interbloquent pas**.
+     *
+     * ## Le defaut que cette course a trouve
+     *
+     * `endEarly()` prenait l ordre **puis** le corps. Le reglement d une bataille, lui, tient deja la
+     * ligne du corps quand il vient clore le chantier — `CombatSettlementService` verrouille les
+     * corps avant `resolve()`, et `resolve()` appelle `endAnyRunningOn()`. Deux chemins, deux ordres
+     * opposes : chacun tient ce que l autre attend, MariaDB en tue un (erreur 1213). En production,
+     * le tue aurait ete le reglement d une bataille, mis en echec par une annulation de reparation
+     * arrivee au mauvais instant.
+     *
+     * `lockForUpdate()` ne compile a rien sous SQLite : la suite ordinaire restait verte.
+     *
+     * ## Comment le chevauchement est etabli, et non suppose
+     *
+     * Le premier processus joue la bataille : il verrouille le corps, **attend**, puis clot le dock.
+     * Le second joue l annulation pendant cette attente. Un essai qui s arreterait la pourrait
+     * verdir sans que rien ne se chevauche — le second aurait pu finir avant que le premier ne
+     * commence. Le second **mesure donc sa propre attente** : bloque sur le corps, il ne peut pas
+     * repondre avant que la bataille ait relache. Une reponse immediate signifie qu il n y a pas eu
+     * de course, et l essai le dit au lieu de conclure.
+     */
+    public function testACombatClosureAndAPlayerCancellationNeverDeadlock(): void
+    {
+        [$corps] = $this->aBodyWithDamagedCruisers(20, 8, 5000);
+
+        $planete = resolve(PlanetServiceFactory::class)->make($corps, true);
+        $this->assertNotNull($planete, 'Le corps monte doit se charger.');
+
+        $ordre = resolve(HullRepairService::class)->confirm(
+            $planete,
+            DamagedHulls::of(['cruiser' => [5000 => 8]]),
+            '',
+            (int)now()->timestamp
+        );
+
+        $debut = (int)$ordre->started_at;
+        $duree = (int)$ordre->completed_at - $debut;
+        $identifiant = (int)$ordre->id;
+
+        // Deux instants distincts : le solde final dit alors **qui** a clos, sans avoir a le croire.
+        $instantCombat = $debut + intdiv($duree, 4);
+        $instantJoueur = $debut + intdiv(3 * $duree, 4);
+
+        $metalApres = (int)DB::table('planets')->where('id', $corps)->value('metal');
+        $rendu = static function (int $instant) use ($ordre, $debut, $duree): int {
+            return (int)floor((int)$ordre->cost_metal * (1.0 - ($instant - $debut) / $duree));
+        };
+
+        $tenue = 1_200_000;
+
+        $issues = $this->inParallel(2, static function (int $rang) use ($corps, $identifiant, $instantCombat, $instantJoueur, $tenue): string {
+            $reparations = resolve(HullRepairService::class);
+
+            if ($rang === 0) {
+                // La bataille : le corps d abord, comme `CombatSettlementService` le fait, puis la
+                // cloture du dock dans la meme transaction.
+                DB::beginTransaction();
+
+                try {
+                    Planet::where('id', $corps)->lockForUpdate()->first();
+
+                    usleep($tenue);
+
+                    $ferme = $reparations->endAnyRunningOn($corps, HullRepairOrder::BECAUSE_COMBAT, $instantCombat);
+
+                    DB::commit();
+
+                    return 'combat:' . ($ferme ? 'oui' : 'non');
+                } catch (Throwable $echec) {
+                    DB::rollBack();
+
+                    return 'combat:erreur:' . $echec->getMessage();
+                }
+            }
+
+            // L annulation du joueur, lancee pendant que la bataille tient le corps.
+            usleep(intdiv($tenue, 4));
+
+            /** @var HullRepairOrder|null $relu */
+            $relu = HullRepairOrder::where('id', $identifiant)->first();
+
+            if ($relu === null) {
+                return 'joueur:ordre disparu';
+            }
+
+            $avant = microtime(true);
+
+            try {
+                $ferme = $reparations->endEarly($relu, HullRepairOrder::BECAUSE_PLAYER, $instantJoueur);
+                $attendu = (int)round((microtime(true) - $avant) * 1000);
+
+                return 'joueur:' . ($ferme ? 'oui' : 'non') . ':' . $attendu;
+            } catch (Throwable $echec) {
+                return 'joueur:erreur:' . $echec->getMessage();
+            }
+        });
+
+        $trace = implode(' | ', $issues);
+
+        // **Aucun interblocage.** C est la raison d etre de cette course, et le message de MariaDB
+        // est explicite : « Deadlock found when trying to get lock », SQLSTATE 40001, erreur 1213.
+        $this->assertStringNotContainsStringIgnoringCase('deadlock', $trace, 'Un interblocage a eu lieu ; les issues : ' . $trace);
+        $this->assertStringNotContainsString('1213', $trace, 'Un interblocage a eu lieu ; les issues : ' . $trace);
+        $this->assertStringNotContainsString('erreur:', $trace, 'Un des deux chemins a echoue ; les issues : ' . $trace);
+
+        // **Le chevauchement est mesure.** Bloquee sur le corps que la bataille tient, l annulation
+        // ne peut pas repondre avant que celle-ci ait relache : une reponse immediate voudrait dire
+        // qu il n y a pas eu de course, et l essai n aurait alors rien prouve.
+        if (preg_match('/joueur:(?:oui|non):(\d+)/', $trace, $mesure) !== 1) {
+            $this->fail('L annulation n a pas rapporte son attente ; les issues : ' . $trace);
+        }
+
+        $this->assertGreaterThanOrEqual(
+            intdiv($tenue, 2000),
+            (int)$mesure[1],
+            'L annulation a repondu sans attendre : les deux chemins ne se sont pas chevauches, et cette course ne prouve rien ; les issues : ' . $trace
+        );
+
+        // Un seul des deux met fin a l ordre, et la base decrit ce vainqueur-la.
+        $this->assertSame(1, substr_count($trace, ':oui'), 'Un seul chemin doit mettre fin a l ordre ; les issues : ' . $trace);
+        $this->assertStringContainsString('combat:oui', $trace, 'La bataille tenait le corps : c est elle qui devait clore ; les issues : ' . $trace);
+
+        $ligne = DB::table('hull_repair_orders')->where('id', $identifiant)->first();
+        $this->assertNotNull($ligne, 'L ordre reste en base.');
+        $this->assertSame(HullRepairOrder::STATUS_CANCELLED, $ligne->status);
+        $this->assertSame(HullRepairOrder::BECAUSE_COMBAT, $ligne->ended_because, 'La raison de fin doit nommer le combat ; les issues : ' . $trace);
+        $this->assertNull($ligne->active_on_planet_id, 'Le verrou du dock doit etre relache.');
+
+        $this->assertSame(
+            $metalApres + $rendu($instantCombat),
+            (int)DB::table('planets')->where('id', $corps)->value('metal'),
+            'Le remboursement doit etre celui du vainqueur, verse une seule fois ; les issues : ' . $trace
+        );
     }
 
     /**
