@@ -60,11 +60,15 @@ return new class () extends Migration {
         Schema::create('hull_repair_orders', function (Blueprint $table) {
             $table->id();
 
-            $table->unsignedBigInteger('planet_id');
-            $table->unsignedBigInteger('player_id');
+            // **`int unsigned`, pas `bigint`** : `planets.id` et `users.id` sont declares par
+            // `increments()`, donc `int unsigned`. MariaDB refuse une cle etrangere dont les types
+            // ne correspondent pas exactement — « errno 150, Foreign key constraint is incorrectly
+            // formed » — et **SQLite l accepte sans rien dire**. Le defaut n a ete vu que par le bac.
+            $table->integer('planet_id', false, true);
+            $table->integer('player_id', false, true);
 
             // Le verrou : un seul ordre actif par planete, tenu par la base elle-meme.
-            $table->unsignedBigInteger('active_on_planet_id')->nullable()->unique();
+            $table->integer('active_on_planet_id', false, true)->nullable()->unique();
 
             // Les unites confiees, avec leur niveau de degats de depart.
             $table->json('units');
