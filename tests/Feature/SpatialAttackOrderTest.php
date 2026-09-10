@@ -236,6 +236,7 @@ class SpatialAttackOrderTest extends AccountTestCase
         $this->planetService->reloadPlanet();
 
         $avant = $this->planetService->getDefenseUnits()->getAmountByMachineName('rocket_launcher');
+        $missionsAvant = (int)DB::table('fleet_missions')->where('user_id', $this->currentUserId)->count();
 
         // **Un proprietaire ordinaire, fabrique et non cherche.** `getSecondPlayerId()` rend le
         // premier autre compte par identifiant croissant : sur une base neuve, c est le compte
@@ -266,6 +267,14 @@ class SpatialAttackOrderTest extends AccountTestCase
             $avant,
             $this->planetService->getDefenseUnits()->getAmountByMachineName('rocket_launcher'),
             'Une defense a quitte le corps pour aller attaquer.'
+        );
+
+        // **Et aucune mission ne nait.** Un refus qui laisserait une flotte en vol serait pire que
+        // l erreur 500 qu il remplace : la 500 ne creait rien.
+        $this->assertSame(
+            $missionsAvant,
+            (int)DB::table('fleet_missions')->where('user_id', $this->currentUserId)->count(),
+            'Une attaque refusee a quand meme cree une mission.'
         );
     }
 

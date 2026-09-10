@@ -88,6 +88,10 @@ final class HullRepairRaceTest extends TestCase
 
         resolve(SettingsService::class)->set('hull_damage_enabled', '0');
 
+        // La connexion nommee que la course du reglement emploie : la purger relache tout ce
+        // qu elle tiendrait encore si l essai s est arrete avant son commit.
+        DB::purge('mysql_temoin');
+
         if ($this->corpsCrees !== []) {
             DB::table('hull_repair_orders')->whereIn('planet_id', $this->corpsCrees)->delete();
             // Les corps partent, les comptes restent : supprimer un compte se heurte aux clefs
@@ -276,17 +280,20 @@ final class HullRepairRaceTest extends TestCase
     /**
      * Un reglement et une cloture par combat se disputent le meme ordre : **un seul effet**.
      *
-     * ## Le chevauchement, et pourquoi il doit porter sur deux instants differents
+     * ## Le chevauchement est impose, pas espere
      *
-     * Les deux chemins existent dans le jeu et peuvent se produire a la meme seconde : le
-     * travailleur regle les ordres echus, et une bataille qui s ouvre sur le corps clot le chantier
-     * (`CombatResolutionService`, decision 8 du 10 septembre 2026). Les faire tomber sur le **meme**
-     * instant ne prouverait rien : passe l echeance, la fin anticipee devient elle-meme un reglement
-     * (`$part >= 1.0`), et les deux issues coincident — le juste et le faux seraient
-     * indiscernables.
+     * Le parent tient la ligne de l ordre sur une connexion a part, que la bifurcation ne ferme pas.
+     * Les deux chemins partent, butent tous les deux sur cette ligne, et le parent **attend de les
+     * voir attendre** — deux processus arretes sur `hull_repair_orders`, lus dans
+     * `information_schema.PROCESSLIST` — avant de relacher. Aucune duree ne decide de rien : si les
+     * deux ne viennent pas attendre, l essai echoue en disant qu il n a rien prouve, au lieu de
+     * verdir sur un croisement qui n a pas eu lieu.
      *
-     * Ils portent donc sur deux instants qui les font **diverger**, comme deux processus qui lisent
-     * l horloge de part et d autre de l echeance : le travailleur regle a l echeance — unites
+     * ## Pourquoi deux instants differents
+     *
+     * Les faire tomber sur le **meme** instant ne prouverait rien : passe l echeance, la fin
+     * anticipee devient elle-meme un reglement (`$part >= 1.0`), et les deux issues coincident — le
+     * juste et le faux seraient indiscernables. Le travailleur regle donc a l echeance — unites
      * intactes, rien de rembourse — pendant que la bataille clot a mi-parcours — coque figee a
      * mi-chemin, moitie du prix rendue.
      *
@@ -329,29 +336,61 @@ final class HullRepairRaceTest extends TestCase
 
         $identifiant = (int)$ordre->id;
 
-        $issues = $this->inParallel(2, static function (int $rang) use ($corps, $identifiant, $echeance, $miParcours): string {
-            $reparations = resolve(HullRepairService::class);
+        // Le parent tient l ordre sur une connexion nommee : elle survit a la bifurcation, et les
+        // enfants, qui ne s en servent jamais, ne la ferment pas en mourant.
+        config(['database.connections.mysql_temoin' => config('database.connections.mysql')]);
+        $temoin = DB::connection('mysql_temoin');
+        $temoin->beginTransaction();
+        $this->assertNotNull(
+            $temoin->table('hull_repair_orders')->where('id', $identifiant)->lockForUpdate()->first(),
+            'Le parent doit tenir la ligne de l ordre avant de lancer les deux chemins.'
+        );
 
-            if ($rang === 0) {
-                /** @var HullRepairOrder|null $relu */
-                $relu = HullRepairOrder::where('id', $identifiant)->first();
+        $issues = $this->inParallel(
+            2,
+            static function (int $rang) use ($corps, $identifiant, $echeance, $miParcours): string {
+                $reparations = resolve(HullRepairService::class);
 
-                if ($relu === null) {
-                    return 'reglement:ordre disparu';
+                if ($rang === 0) {
+                    /** @var HullRepairOrder|null $relu */
+                    $relu = HullRepairOrder::where('id', $identifiant)->first();
+
+                    if ($relu === null) {
+                        return 'reglement:ordre disparu';
+                    }
+
+                    // `settle()` et non `settleDue()` : la base du bac est partagee, et un ordre echu
+                    // laisse par une classe voisine ferait mentir un comptage. Le travailleur appelle
+                    // exactement cette methode-la.
+                    return 'reglement:' . ($reparations->settle($relu, $echeance) ? 'oui' : 'non');
                 }
 
-                // `settle()` et non `settleDue()` : la base du bac est partagee, et un ordre echu
-                // laisse par une classe voisine ferait mentir un comptage. Le travailleur appelle
-                // exactement cette methode-la.
-                return 'reglement:' . ($reparations->settle($relu, $echeance) ? 'oui' : 'non');
-            }
+                return 'combat:' . ($reparations->endAnyRunningOn(
+                    $corps,
+                    HullRepairOrder::BECAUSE_COMBAT,
+                    $miParcours
+                ) ? 'oui' : 'non');
+            },
+            function () use ($temoin): void {
+                // **Les deux sont venus attendre l ordre, et la base le dit.** La duree separe
+                // l attente du simple passage : une instruction qui n attend personne se termine en
+                // millisecondes.
+                $this->waitUntil(
+                    static function (): bool {
+                        $compte = DB::selectOne(
+                            'SELECT COUNT(*) AS n FROM information_schema.PROCESSLIST'
+                            . ' WHERE ID <> CONNECTION_ID() AND INFO LIKE ? AND TIME >= 1',
+                            ['%hull_repair_orders%']
+                        );
 
-            return 'combat:' . ($reparations->endAnyRunningOn(
-                $corps,
-                HullRepairOrder::BECAUSE_COMBAT,
-                $miParcours
-            ) ? 'oui' : 'non');
-        });
+                        return $compte !== null && (int)$compte->n >= 2;
+                    },
+                    'Les deux chemins ne sont pas venus attendre l ordre : rien ne s est chevauche, et cette course ne prouverait rien.'
+                );
+
+                $temoin->commit();
+            }
+        );
 
         $trace = implode(' | ', $issues);
 
@@ -414,14 +453,23 @@ final class HullRepairRaceTest extends TestCase
      *
      * `lockForUpdate()` ne compile a rien sous SQLite : la suite ordinaire restait verte.
      *
-     * ## Comment le chevauchement est etabli, et non suppose
+     * ## L orchestration : deux rendez-vous, aucune duree
      *
-     * Le premier processus joue la bataille : il verrouille le corps, **attend**, puis clot le dock.
-     * Le second joue l annulation pendant cette attente. Un essai qui s arreterait la pourrait
-     * verdir sans que rien ne se chevauche — le second aurait pu finir avant que le premier ne
-     * commence. Le second **mesure donc sa propre attente** : bloque sur le corps, il ne peut pas
-     * repondre avant que la bataille ait relache. Une reponse immediate signifie qu il n y a pas eu
-     * de course, et l essai le dit au lieu de conclure.
+     * Une course qui se contenterait de lancer les deux chemins et d esperer qu ils se croisent ne
+     * prouverait rien — et un `usleep()` bien choisi n est qu une esperance ecrite en chiffres.
+     * Cette course impose donc l ordre par deux faits observables :
+     *
+     * 1. **Le jalon.** La bataille verrouille le corps, puis pose un fichier. L annulation ne
+     *    commence qu apres l avoir vu : elle ne peut pas prendre le corps avant la bataille, et les
+     *    roles ne peuvent pas s inverser.
+     * 2. **L attente lue en base.** La bataille ne demande l ordre qu apres avoir vu, dans
+     *    `information_schema.PROCESSLIST`, un processus arrete sur `planets ... for update` — donc
+     *    apres que l annulation a pris tout ce qu elle prend avant le corps. Sous l ancien code,
+     *    c est precisement l ordre de reparation ; le cycle est alors complet et l interblocage
+     *    certain, jamais probable.
+     *
+     * Si l un des deux rendez-vous ne se produit pas, l essai echoue en le disant : il refuse de
+     * conclure d un croisement qui n a pas eu lieu.
      */
     public function testACombatClosureAndAPlayerCancellationNeverDeadlock(): void
     {
@@ -446,13 +494,11 @@ final class HullRepairRaceTest extends TestCase
         $instantJoueur = $debut + intdiv(3 * $duree, 4);
 
         $metalApres = (int)DB::table('planets')->where('id', $corps)->value('metal');
-        $rendu = static function (int $instant) use ($ordre, $debut, $duree): int {
-            return (int)floor((int)$ordre->cost_metal * (1.0 - ($instant - $debut) / $duree));
-        };
+        $rendu = (int)floor((int)$ordre->cost_metal * (1.0 - ($instantCombat - $debut) / $duree));
 
-        $tenue = 1_200_000;
+        $jalon = sys_get_temp_dir() . '/ogamex-dock-jalon-' . bin2hex(random_bytes(6));
 
-        $issues = $this->inParallel(2, static function (int $rang) use ($corps, $identifiant, $instantCombat, $instantJoueur, $tenue): string {
+        $issues = $this->inParallel(2, function (int $rang) use ($corps, $identifiant, $instantCombat, $instantJoueur, $jalon): string {
             $reparations = resolve(HullRepairService::class);
 
             if ($rang === 0) {
@@ -463,7 +509,12 @@ final class HullRepairRaceTest extends TestCase
                 try {
                     Planet::where('id', $corps)->lockForUpdate()->first();
 
-                    usleep($tenue);
+                    // Le corps est tenu : l annulation peut partir.
+                    touch($jalon);
+
+                    // **Et elle est venue buter dessus.** Lu dans la base, jamais suppose : sous
+                    // l ancien code, elle tient alors l ordre que cette transaction va demander.
+                    $this->waitUntilAProcessWaitsOnALockOn('planets');
 
                     $ferme = $reparations->endAnyRunningOn($corps, HullRepairOrder::BECAUSE_COMBAT, $instantCombat);
 
@@ -473,12 +524,20 @@ final class HullRepairRaceTest extends TestCase
                 } catch (Throwable $echec) {
                     DB::rollBack();
 
-                    return 'combat:erreur:' . $echec->getMessage();
+                    return 'combat:erreur:' . $echec::class . ' : ' . $echec->getMessage();
                 }
             }
 
-            // L annulation du joueur, lancee pendant que la bataille tient le corps.
-            usleep(intdiv($tenue, 4));
+            // L annulation du joueur ne commence qu une fois le corps tenu par la bataille.
+            $limite = microtime(true) + 15.0;
+
+            while (!file_exists($jalon)) {
+                if (microtime(true) >= $limite) {
+                    return 'joueur:jalon jamais pose';
+                }
+
+                usleep(5_000);
+            }
 
             /** @var HullRepairOrder|null $relu */
             $relu = HullRepairOrder::where('id', $identifiant)->first();
@@ -491,13 +550,14 @@ final class HullRepairRaceTest extends TestCase
 
             try {
                 $ferme = $reparations->endEarly($relu, HullRepairOrder::BECAUSE_PLAYER, $instantJoueur);
-                $attendu = (int)round((microtime(true) - $avant) * 1000);
 
-                return 'joueur:' . ($ferme ? 'oui' : 'non') . ':' . $attendu;
+                return 'joueur:' . ($ferme ? 'oui' : 'non') . ':' . (int)round((microtime(true) - $avant) * 1000);
             } catch (Throwable $echec) {
-                return 'joueur:erreur:' . $echec->getMessage();
+                return 'joueur:erreur:' . $echec::class . ' : ' . $echec->getMessage();
             }
         });
+
+        @unlink($jalon);
 
         $trace = implode(' | ', $issues);
 
@@ -506,18 +566,19 @@ final class HullRepairRaceTest extends TestCase
         $this->assertStringNotContainsStringIgnoringCase('deadlock', $trace, 'Un interblocage a eu lieu ; les issues : ' . $trace);
         $this->assertStringNotContainsString('1213', $trace, 'Un interblocage a eu lieu ; les issues : ' . $trace);
         $this->assertStringNotContainsString('erreur:', $trace, 'Un des deux chemins a echoue ; les issues : ' . $trace);
+        $this->assertStringNotContainsString('jalon jamais pose', $trace, 'La bataille n a jamais tenu le corps : rien ne s est chevauche.');
 
-        // **Le chevauchement est mesure.** Bloquee sur le corps que la bataille tient, l annulation
-        // ne peut pas repondre avant que celle-ci ait relache : une reponse immediate voudrait dire
-        // qu il n y a pas eu de course, et l essai n aurait alors rien prouve.
+        // L attente de l annulation n est pas la preuve — les deux rendez-vous le sont — mais elle
+        // corrobore : bloquee sur le corps que la bataille tient, elle ne peut pas repondre avant
+        // que celle-ci ait relache.
         if (preg_match('/joueur:(?:oui|non):(\d+)/', $trace, $mesure) !== 1) {
             $this->fail('L annulation n a pas rapporte son attente ; les issues : ' . $trace);
         }
 
-        $this->assertGreaterThanOrEqual(
-            intdiv($tenue, 2000),
+        $this->assertGreaterThan(
+            0,
             (int)$mesure[1],
-            'L annulation a repondu sans attendre : les deux chemins ne se sont pas chevauches, et cette course ne prouve rien ; les issues : ' . $trace
+            'L annulation a repondu sans attendre ; les issues : ' . $trace
         );
 
         // Un seul des deux met fin a l ordre, et la base decrit ce vainqueur-la.
@@ -531,7 +592,7 @@ final class HullRepairRaceTest extends TestCase
         $this->assertNull($ligne->active_on_planet_id, 'Le verrou du dock doit etre relache.');
 
         $this->assertSame(
-            $metalApres + $rendu($instantCombat),
+            $metalApres + $rendu,
             (int)DB::table('planets')->where('id', $corps)->value('metal'),
             'Le remboursement doit etre celui du vainqueur, verse une seule fois ; les issues : ' . $trace
         );
