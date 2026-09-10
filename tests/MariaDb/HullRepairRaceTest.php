@@ -282,12 +282,22 @@ final class HullRepairRaceTest extends TestCase
      *
      * ## Le chevauchement est impose, pas espere
      *
-     * Le parent tient la ligne de l ordre sur une connexion a part, que la bifurcation ne ferme pas.
-     * Les deux chemins partent, butent tous les deux sur cette ligne, et le parent **attend de les
-     * voir attendre** — deux processus arretes sur `hull_repair_orders`, lus dans
-     * `information_schema.PROCESSLIST` — avant de relacher. Aucune duree ne decide de rien : si les
-     * deux ne viennent pas attendre, l essai echoue en disant qu il n a rien prouve, au lieu de
-     * verdir sur un croisement qui n a pas eu lieu.
+     * Le parent tient la ligne du **corps** sur une connexion a part, que la bifurcation ne ferme
+     * pas. Les deux chemins partent, butent tous les deux dessus — c est le premier des deux verrous
+     * du dock, et depuis le bac ils le prennent tous les deux —, et le parent **attend de les voir
+     * attendre** : deux processus arretes sur `planets ... for update`, lus dans
+     * `information_schema.PROCESSLIST`. Aucune duree ne decide de rien ; si les deux ne viennent pas
+     * attendre, l essai echoue en disant qu il n a rien prouve, au lieu de verdir sur un croisement
+     * qui n a pas eu lieu.
+     *
+     * **Ils attendent la meme ligne, et c est voulu.** Un rendez-vous pris sur deux lignes
+     * differentes imposerait le vainqueur par construction, et la moitie du verdict ne serait
+     * jamais exercee. Ici le moteur tranche, et l essai exige la coherence de l issue quelle qu elle
+     * soit.
+     *
+     * Une premiere version tenait la ligne de l ordre : elle encodait l ancien ordre des verrous, ou
+     * le reglement demandait l ordre sans passer par le corps. Le bac l a dit en refusant de
+     * conclure.
      *
      * ## Pourquoi deux instants differents
      *
@@ -336,14 +346,14 @@ final class HullRepairRaceTest extends TestCase
 
         $identifiant = (int)$ordre->id;
 
-        // Le parent tient l ordre sur une connexion nommee : elle survit a la bifurcation, et les
+        // Le parent tient le corps sur une connexion nommee : elle survit a la bifurcation, et les
         // enfants, qui ne s en servent jamais, ne la ferment pas en mourant.
         config(['database.connections.mysql_temoin' => config('database.connections.mysql')]);
         $temoin = DB::connection('mysql_temoin');
         $temoin->beginTransaction();
         $this->assertNotNull(
-            $temoin->table('hull_repair_orders')->where('id', $identifiant)->lockForUpdate()->first(),
-            'Le parent doit tenir la ligne de l ordre avant de lancer les deux chemins.'
+            $temoin->table('planets')->where('id', $corps)->lockForUpdate()->first(),
+            'Le parent doit tenir la ligne du corps avant de lancer les deux chemins.'
         );
 
         $issues = $this->inParallel(
@@ -383,20 +393,20 @@ final class HullRepairRaceTest extends TestCase
                 }
             },
             function () use ($temoin): void {
-                // **Les deux sont venus attendre l ordre, et la base le dit.** La duree separe
-                // l attente du simple passage : une instruction qui n attend personne se termine en
+                // **Les deux sont venus attendre le corps, et la base le dit.** La duree separe
+                // l attente du simple passage : une lecture verrouillante libre se termine en
                 // millisecondes.
                 $this->waitUntil(
                     static function (): bool {
                         $compte = DB::selectOne(
                             'SELECT COUNT(*) AS n FROM information_schema.PROCESSLIST'
-                            . ' WHERE ID <> CONNECTION_ID() AND INFO LIKE ? AND TIME >= 1',
-                            ['%hull_repair_orders%']
+                            . ' WHERE ID <> CONNECTION_ID() AND INFO LIKE ? AND INFO LIKE ? AND TIME >= 1',
+                            ['%planets%', '%for update%']
                         );
 
                         return $compte !== null && (int)$compte->n >= 2;
                     },
-                    'Les deux chemins ne sont pas venus attendre l ordre : rien ne s est chevauche, et cette course ne prouverait rien.'
+                    'Les deux chemins ne sont pas venus attendre le corps : rien ne s est chevauche, et cette course ne prouverait rien.'
                 );
 
                 $temoin->commit();
