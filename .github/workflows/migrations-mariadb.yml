@@ -22,6 +22,14 @@ on:
       - 'app/Combat/**'
       - 'app/GameMissions/**'
       - 'app/Patrol/**'
+      # Les degats de coque et le chantier spatial (journal §118) : le service de reparation, le
+      # verrou de depart et les courses du dock vivent ici. Sans ces chemins, un changement du
+      # dock ne declenchait **pas** les courses du bac — et elles sont la seule preuve de
+      # concurrence dont ce chantier dispose.
+      - 'app/Hull/**'
+      - 'app/Services/PlanetService.php'
+      - 'app/Services/JumpGateService.php'
+      - 'tests/Feature/HullRepairTest.php'
       - 'tests/Feature/Patrol*.php'
       - 'tests/MariaDb/**'
       - 'tests/*.php'
@@ -34,6 +42,14 @@ on:
       - 'app/Combat/**'
       - 'app/GameMissions/**'
       - 'app/Patrol/**'
+      # Les degats de coque et le chantier spatial (journal §118) : le service de reparation, le
+      # verrou de depart et les courses du dock vivent ici. Sans ces chemins, un changement du
+      # dock ne declenchait **pas** les courses du bac — et elles sont la seule preuve de
+      # concurrence dont ce chantier dispose.
+      - 'app/Hull/**'
+      - 'app/Services/PlanetService.php'
+      - 'app/Services/JumpGateService.php'
+      - 'tests/Feature/HullRepairTest.php'
       - 'tests/Feature/Patrol*.php'
       - 'tests/MariaDb/**'
       - 'tests/*.php'
