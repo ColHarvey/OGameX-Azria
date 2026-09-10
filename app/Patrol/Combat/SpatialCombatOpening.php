@@ -81,10 +81,27 @@ use OGame\Patrol\FrozenPatrolTarget;
  *
  *   - la fermeture d un combat spatial ne figera **pas** un verdict complet ; elle produira
  *     l etat de champ initial, et l avanceur jouera les rounds ;
- *   - `owned_through_effect_at` sera etendu a la fin reelle de la bataille, pas a son
- *     ouverture, pour que les arrivees de la periode y entrent ;
  *   - l admission des renforts se prononcera entre deux pas, sur l etat relu, jamais sur une
  *     photographie prise avant le premier tir.
+ *
+ * ------------------------------------------------------------------------------------
+ * ET LA BORNE NE PEUT PAS ETRE « LA FIN REELLE » PENDANT LA BATAILLE
+ *
+ * J avais ecrit que `owned_through_effect_at` serait « etendu a la fin reelle de la
+ * bataille ». **C est impossible, et Keven l a releve** : pendant qu on se bat, cette fin
+ * n est pas connue — elle depend des rounds qui restent a jouer, donc des renforts qui vont
+ * arriver. Une borne qui l attendrait refuserait justement ce qu elle doit accepter.
+ *
+ * Il y a donc deux etats a distinguer, et non une date a remplir :
+ *
+ *   - **tant que la bataille est ouverte**, une arrivee de la periode lui appartient. La
+ *     question n est pas « avant quelle date », mais « ce combat accepte-t-il encore » ;
+ *   - **a la resolution**, la borne se fige sur l instant reellement atteint, et devient
+ *     definitive. C est elle qui tranche ensuite pour un travailleur en retard : un effet
+ *     planifie apres n appartient plus a ce combat, mais au suivant.
+ *
+ * Ce que la colonne portera est donc la **borne figee**, ecrite une fois a la resolution.
+ * Ce qui gouverne pendant le combat est l **etat**, pas la date.
  *
  * Tant que ce raccordement n existe pas, aucune arrivee ne peut rejoindre un combat spatial —
  * et c est pour cela que rien n appelle ce service : `patrols_enabled` vaut 0.
@@ -94,6 +111,15 @@ use OGame\Patrol\FrozenPatrolTarget;
  *
  * Il ouvre et il tient. Il ne ferme pas, ne photographie pas la flotte defenseuse et ne
  * regle rien.
+ *
+ * Ce que le reglement devra traiter, et qui est note ici pour ne pas etre reduit en
+ * chemin — **la consigne est celle de chaque flotte participante, jamais une consigne
+ * unique heritee de la patrouille visee** :
+ *
+ *   - rentrer ou rester, **par flotte**, chacune gardant ses propres survivants ;
+ *   - la reserve de carburant suffisante pour ce retour, sans quoi il n a pas lieu ;
+ *   - l immobilisation quand cette reserve ne suffit plus ;
+ *   - la disparition d une flotte entierement detruite, dont rien ne rentre.
  */
 final class SpatialCombatOpening
 {

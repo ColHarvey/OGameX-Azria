@@ -61,8 +61,19 @@ class PatrolCombatBarrier extends Model
      * travailleur en retard ferait changer de combat un evenement qui appartenait a celui-ci.
      *
      * La borne est **fermee du meme cote que partout ailleurs** : une egalite compte pour « apres »,
-     * donc pour le combat suivant. En espace libre la fenetre est nulle — personne ne peut rejoindre
-     * dans cette version — et cette methode rend donc faux des l instant d ouverture.
+     * donc pour le combat suivant.
+     *
+     * ## Ce que cette methode ne peut pas decider a elle seule
+     *
+     * Elle lit une **date**, et une date ne sait pas dire « la bataille accepte encore ». Tant qu un
+     * combat spatial est ouvert, sa fin n est pas connue : elle depend des rounds restants, donc des
+     * renforts a venir. Une borne qui pretendrait la connaitre refuserait precisement ce qu elle doit
+     * accepter.
+     *
+     * La colonne portera donc la **borne figee, ecrite une fois a la resolution** ; ce qui gouverne
+     * pendant le combat est l **etat de l instance**, pas cette date. Aujourd hui la valeur vaut
+     * l instant d ouverture parce que rien ne peut encore rejoindre un combat spatial — un etat de
+     * tranche, pas la regle.
      */
     public function ownsEffectAt(int $plannedAt): bool
     {
