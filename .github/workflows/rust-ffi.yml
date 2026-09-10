@@ -249,10 +249,20 @@ jobs:
       # **Les preuves d'un echec ne survivent pas au coureur.** Les bases du banc sont detruites avec
       # la machine : sans cette collecte, un rouge intermittent ne laisse que son message.
       #
-      # Ce qui part, et rien d'autre : les bases **du banc** (`database/database*.sqlite`, creees et
-      # remises a zero par `scripts/suite.php`, ne portant que des comptes generes), le journal de
-      # repartition, et le contexte d'execution. Le `.env` n'est pas dans la liste et ne peut pas y
-      # entrer : les chemins sont nommes un par un, jamais par un motif large.
+      # Ce qui part, et rien d'autre : les bases **du banc**, le journal de repartition, et le
+      # contexte d'execution. Le `.env` n'est pas dans la liste et ne peut pas y entrer : les chemins
+      # sont nommes un par un, jamais par un motif large.
+      #
+      # **Mais exclure le `.env` ne dit rien du contenu des bases.** Elles ne portent que des comptes
+      # generes, et pourtant trois endroits n'ont rien a faire dans un fichier telecharge : les
+      # empreintes de mot de passe, les secrets a deux facteurs, les jetons de reinitialisation — et
+      # les sessions, qui portent des connexions vivantes. Les **inspecter** pour se rassurer serait
+      # fragile : il suffirait qu'une migration en ajoute un quatrieme.
+      #
+      # `scripts/preuves-echec.php` copie les bases et **vide** ces colonnes, puis relit la copie
+      # pour verifier qu'il n'en reste rien. Il refuse aussi une base anterieure au passage : la
+      # provenance est etablie, pas supposee. L'etat de jeu, lui, est conserve entier — c'est
+      # exactement ce qu'un diagnostic d'ordre d'execution demande.
       #
       # L'inventaire est ecrit dans le resume du job pour que ce qui part soit **lisible** avant
       # d'etre telecharge, plutot qu'affirme ici.
@@ -267,11 +277,16 @@ jobs:
             echo "php=$(php -r 'echo PHP_VERSION;')"
             echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           } > storage/logs/contexte/execution.txt
+
+          php scripts/preuves-echec.php "$(date -d '-6 hours' +%s 2>/dev/null || echo 0)"
+
           {
             echo "### Preuves conservees pour cet echec"
             echo ""
+            echo "Bases **videes de leurs colonnes d authentification** avant depart."
+            echo ""
             echo '```'
-            ls -l database/database*.sqlite 2>/dev/null | awk '{print $5, $9}' || echo "(aucune base)"
+            ls -l storage/logs/preuves 2>/dev/null | awk '{print $5, $9}' || echo "(aucune base)"
             ls -l storage/logs/repartition 2>/dev/null | awk '{print $5, $9}' || echo "(aucun journal de repartition)"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
@@ -285,7 +300,7 @@ jobs:
           # Courte : ces bases ne servent qu'au diagnostic immediat de ce rouge-ci.
           retention-days: 3
           path: |
-            database/database*.sqlite
+            storage/logs/preuves/
             storage/logs/repartition/
             storage/logs/contexte/
 
