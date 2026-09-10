@@ -2410,13 +2410,31 @@ class PlanetService
     public function detachUnitsForDeparture(Resources $resources, UnitCollection $units): DamagedHulls|null
     {
         return DB::transaction(function () use ($resources, $units): DamagedHulls|null {
+            // **La ligne du corps est tenue avant toute decision, et c est une course reelle qui l a
+            // impose** (`HullRepairRaceTest`, bac MariaDB du 10 septembre 2026).
+            //
+            // Sans ce verrou, un depart et une confirmation de reparation ne se voyaient pas : le
+            // depart lisait les unites tenues au dock par une requete ordinaire, la confirmation
+            // verrouillait de son cote, et les deux passaient. Le bac a rendu un corps portant cinq
+            // croiseurs dont le dock en tenait huit — trois unites qui existaient deux fois.
+            //
+            // La lecture en memoire etait le second defaut : `$this->planet->{$type}` peut dater
+            // d avant la transaction. L effectif se relit donc **sur la ligne tenue**.
+            //
+            // Sous SQLite `lockForUpdate()` ne compile a rien ; c est le bac qui prouve celui-ci.
+            $tenue = Planet::where('id', $this->getPlanetId())->lockForUpdate()->first();
+
+            if ($tenue === null) {
+                return null;
+            }
+
             // First deduct resources atomically
             if (!$this->deductResourcesAtomic($resources)) {
                 return null;
             }
 
             // **Avant le retrait** : l effectif present decide de quels paliers partent.
-            $restant = $this->damagedHulls();
+            $restant = DamagedHulls::fromStorage($tenue->damaged_hulls);
             $partent = DamagedHulls::none();
             $tenuesAuDock = $this->unitsHeldAtDock();
 
@@ -2426,7 +2444,7 @@ class PlanetService
                 }
 
                 $type = $unit->unitObject->machine_name;
-                $present = (int)$this->planet->{$type};
+                $present = (int)$tenue->{$type};
 
                 // **Les unites confiees au dock ne partent pas.**
                 //
@@ -2466,8 +2484,38 @@ class PlanetService
                 throw new RuntimeException('Insufficient units - rolling back transaction');
             }
 
-            // L effectif vient de baisser : l invariant se verifie contre le nouveau.
-            $this->writeDamagedHulls($restant);
+            // **L ecriture va sur la ligne tenue, pas sur le modele en memoire.**
+            //
+            // `writeDamagedHulls()` sauve `$this->planet`, qui peut dater d avant la transaction :
+            // son `save()` reecrirait toutes les colonnes avec des valeurs peut-etre perimees. La
+            // ligne relue sous verrou, elle, ne peut plus bouger tant que la transaction dure.
+            //
+            // L invariant est verifie ici contre l effectif **d apres** le retrait — `$tenue` porte
+            // encore l ancien, dont on retire ce qui part.
+            foreach ($restant->all() as $type => $niveaux) {
+                $partis = 0;
+
+                foreach ($units->units as $unit) {
+                    if ($unit->unitObject->machine_name === $type) {
+                        $partis = $unit->amount;
+                    }
+                }
+
+                if (array_sum($niveaux) > (int)$tenue->{$type} - $partis) {
+                    throw new RuntimeException(sprintf(
+                        'Refusing to leave %d damaged %s on a body that will hold %d.',
+                        array_sum($niveaux),
+                        $type,
+                        (int)$tenue->{$type} - $partis
+                    ));
+                }
+            }
+
+            $tenue->damaged_hulls = $restant->toStorage();
+            $tenue->save();
+
+            // Le modele en memoire suit, pour que l appelant lise la meme chose.
+            $this->planet->damaged_hulls = $restant->toStorage();
 
             return $partent;
         });

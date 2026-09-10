@@ -59,6 +59,19 @@ class RustParityBenchTest extends UnitTestCase
     }
 
     /**
+     * **Des flottes deja entamees se battent pareil des deux cotes.**
+     *
+     * Les coques traversent la frontiere FFI dans les deux sens : PHP les calcule et les envoie en
+     * `initial_hulls`, Rust rend l'etat des survivants en `survivor_hulls`. **Aucun autre scenario
+     * n'en pose** — sans celui-ci, un moteur pourrait appliquer les degats et l'autre les ignorer
+     * sans qu'un seul job ne rougisse.
+     */
+    public function testFleetsThatArriveDamagedAreFoughtIdenticallyByBothEngines(): void
+    {
+        $this->assertBothEnginesAgree('degats', $this->fleetsThatArriveAlreadyDamaged());
+    }
+
+    /**
      * **Interdit de piller n'est pas « rien a prendre ».** La cible est riche, la flotte a du fret,
      * et pourtant le butin est nul des deux cotes : c'est la politique qui le dit, sous sa version
      * et son motif. Sans ce scenario, le duel a stock nul ne traversait jamais `no_loot_v1`.

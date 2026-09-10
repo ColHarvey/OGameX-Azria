@@ -13,6 +13,7 @@ use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Hull\DamagedHulls;
 use OGame\Models\Planet;
 use OGame\Models\Resources;
 use OGame\Models\UserTech;
@@ -158,6 +159,13 @@ trait BuildsParityScenarios
         $flotte->isInitiator = $initiatrice;
         $flotte->fleetMission = null;
 
+        // **Les coques entamees traversent aussi la frontiere FFI** : PHP les calcule, Rust les
+        // applique. Sans un scenario qui en pose, `initial_hulls` et `survivor_hulls` ne seraient
+        // exerces par aucune epreuve de parite — et deux moteurs pourraient diverger en silence.
+        if (is_array($description['degats'] ?? null)) {
+            $flotte->damagedHulls = DamagedHulls::of($description['degats']);
+        }
+
         return $flotte;
     }
 
@@ -172,6 +180,10 @@ trait BuildsParityScenarios
         $renfort->fleetMissionId = $missionId;
         $renfort->ownerId = $renfort->player->getId();
         $renfort->fleetMission = null;
+
+        if (is_array($description['degats'] ?? null)) {
+            $renfort->damagedHulls = DamagedHulls::of($description['degats']);
+        }
 
         return $renfort;
     }
@@ -263,6 +275,56 @@ trait BuildsParityScenarios
                 ['units' => ['heavy_fighter' => 25]],
             ],
             permute: $permute,
+        );
+    }
+
+    /**
+     * **Des flottes qui arrivent deja entamees, des deux cotes.**
+     *
+     * C'est le seul scenario qui exerce `initial_hulls` et `survivor_hulls` a travers la frontiere
+     * FFI. Sans lui, un moteur pourrait appliquer les degats et l'autre les ignorer, et **les deux
+     * jobs resteraient verts** : aucune autre epreuve n'en pose.
+     *
+     * Trois choses le rendent discriminant :
+     *
+     *   - **plusieurs paliers par type**, pour que l'ordre d'entree compte — les plus intactes
+     *     d'abord — et qu'une inversion se voie sur le choix des cibles ;
+     *   - **le meme type de vaisseau des deux cotes**, entame differemment, pour qu'une coque prise
+     *     au mauvais camp donne un autre resultat ;
+     *   - **des unites intactes a cote des entamees**, pour que la suite melange zeros et paliers,
+     *     ce qu'un tableau plus court que l'effectif doit couvrir correctement.
+     *
+     * @return array{attaquantes: array<int, AttackerFleet>, defenseurs: array<int, DefenderFleet>, cible: PlanetService, contexte: \OGame\Combat\Support\LootContext}
+     */
+    private function fleetsThatArriveAlreadyDamaged(): array
+    {
+        return $this->aBattle(
+            planete: ['metal' => 80_000, 'crystal' => 80_000, 'rocket_launcher' => 60],
+            attaquantes: [
+                [
+                    'units' => ['cruiser' => 60, 'light_fighter' => 80],
+                    // 20 croiseurs entames sur 60, a trois paliers ; 30 chasseurs sur 80.
+                    'degats' => [
+                        'cruiser' => [2500 => 8, 5000 => 7, 7500 => 5],
+                        'light_fighter' => [4000 => 30],
+                    ],
+                ],
+                [
+                    'units' => ['cruiser' => 30],
+                    'tech' => ['armor_technology' => 6],
+                    'degats' => ['cruiser' => [6000 => 12]],
+                ],
+            ],
+            renforts: [
+                [
+                    // Le meme type que l'attaquant, entame autrement.
+                    'units' => ['cruiser' => 45, 'heavy_fighter' => 40],
+                    'degats' => [
+                        'cruiser' => [3000 => 15],
+                        'heavy_fighter' => [8000 => 10],
+                    ],
+                ],
+            ],
         );
     }
 

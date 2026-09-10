@@ -135,6 +135,56 @@ class ParityScenarioFixturesTest extends UnitTestCase
     }
 
     /**
+     * **Le scenario des flottes entamees porte vraiment des degats, et ils entrent au combat.**
+     *
+     * Le banc de parite ne tourne qu'en CI, avec la bibliotheque Rust. Un montage qui n'aurait pas
+     * pose de degats y serait **vert sans rien prouver** : les deux moteurs s'accorderaient sur une
+     * bataille ou personne n'est abime. C'est exactement ce que ce fichier existe pour empecher.
+     *
+     * L'essai exige donc les trois proprietes qui rendent le scenario discriminant : plusieurs
+     * paliers par type, le meme type entame differemment des deux cotes, et des unites intactes a
+     * cote des entamees.
+     */
+    public function testTheDamagedFleetScenarioReallyCarriesDamage(): void
+    {
+        $bataille = $this->fleetsThatArriveAlreadyDamaged();
+
+        [$premiere, $seconde] = $bataille['attaquantes'];
+        [, $renfort] = $bataille['defenseurs'];
+
+        // Plusieurs paliers sur un meme type : sans cela l'ordre d'entree ne decide de rien.
+        $this->assertGreaterThan(
+            1,
+            count($premiere->damagedHulls()->levelsOf('cruiser')),
+            'Un seul palier ne ferait pas travailler l ordre d entree.'
+        );
+
+        // Des unites intactes a cote des entamees : la suite doit melanger zeros et paliers.
+        $this->assertSame(60, $premiere->units->getAmountByMachineName('cruiser'));
+        $this->assertSame(20, $premiere->damagedHulls()->damagedCountOf('cruiser'));
+
+        // Le meme type des deux cotes, entame differemment : une coque prise au mauvais camp
+        // donnerait un autre resultat.
+        $this->assertNotSame(
+            $premiere->damagedHulls()->levelsOf('cruiser'),
+            $renfort->damagedHulls()->levelsOf('cruiser'),
+            'Les deux camps portent les memes degats : une confusion de camp ne se verrait pas.'
+        );
+
+        $this->assertSame(12, $seconde->damagedHulls()->damagedCountOf('cruiser'));
+
+        // **Et les degats arrivent bien dans le champ.** Les compter sur la description ne prouve
+        // que la description ; ce qui compte est la coque avec laquelle une unite entre.
+        $resultat = $this->fight(PhpBattleEngine::class, $bataille);
+
+        $this->assertGreaterThan(
+            0,
+            $resultat->attackerUnitsLost->getAmount() + $resultat->defenderUnitsLost->getAmount(),
+            'Cette bataille ne fait aucune perte : elle ne discriminerait rien.'
+        );
+    }
+
+    /**
      * Garnison et renfort partagent un type de vaisseau, avec des boucliers reellement differents.
      */
     public function testTheDefenceSharesAUnitTypeWithGenuinelyDifferentTechnologies(): void
