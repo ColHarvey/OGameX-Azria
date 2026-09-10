@@ -40,77 +40,81 @@ class PersistedRehydrationGuardTest extends TestCase
      * @var array<string, array{0: string, 1: string}> Classe::methode => [fichier d'essai, methode d'essai]
      */
     private const array PROVEN = [
-        'Admission/FrozenAllianceMembership::fromStorage' => [
+        'Combat/Admission/FrozenAllianceMembership::fromStorage' => [
             'tests/Unit/Combat/FrozenAllianceMembershipTest.php',
             'testAStoredIdentifierOfTheWrongTypeIsRefused',
         ],
-        'Allocation/ExactLootAmounts::fromStorage' => [
+        'Combat/Allocation/ExactLootAmounts::fromStorage' => [
             'tests/Unit/Combat/LootSettlementTest.php',
             'testStoredAmountsAreNeverHydratedByCoercion',
         ],
-        'Allocation/FrozenLootPotential::fromInstance' => [
+        'Combat/Allocation/FrozenLootPotential::fromInstance' => [
             'tests/Feature/Combat/FrozenLootPotentialTest.php',
             'testACorruptedRateIsRefusedAtReading',
         ],
-        'MoonDestruction/FrozenMoonDestructionAttempt::fromFrozenFacts' => [
+        'Combat/MoonDestruction/FrozenMoonDestructionAttempt::fromFrozenFacts' => [
             'tests/Unit/Combat/FrozenMoonDestructionPlanTest.php',
             'testAnAttemptWithANumericStringChanceIsRefused',
         ],
-        'MoonDestruction/FrozenMoonDestructionPlan::fromFrozenFacts' => [
+        'Combat/MoonDestruction/FrozenMoonDestructionPlan::fromFrozenFacts' => [
             'tests/Unit/Combat/FrozenMoonDestructionPlanTest.php',
             'testAPlanWithAFloatCombatIdentifierIsRefused',
         ],
-        'MoonDestruction/FrozenMoonIdentity::fromFrozenFacts' => [
+        'Combat/MoonDestruction/FrozenMoonIdentity::fromFrozenFacts' => [
             'tests/Unit/Combat/FrozenMoonDestructionPlanTest.php',
             'testAMoonWithANumericStringIdentifierIsRefused',
         ],
-        'Application/FrozenCombatApplicationContext::fromStorage' => [
+        'Combat/Application/FrozenCombatApplicationContext::fromStorage' => [
             'tests/Unit/Combat/FrozenCombatApplicationContextTest.php',
             'testASpaceDockLevelGivenAsANumericStringIsRefused',
         ],
-        'Replay/BattleFieldStateCodec::fromStorage' => [
+        'Combat/Replay/BattleFieldStateCodec::fromStorage' => [
             'tests/Unit/Combat/BattleFieldStateCodecTest.php',
             'testANumericStringIsRefused',
         ],
-        'Replay/BattleResultCodec::fromStorage' => [
+        'Combat/Replay/BattleResultCodec::fromStorage' => [
             'tests/Unit/Combat/BattleResultCodecTest.php',
             'testANumericStringIsRefused',
         ],
-        'Replay/CombatResultIdentity::fromStorage' => [
+        'Combat/Replay/CombatResultIdentity::fromStorage' => [
             'tests/Unit/Combat/BattleResultCodecTest.php',
             'testAnIdentityWithANumericStringCombatIsRefused',
         ],
-        'Services/PhotographedDefender::fromFrozenFacts' => [
+        'Combat/Services/PhotographedDefender::fromFrozenFacts' => [
             'tests/Unit/Combat/PhotographedDefenderFactsTest.php',
             'testANumericStringLevelIsRefused',
         ],
-        'Services/MissileStrikeFacts::fromFrozenFacts' => [
+        'Combat/Services/MissileStrikeFacts::fromFrozenFacts' => [
             'tests/Unit/Combat/MissileStrikeFactsTest.php',
             'testANumericStringMissileCountIsRefused',
         ],
-        'Services/PhotographedUniverse::fromFrozenFacts' => [
+        'Combat/Services/PhotographedUniverse::fromFrozenFacts' => [
             'tests/Unit/Combat/PhotographedUniverseFactsTest.php',
             'testANumericStringSettingIsRefused',
         ],
-        'Support/FrozenCombatVersionSet::fromInstance' => [
+        'Combat/Support/FrozenCombatVersionSet::fromInstance' => [
             'tests/Unit/Combat/FrozenCombatVersionSetTest.php',
             'testAnInstanceWithAMissingVersionIsRefused',
         ],
-        'Support/FrozenCombatVersionSet::fromStorage' => [
+        'Combat/Support/FrozenCombatVersionSet::fromStorage' => [
             'tests/Unit/Combat/FrozenCombatVersionSetTest.php',
             'testEachOfTheFiveVersionsIsRefusedWhenItIsNotAString',
         ],
-        'Support/LootContext::fromFrozenFacts' => [
+        'Combat/Support/LootContext::fromFrozenFacts' => [
             'tests/Unit/Combat/LootContextTest.php',
             'testANumericStringRateIsRefused',
         ],
-        'Support/OperationKey::rehydrate' => [
+        'Combat/Support/OperationKey::rehydrate' => [
             'tests/Unit/Combat/OperationKeyTest.php',
             'testANumericStringIdentifierIsRefusedAtRehydration',
         ],
-        'Support/SnapshotContributionSet::fromStorage' => [
+        'Combat/Support/SnapshotContributionSet::fromStorage' => [
             'tests/Unit/Combat/SnapshotContributionSetTest.php',
             'testAStoredStructureThatIsNotAListIsRefused',
+        ],
+        'Patrol/Combat/FrozenSpatialDefence::fromFrozenFacts' => [
+            'tests/Feature/SpatialOpeningStateTest.php',
+            'testANumericStringInTheRosterIsRefused',
         ],
     ];
 
@@ -122,22 +126,29 @@ class PersistedRehydrationGuardTest extends TestCase
         $racine = dirname(__DIR__, 3);
         $trouvees = [];
 
-        foreach ($this->phpFilesOf($racine . '/app/Combat') as $fichier) {
-            $source = file_get_contents($fichier);
+        // **Deux racines, et la seconde a ete ajoutee parce qu'une porte lui avait echappe.**
+        // `app/Patrol/Combat` porte desormais des relectures de faits geles — la defense d'un
+        // combat en espace libre —, et un inventaire limite a `app/Combat` les aurait laissees
+        // entrer sans essai de refus. Les clefs portent donc la racine, ce qui rend l'oubli
+        // visible : une porte non inscrite se lit avec son chemin complet.
+        foreach (['Combat', 'Patrol'] as $racineRelative) {
+            foreach ($this->phpFilesOf($racine . '/app/' . $racineRelative) as $fichier) {
+                $source = file_get_contents($fichier);
 
-            if ($source === false) {
-                continue;
-            }
+                if ($source === false) {
+                    continue;
+                }
 
-            if (preg_match_all('/public static function (fromStorage|fromFrozenFacts|rehydrate|fromInstance)\(/', $source, $m) === 0) {
-                continue;
-            }
+                if (preg_match_all('/public static function (fromStorage|fromFrozenFacts|rehydrate|fromInstance)\(/', $source, $m) === 0) {
+                    continue;
+                }
 
-            $relatif = str_replace(DIRECTORY_SEPARATOR, '/', substr($fichier, strlen($racine . '/app/Combat/')));
-            $classe = substr($relatif, 0, -4);
+                $relatif = str_replace(DIRECTORY_SEPARATOR, '/', substr($fichier, strlen($racine . '/app/')));
+                $classe = substr($relatif, 0, -4);
 
-            foreach ($m[1] as $methode) {
-                $trouvees[] = $classe . '::' . $methode;
+                foreach ($m[1] as $methode) {
+                    $trouvees[] = $classe . '::' . $methode;
+                }
             }
         }
 
@@ -149,7 +160,7 @@ class PersistedRehydrationGuardTest extends TestCase
             $inscrites,
             $trouvees,
             'A persisted rehydration door exists without a registered refusal test, or a registered '
-            . 'one is gone. Every fromStorage / fromFrozenFacts / rehydrate / fromInstance in app/Combat '
+            . 'one is gone. Every fromStorage / fromFrozenFacts / rehydrate / fromInstance in app/Combat or app/Patrol '
             . 'must be listed here with the test that proves it refuses a numeric string or a float.'
         );
     }

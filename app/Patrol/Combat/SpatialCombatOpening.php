@@ -82,7 +82,13 @@ use OGame\Patrol\FrozenPatrolTarget;
  *   - la fermeture d un combat spatial ne figera **pas** un verdict complet ; elle produira
  *     l etat de champ initial, et l avanceur jouera les rounds ;
  *   - l admission des renforts se prononcera entre deux pas, sur l etat relu, jamais sur une
- *     photographie prise avant le premier tir.
+ *     photographie prise avant le premier tir ;
+ *   - **avant de finaliser un round, les arrivees admissibles jusqu a son instant logique
+ *     sont traitees.** Un travailleur en retard ne cloture pas d abord pour exclure ensuite
+ *     un renfort arrive a temps : ce qui decide est l instant du round, jamais l instant ou
+ *     le travailleur a eu la main. C est la meme regle que la fermeture d un corps applique
+ *     deja a ses files echues — elle les draine **avant toute mesure**, faute de quoi elle
+ *     compterait un monde qu elle n a pas encore constitue (journal §90).
  *
  * ------------------------------------------------------------------------------------
  * ET LA BORNE NE PEUT PAS ETRE « LA FIN REELLE » PENDANT LA BATAILLE
