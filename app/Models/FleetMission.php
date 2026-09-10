@@ -120,6 +120,9 @@ class FleetMission extends Model
     protected $casts = [
         'wreck_field_data' => 'array',
         'retreat_after_defender_retreat' => 'boolean',
+        // Les coques entamees que cette flotte transporte (journal §118) : un histogramme
+        // `{type: {degats: nombre}}`, ou `null` quand tout est intact.
+        'damaged_hulls' => 'array',
     ];
 
     /**

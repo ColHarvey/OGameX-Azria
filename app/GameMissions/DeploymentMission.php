@@ -85,7 +85,7 @@ class DeploymentMission extends GameMission
         $target_planet->addResources($resources);
 
         // Add units to the target planet
-        $target_planet->addUnits($this->fleetMissionService->getFleetUnits($mission));
+        $this->landFleetOn($target_planet, $mission);
 
         // Send a message to the player that the mission has arrived
         if ($resources->any()) {
@@ -126,7 +126,7 @@ class DeploymentMission extends GameMission
         }
 
         // Transport return trip: add back the units to the source planet. Then we're done.
-        $target_planet->addUnits($this->fleetMissionService->getFleetUnits($mission));
+        $this->landFleetOn($target_planet, $mission);
 
         // Add resources to the origin planet (if any).
         $return_resources = $this->fleetMissionService->getResources($mission);

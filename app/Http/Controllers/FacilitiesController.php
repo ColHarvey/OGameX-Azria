@@ -5,8 +5,13 @@ namespace OGame\Http\Controllers;
 use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Date;
 use Illuminate\View\View;
 use OGame\Http\Controllers\Abstracts\AbstractBuildingsController;
+use OGame\Hull\DamagedHulls;
+use OGame\Hull\HullRepairPanel;
+use OGame\Hull\HullRepairService;
+use OGame\Models\HullRepairOrder;
 use OGame\Services\BuildingQueueService;
 use OGame\Services\HalvingService;
 use OGame\Services\PlayerService;
@@ -18,8 +23,12 @@ class FacilitiesController extends AbstractBuildingsController
     /**
      * ResourcesController constructor.
      */
-    public function __construct(BuildingQueueService $queue, private WreckFieldService $wreckFieldService)
-    {
+    public function __construct(
+        BuildingQueueService $queue,
+        private WreckFieldService $wreckFieldService,
+        private HullRepairService $hullRepairs,
+        private HullRepairPanel $hullRepairPanel,
+    ) {
         $this->route_view_index = 'facilities.index';
         parent::__construct($queue);
     }
@@ -94,7 +103,88 @@ class FacilitiesController extends AbstractBuildingsController
             : null;
         $params['wreckField'] = $wreckFieldData;
 
+        // **La seconde fonction du dock, et elle reste separee de la premiere.** La recuperation
+        // d epaves ci-dessus est gratuite et inchangee ; celle-ci repare des survivants contre
+        // paiement. Les deux partagent un batiment, rien d autre — ni emplacement, ni file.
+        $params['hullRepair'] = $this->hullRepairPanel->forPlanet($this->planet);
+
         return $params;
+    }
+
+    /**
+     * Le devis pour reparer une selection d unites endommagees.
+     *
+     * **Le serveur calcule, le navigateur affiche.** Un prix compose cote client serait un prix que
+     * le joueur pourrait choisir. La reponse porte son empreinte, que la confirmation renverra : ce
+     * qui suit ne peut donc pas payer autre chose que ce qui a ete montre.
+     */
+    public function quoteHullRepair(Request $request, PlayerService $player): JsonResponse
+    {
+        try {
+            $selection = DamagedHulls::fromStorage($request->input('units'));
+            $devis = $this->hullRepairs->quoteFor($this->planet, $selection);
+
+            return response()->json([
+                'success' => true,
+                'cost' => [
+                    'metal' => (int)$devis->cost->metal->get(),
+                    'crystal' => (int)$devis->cost->crystal->get(),
+                    'deuterium' => (int)$devis->cost->deuterium->get(),
+                ],
+                'duration_seconds' => $devis->durationSeconds,
+                'dock_level' => $devis->dockLevel,
+                'fingerprint' => $devis->fingerprint(),
+            ]);
+        } catch (Exception $refus) {
+            return response()->json(['success' => false, 'reason' => $refus->getMessage()], 422);
+        }
+    }
+
+    /**
+     * Confirme un ordre de reparation : paie, reserve, ecrit — ou refuse en le disant.
+     */
+    public function startHullRepair(Request $request, PlayerService $player): JsonResponse
+    {
+        try {
+            $ordre = $this->hullRepairs->confirm(
+                $this->planet,
+                DamagedHulls::fromStorage($request->input('units')),
+                (string)$request->input('fingerprint', ''),
+                (int)Date::now()->timestamp,
+            );
+
+            return response()->json([
+                'success' => true,
+                'order_id' => (int)$ordre->id,
+                'seconds_remaining' => max(0, $ordre->completed_at - (int)Date::now()->timestamp),
+            ]);
+        } catch (Exception $refus) {
+            // **La raison est rendue telle quelle** : chaque refus porte une clef que l interface
+            // traduit. Un « echec » sans raison forcerait le joueur a deviner.
+            return response()->json(['success' => false, 'reason' => $refus->getMessage()], 422);
+        }
+    }
+
+    /**
+     * Annule un ordre en cours : le travail fait reste acquis, le reste est rembourse.
+     */
+    public function cancelHullRepair(Request $request, PlayerService $player): JsonResponse
+    {
+        $ordre = $this->hullRepairs->runningOrderOn($this->planet->getPlanetId());
+
+        if ($ordre === null) {
+            return response()->json(['success' => false, 'reason' => 'hull_repair.refused.no_order'], 422);
+        }
+
+        // **Le proprietaire est verifie ici aussi**, pas seulement par la session : l ordre nomme son
+        // joueur, et c est ce lien qui decide — jamais le corps courant seul.
+        if ((int)$ordre->player_id !== $player->getId()) {
+            return response()->json(['success' => false, 'reason' => 'hull_repair.refused.not_owner'], 403);
+        }
+
+        $fait = $this->hullRepairs->endEarly($ordre, HullRepairOrder::BECAUSE_PLAYER, (int)Date::now()->timestamp);
+
+        return response()->json(['success' => $fait]);
     }
 
     /**

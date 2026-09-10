@@ -9,8 +9,10 @@ use OGame\GameMissions\BattleEngine\Models\BattleResultRound;
 use OGame\GameMissions\BattleEngine\Models\BattleUnit;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
 use OGame\GameMissions\BattleEngine\State\BattleFieldState;
+use OGame\GameObjects\Models\Enums\GameObjectType;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\GameObjects\Models\Units\UnitEntry;
+use OGame\Hull\DamagedHulls;
 use OGame\Services\CharacterClassService;
 use OGame\Services\SettingsService;
 
@@ -80,9 +82,28 @@ class PhpBattleEngine extends BattleEngine
                 $attackPower = $unit->unitObject->properties->attack->calculate($attackerFleet->player)->totalValue;
                 $unitObject = new BattleUnit($unit->unitObject, $structuralIntegrity, $shieldPoints, $attackPower, $attackerFleet->fleetMissionId, $attackerFleet->ownerId);
 
+                // **Les degats que cette flotte apporte**, un niveau par unite, les plus intactes
+                // d abord. Une flotte qui n a jamais combattu rend une suite de zeros, et la boucle
+                // se comporte exactement comme avant.
+                $degatsPortes = $attackerFleet->damagedHulls()
+                    ->damageSequenceFor($unit->unitObject->machine_name, $unit->amount);
+
                 for ($i = 0; $i < $unit->amount; $i++) {
                     // Clone the unit object for each individual entry of this ship add it to the array.
-                    $attackerUnits[] = clone $unitObject;
+                    $exemplaire = clone $unitObject;
+                    $degats = $degatsPortes[$i] ?? 0;
+
+                    if ($degats > 0) {
+                        // `originalHullPlating` ne bouge pas : c est la coque **pleine** de l unite,
+                        // et c est elle qui decide du risque d explosion. Une unite qui arrive
+                        // entamee est donc plus fragile qu une unite neuve — c est voulu.
+                        $exemplaire->currentHullPlating = DamagedHulls::hullFromDamage(
+                            $exemplaire->originalHullPlating,
+                            $degats
+                        );
+                    }
+
+                    $attackerUnits[] = $exemplaire;
                 }
             }
         }
@@ -106,9 +127,24 @@ class PhpBattleEngine extends BattleEngine
                     $defenderFleet->ownerId          // Track which player owns this unit
                 );
 
+                // Les degats de cette flotte defensive, meme regle qu au-dessus : les plus intactes
+                // d abord, et une suite de zeros pour qui n a jamais ete touche.
+                $degatsPortes = $defenderFleet->damagedHulls()
+                    ->damageSequenceFor($unit->unitObject->machine_name, $unit->amount);
+
                 // Create individual BattleUnit for each ship
                 for ($i = 0; $i < $unit->amount; $i++) {
-                    $defenderUnits[] = clone $unitObject;
+                    $exemplaire = clone $unitObject;
+                    $degats = $degatsPortes[$i] ?? 0;
+
+                    if ($degats > 0) {
+                        $exemplaire->currentHullPlating = DamagedHulls::hullFromDamage(
+                            $exemplaire->originalHullPlating,
+                            $degats
+                        );
+                    }
+
+                    $defenderUnits[] = $exemplaire;
                 }
             }
         }
@@ -304,12 +340,37 @@ class PhpBattleEngine extends BattleEngine
 
         // Populate per-fleet attacker results by scanning surviving units
         foreach ($result->attackerFleetResults as $fleetResult) {
+            // **C est ici que la coque existe encore, et c est ici qu elle se perdait.**
+            //
+            // Cette boucle ne gardait que le compte : trente croiseurs survivants devenaient le
+            // nombre 30, et l etat de chacun disparaissait avec l objet. On en derive desormais
+            // l histogramme des degats, seul endroit du jeu ou l information soit disponible.
+            $degatsBruts = [];
+
             // Count surviving units for this fleet
             foreach ($attackerUnits as $battleUnit) {
                 if ($battleUnit->fleetMissionId === $fleetResult->fleetMissionId) {
                     $fleetResult->unitsResult->addUnit($battleUnit->unitObject, 1);
+
+                    $degats = DamagedHulls::damageFromHull(
+                        $battleUnit->currentHullPlating,
+                        $battleUnit->originalHullPlating
+                    );
+
+                    // **Les vaisseaux seulement.** Les defenses ont deja leur propre reparation,
+                    // automatique et gratuite (`DefenseRepairService`) : leur ajouter une coque
+                    // persistante creerait deux mecanismes concurrents sur le meme objet, et la
+                    // consigne demande de ne pas toucher a ce qui existe.
+                    if ($degats > 0 && $battleUnit->unitObject->type === GameObjectType::Ship) {
+                        // Accumule a plat : reconstruire l histogramme a chaque unite le trierait
+                        // des milliers de fois pour rien. Il se construit une seule fois, apres.
+                        $degatsBruts[$battleUnit->unitObject->machine_name][$degats] =
+                            ($degatsBruts[$battleUnit->unitObject->machine_name][$degats] ?? 0) + 1;
+                    }
                 }
             }
+
+            $fleetResult->survivorHulls = DamagedHulls::of($degatsBruts);
 
             // Calculate losses for this fleet
             $fleetResult->unitsLost = clone $fleetResult->unitsStart;
@@ -324,12 +385,34 @@ class PhpBattleEngine extends BattleEngine
 
         // Populate per-fleet defender results by scanning surviving units
         foreach ($result->defenderFleetResults as $fleetResult) {
+            // Meme derivation que cote attaquant : la garnison comme les renforts gardent leurs
+            // coques entamees, et la flotte d identifiant zero est celle du corps lui-meme.
+            $degatsBruts = [];
+
             // Count surviving units for this fleet
             foreach ($defenderUnits as $battleUnit) {
                 if ($battleUnit->fleetMissionId === $fleetResult->fleetMissionId) {
                     $fleetResult->unitsResult->addUnit($battleUnit->unitObject, 1);
+
+                    $degats = DamagedHulls::damageFromHull(
+                        $battleUnit->currentHullPlating,
+                        $battleUnit->originalHullPlating
+                    );
+
+                    // **Les vaisseaux seulement.** Les defenses ont deja leur propre reparation,
+                    // automatique et gratuite (`DefenseRepairService`) : leur ajouter une coque
+                    // persistante creerait deux mecanismes concurrents sur le meme objet, et la
+                    // consigne demande de ne pas toucher a ce qui existe.
+                    if ($degats > 0 && $battleUnit->unitObject->type === GameObjectType::Ship) {
+                        // Accumule a plat : reconstruire l histogramme a chaque unite le trierait
+                        // des milliers de fois pour rien. Il se construit une seule fois, apres.
+                        $degatsBruts[$battleUnit->unitObject->machine_name][$degats] =
+                            ($degatsBruts[$battleUnit->unitObject->machine_name][$degats] ?? 0) + 1;
+                    }
                 }
             }
+
+            $fleetResult->survivorHulls = DamagedHulls::of($degatsBruts);
 
             // Calculate losses for this fleet
             $fleetResult->unitsLost = clone $fleetResult->unitsStart;

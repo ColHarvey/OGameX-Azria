@@ -3,6 +3,7 @@
 namespace OGame\Combat\Services;
 
 use Closure;
+use Illuminate\Support\Facades\Date;
 use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Application\CombatApplicationContext;
 use OGame\Combat\Enums\ActorKind;
@@ -21,8 +22,10 @@ use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
 use OGame\GameMissions\BattleEngine\Services\LootService;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Hull\HullRepairService;
 use OGame\Models\BattleReport;
 use OGame\Models\FleetMission;
+use OGame\Models\HullRepairOrder;
 use OGame\Models\Resources;
 use OGame\Models\User;
 use OGame\Services\DebrisFieldService;
@@ -130,6 +133,29 @@ class CombatResolutionService
         // que le moteur l'a fige.
         $diagnostics = ResourceNormalizationDiagnostics::none();
 
+        // **Une bataille sur ce corps clot tout ordre de reparation en cours** (decision 8 du
+        // 10 septembre 2026, journal §118).
+        //
+        // Les unites confiees au dock ne sont pas a l abri : elles sont physiquement presentes et
+        // elles se battent. Mais un ordre qui continuerait a courir pendant la bataille creerait
+        // exactement ce que la consigne redoutait — une fin de reparation qui rendrait des unites
+        // detruites entre-temps. En cloturant ici, **il n y a plus d ordre a traiter** : le probleme
+        // est supprime, pas surveille.
+        //
+        // La cloture emprunte le chemin unique des fins anticipees : coque figee a l interpolation
+        // de cet instant, unites rendues au corps, part non faite remboursee. Elle est sans effet
+        // s il n y avait pas d ordre, donc l appeler deux fois ne coute rien.
+        if ($this->settings->hullDamageEnabled()) {
+            resolve(HullRepairService::class)->endAnyRunningOn(
+                $defenderPlanet->getPlanetId(),
+                HullRepairOrder::BECAUSE_COMBAT,
+                (int)Date::now()->timestamp,
+            );
+
+            // Le corps est relu : la cloture vient d y reecrire les degats et les ressources.
+            $defenderPlanet->reloadPlanet();
+        }
+
         // **La version de l allocateur se choisit ici, une fois, et vaut pour toute la
         // resolution.** Elle etait relue a chaque plafonnement : un deploiement survenu entre
         // deux appels aurait plafonne la premiere moitie de cette bataille sous une regle et la
@@ -168,6 +194,17 @@ class CombatResolutionService
                 // Only remove units if there are any to remove
                 if ($permanentlyLostUnits->getAmount() > 0) {
                     $defenderPlanet->removeUnits($permanentlyLostUnits, false);
+                }
+
+                // **Les survivants de la garnison gardent leurs coques entamees.**
+                //
+                // Les detruites viennent d etre retirees ci-dessus ; ce qui reste est exactement ce
+                // que le moteur a vu sortir vivant, et l histogramme decrit son etat. Il **remplace**
+                // celui du corps au lieu de s y ajouter : les unites presentes ont toutes combattu,
+                // donc le nouvel etat est complet — fusionner compterait deux fois les degats
+                // d avant la bataille, que le moteur a deja pris en compte a l entree.
+                if ($this->settings->hullDamageEnabled()) {
+                    $defenderPlanet->writeDamagedHulls($fleetResult->survivorHulls(), false);
                 }
 
                 $defenderPlanet->save();
@@ -222,6 +259,14 @@ class CombatResolutionService
                         // Set surviving ship counts
                         foreach ($fleetResult->unitsResult->units as $unit) {
                             $defendMission->{$unit->unitObject->machine_name} = $unit->amount;
+                        }
+
+                        // Les coques entamees voyagent avec la flotte : ce renfort tient encore la
+                        // position, repartira, et devra arriver chez lui dans l etat ou la bataille
+                        // l a laisse. Ecrire l histogramme ici est ce qui l empeche de se soigner en
+                        // rentrant.
+                        if ($this->settings->hullDamageEnabled()) {
+                            $defendMission->damaged_hulls = $fleetResult->survivorHulls()->toStorage();
                         }
 
                         // **La cargaison de depart vient du contexte, pas de la ligne.**
@@ -346,6 +391,13 @@ class CombatResolutionService
                     $attackerWreckFieldData = null;
                     if ($context->isGeneral($fleetOwner)) {
                         $attackerWreckFieldData = $this->calculateAttackerWreckField($fleetResult->unitsLost, $fleetResult->unitsStart, $originPlanet, $context);
+                    }
+
+                    // **L etat des coques est ecrit sur l aller avant que le retour ne naisse.**
+                    // `startReturn()` en herite (voir son commentaire) : c est ainsi que les degats
+                    // suivent la flotte sans qu une demi-douzaine d appelants aient a les porter.
+                    if ($this->settings->hullDamageEnabled()) {
+                        $fleetMission->damaged_hulls = $fleetResult->survivorHulls()->toStorage();
                     }
 
                     // Mark outbound mission as processed and create return mission with survivors
@@ -643,6 +695,18 @@ class CombatResolutionService
 
                 // Calculate wreck field data if conditions are met
                 $attackerWreckFieldData = $this->calculateAttackerWreckField($attackerUnitsLost, $battleResult->attackerUnitsStart, $originPlanet, $context);
+            }
+
+            // Meme regle sur le chemin a un seul attaquant : l aller porte l etat d apres la
+            // bataille, le retour en herite. Le premier resultat de flotte est celui de cette
+            // mission — il n y en a qu une.
+            if ($this->settings->hullDamageEnabled()) {
+                $seul = $battleResult->attackerFleetResults[0] ?? null;
+
+                if ($seul !== null) {
+                    $mission->damaged_hulls = $seul->survivorHulls()->toStorage();
+                    $mission->save();
+                }
             }
 
             ($creerRetour)($mission, $totalResources, $this->withoutDeathstarsLostToTheMoon($battleResult->attackerUnitsResult, (int)$mission->id, $moonPlan), 0, $attackerWreckFieldData);

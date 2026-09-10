@@ -3,6 +3,7 @@
 namespace OGame\GameMissions\BattleEngine\Models;
 
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Hull\DamagedHulls;
 use OGame\Models\Resources;
 
 /**
@@ -116,5 +117,26 @@ class AttackerFleetResult
     public function getSurvivorCount(): int
     {
         return $this->unitsResult->getAmount();
+    }
+
+    /**
+     * Les degats que gardent les survivants de cette flotte.
+     *
+     * `unitsResult` dit **combien** d unites sortent vivantes ; ceci dit **dans quel etat**. Les
+     * deux se lisent ensemble : une unite qui figure ici figure aussi la, et une unite absente
+     * d ici est intacte.
+     *
+     * Sans valeur par defaut, comme les degats d entree : `survivorHulls()` rend « rien d abime »
+     * pour tout ce qui n a pas traverse le moteur — un resultat fabrique par un banc, un chemin qui
+     * ne joue aucun round.
+     */
+    public DamagedHulls $survivorHulls;
+
+    /**
+     * Les degats des survivants, ou aucun si le moteur ne les a pas derives.
+     */
+    public function survivorHulls(): DamagedHulls
+    {
+        return $this->survivorHulls ?? DamagedHulls::none();
     }
 }

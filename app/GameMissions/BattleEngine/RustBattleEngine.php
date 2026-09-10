@@ -11,6 +11,7 @@ use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameMissions\BattleEngine\Models\BattleResultRound;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Hull\DamagedHulls;
 use OGame\Services\CharacterClassService;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
@@ -159,13 +160,25 @@ class RustBattleEngine extends BattleEngine
                     $rapidfire->{$targetUnit->id} = $rapidfireObject->amount;
                 }
 
+                $coquePleine = (int)floor($unit->unitObject->properties->structural_integrity->calculate($attackerFleet->player)->totalValue / 10);
+
                 $attackerUnits->{$unit->unitObject->id} = (object)[
                     'unit_id' => $unit->unitObject->id,
                     'amount' => $unit->amount,
                     'shield_points' => $unit->unitObject->properties->shield->calculate($attackerFleet->player)->totalValue,
                     'attack_power' => $unit->unitObject->properties->attack->calculate($attackerFleet->player)->totalValue,
-                    'hull_plating' => floor($unit->unitObject->properties->structural_integrity->calculate($attackerFleet->player)->totalValue / 10),
+                    'hull_plating' => $coquePleine,
                     'rapidfire' => $rapidfire,
+                    // **Les coques sont calculees ici, jamais de l autre cote.** Dupliquer la
+                    // formule en Rust ferait deux implementations d une regle d arrondi, et deux
+                    // implementations derivent — silencieusement, jusqu a ce qu une bataille se
+                    // joue differemment selon le moteur. Rust ne fait qu appliquer ce tableau.
+                    'initial_hulls' => self::initialHullsFor(
+                        $attackerFleet->damagedHulls(),
+                        $unit->unitObject->machine_name,
+                        $unit->amount,
+                        $coquePleine
+                    ),
                 ];
             }
 
@@ -182,8 +195,12 @@ class RustBattleEngine extends BattleEngine
         // le moteur PHP. Toutes etaient evaluees avec celles du proprietaire de la planete : un
         // renfort ACS recevait, sous Rust, les boucliers et l'armement d'un autre joueur.
         $proprietaires = [];
+        $degatsDefensifs = [];
         foreach ($this->defenders as $defenderFleet) {
             $proprietaires[$defenderFleet->fleetMissionId] = $defenderFleet->player;
+            // La boucle qui suit parcourt les **resultats**, pas les flottes : les degats se
+            // relevent ici, par identifiant, comme les proprietaires juste au-dessus.
+            $degatsDefensifs[$defenderFleet->fleetMissionId] = $defenderFleet->damagedHulls();
         }
 
         $defenderFleets = [];
@@ -201,13 +218,23 @@ class RustBattleEngine extends BattleEngine
                     $rapidfire->{$targetUnit->id} = $rapidfireObject->amount;
                 }
 
+                $coquePleine = (int)floor($unit->unitObject->properties->structural_integrity->calculate($defenderPlayer)->totalValue / 10);
+
                 $defenderUnits->{$unit->unitObject->id} = (object)[
                     'unit_id' => $unit->unitObject->id,
                     'amount' => $unit->amount,
                     'shield_points' => $unit->unitObject->properties->shield->calculate($defenderPlayer)->totalValue,
                     'attack_power' => $unit->unitObject->properties->attack->calculate($defenderPlayer)->totalValue,
-                    'hull_plating' => floor($unit->unitObject->properties->structural_integrity->calculate($defenderPlayer)->totalValue / 10),
+                    'hull_plating' => $coquePleine,
                     'rapidfire' => $rapidfire,
+                    // Meme regle cote defenseur, y compris pour la garnison : les coques viennent
+                    // d ici, Rust les applique.
+                    'initial_hulls' => self::initialHullsFor(
+                        $degatsDefensifs[$fleetResult->fleetMissionId] ?? DamagedHulls::none(),
+                        $unit->unitObject->machine_name,
+                        $unit->amount,
+                        $coquePleine
+                    ),
                 ];
             }
 
@@ -329,6 +356,14 @@ class RustBattleEngine extends BattleEngine
                                 $attackerFleetResult->unitsLost = $this->convertUnitArrayToUnitCollection($fleetResult['units_lost']);
                             }
 
+                            // **L etat des survivants, pas seulement leur nombre.** Rust rend la
+                            // coque de chacun ; c est ici qu elle redevient des degats stockables.
+                            $attackerFleetResult->survivorHulls = self::survivorHullsFrom(
+                                $fleetResult["survivor_hulls"] ?? null,
+                                $attackerFleetResult->fleetMissionId,
+                                $this->attackers
+                            );
+
                             // Check if completely destroyed
                             $attackerFleetResult->completelyDestroyed = $attackerFleetResult->unitsResult->getAmount() === 0;
                             break;
@@ -358,6 +393,13 @@ class RustBattleEngine extends BattleEngine
                             }
 
                             // Check if completely destroyed
+                            // Meme derivation cote defenseur, garnison comprise.
+                            $defenderFleetResult->survivorHulls = self::survivorHullsFrom(
+                                $fleetResult["survivor_hulls"] ?? null,
+                                $defenderFleetResult->fleetMissionId,
+                                $this->defenders
+                            );
+
                             $defenderFleetResult->completelyDestroyed = $defenderFleetResult->unitsResult->getAmount() === 0;
                             break;
                         }
@@ -475,5 +517,87 @@ class RustBattleEngine extends BattleEngine
             // NOTE: The loss will be properly calculated after battle rounds complete
             // by comparing the modified defenderUnitsStart with defenderUnitsResult.
         }
+    }
+
+    /**
+     * Les coques avec lesquelles chaque unite d un type entre dans la bataille.
+     *
+     * **La formule vit d un seul cote de la frontiere.** Rust pourrait deriver ces valeurs d un
+     * rapport de degats, mais ce serait une seconde implementation d une regle d arrondi — et deux
+     * implementations derivent. Elles se seraient separees sur un `floor` un jour, et la bataille se
+     * serait jouee differemment selon le moteur, sans que rien ne le signale. PHP calcule, Rust
+     * applique.
+     *
+     * Une flotte intacte rend un tableau vide : Rust retombe alors sur la coque pleine, et la couture
+     * se comporte exactement comme avant que ce champ existe.
+     *
+     * @return array<int, int>
+     */
+    private static function initialHullsFor(DamagedHulls $degats, string $type, int $combien, int $coquePleine): array
+    {
+        if ($degats->isEmpty() || $degats->damagedCountOf($type) === 0) {
+            return [];
+        }
+
+        $coques = [];
+
+        foreach ($degats->damageSequenceFor($type, $combien) as $niveau) {
+            $coques[] = DamagedHulls::hullFromDamage($coquePleine, $niveau);
+        }
+
+        return $coques;
+    }
+
+    /**
+     * Les degats des survivants, depuis les coques que Rust rend.
+     *
+     * Rust ne connait pas la coque pleine de chaque type une fois les technologies appliquees : il
+     * rend donc **toutes** les coques, y compris pleines, et c est ici que la comparaison se fait.
+     * Le tri par (type, coque) est ce qui redonne un histogramme.
+     *
+     * @param mixed $brut Le champ `survivor_hulls` de la sortie Rust, ou `null` s il est absent.
+     * @param array<int, AttackerFleet|DefenderFleet> $flottes
+     */
+    private static function survivorHullsFrom(mixed $brut, int $fleetMissionId, array $flottes): DamagedHulls
+    {
+        if (!is_array($brut) || $brut === []) {
+            return DamagedHulls::none();
+        }
+
+        // Le joueur de cette flotte : c est lui qui donne la coque pleine de chaque type, et il doit
+        // etre celui de la bataille — jamais un joueur relu.
+        $joueur = null;
+
+        foreach ($flottes as $flotte) {
+            if ($flotte->fleetMissionId === $fleetMissionId) {
+                $joueur = $flotte->player;
+                break;
+            }
+        }
+
+        if ($joueur === null) {
+            return DamagedHulls::none();
+        }
+
+        $paliers = [];
+
+        foreach ($brut as $unitId => $coques) {
+            if (!is_array($coques) || $coques === []) {
+                continue;
+            }
+
+            $objet = ObjectService::getUnitObjectById((int)$unitId);
+            $coquePleine = (int)floor($objet->properties->structural_integrity->calculate($joueur)->totalValue / 10);
+
+            foreach ($coques as $coque) {
+                $degats = DamagedHulls::damageFromHull((int)$coque, $coquePleine);
+
+                if ($degats > 0) {
+                    $paliers[$objet->machine_name][$degats] = ($paliers[$objet->machine_name][$degats] ?? 0) + 1;
+                }
+            }
+        }
+
+        return DamagedHulls::of($paliers);
     }
 }

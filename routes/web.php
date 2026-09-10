@@ -96,6 +96,11 @@ Route::middleware(['auth', 'banned', 'globalgame', 'locale', 'firstlogin'])->gro
     Route::post('/ajax/facilities/complete-repairs', [FacilitiesController::class, 'completeRepairs'])->name('facilities.completerepairs');
     Route::post('/ajax/facilities/burn-wreck-field', [FacilitiesController::class, 'burnWreckField'])->name('facilities.burnwreckfield');
     Route::get('/ajax/facilities/wreck-field-status', [FacilitiesController::class, 'getWreckFieldStatus'])->name('facilities.wreckfieldstatus');
+    // Reparation des survivants endommages : la seconde fonction du chantier spatial, distincte de
+    // la recuperation d epaves ci-dessus, qui reste gratuite et inchangee.
+    Route::post('/ajax/facilities/hull-repair-quote', [FacilitiesController::class, 'quoteHullRepair'])->name('facilities.hullrepairquote');
+    Route::post('/ajax/facilities/hull-repair-start', [FacilitiesController::class, 'startHullRepair'])->name('facilities.hullrepairstart');
+    Route::post('/ajax/facilities/hull-repair-cancel', [FacilitiesController::class, 'cancelHullRepair'])->name('facilities.hullrepaircancel');
     Route::get('/ajax/facilities/destroy-rockets', [FacilitiesController::class, 'destroyRocketsOverlay'])->name('facilities.destroy-rockets-overlay');
     Route::post('/ajax/facilities/destroy-rockets', [FacilitiesController::class, 'destroyRockets'])->name('facilities.destroy-rockets');
 

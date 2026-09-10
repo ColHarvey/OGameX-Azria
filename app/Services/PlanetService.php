@@ -15,10 +15,12 @@ use OGame\Factories\PlayerServiceFactory;
 use OGame\GameObjects\Models\Abstracts\GameObject;
 use OGame\GameObjects\Models\Enums\GameObjectType;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Hull\DamagedHulls;
 use OGame\Models\BuildingQueue;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\Enums\ResourceType;
 use OGame\Models\FleetMission;
+use OGame\Models\HullRepairOrder;
 use OGame\Models\Planet;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\PlanetMove;
@@ -979,6 +981,48 @@ class PlanetService
         }
 
         return $units;
+    }
+
+    /**
+     * Les degats que portent les unites de ce corps.
+     *
+     * **Ce n est pas la disponibilite.** Une unite endommagee est presente, elle se bat, elle peut
+     * partir. Ce que dit cet histogramme est seulement *dans quel etat* elle est, par type et par
+     * palier — les unites qui n y figurent pas sont intactes.
+     */
+    public function damagedHulls(): DamagedHulls
+    {
+        return DamagedHulls::fromStorage($this->planet->damaged_hulls);
+    }
+
+    /**
+     * Ecrit les degats de ce corps.
+     *
+     * L invariant qu aucun appelant ne doit briser : pour un type donne, le nombre d unites
+     * endommagees ne depasse jamais l effectif de ce type. Il est verifie ici plutot que rappele
+     * dans chaque appelant — une unite comptee deux fois serait invisible jusqu au premier combat.
+     */
+    public function writeDamagedHulls(DamagedHulls $degats, bool $save_planet = true): void
+    {
+        foreach ($degats->all() as $type => $niveaux) {
+            $abimees = array_sum($niveaux);
+            $present = (int)$this->planet->{$type};
+
+            if ($abimees > $present) {
+                throw new RuntimeException(sprintf(
+                    'Refusing to record %d damaged %s on a body that holds %d.',
+                    $abimees,
+                    $type,
+                    $present
+                ));
+            }
+        }
+
+        $this->planet->damaged_hulls = $degats->toStorage();
+
+        if ($save_planet) {
+            $this->planet->save();
+        }
     }
 
     /**
@@ -2336,10 +2380,84 @@ class PlanetService
      */
     public function deductResourcesAndUnitsAtomic(Resources $resources, UnitCollection $units): bool
     {
-        return DB::transaction(function () use ($resources, $units) {
+        return $this->detachUnitsForDeparture($resources, $units) !== null;
+    }
+
+    /**
+     * Retire ressources et unites pour un depart, et rend **les degats qui partent avec elles**.
+     *
+     * ------------------------------------------------------------------------------------
+     * LA REGLE DE DEPART VIT ICI, ET NULLE PART AILLEURS
+     *
+     * `removeUnitsAtomic()` decremente un entier : si un corps porte 20 croiseurs dont 8 abimes et
+     * qu on en fait partir 10, **rien dans ce code ne dit lesquels**. La question n est pas
+     * theorique — elle decide de ce que le joueur envoie au combat et de ce qui reste pres du dock.
+     *
+     * Decision du 10 septembre 2026 : **les plus intactes partent d abord**. C est ce qu un joueur
+     * ferait s il choisissait, et cela garde les abimees la ou on peut les reparer. Les deux autres
+     * regles — « les plus abimees d abord », « au prorata » — sont ecartees dans le document de
+     * conception, avec leurs effets.
+     *
+     * Les deux seuls departs du jeu passent par cette methode : les missions ordinaires
+     * (`GameMission`) et les patrouilles (`PatrolOrders`). C est ce qui permet a la regle de n avoir
+     * qu une implementation.
+     *
+     * **L effectif se lit avant le retrait**, sinon `takeMostIntact()` compterait les unites qui
+     * viennent de partir comme absentes et se tromperait de paliers.
+     *
+     * @return DamagedHulls|null les degats emportes, ou `null` si le depart est refuse
+     */
+    public function detachUnitsForDeparture(Resources $resources, UnitCollection $units): DamagedHulls|null
+    {
+        return DB::transaction(function () use ($resources, $units): DamagedHulls|null {
             // First deduct resources atomically
             if (!$this->deductResourcesAtomic($resources)) {
-                return false;
+                return null;
+            }
+
+            // **Avant le retrait** : l effectif present decide de quels paliers partent.
+            $restant = $this->damagedHulls();
+            $partent = DamagedHulls::none();
+            $tenuesAuDock = $this->unitsHeldAtDock();
+
+            foreach ($units->units as $unit) {
+                if ($unit->amount <= 0) {
+                    continue;
+                }
+
+                $type = $unit->unitObject->machine_name;
+                $present = (int)$this->planet->{$type};
+
+                // **Les unites confiees au dock ne partent pas.**
+                //
+                // Elles restent comptees dans la colonne — elles sont physiquement la et elles se
+                // battront si le corps est attaque — mais elles sont immobilisees. Sans cette
+                // soustraction, un joueur ferait partir la flotte qu il vient de mettre en
+                // reparation : le dock la rendrait plus tard a un corps qu elle aurait quitte, et
+                // l unite existerait deux fois.
+                //
+                // La garde est **ici**, au depart, et pas seulement dans l affichage : une liste qui
+                // ne propose pas une unite n empeche personne de la demander.
+                $auDock = $tenuesAuDock[$type] ?? 0;
+
+                if ($present - $auDock < $unit->amount) {
+                    throw new RuntimeException(sprintf(
+                        'Refusing to send %d %s: %d are held at the space dock for repairs.',
+                        $unit->amount,
+                        $type,
+                        $auDock
+                    ));
+                }
+
+                if ($present < $unit->amount) {
+                    // Le retrait atomique va refuser juste apres, et sa transaction annulera tout.
+                    continue;
+                }
+
+                [$emportes, $laisses] = $restant->takeMostIntact($type, $unit->amount, $present);
+
+                $partent = $partent->merge($emportes);
+                $restant = $laisses;
             }
 
             // Then deduct units atomically
@@ -2348,8 +2466,60 @@ class PlanetService
                 throw new RuntimeException('Insufficient units - rolling back transaction');
             }
 
-            return true;
+            // L effectif vient de baisser : l invariant se verifie contre le nouveau.
+            $this->writeDamagedHulls($restant);
+
+            return $partent;
         });
+    }
+
+    /**
+     * Les unites que le dock immobilise sur ce corps, par type.
+     *
+     * **Elles ne sont pas parties** : la colonne les compte toujours, elles se battent si le corps
+     * est attaque, et le cahier des charges l exige — le dock ne doit pas etre un abri. Ce qu elles
+     * ne peuvent pas faire, c est **repartir en mission** tant que la reparation court.
+     *
+     * La lecture est directe plutot que par `HullRepairService` : ce service depend deja de
+     * `PlanetService`, et l inverse ferait un cycle pour une seule requete.
+     *
+     * @return array<string, int>
+     */
+    public function unitsHeldAtDock(): array
+    {
+        $ordre = HullRepairOrder::where('active_on_planet_id', $this->getPlanetId())->first();
+
+        if ($ordre === null) {
+            return [];
+        }
+
+        $tenues = [];
+
+        foreach (DamagedHulls::fromStorage($ordre->units)->all() as $type => $niveaux) {
+            $tenues[$type] = array_sum($niveaux);
+        }
+
+        return $tenues;
+    }
+
+    /**
+     * Fait atterrir sur ce corps les degats qu une flotte rapporte.
+     *
+     * **Ils fusionnent, ils ne remplacent pas** : le corps peut deja porter des unites abimees, qui
+     * n ont rien a voir avec celles qui reviennent. C est l inverse exact du reglement d une
+     * bataille sur le corps, ou l histogramme du moteur decrit *tout* ce qui est present et remplace
+     * donc ce qui l precede.
+     *
+     * **Arriver ne repare rien** : c est une exigence du cahier des charges, et elle est tenue par
+     * le fait que cette methode n a aucun moyen de soigner quoi que ce soit.
+     */
+    public function landDamagedHulls(DamagedHulls $arrivants, bool $save_planet = true): void
+    {
+        if ($arrivants->isEmpty()) {
+            return;
+        }
+
+        $this->writeDamagedHulls($this->damagedHulls()->merge($arrivants), $save_planet);
     }
 
     /**

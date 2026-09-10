@@ -58,4 +58,30 @@ Puisque le Dock spatial flotte en orbite, il ne nécessite pas de champ planéta
     ],
     'construction_time' => 'Temps de construction : {heure}',
     'upgrade_time' => 'Heure de mise à niveau : {time}',
+    // Reparation des survivants endommages au chantier spatial (journal §118). Distincte de la
+    // recuperation d epaves, qui reste gratuite.
+    'hull_repair' => [
+        'title' => 'Réparation de la flotte',
+        'intro' => 'Le chantier spatial peut remettre en état les vaisseaux endommagés au combat, contre paiement.',
+        'fleet_line' => ':total :vaisseau, dont :damaged endommagé(s)',
+        'level_line' => ':count à :percent % de coque',
+        'quote' => 'Devis',
+        'start' => 'Lancer la réparation',
+        'cancel' => 'Annuler la réparation',
+        'in_progress' => 'Réparation en cours : :percent %',
+        'refund_notice' => 'Une annulation conserve le travail déjà effectué et rembourse le reste.',
+        'refused' => [
+            'no_dock' => 'Ce corps n’a pas de chantier spatial.',
+            'dock_busy' => 'Le chantier spatial répare déjà une flotte.',
+            'nothing_damaged' => 'Aucun vaisseau endommagé sur ce corps.',
+            'not_enough_resources' => 'Ressources insuffisantes pour ce devis.',
+            'quote_stale' => 'Le devis n’est plus valable. Recommencez.',
+            'units_gone' => 'Ces vaisseaux ne sont plus disponibles.',
+            'not_owner' => 'Ce corps ne vous appartient pas.',
+            'body_gone' => 'Ce corps n’existe plus.',
+            'nothing_selected' => 'Aucun vaisseau sélectionné.',
+            'no_order' => 'Aucune réparation en cours.',
+            'disabled' => 'La réparation de flotte n’est pas active sur cet univers.',
+        ],
+    ],
 ];

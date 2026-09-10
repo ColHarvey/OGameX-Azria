@@ -891,6 +891,41 @@ class SettingsService
     }
 
     /**
+     * L interrupteur des degats de coque persistants et de la reparation au dock (journal §118).
+     *
+     * Eteint par defaut. Tant qu il vaut non : aucune coque entamee n est ecrite, aucun devis n est
+     * calcule, le dock n offre que la recuperation d epaves — exactement le jeu d avant.
+     *
+     * **Le desarmer n efface rien.** Les degats deja subis restent dans leur colonne et les ordres en
+     * cours dans leur table ; ils redeviennent simplement invisibles et inertes. C est une exigence
+     * explicite du cahier des charges : une desactivation ne doit pas detruire ce qui a ete acquis.
+     */
+    public function hullDamageEnabled(): bool
+    {
+        return $this->get('hull_damage_enabled', '0') === '1';
+    }
+
+    /**
+     * Le plancher d une reparation de survivants, en minutes.
+     *
+     * Meme valeur par defaut que celle des epaves : le dock est un seul batiment, et deux planchers
+     * differents pour deux services rendus au meme endroit n auraient pas de sens pour un joueur.
+     */
+    public function hullRepairMinMinutes(): int
+    {
+        return (int)$this->get('hull_repair_min_minutes', 30);
+    }
+
+    /**
+     * Le plafond d une reparation de survivants, en heures. C est lui qui empeche un lot enorme de
+     * bloquer un dock indefiniment — une Etoile de la Mort a moitie detruite l atteint.
+     */
+    public function hullRepairMaxHours(): int
+    {
+        return (int)$this->get('hull_repair_max_hours', 12);
+    }
+
+    /**
      * Aucune offensive entre membres d une meme alliance (plan approuve du 9 septembre 2026,
      * section 2). Eteint par defaut : tant qu il vaut non, la regle n existe pas et aucun
      * lancement ne lit d alliance.

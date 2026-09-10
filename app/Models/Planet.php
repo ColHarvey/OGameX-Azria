@@ -178,6 +178,20 @@ class Planet extends Model
     use HasFactory;
 
     /**
+     * Les coques entamees que portent les unites de ce corps (journal §118) : un histogramme
+     * `{type: {degats: nombre}}`, ou `null` quand tout est intact.
+     *
+     * **Ce modele n avait aucun `$casts`**, et c est pourquoi celui-ci existe : sans lui, ecrire un
+     * tableau dans la colonne le passerait tel quel au pilote, qui refuserait. Le cast fait la
+     * conversion dans les deux sens.
+     *
+     * @var array<string, string>
+     */
+    protected $casts = [
+        'damaged_hulls' => 'array',
+    ];
+
+    /**
      * Get the planet that owns the research queue record.
      */
     public function planet(): BelongsTo

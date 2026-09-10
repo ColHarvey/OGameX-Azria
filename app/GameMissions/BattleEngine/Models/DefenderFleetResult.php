@@ -3,6 +3,7 @@
 namespace OGame\GameMissions\BattleEngine\Models;
 
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Hull\DamagedHulls;
 
 /**
  * Tracks battle results for a specific defending fleet.
@@ -60,5 +61,27 @@ class DefenderFleetResult
         $this->unitsResult = new UnitCollection();
         $this->unitsLost = new UnitCollection();
         $this->completelyDestroyed = false;
+        $this->survivorHulls = DamagedHulls::none();
+    }
+
+    /**
+     * Les degats que gardent les survivants de cette flotte defensive — garnison comprise, dont
+     * l identifiant de mission est zero.
+     *
+     * Ici la propriete **est** initialisee, parce que cette classe a un constructeur qui pose deja
+     * tous ses champs : y ajouter une exception aurait ete gratuit.
+     */
+    public DamagedHulls $survivorHulls;
+
+    /**
+     * Les degats des survivants.
+     *
+     * **Pas de repli ici**, contrairement au cote attaquant : le constructeur de cette classe pose
+     * deja la propriete, donc un `??` serait du code mort qui laisserait croire a un cas qui n existe
+     * pas.
+     */
+    public function survivorHulls(): DamagedHulls
+    {
+        return $this->survivorHulls;
     }
 }

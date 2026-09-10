@@ -4,6 +4,7 @@ namespace OGame\GameMissions\BattleEngine\Models;
 
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Hull\DamagedHulls;
 use OGame\Models\FleetMission;
 use OGame\Services\FleetMissionService;
 use OGame\Services\ObjectService;
@@ -145,5 +146,22 @@ class DefenderFleet
         $defender->fleetMission = $mission;
 
         return $defender;
+    }
+
+    /**
+     * Les degats que porte cette flotte en entrant au combat, par type et par palier.
+     *
+     * **Volontairement sans valeur par defaut**, comme cote attaquant : la garnison et des dizaines
+     * de montages construisent une `DefenderFleet` sans rien savoir des coques. `damagedHulls()`
+     * rend « rien d abime » tant que personne n a pose la propriete.
+     */
+    public DamagedHulls $damagedHulls;
+
+    /**
+     * Les degats de cette flotte, ou aucun si personne ne les a poses.
+     */
+    public function damagedHulls(): DamagedHulls
+    {
+        return $this->damagedHulls ?? DamagedHulls::none();
     }
 }

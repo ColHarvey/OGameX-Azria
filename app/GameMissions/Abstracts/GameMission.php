@@ -22,6 +22,7 @@ use OGame\GameMissions\ExpeditionMission;
 use OGame\GameMissions\Models\MissionPossibleStatus;
 use OGame\GameMissions\Models\ResolvedReturnDestination;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Hull\DamagedHulls;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\FleetUnion;
@@ -257,10 +258,52 @@ abstract class GameMission
      */
     public function deductMissionResources(PlanetService $planet, Resources $resources, UnitCollection $units): void
     {
-        if (!$planet->deductResourcesAndUnitsAtomic($resources, $units)) {
+        $emportes = $planet->detachUnitsForDeparture($resources, $units);
+
+        if ($emportes === null) {
             throw new Exception(__('Not enough resources or units on the planet to send the fleet.'));
         }
+
+        $this->degatsEmportes = $emportes;
     }
+
+    /**
+     * Fait atterrir une flotte sur un corps : ses unites **et** l etat de leurs coques.
+     *
+     * ------------------------------------------------------------------------------------
+     * POURQUOI CETTE METHODE EXISTE
+     *
+     * Dix chemins du jeu ecrivaient la meme ligne — `addUnits(getFleetUnits($mission))` — pour un
+     * retour, un transport, un deploiement, une colonisation, un recyclage, une expedition, un
+     * stationnement ACS, un atterrissage de patrouille, une remise administrative. Chacun aurait du
+     * apprendre a transporter les degats, et **le premier oublie n aurait rien casse de visible** :
+     * la flotte serait simplement rentree guerie.
+     *
+     * Le point de convergence est donc pose ici, une fois.
+     *
+     * **Arriver ne repare rien** : les degats fusionnent avec ceux que le corps porte deja, ils ne
+     * les remplacent pas et ne s effacent pas. C est une exigence explicite du cahier des charges.
+     */
+    protected function landFleetOn(PlanetService $planet, FleetMission $mission): void
+    {
+        $planet->addUnits($this->fleetMissionService->getFleetUnits($mission));
+
+        if ($this->settings->hullDamageEnabled()) {
+            $planet->landDamagedHulls(DamagedHulls::fromStorage($mission->damaged_hulls));
+        }
+    }
+
+    /**
+     * Les degats que le dernier depart a emportes, pour les poser sur la ligne de la mission.
+     *
+     * **Pourquoi une propriete et pas une valeur de retour** : `deductMissionResources()` rend
+     * `void`, elle est publique, et plusieurs genres de mission la surchargent. Changer sa signature
+     * aurait touche tout ce monde pour une donnee que seul `start()` consomme — immediatement apres
+     * l appel, quelques lignes plus bas.
+     *
+     * Elle vaut `null` tant qu aucun depart n a eu lieu sur cette instance.
+     */
+    protected DamagedHulls|null $degatsEmportes = null;
 
     /**
      * Start a new mission.
@@ -385,6 +428,12 @@ abstract class GameMission
 
         // Deduct mission resources from the planet.
         $this->deductMissionResources($planet, $deduct_resources, $units);
+
+        // **Les coques entamees embarquent avec la flotte.** Le retrait vient de decider lesquelles
+        // partent — les plus intactes d abord — et les retient ; la ligne les emporte.
+        if ($this->degatsEmportes !== null && !$this->degatsEmportes->isEmpty()) {
+            $mission->damaged_hulls = $this->degatsEmportes->toStorage();
+        }
 
         // Save the new fleet mission.
         $mission->save();
@@ -709,6 +758,17 @@ abstract class GameMission
         $mission->y_from = $parentMission->y_to;
         $mission->x_to = $parentMission->x_from;
         $mission->y_to = $parentMission->y_from;
+
+        // **Les coques entamees suivent la flotte** (journal §118).
+        //
+        // Elles s heritent de la mission aller plutot que de voyager en parametre, et c est
+        // volontaire : `startReturn()` a une demi-douzaine d appelants — bataille, annulation, refus,
+        // expiration — et leur faire tous porter un argument de plus aurait multiplie les occasions
+        // de l oublier, sans qu aucun essai ne le voie.
+        //
+        // C est donc a l appelant d avoir ecrit sur la mission aller l etat **d apres** la bataille
+        // avant de creer le retour. Le reglement le fait juste avant d appeler cette methode.
+        $mission->damaged_hulls = $parentMission->damaged_hulls;
 
         // **Une destination resolue l'emporte sur le corps de depart, et elle s'ecrit telle quelle.**
         // Le corps d'origine peut avoir disparu depuis le lancement — une lune rasee, une planete

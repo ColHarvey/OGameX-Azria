@@ -262,6 +262,23 @@ struct BattleUnitInfo {
     shield_points: f32,
     hull_plating: f32,
     rapidfire: HashMap<i16, u16>,
+    /// The hull each individual unit of this type enters the battle with, in order.
+    ///
+    /// Ships keep the damage they took in an earlier battle, so two units of the same type in the
+    /// same fleet no longer necessarily start alike. One entry per unit, ordered least damaged
+    /// first — the same order PHP expands them in, which is what keeps target selection identical
+    /// on both engines.
+    ///
+    /// **The values are computed by PHP, never here.** Deriving hulls from a damage ratio on this
+    /// side would duplicate a formula, and a duplicated formula is a divergence waiting to happen:
+    /// the two engines would drift on a rounding rule and nothing would notice until a battle
+    /// played out differently. PHP owns `DamagedHulls::hullFromDamage()`; this side only applies
+    /// what it is handed.
+    ///
+    /// Absent or shorter than `amount` — the ordinary case of an undamaged fleet — every remaining
+    /// unit starts at `hull_plating`, exactly as before this field existed.
+    #[serde(default)]
+    initial_hulls: Vec<f32>,
 }
 
 /// Battle unit count to keep track of the amount of units of a certain type.
@@ -340,6 +357,16 @@ struct FleetResult {
     units_start: HashMap<i16, BattleUnitCount>,
     units_result: HashMap<i16, BattleUnitCount>,
     units_lost: HashMap<i16, BattleUnitCount>,
+    /// The hull each surviving unit comes out with, grouped by unit type.
+    ///
+    /// `units_result` says **how many** survive; this says **in what state**. PHP turns these back
+    /// into stored damage — the reverse of `initial_hulls` — so a fleet that leaves a battle
+    /// wounded arrives home wounded.
+    ///
+    /// Full hulls are included: this side does not know each type's undamaged hull once technology
+    /// bonuses are folded in, and dropping values it cannot classify would silently lose the state
+    /// of every unit that happens to be intact. PHP holds that number and does the comparison.
+    survivor_hulls: HashMap<i16, Vec<f32>>,
 }
 
 /// Memory metrics which is used to keep track of the peak memory usage during the battle.
@@ -631,13 +658,21 @@ fn expand_fleets<F: FleetInput>(fleets: &Vec<F>) -> Vec<BattleUnitInstance> {
         units.sort_by_key(|unit| unit.unit_id);
 
         for unit in units {
-            for _ in 0..unit.amount {
+            for index in 0..unit.amount {
+                // Damage carried over from an earlier battle, if PHP handed any for this unit.
+                // Missing entries mean an intact unit, which is the ordinary case.
+                let hull = unit
+                    .initial_hulls
+                    .get(index as usize)
+                    .copied()
+                    .unwrap_or(unit.hull_plating);
+
                 expanded.push(BattleUnitInstance {
                     unit_id: unit.unit_id,
                     fleet_mission_id: fleet.get_fleet_mission_id(),
                     owner_id: fleet.get_owner_id(),
                     current_shield_points: unit.shield_points,
-                    current_hull_plating: unit.hull_plating,
+                    current_hull_plating: hull,
                 });
             }
         }
@@ -692,8 +727,12 @@ fn compress_units(units: &Vec<BattleUnitInstance>) -> HashMap<i16, BattleUnitCou
 /// The result of one fleet at the end of a round: what it started with, what survives, what it lost.
 fn fleet_result(units: &Vec<BattleUnitInstance>, fleet_mission_id: u64, owner_id: u64, initial_units: &HashMap<i16, BattleUnitInfo>) -> FleetResult {
     let mut units_result: HashMap<i16, BattleUnitCount> = HashMap::new();
+    let mut survivor_hulls: HashMap<i16, Vec<f32>> = HashMap::new();
     for unit in units.iter().filter(|u| u.fleet_mission_id == fleet_mission_id) {
         increment_battle_unit_count_amount(&mut units_result, unit.unit_id, 1);
+        // The state each survivor comes out in, in the order the field holds them — the same order
+        // PHP reads, so both engines describe the same fleet.
+        survivor_hulls.entry(unit.unit_id).or_default().push(unit.current_hull_plating);
     }
 
     let mut units_start: HashMap<i16, BattleUnitCount> = HashMap::new();
@@ -709,7 +748,7 @@ fn fleet_result(units: &Vec<BattleUnitInstance>, fleet_mission_id: u64, owner_id
         }
     }
 
-    FleetResult { fleet_mission_id, owner_id, units_start, units_result, units_lost }
+    FleetResult { fleet_mission_id, owner_id, units_start, units_result, units_lost, survivor_hulls }
 }
 
 /// Simulates combat for a single phase between two groups of units.

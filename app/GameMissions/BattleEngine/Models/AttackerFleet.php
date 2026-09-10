@@ -4,6 +4,7 @@ namespace OGame\GameMissions\BattleEngine\Models;
 
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Hull\DamagedHulls;
 use OGame\Models\FleetMission;
 use OGame\Models\Resources;
 use OGame\Services\FleetMissionService;
@@ -50,6 +51,24 @@ class AttackerFleet
      * @var FleetMission|null The fleet mission.
      */
     public ?FleetMission $fleetMission;
+
+    /**
+     * Les degats que porte cette flotte en arrivant, par type et par palier.
+     *
+     * **Volontairement sans valeur par defaut.** Des dizaines de montages construisent une
+     * `AttackerFleet` a la main sans rien savoir des coques ; leur imposer une initialisation les
+     * casserait tous pour rien. La lecture passe donc par `damagedHulls()`, qui rend « rien
+     * d abime » quand la propriete n a jamais ete posee — l etat exact du jeu d avant.
+     */
+    public DamagedHulls $damagedHulls;
+
+    /**
+     * Les degats de cette flotte, ou aucun si personne ne les a poses.
+     */
+    public function damagedHulls(): DamagedHulls
+    {
+        return $this->damagedHulls ?? DamagedHulls::none();
+    }
 
     /**
      * Create an AttackerFleet from a fleet mission.

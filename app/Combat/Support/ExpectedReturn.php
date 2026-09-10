@@ -47,6 +47,15 @@ final readonly class ExpectedReturn
         // mouvement : il vit le temps d'un traitement et personne ne le lit apres. Un retour naissant
         // le porte a nul, comme toute mission neuve.
         'processing_claimed_at',
+        // L etat des coques que la flotte rapporte (journal §118). Elle est **sans effet sur le
+        // mouvement** — ni destination, ni instant, ni effectif n en dependent — et c est le critere
+        // exact de cette liste.
+        //
+        // Elle n est pas pour autant sans importance, et la classer ici veut dire que **cette garde
+        // ne verifie pas son transport** : c est un temoin dedie qui etablit qu un retour rapporte
+        // les degats de son aller, pas la projection du mouvement. Le dire plutot que de laisser
+        // croire a une couverture qui n existe pas.
+        'damaged_hulls',
     ];
 
     /**

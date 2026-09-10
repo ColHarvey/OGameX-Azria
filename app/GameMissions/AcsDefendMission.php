@@ -292,7 +292,7 @@ class AcsDefendMission extends GameMission
         }
 
         // Return units to the destination planet
-        $destination_planet->addUnits($this->fleetMissionService->getFleetUnits($mission));
+        $this->landFleetOn($destination_planet, $mission);
 
         // Add resources to the destination planet (if any).
         $return_resources = $this->fleetMissionService->getResources($mission);

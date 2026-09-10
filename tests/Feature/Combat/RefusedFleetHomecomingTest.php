@@ -421,7 +421,11 @@ class RefusedFleetHomecomingTest extends TestCase
         $projection = ExpectedReturn::of($mission, $ordre);
         // La liste est **redite ici volontairement** : l'essai enonce le classement attendu au lieu
         // de relire celui du code, qu'il aurait alors valide par construction.
-        $sansEffet = ['id', 'created_at', 'updated_at', 'target_priority', 'retreat_after_defender_retreat', 'processing_claimed_at'];
+        // `damaged_hulls` porte l'etat des coques que la flotte rapporte (journal §118). Elle est
+        // sans effet sur le **mouvement** — ni destination, ni instant, ni effectif n'en dependent —
+        // et c'est le critere de cette liste. Son transport est etabli par ses propres temoins, pas
+        // par cette projection : le dire ici evite de croire a une couverture qui n'existe pas.
+        $sansEffet = ['id', 'created_at', 'updated_at', 'target_priority', 'retreat_after_defender_retreat', 'processing_claimed_at', 'damaged_hulls'];
 
         foreach (Schema::getColumnListing('fleet_missions') as $colonne) {
             $this->assertTrue(

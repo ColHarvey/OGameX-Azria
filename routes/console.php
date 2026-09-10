@@ -3,6 +3,7 @@
 use OGame\Console\Commands\Combat\AdvancePersistentCombats;
 use OGame\Console\Commands\Combat\BroadcastCombatLosses;
 use OGame\Console\Commands\Combat\RefundCancelledMissiles;
+use OGame\Console\Commands\Combat\SettleHullRepairs;
 use OGame\Console\Commands\Npc\NpcTick;
 use OGame\Console\Commands\Scheduler\CleanupDestroyedPlanets;
 use OGame\Console\Commands\Scheduler\CleanupWreckFields;
@@ -69,6 +70,12 @@ Schedule::command(BroadcastCombatLosses::class, ['--continu'])->everyMinute()->r
 // une main humaine — et des actifs de joueur resteraient bloques sans que personne le sache. Une
 // heure suffit : rien ne presse un remboursement, et un passage sans creance ne fait qu'une requete.
 Schedule::command(RefundCancelledMissiles::class)->hourly()->withoutOverlapping();
+
+// Les vaisseaux repares au chantier spatial rentrent en service a leur echeance. Le passage est
+// leger par construction : l avancement d une reparation est une fonction du temps, calculee a la
+// lecture, donc il n y a rien a faire avancer — seulement des ordres echus a clore. Sans effet tant
+// que hull_damage_enabled est a non, et un passage sans ordre echu ne fait qu une requete.
+Schedule::command(SettleHullRepairs::class)->everyMinute()->withoutOverlapping();
 
 // Factions hostiles : croissance des bases, releve des bases detruites, decision de raid.
 // Sans effet tant que npc_enabled est a non, et n envoie aucune flotte tant que

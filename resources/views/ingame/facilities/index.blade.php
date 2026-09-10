@@ -114,6 +114,8 @@
             </div>
         </div>
 
+        @include("ingame.facilities.partials.hull-repair")
+
         <div id="productionboxBottom">
             <div class="productionBoxBuildings boxColumn building">
                 <div id="productionboxbuildingcomponent" class="productionboxbuilding injectedComponent parent facilities"><div class="content-box-s">

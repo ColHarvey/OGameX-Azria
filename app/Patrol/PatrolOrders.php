@@ -8,6 +8,7 @@ use OGame\Enums\AccountDeletionState;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Hull\DamagedHulls;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\Patrol;
@@ -128,7 +129,12 @@ final class PatrolOrders
 
             $aRetirer = self::takenFromThePlanet($cargo, $reserve);
 
-            if (!$from->deductResourcesAndUnitsAtomic($aRetirer, $units)) {
+            // **Une patrouille part comme toute flotte** : les plus intactes d abord. Le retrait
+            // rend les degats emportes, qui s ecrivent sur le premier segment plus bas — sans quoi
+            // une patrouille serait le seul chemin du jeu par lequel une flotte partirait guerie.
+            $degatsEmportes = $from->detachUnitsForDeparture($aRetirer, $units);
+
+            if ($degatsEmportes === null) {
                 throw new PatrolOrderRefused('not_enough_on_planet');
             }
 
@@ -157,7 +163,8 @@ final class PatrolOrders
                 $units,
                 $cargo,
                 $now,
-                $now + $devis->durationSeconds
+                $now + $devis->durationSeconds,
+                $degatsEmportes,
             );
 
             $patrouille->forceFill(['current_mission_id' => $segment->id])->save();
@@ -525,7 +532,8 @@ final class PatrolOrders
                 $units,
                 new Resources((float)$tenu->metal, (float)$tenu->crystal, (float)$tenu->deuterium, 0),
                 $now + $delai,
-                $now + $delai + $devis->durationSeconds
+                $now + $delai + $devis->durationSeconds,
+                DamagedHulls::fromStorage($tenu->damaged_hulls),
             );
 
             $patrol->forceFill([
@@ -1149,7 +1157,8 @@ final class PatrolOrders
                 $units,
                 new Resources((float)$parked->metal, (float)$parked->crystal, (float)$parked->deuterium, 0),
                 $now,
-                $now + $duree
+                $now + $duree,
+                DamagedHulls::fromStorage($parked->damaged_hulls),
             );
 
             // **La reserve paie le retour maintenant**, comme tout segment : ce qui reste rentrera
@@ -1289,6 +1298,13 @@ final class PatrolOrders
 
             $home->addUnits($this->unitsOf($segment));
 
+            // Les coques entamees rentrent avec la patrouille. Une patrouille passe sa vie a se
+            // battre en espace libre : c est le chemin par lequel des degats reviennent le plus
+            // souvent, et atterrir n en repare aucun.
+            if ($this->settings->hullDamageEnabled()) {
+                $home->landDamagedHulls(DamagedHulls::fromStorage($segment->damaged_hulls));
+            }
+
             // **La reserve rentre en unites entieres.** Le stationnement se facture au prorata de la
             // seconde et laisse une fraction de deuterium ; la frontiere economique refuse de la
             // crediter, a raison. Le plancher est un fait dit ici : la fraction reste dans l espace.
@@ -1340,12 +1356,23 @@ final class PatrolOrders
         Resources $cargo,
         int $departure,
         int $arrival,
+        DamagedHulls|null $damagedHulls = null,
     ): FleetMission {
         $segment = new FleetMission();
 
         $segment->user_id = (int)$patrol->user_id;
         $segment->patrol_id = (int)$patrol->id;
         $segment->mission_type = 11;
+
+        // **Les coques entamees passent d un segment au suivant.** Une patrouille est une suite de
+        // `FleetMission` : sans cette ligne, une flotte abimee au premier segment repartirait neuve
+        // au deuxieme, et le systeme serait faux precisement la ou il sert le plus.
+        //
+        // Par defaut `null` : un segment cree sans rien preciser ne transporte aucun degat, ce qui
+        // est le bon comportement pour tous les appelants qui ne s en occupent pas encore.
+        if ($damagedHulls !== null && !$damagedHulls->isEmpty()) {
+            $segment->damaged_hulls = $damagedHulls->toStorage();
+        }
 
         // **L ancre administrative est une planete vivante.** Le travailleur des pages cherche les
         // missions par les planetes du joueur, et cette liste exclut les corps detruits : un segment

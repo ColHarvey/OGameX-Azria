@@ -158,7 +158,7 @@ class ColonisationMission extends GameMission
         }
 
         // Transport return trip: add back the units to the source planet. Then we're done.
-        $target_planet->addUnits($this->fleetMissionService->getFleetUnits($mission));
+        $this->landFleetOn($target_planet, $mission);
 
         // Add resources to the origin planet (if any).
         $return_resources = $this->fleetMissionService->getResources($mission);
