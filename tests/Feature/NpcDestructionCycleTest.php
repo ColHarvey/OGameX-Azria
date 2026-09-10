@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Schema;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Enums\PlanetType;
+use OGame\Models\FleetMission;
 use OGame\Models\Planet;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
@@ -291,6 +292,119 @@ class NpcDestructionCycleTest extends AccountTestCase
             0,
             (int)$planetRow->destroyed,
             'A fleet without an Etoile de la Mort brought the base down.'
+        );
+    }
+
+    /**
+     * Assert that beating a base without a Deathstar still pays: loot, and debris to recycle.
+     *
+     * ## La phrase que ce temoin corrige
+     *
+     * J'ai ecrit, apres avoir mesure la regle de l'Etoile de la Mort, que « sans Etoile un joueur
+     * ne peut plus rien prendre ». C'est trop large, et Keven l'a repris : la mesure disait
+     * seulement qu'il ne peut plus **detruire** la base. Vaincre et detruire sont deux choses, et
+     * la premiere doit continuer de payer — sans quoi la regle reserverait bel et bien tout le
+     * contenu pirate aux flottes de fin de partie.
+     *
+     * Le temoin etablit donc les deux recompenses separement, sur une flotte **sans** Etoile :
+     * le butin revient dans le vol de retour, et un champ de debris existe au-dessus de la
+     * position. Et il etablit la troisieme moitie du fait — la base est toujours la —, sans quoi
+     * il ne dirait pas « victoire sans destruction », seulement « victoire ».
+     */
+    public function testAVictoryWithoutADeathstarStillPaysLootAndDebris(): void
+    {
+        $base = $this->placeBaseNextDoor();
+        $baseCoordinate = $base->getPlanetCoordinates();
+        $basePlanetId = $base->getPlanetId();
+
+        // De quoi piller : une base vide ferait coincider « rien a prendre » et « pillage
+        // interdit », et le temoin ne saurait pas lequel des deux il observe.
+        $base->addResources(new Resources(40000, 20000, 0, 0));
+
+        // Des vaisseaux et non des defenses seules : dans OGame les defenses ne laissent aucun
+        // champ de debris. Sans eux il n'y aurait rien a recycler, et l'absence ne dirait rien.
+        $base->addUnit('rocket_launcher', 2);
+        $base->addUnit('light_fighter', 3);
+        $baseUser = $base->getPlayer()?->getUser();
+        $this->assertNotNull($baseUser);
+        $baseUser->tactical_retreat_ratio = 0;
+        $baseUser->save();
+
+        // La part d'epaves est posee explicitement : plusieurs essais de la suite la basculent
+        // sans la remettre, et une mesure qui se fierait a la valeur trouvee en base dirait
+        // n'importe quoi selon l'ordre des processus.
+        $partEpaves = (string)$this->settings->get('debris_field_from_ships', '30');
+        $this->settings->set('debris_field_from_ships', '30');
+
+        $repairRate = (string)$this->settings->get('defense_repair_rate', '70');
+        $this->settings->set('defense_repair_rate', '0');
+
+        $this->planetAddUnit('light_fighter', 200);
+        $this->planetAddResources(new Resources(0, 0, 5000000, 0));
+
+        $fleet = new UnitCollection();
+        $fleet->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 200);
+
+        $mission = resolve(FleetMissionService::class)->createNewFromPlanet(
+            $this->planetService,
+            $baseCoordinate,
+            PlanetType::Planet,
+            1,
+            $fleet,
+            new Resources(0, 0, 0, 0),
+            10
+        );
+
+        $this->travelTo(Date::createFromTimestamp($mission->time_arrival + 10));
+        $this->reloadApplication();
+        $this->get('/overview');
+
+        $this->settings->set('defense_repair_rate', $repairRate);
+        $this->settings->set('debris_field_from_ships', $partEpaves);
+
+        // --- La base a bien survecu : c'est une victoire, pas une destruction ---
+        $planetRow = Planet::find($basePlanetId);
+        $this->assertNotNull($planetRow, 'The base was removed although no Deathstar took part.');
+        $this->assertSame(0, (int)$planetRow->destroyed, 'The base was destroyed without a Deathstar.');
+
+        // --- Le butin revient avec la flotte ---
+        $retour = FleetMission::where('user_id', $this->currentUserId)
+            ->whereNotNull('parent_id')
+            ->orderByDesc('id')
+            ->first();
+
+        $this->assertNotNull($retour, 'The winning fleet never started its return trip.');
+
+        // **Le metal et le cristal seulement, jamais le deuterium.** Le moteur rend la moitie du
+        // carburant a toute flotte qui rentre, quel que soit le genre de mission : une somme des
+        // trois ressources serait donc positive meme sur une base sans un gramme de minerai. La
+        // premiere mutation l'a montre — le temoin passait sur une base videe.
+        //
+        // **Et le seuil est mesure, pas choisi.** Une base pirate n'est jamais vraiment vide : sa
+        // propre production laisse toujours un peu a prendre. Les deux mesures, sur ce montage :
+        //
+        //     base non garnie — 783 metal + 566 cristal, soit 1 349 de minerai ;
+        //     base garnie     — 4 988 + 4 776, soit 9 764, la soute etant pleine.
+        //
+        // La soute est le plafond, pas le stock : deux cents chasseurs legers portent 10 000, et
+        // le retour en ramene exactement 10 000 en comptant le deuterium. Cinq mille separe donc
+        // sans ambiguite « rentree chargee » de « a ramasse des miettes ».
+        $this->assertGreaterThan(
+            5000,
+            (int)$retour->metal + (int)$retour->crystal,
+            'A fleet that won without a Deathstar came home nearly empty: beating a base stopped paying.'
+        );
+
+        // --- Et il reste des debris a recycler au-dessus de la position ---
+        $debris = resolve(DebrisFieldService::class);
+        $this->assertTrue(
+            $debris->loadForCoordinates($baseCoordinate),
+            'No debris field was created above the beaten base, so there is nothing to recycle.'
+        );
+        $this->assertGreaterThan(
+            0,
+            $debris->getResources()->sum(),
+            'The debris field above the beaten base is empty, so recycling it would bring nothing.'
         );
     }
 

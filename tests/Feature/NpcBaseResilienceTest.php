@@ -173,12 +173,14 @@ class NpcBaseResilienceTest extends AccountTestCase
      *
      *     sans Etoile — aucune base ne tombe, la courbe plafonne (20 chasseurs : 99 lanceurs
      *                   debout apres six vagues ; 80 chasseurs : 15, et le plateau approche) ;
-     *     avec une Etoile — toutes les bases tombent en UNE vague, quelle que soit leur taille
-     *                   et quelle que soit la flotte qui l'accompagne.
+     *     avec une Etoile — les neuf configurations essayees tombent en UNE vague.
      *
-     * La matrice mesuree le montre case par case : faible/moyen/fort contre faible/moyenne/forte
-     * donnent neuf fois « 1 ». **La taille d'une base ne decide plus rien ; l'Etoile de la Mort
-     * decide tout.**
+     * **Ce que cette mesure dit, et ce qu'elle ne dit pas.** Elle porte sur neuf couples mesures —
+     * flottes de 40, 120 et 400 chasseurs contre bases de 30, 100 et 250 lanceurs, une Etoile a
+     * chaque fois — et ils donnent neuf fois « 1 ». Elle ne dit pas que toute flotte accompagnee
+     * d'une Etoile bat toute base : au-dela de ces bornes, rien n'a ete essaye. Ce qui est etabli
+     * est que **sur l'etendue mesuree, la taille de la base ne fait plus aucune difference**, la
+     * ou elle en faisait une avant la regle.
      *
      * ## Pourquoi cet essai reste, et sous cette forme
      *
