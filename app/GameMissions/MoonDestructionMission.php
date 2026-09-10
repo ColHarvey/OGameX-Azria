@@ -215,6 +215,14 @@ class MoonDestructionMission extends GameMission
                 if ($fleetResult->unitsLost->getAmount() > 0) {
                     $targetMoon->removeUnits($fleetResult->unitsLost, false);
                 }
+
+                // Meme regle que partout ailleurs : les survivants gardent leurs coques entamees.
+                // Si la lune est detruite juste apres, l ecriture disparait avec elle — mais elle
+                // ne l est qu une fois sur deux, et une lune qui survit garde ses degats.
+                if ($this->settings->hullDamageEnabled()) {
+                    $targetMoon->writeDamagedHulls($fleetResult->survivorHulls(), false);
+                }
+
                 $targetMoon->save();
             } else {
                 // ACS Defend fleet - handle return or destruction

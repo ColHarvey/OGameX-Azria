@@ -8,6 +8,7 @@ use OGame\Hull\DamagedHulls;
 use OGame\Hull\HullRepairService;
 use OGame\Models\HullRepairOrder;
 use OGame\Models\Resources;
+use OGame\Services\JumpGateService;
 use OGame\Services\ObjectService;
 use OGame\Services\SettingsService;
 use RuntimeException;
@@ -398,6 +399,92 @@ class HullRepairTest extends AccountTestCase
         $this->expectExceptionMessageMatches('/no_dock/');
 
         $this->reparations->confirm($this->planetService, $selection, $devis->fingerprint(), (int)Date::now()->timestamp);
+    }
+
+    /**
+     * **La porte de saut ne repare pas.**
+     *
+     * Sans les degats qui suivent, sauter sa flotte abimee vers une seconde lune la rendrait neuve :
+     * un contournement complet du dock, et **invisible** — les effectifs restent justes des deux
+     * cotes, seule la sante change.
+     */
+    public function testUnSautNeSoignePersonne(): void
+    {
+        $this->unCorpsAvecDesCroiseursAbimes(20, 8, 5000);
+
+        $source = $this->planetService;
+        $cible = $this->secondPlanetService ?? null;
+
+        if ($cible === null) {
+            $this->markTestSkipped('Ce compte n a qu un corps : le saut ne peut pas etre eprouve ici.');
+        }
+
+        // La cible peut deja porter des abimees : on compte en ecart, jamais a zero.
+        $avantCible = $cible->damagedHulls()->damagedCountOf('cruiser');
+
+        // Quinze partent : les douze intacts, puis trois des abimes.
+        $this->assertTrue(
+            resolve(JumpGateService::class)->transferShips($source, $cible, ['cruiser' => 15]),
+            'Le transfert doit aboutir.'
+        );
+
+        $source->reloadPlanet();
+        $cible->reloadPlanet();
+
+        $restees = $source->damagedHulls()->damagedCountOf('cruiser');
+        $arrivees = $cible->damagedHulls()->damagedCountOf('cruiser') - $avantCible;
+
+        // **Aucune unite abimee n a disparu ni ete soignee** : les huit se repartissent entre les
+        // deux corps. C est la seule assertion qui ferme l exploit.
+        $this->assertSame(
+            8,
+            $restees + $arrivees,
+            'Le saut a soigne ou perdu des unites endommagees : ' . $restees . ' restees, ' . $arrivees . ' arrivees.'
+        );
+
+        // Et la regle de depart vaut aussi ici : les intactes partent d abord, donc cinq abimees
+        // restent et trois seulement voyagent.
+        $this->assertSame(5, $restees, 'Les intactes doivent partir avant les abimees.');
+        $this->assertSame(3, $arrivees);
+
+        $this->assertSame(
+            [5000 => 5],
+            $source->damagedHulls()->levelsOf('cruiser'),
+            'Le palier des restantes doit etre celui d origine, inchange.'
+        );
+    }
+
+    /**
+     * **Un retrait d unites ne laisse jamais plus d abimees que d unites presentes.**
+     *
+     * L invariant se casserait en silence : rien ne rougirait avant le combat suivant, ou la
+     * composition du champ refuserait de se faire. Le filet de `removeUnitsAtomic()` le tient pour
+     * tous les chemins qui ne savent rien des coques.
+     */
+    public function testUnRetraitNeLaissePlusDAbimeesQueDUnites(): void
+    {
+        $this->unCorpsAvecDesCroiseursAbimes(20, 8, 5000);
+
+        // Quinze disparaissent sans que personne ne s occupe des degats — un demenagement, une
+        // perte de defense, un chemin d administration.
+        $this->planetService->removeUnits($this->croiseurs(15), true);
+        $this->planetService->reloadPlanet();
+
+        $restants = $this->planetService->getShipUnits()->getAmountByMachineName('cruiser');
+        $abimees = $this->planetService->damagedHulls()->damagedCountOf('cruiser');
+
+        $this->assertSame(5, $restants);
+        $this->assertLessThanOrEqual(
+            $restants,
+            $abimees,
+            'L histogramme compte plus d unites abimees que le corps n en porte.'
+        );
+
+        // Et la composition d un champ de bataille reste possible — c est ce que l invariant protege.
+        $this->assertCount(
+            $restants,
+            $this->planetService->damagedHulls()->damageSequenceFor('cruiser', $restants)
+        );
     }
 
     public function testInterrupteurDesarmeAucuneReparationEtAucuneDestruction(): void

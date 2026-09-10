@@ -4,7 +4,9 @@ namespace OGame\Services;
 
 use Exception;
 use Illuminate\Support\Facades\Date;
+use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\FleetMission;
+use OGame\Models\Resources;
 
 /**
  * Class JumpGateService
@@ -256,18 +258,39 @@ class JumpGateService
             }
         }
 
-        // Perform the transfer
+        // **Les coques entamees sautent avec les vaisseaux** (journal §118).
+        //
+        // Sans cela, la porte de saut serait une **reparation gratuite** : un joueur enverrait sa
+        // flotte abimee sur sa seconde lune et la recevrait neuve. Ce n est pas une imprecision,
+        // c est un contournement complet du dock — et il aurait ete invisible, les effectifs restant
+        // justes des deux cotes.
+        //
+        // Le retrait passe par le point unique des departs : il applique la meme regle que toute
+        // flotte qui part — les plus intactes d abord — et **refuse les unites tenues au dock**, ce
+        // qui est exactement ce qu il faut ici aussi. Un vaisseau en reparation ne saute pas.
+        $aTransferer = new UnitCollection();
+
         foreach ($ships as $ship_name => $amount) {
-            if ($amount <= 0) {
-                continue;
+            if ($amount > 0) {
+                $aTransferer->addUnit(ObjectService::getUnitObjectByMachineName($ship_name), $amount);
             }
-
-            // Remove from source
-            $source->removeUnit($ship_name, $amount, false);
-
-            // Add to target
-            $target->addUnit($ship_name, $amount, false);
         }
+
+        if ($aTransferer->getAmount() === 0) {
+            return true;
+        }
+
+        $degatsEmportes = $source->detachUnitsForDeparture(new Resources(0, 0, 0, 0), $aTransferer);
+
+        if ($degatsEmportes === null) {
+            return false;
+        }
+
+        foreach ($aTransferer->units as $unit) {
+            $target->addUnit($unit->unitObject->machine_name, $unit->amount, false);
+        }
+
+        $target->landDamagedHulls($degatsEmportes, false);
 
         // Save both planets
         $source->save();

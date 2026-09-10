@@ -313,6 +313,15 @@ class EspionageMission extends GameMission
                 if ($fleetResult->unitsLost->getAmount() > 0) {
                     $targetPlanet->removeUnits($fleetResult->unitsLost, false);
                 }
+
+                // **Les survivants gardent leurs coques entamees** (journal §118), comme sur tout
+                // autre chemin de combat. Sans cette ligne, un contre-espionnage serait le seul
+                // endroit du jeu ou une garnison ressort indemne d une bataille qu elle a subie —
+                // et l histogramme, lui, resterait celui d avant : plus d abimees que d unites.
+                if ($this->settings->hullDamageEnabled()) {
+                    $targetPlanet->writeDamagedHulls($fleetResult->survivorHulls(), false);
+                }
+
                 $targetPlanet->save();
             } else {
                 // ACS Defend fleet - handle return or destruction

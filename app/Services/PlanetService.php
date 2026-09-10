@@ -2115,6 +2115,13 @@ class PlanetService
 
             $this->planet->{$object->machine_name} -= $amount;
         }
+
+        // **Le meme filet qu au retrait par collection**, parce que ce chemin-ci ne passe pas par
+        // lui : la porte de saut retire ses vaisseaux un type a la fois. Sans cela, un transfert
+        // laisserait les degats sur le corps d origine, qui n a plus les unites correspondantes.
+        $collection = new UnitCollection();
+        $collection->addUnit($object, $amount);
+        $this->keepDamagedHullsWithinStock($collection);
     }
 
     /**
@@ -2364,10 +2371,74 @@ class PlanetService
                 $machineName = $unit->unitObject->machine_name;
                 $this->planet->{$machineName} -= $unit->amount;
             }
+
+            $this->keepDamagedHullsWithinStock($units);
+
             return true;
         }
 
         return false;
+    }
+
+    /**
+     * Le filet qui garde l invariant des coques quand un appelant ne s en occupe pas.
+     *
+     * ------------------------------------------------------------------------------------
+     * POURQUOI UN FILET, ET NON UNE REGLE
+     *
+     * Ce retrait atomique est le **point unique** par lequel des unites quittent un corps, et ses
+     * appelants n ont pas tous la meme connaissance. Le reglement d un combat, lui, sait exactement
+     * dans quel etat sortent les survivants et **reecrit** l histogramme juste apres : ce filet ne
+     * fait alors rien d utile, et son effet est aussitot remplace par le bon.
+     *
+     * Mais d autres chemins retirent des unites sans rien savoir des coques — un demenagement de
+     * planete, une perte de defense, un chemin d administration. Sans filet, l histogramme y
+     * garderait plus d unites abimees que le corps n en porte, et **la faute ne se verrait qu au
+     * combat suivant**, quand `damageSequenceFor()` refuserait de composer le champ.
+     *
+     * ------------------------------------------------------------------------------------
+     * LES PLUS ABIMEES PARTENT LES PREMIERES, ET C EST LE COMPLEMENT DE LA REGLE DE DEPART
+     *
+     * Quand ce filet doit trancher, il retire les paliers les plus entames. C est la lecture la plus
+     * juste par defaut : ce qui disparait sans qu on sache lesquelles, ce sont les unites qui
+     * tenaient le moins. Et c est l exact complement de `takeMostIntact()`, qui fait partir les plus
+     * saines — les deux bouts de la meme file.
+     */
+    private function keepDamagedHullsWithinStock(UnitCollection $units): void
+    {
+        $degats = $this->damagedHulls();
+
+        if ($degats->isEmpty()) {
+            return;
+        }
+
+        $ajuste = $degats;
+
+        foreach ($units->units as $unit) {
+            $type = $unit->unitObject->machine_name;
+            $abimees = $ajuste->damagedCountOf($type);
+
+            if ($abimees === 0) {
+                continue;
+            }
+
+            $reste = max(0, (int)$this->planet->{$type});
+
+            if ($abimees <= $reste) {
+                continue;
+            }
+
+            [$ajuste] = $ajuste->withoutMostDamaged($type, $abimees - $reste);
+        }
+
+        if ($ajuste->toStorage() === $degats->toStorage()) {
+            return;
+        }
+
+        // L ecriture est ciblee : `save()` du modele entier reecrirait des colonnes qui viennent
+        // d etre changees en base par la mise a jour atomique ci-dessus.
+        Planet::where('id', $this->getPlanetId())->update(['damaged_hulls' => $ajuste->toStorage()]);
+        $this->planet->damaged_hulls = $ajuste->toStorage();
     }
 
     /**
