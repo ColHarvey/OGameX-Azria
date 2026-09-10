@@ -294,6 +294,39 @@ abstract class GameMission
     }
 
     /**
+     * Les degats qui tiennent dans une flotte donnee, les plus abimees retirees en premier.
+     *
+     * Une flotte peut avoir maigri entre le depart et le retour sans que personne ne reecrive ses
+     * coques — une expedition qui perd des vaisseaux contre des pirates. L histogramme decrirait
+     * alors plus d unites que la flotte n en porte, et **l invariant leverait a l atterrissage**.
+     *
+     * Ce qui disparait sans qu on sache lesquelles, ce sont les unites qui tenaient le moins : c est
+     * la meme lecture que le filet de `PlanetService`, et le complement de la regle de depart.
+     *
+     * @param mixed $stocke la colonne `damaged_hulls` de la mission d origine
+     * @return array<string, array<int, int>>|null la forme a ecrire
+     */
+    private static function hullsThatFitTheFleet(mixed $stocke, UnitCollection $units): array|null
+    {
+        $degats = DamagedHulls::fromStorage($stocke);
+
+        if ($degats->isEmpty()) {
+            return null;
+        }
+
+        foreach ($degats->types() as $type) {
+            $abimees = $degats->damagedCountOf($type);
+            $portees = $units->getAmountByMachineName($type);
+
+            if ($abimees > $portees) {
+                [$degats] = $degats->withoutMostDamaged($type, $abimees - $portees);
+            }
+        }
+
+        return $degats->toStorage();
+    }
+
+    /**
      * Les degats que le dernier depart a emportes, pour les poser sur la ligne de la mission.
      *
      * **Pourquoi une propriete et pas une valeur de retour** : `deductMissionResources()` rend
@@ -768,7 +801,16 @@ abstract class GameMission
         //
         // C est donc a l appelant d avoir ecrit sur la mission aller l etat **d apres** la bataille
         // avant de creer le retour. Le reglement le fait juste avant d appeler cette methode.
-        $mission->damaged_hulls = $parentMission->damaged_hulls;
+        //
+        // **Et l heritage se borne a ce que le retour transporte reellement.** Une expedition qui
+        // perd des vaisseaux contre des pirates rentre avec moins d unites que l aller n en portait,
+        // sans que personne ne reecrive ses coques : le retour aurait alors decrit plus d unites
+        // abimees qu il n en ramene, et l atterrissage aurait **leve une exception** en verifiant
+        // l invariant — une expedition malheureuse aurait casse le jeu.
+        //
+        // Ce sont les plus abimees qui sautent, comme partout ailleurs quand des unites disparaissent
+        // sans qu on sache lesquelles.
+        $mission->damaged_hulls = self::hullsThatFitTheFleet($parentMission->damaged_hulls, $units);
 
         // **Une destination resolue l'emporte sur le corps de depart, et elle s'ecrit telle quelle.**
         // Le corps d'origine peut avoir disparu depuis le lancement — une lune rasee, une planete

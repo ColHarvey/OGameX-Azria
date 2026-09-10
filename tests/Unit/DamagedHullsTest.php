@@ -203,6 +203,30 @@ class DamagedHullsTest extends TestCase
         $this->assertSame(5.0, $corps->damageShareOf('cruiser'));
     }
 
+    /**
+     * **Une flotte qui maigrit en vol garde des degats qui tiennent dedans.**
+     *
+     * Une expedition qui perd des vaisseaux contre des pirates rentre avec moins d unites que
+     * l aller n en portait, sans que ses coques soient reecrites. Sans bornage, le retour
+     * decrirait plus d unites abimees qu il n en ramene, et l atterrissage **leverait** — une
+     * expedition malheureuse aurait casse le jeu.
+     *
+     * Ce sont les plus abimees qui sautent : les survivantes sont les plus saines.
+     */
+    public function testDesDegatsQuiNeTiennentPlusDansLaFlotteSeBornentParLeHaut(): void
+    {
+        $depart = DamagedHulls::of(['cruiser' => [5000 => 8, 2500 => 4]]);
+
+        // Douze abimees pour cinq unites qui rentrent : sept doivent sauter.
+        [$borne, $retires] = $depart->withoutMostDamaged('cruiser', 12 - 5);
+
+        $this->assertSame(7, $retires);
+        $this->assertSame(5, $borne->damagedCountOf('cruiser'), 'Le compte doit tenir dans la flotte.');
+
+        // Et ce sont les moins abimees qui restent : quatre a 25 %, une a 50 %.
+        $this->assertSame([2500 => 4, 5000 => 1], $borne->levelsOf('cruiser'));
+    }
+
     public function testLeRetraitDesPlusAbimeesEstLeComplementDuDepart(): void
     {
         $corps = DamagedHulls::of(['cruiser' => [5000 => 8, 2500 => 4]]);
