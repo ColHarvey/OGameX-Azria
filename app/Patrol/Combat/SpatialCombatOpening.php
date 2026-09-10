@@ -37,22 +37,14 @@ use OGame\Patrol\FrozenPatrolTarget;
  * ------------------------------------------------------------------------------------
  * POURQUOI CE SERVICE EXISTE A COTE DE `CombatOpeningService`
  *
- * L ouverture sur un corps fait quatre choses de plus, et **aucune n a de sens ici** :
+ * L ouverture sur un corps photographie l etat du corps — stocks, files, garnison,
+ * antimissiles — et retient les Defenses ACS deja posees dessus. **Un point libre n a ni
+ * stock, ni file, ni garnison, et rien n y est pose** : ces deux gestes n ont pas d objet
+ * ici, et les executer demanderait au service des corps de semer des « si le corps existe »
+ * dans chacune de ses etapes, c est-a-dire d y installer un second regime partout.
  *
- *   - elle photographie l etat du corps — stocks, files, garnison, antimissiles ;
- *   - elle retient les Defenses ACS deja posees dessus ;
- *   - elle calcule l echeance du ralliement sur les flottes qui seraient admises ;
- *   - elle photographie les appartenances d alliance qui gouvernent cette admission.
- *
- * Un point libre n a ni stock, ni file, ni garnison. Et les regroupements autour d une
- * patrouille sont **hors perimetre de cette version** (revue 121, R9) : il n y a donc
- * personne a attendre, la fenetre de ralliement est nulle par construction, et l admission
- * n a aucune decision a prendre.
- *
- * Faire passer ce cas par le service des corps aurait demande d y semer des « si le corps
- * existe » — c est-a-dire d y installer un second regime dans chaque etape. Deux services
- * qui partagent la **meme barriere logique** et le meme ordre de verrous, chacun repondant
- * a une seule question, se relisent mieux qu un service qui repond a deux.
+ * Deux services qui partagent la **meme barriere logique** et le meme ordre de verrous,
+ * chacun repondant a une seule question, se relisent mieux qu un service qui repond a deux.
  *
  * ------------------------------------------------------------------------------------
  * L ORDRE DES VERROUS EST INCHANGE
@@ -74,11 +66,34 @@ use OGame\Patrol\FrozenPatrolTarget;
  * ce qui est etabli est que la paire porte la regle, pas lequel des deux gestes agit.
  *
  * ------------------------------------------------------------------------------------
+ * L ECHEANCE POSEE ICI EST PROVISOIRE, ET CE N EST PAS UN DETAIL
+ *
+ * `owned_through_effect_at` vaut l instant d ouverture : aucun effet planifie apres n
+ * appartient encore a ce combat. **C est l etat d une tranche intermediaire, pas la regle
+ * du jeu**, et l ecrire autrement serait installer l ancien modele comme resultat final.
+ *
+ * La regle voulue est l inverse : un joueur doit pouvoir envoyer ses propres flottes et les
+ * renforts de son alliance **pendant** la bataille. Ce que le moteur progressif construit
+ * (journal §116) est exactement cela — un etat de champ persiste round par round, ou de
+ * nouveaux arrivants entrent entre deux pas au lieu d etre juges a l avance.
+ *
+ * Le raccordement est donc nomme des maintenant :
+ *
+ *   - la fermeture d un combat spatial ne figera **pas** un verdict complet ; elle produira
+ *     l etat de champ initial, et l avanceur jouera les rounds ;
+ *   - `owned_through_effect_at` sera etendu a la fin reelle de la bataille, pas a son
+ *     ouverture, pour que les arrivees de la periode y entrent ;
+ *   - l admission des renforts se prononcera entre deux pas, sur l etat relu, jamais sur une
+ *     photographie prise avant le premier tir.
+ *
+ * Tant que ce raccordement n existe pas, aucune arrivee ne peut rejoindre un combat spatial —
+ * et c est pour cela que rien n appelle ce service : `patrols_enabled` vaut 0.
+ *
+ * ------------------------------------------------------------------------------------
  * CE QUE CE SERVICE NE FAIT PAS ENCORE
  *
  * Il ouvre et il tient. Il ne ferme pas, ne photographie pas la flotte defenseuse et ne
- * regle rien : ces trois-la viennent ensuite, et le combat reste en ralliement jusque-la.
- * Rien ne l appelle tant que `patrols_enabled` vaut 0.
+ * regle rien.
  */
 final class SpatialCombatOpening
 {
@@ -203,9 +218,11 @@ final class SpatialCombatOpening
             'patrol_id' => $target->patrolId,
             'combat_instance_id' => $combat->id,
             'opened_at' => $openedAt,
-            // **La fenetre est nulle, et elle l est par construction.** Personne ne peut rejoindre
-            // un combat en espace libre dans cette version : l echeance vaut l instant d ouverture,
-            // et l egalite compte pour « apres », comme partout ailleurs dans ce socle.
+            // **Provisoire, et le mot compte.** Tant que le raccordement au moteur progressif n existe
+            // pas, aucune arrivee ne peut rejoindre un combat spatial : l echeance vaut donc l instant
+            // d ouverture, l egalite comptant pour « apres » comme partout dans ce socle. Elle sera
+            // etendue a la fin reelle de la bataille quand l avanceur jouera les rounds — voir l en-tete
+            // de classe. Ce n est pas la regle du jeu, c est l etat d une tranche.
             'owned_through_effect_at' => $openedAt,
             'revision' => 0,
         ]);

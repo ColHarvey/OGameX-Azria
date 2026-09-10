@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Factories\PlayerServiceFactory;
+use OGame\GameMissions\BattleEngine\Services\DefenseRepairService;
+use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Resources;
 use OGame\Patrol\Combat\SpatialCombatSite;
 use OGame\Patrol\Geometry\SpatialPoint;
@@ -142,9 +144,83 @@ class SpatialCombatSiteTest extends AccountTestCase
         $site->deductResources(new Resources(0, 0, 0, 0));
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessageMatches('/nothing is stored in free space/');
+        $this->expectExceptionMessageMatches('/free space is read-only/');
 
         $site->deductResources(new Resources(0, 0, 900, 0));
+    }
+
+    /**
+     * **Le site est un adaptateur de lecture, et toute ecriture est refusee.**
+     *
+     * Sans ces refus, un chemin qui croirait tenir une planete ecrirait dans un corps fictif : au
+     * mieux sans effet, au pire sur la ligne d'une vraie planete si ce site en empruntait une un
+     * jour. Le silence rendrait la faute invisible jusqu'a ce qu'un joueur perde des unites que
+     * personne n'a debitees.
+     *
+     * Les six gestes sont nommes un par un : une garde qui dirait « aucune methode d'ecriture »
+     * devrait d'abord definir ce qu'est une ecriture, et se tromperait en silence sur la premiere
+     * qui ne ressemble pas aux autres.
+     */
+    public function testEveryWriteToAPointIsRefused(): void
+    {
+        $gestes = [
+            'save' => static function (SpatialCombatSite $s): void {
+                $s->save();
+            },
+            'addResources' => static function (SpatialCombatSite $s): void {
+                $s->addResources(new Resources(10, 0, 0, 0));
+            },
+            'addResourcesAtomic' => static function (SpatialCombatSite $s): void {
+                $s->addResourcesAtomic(new Resources(0, 10, 0, 0));
+            },
+            'addUnit' => static function (SpatialCombatSite $s): void {
+                $s->addUnit('light_fighter', 3);
+            },
+            'removeUnits' => static function (SpatialCombatSite $s): void {
+                $s->removeUnits(new UnitCollection(), false);
+            },
+            'deductResources' => static function (SpatialCombatSite $s): void {
+                $s->deductResources(new Resources(0, 0, 5, 0));
+            },
+        ];
+
+        foreach ($gestes as $nom => $geste) {
+            $site = $this->aSite();
+            $refuse = false;
+
+            try {
+                $geste($site);
+            } catch (RuntimeException $refus) {
+                $refuse = true;
+                $this->assertStringContainsString(
+                    'free space is read-only',
+                    $refus->getMessage(),
+                    'The refusal of « ' . $nom . ' » does not say why writing to a point is impossible.'
+                );
+            }
+
+            $this->assertTrue($refuse, 'A spatial point accepted « ' . $nom . ' »: it is no longer a read adapter.');
+        }
+    }
+
+    /**
+     * **La reparation des defenses ne peut pas s'appliquer a un point**, et ce n'est pas un refus :
+     * c'est la forme du jeu. Le service ne recoit que les defenses **detruites**, et un point libre
+     * n'en porte aucune — il n'y a donc rien a relever, quel que soit le taux.
+     */
+    public function testNoDefenceCanBeRepairedWhereNoDefenceStands(): void
+    {
+        $site = $this->aSite();
+
+        $this->assertSame(0, $site->getDefenseUnits()->getAmount(), 'A point holds defences, so repair could apply.');
+
+        $relevees = new DefenseRepairService(100)->calculateRepairedDefenses($site->getDefenseUnits());
+
+        $this->assertSame(
+            0,
+            $relevees->getAmount(),
+            'Defences were repaired at a spatial point although none ever stood there.'
+        );
     }
 
     /**

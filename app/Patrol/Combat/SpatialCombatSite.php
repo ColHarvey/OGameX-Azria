@@ -162,11 +162,59 @@ final class SpatialCombatSite extends PlanetService
     public function deductResources(Resources $resources, bool $save_planet = true): void
     {
         if ($resources->sum() > 0) {
-            throw new RuntimeException(
-                'A spatial point was asked to pay ' . $resources->sum() . ' units of resources: '
-                . 'nothing is stored in free space, so this debit has no owner.'
-            );
+            $this->refuseWrite('pay ' . $resources->sum() . ' units of resources');
         }
+    }
+
+    /**
+     * ------------------------------------------------------------------------------------
+     * CE SITE EST UN ADAPTATEUR DE LECTURE, ET IL LE RESTE
+     *
+     * Toute la surface d'ecriture de `PlanetService` est refusee ici. Ce n'est pas une
+     * precaution de style : sans ces refus, un chemin qui croirait tenir une planete
+     * ecrirait dans un corps **fictif** — au mieux sans effet, au pire sur la ligne d'une
+     * vraie planete si un jour ce site en empruntait une.
+     *
+     * Les refus sont bruyants. Un chemin qui ecrit sur le vide est une faute de conception,
+     * pas un cas a absorber : le silence la rendrait invisible jusqu'a ce qu'un joueur perde
+     * des unites que personne n'a debitees.
+     *
+     * **La reparation des defenses ne peut pas s'appliquer ici**, et cela ne tient pas a un
+     * refus mais a la forme du jeu : `DefenseRepairService::calculateRepairedDefenses()` ne
+     * recoit que les defenses **detruites**, et un point libre n'en porte aucune. Il n'y a
+     * donc rien a relever, quelle que soit la valeur du taux.
+     */
+    private function refuseWrite(string $geste): never
+    {
+        throw new RuntimeException(
+            'A spatial point was asked to ' . $geste . ': free space is read-only, and writing to a '
+            . 'body that does not exist would either vanish or land on a real planet.'
+        );
+    }
+
+    public function save(): void
+    {
+        $this->refuseWrite('save itself');
+    }
+
+    public function addResources(Resources $resources, bool $save_planet = true): void
+    {
+        $this->refuseWrite('receive ' . $resources->sum() . ' units of resources');
+    }
+
+    public function addResourcesAtomic(Resources $resources): void
+    {
+        $this->refuseWrite('receive ' . $resources->sum() . ' units of resources atomically');
+    }
+
+    public function addUnit(string $machine_name, int $amount, bool $save_planet = true): void
+    {
+        $this->refuseWrite('receive ' . $amount . ' × ' . $machine_name);
+    }
+
+    public function removeUnits(UnitCollection $units, bool $save_planet): void
+    {
+        $this->refuseWrite('lose ' . $units->getAmount() . ' units from the ground');
     }
 
     /**
