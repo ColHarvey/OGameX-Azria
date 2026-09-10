@@ -930,6 +930,9 @@ mod tests {
                 shield_points: shield,
                 hull_plating: hull,
                 rapidfire: HashMap::new(),
+                // Undamaged: every unit starts at `hull_plating`. `#[serde(default)]` covers the
+                // wire format, but a literal initializer has to name every field.
+                initial_hulls: Vec::new(),
             },
         )
     }

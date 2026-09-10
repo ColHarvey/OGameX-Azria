@@ -11,6 +11,7 @@ use OGame\Combat\Support\FrozenFact;
 use OGame\Combat\Support\ResourceBoundary;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
+use OGame\Hull\DamagedHulls;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\CombatInstance;
 use OGame\Models\Planet;
@@ -66,7 +67,7 @@ use RuntimeException;
  */
 final class OpeningStateRecorder
 {
-    public const int VERSION = 6;
+    public const int VERSION = 7;
 
     public function __construct(
         private CausalEventReader $reader = new CausalEventReader(),
@@ -113,6 +114,11 @@ final class OpeningStateRecorder
                 'deuterium' => ResourceBoundary::wholeUnitsOfLivingStock($ressources->deuterium->get(), 'deuterium', 'etat_d_ouverture')->units,
             ],
             'units' => DefenderFleet::fromPlanet($corps)->units->toArray(),
+            // **Les coques entamees de la garnison, a l ouverture** (journal §118). Sans elles, la
+            // garnison photographiee serait un effectif de l ouverture portant des degats lus a la
+            // cloture — et une flotte abimee qui atterrit pendant le ralliement ferait porter au
+            // corps plus d unites abimees que la photographie n en compte.
+            'damaged_hulls' => $corps->damagedHulls()->toStorage(),
             // Les antimissiles ne se battent pas dans la garnison, mais une salve admissible les consomme :
             // la fermeture projette chaque salve sur la photographie, et il lui faut ceux de l'ouverture.
             'interceptors' => $corps->getObjectAmount('anti_ballistic_missile'),
@@ -238,6 +244,19 @@ final class OpeningStateRecorder
         }
 
         return FrozenFact::int($document, 'interceptors');
+    }
+
+    /**
+     * Les coques entamees que la garnison portait a l ouverture.
+     *
+     * **L absence est tolerée ici, contrairement aux autres faits**, et pour la meme raison que le
+     * schema 4 du codec : un combat ouvert avant que les degats existent n en portait aucun, et
+     * « rien d abime » est la valeur juste, pas un repli sur le monde vivant. Retomber sur les
+     * degats **courants** du corps serait la faute — ils auraient pu changer depuis l ouverture.
+     */
+    public static function openingDamagedHullsOf(CombatInstance $combat): DamagedHulls
+    {
+        return DamagedHulls::fromStorage(self::documentOf($combat)['damaged_hulls'] ?? null);
     }
 
     /**

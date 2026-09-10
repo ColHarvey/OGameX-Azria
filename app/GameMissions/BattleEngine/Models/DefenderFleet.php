@@ -63,10 +63,23 @@ class DefenderFleet
      * prise apres l'ouverture — ou manquer ceux qu'une file admissible a produits mais que le monde
      * n'a pas encore appliques.
      */
-    public static function fromPhotographedGarrison(PlanetService $planet, UnitCollection $units): self
+    public static function fromPhotographedGarrison(PlanetService $planet, UnitCollection $units, DamagedHulls|null $damagedHulls = null): self
     {
         $defender = self::fromPlanet($planet);
         $defender->units = $units;
+
+        // **Les degats de l ouverture, jamais ceux du moment.**
+        //
+        // `fromPlanet()` vient de poser les degats **courants** du corps, ce qui est juste sur le
+        // chemin instantane et faux ici : cet effectif est celui de l ouverture, et une flotte
+        // abimee qui atterrit pendant le ralliement lui ferait porter plus d unites abimees qu il
+        // n en compte — le moteur le refuserait, a raison.
+        //
+        // `null` laisse ce que `fromPlanet()` a pose : c est le comportement d un appelant qui n a
+        // pas de photographie, et d un combat ouvert sous une version anterieure.
+        if ($damagedHulls !== null) {
+            $defender->damagedHulls = $damagedHulls;
+        }
 
         return $defender;
     }
@@ -89,6 +102,14 @@ class DefenderFleet
         $defender->fleetMissionId = 0; // 0 indicates stationary planet forces
         $defender->ownerId = $player->getId();
         $defender->fleetMission = null;
+
+        // **La garnison entre au combat dans l etat ou la derniere bataille l a laissee.**
+        //
+        // Sans cette ligne, un corps dont la flotte stationnaire est a moitie detruite la verrait
+        // renaitre intacte au combat suivant — et le defaut serait **invisible** : les effectifs
+        // seraient justes, seule la resistance serait fausse. C est le pendant exact de ce que
+        // `AttackerFleet` recoit du cote attaquant.
+        $defender->damagedHulls = $planet->damagedHulls();
 
         return $defender;
     }

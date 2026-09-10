@@ -104,9 +104,18 @@ final class CombatRosterReader
         }
 
         // La garnison d'abord : elle est le camp defenseur meme quand personne n'est venu en renfort.
+        //
+        // **Ses coques entamees viennent de l'ouverture**, comme son effectif (journal §118) : les
+        // lire sur le corps a cet instant melangerait un effectif photographie a des degats
+        // courants. Un combat ouvert sous une version anterieure n'en porte aucun, ce qui est la
+        // valeur juste — les degats n'existaient pas alors.
         $defenseurs = [$photographedGarrison === null
             ? DefenderFleet::fromPlanet($cible)
-            : DefenderFleet::fromPhotographedGarrison($cible, $photographedGarrison)];
+            : DefenderFleet::fromPhotographedGarrison(
+                $cible,
+                $photographedGarrison,
+                OpeningStateRecorder::openingDamagedHullsOf($combat)
+            )];
         foreach ($defensives as $id) {
             $defenseurs[] = DefenderFleet::fromFleetMission(
                 $this->missionOf($missions, $id, $combat),

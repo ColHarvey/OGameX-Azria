@@ -4,6 +4,7 @@ namespace OGame\Patrol\Combat;
 
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Hull\DamagedHulls;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
 use OGame\Patrol\Geometry\SpatialPoint;
@@ -113,6 +114,19 @@ final class SpatialCombatSite extends PlanetService
     }
 
     /**
+     * Aucun degat, parce qu il n y a aucune unite a ce point.
+     *
+     * **La surcharge est necessaire, pas decorative** : la version heritee lit
+     * `$this->planet->damaged_hulls`, et ce site n a pas de ligne de planete — la propriete typee
+     * n est jamais initialisee, et PHP leverait une `Error`. Les unites d une patrouille voyagent
+     * sur son segment, pas sur le lieu ; leurs degats aussi.
+     */
+    public function damagedHulls(): DamagedHulls
+    {
+        return DamagedHulls::none();
+    }
+
+    /**
      * Aucun batiment, aucun vaisseau au sol. Le moteur lit ainsi le chantier spatial, qui
      * decide de la part d'epaves : sans chantier, c'est le plancher du jeu qui s'applique.
      */
@@ -215,6 +229,20 @@ final class SpatialCombatSite extends PlanetService
     public function removeUnits(UnitCollection $units, bool $save_planet): void
     {
         $this->refuseWrite('lose ' . $units->getAmount() . ' units from the ground');
+    }
+
+    /**
+     * Un point ne garde aucune coque entamee : il n a pas d unites a lui.
+     *
+     * Le reglement ecrit les degats des survivants de la garnison. Ici la garnison est vide par
+     * construction, donc il n a rien a ecrire — mais s il essayait, il faudrait l entendre plutot
+     * que de laisser une ecriture disparaitre dans le vide.
+     */
+    public function writeDamagedHulls(DamagedHulls $degats, bool $save_planet = true): void
+    {
+        if (!$degats->isEmpty()) {
+            $this->refuseWrite('record damaged hulls for units it does not hold');
+        }
     }
 
     /**
