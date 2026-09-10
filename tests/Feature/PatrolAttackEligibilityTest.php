@@ -140,7 +140,7 @@ class PatrolAttackEligibilityTest extends AccountTestCase
         $cible = $this->unePatrouille($this->unEtranger());
         $this->unContact($cible, 1000);
 
-        $this->attendreLeRefus('t_ingame.patrol.refusal_disabled', $cible);
+        $this->attendreLeRefus('disabled', $cible);
     }
 
     public function testOnNAttaquePasSaProprePatrouille(): void
@@ -149,7 +149,7 @@ class PatrolAttackEligibilityTest extends AccountTestCase
         $cible = $this->unePatrouille($this->currentUserId);
         $this->unContact($cible, 1000);
 
-        $this->attendreLeRefus('t_ingame.patrol.refusal_target_is_your_own_patrol', $cible);
+        $this->attendreLeRefus('target_is_your_own_patrol', $cible);
     }
 
     public function testSansContactOnNeVisePasUnePatrouille(): void
@@ -157,7 +157,7 @@ class PatrolAttackEligibilityTest extends AccountTestCase
         $this->armer();
         $cible = $this->unePatrouille($this->unEtranger());
 
-        $this->attendreLeRefus('t_ingame.patrol.refusal_target_not_detected', $cible);
+        $this->attendreLeRefus('target_not_detected', $cible);
     }
 
     /**
@@ -170,7 +170,7 @@ class PatrolAttackEligibilityTest extends AccountTestCase
         $cible = $this->unePatrouille($this->unEtranger());
         $this->unContact($cible, 1000, 1500);
 
-        $this->attendreLeRefus('t_ingame.patrol.refusal_target_not_detected', $cible);
+        $this->attendreLeRefus('target_not_detected', $cible);
     }
 
     /**
@@ -182,7 +182,7 @@ class PatrolAttackEligibilityTest extends AccountTestCase
         $cible = $this->unePatrouille($this->unEtranger());
         $this->unContact($cible, 9000);
 
-        $this->attendreLeRefus('t_ingame.patrol.refusal_target_not_detected', $cible);
+        $this->attendreLeRefus('target_not_detected', $cible);
     }
 
     public function testUnProprietaireEnVacancesEstProtege(): void
@@ -195,7 +195,7 @@ class PatrolAttackEligibilityTest extends AccountTestCase
         DB::table('users')->where('id', $etranger)->update(['vacation_mode' => 1]);
 
         try {
-            $this->attendreLeRefus('t_ingame.patrol.refusal_target_owner_on_vacation', $cible);
+            $this->attendreLeRefus('target_owner_on_vacation', $cible);
         } finally {
             DB::table('users')->where('id', $etranger)->update(['vacation_mode' => 0]);
         }
@@ -213,7 +213,7 @@ class PatrolAttackEligibilityTest extends AccountTestCase
         $cible = $this->unePatrouille((int)$systeme);
         $this->unContact($cible, 1000);
 
-        $this->attendreLeRefus('t_ingame.patrol.refusal_target_is_protected', $cible);
+        $this->attendreLeRefus('target_is_protected', $cible);
     }
 
     /**
@@ -230,7 +230,7 @@ class PatrolAttackEligibilityTest extends AccountTestCase
         DB::table('users')->where('id', $etranger)->update(['vacation_mode' => 1]);
 
         try {
-            $this->attendreLeRefus('t_ingame.patrol.refusal_target_not_detected', $cible);
+            $this->attendreLeRefus('target_not_detected', $cible);
         } finally {
             DB::table('users')->where('id', $etranger)->update(['vacation_mode' => 0]);
         }
@@ -245,7 +245,7 @@ class PatrolAttackEligibilityTest extends AccountTestCase
         $cible = $this->unePatrouille($this->unEtranger(), PatrolState::EnRoute);
         $this->unContact($cible, 1000);
 
-        $this->attendreLeRefus('t_ingame.patrol.refusal_target_not_parked', $cible);
+        $this->attendreLeRefus('target_not_parked', $cible);
     }
 
     private function attendreLeRefus(string $raison, Patrol $cible): void

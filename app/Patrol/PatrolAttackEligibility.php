@@ -52,29 +52,29 @@ final class PatrolAttackEligibility
     public function frozenTargetFor(int $attackerId, Patrol $target, int $now): FrozenPatrolTarget
     {
         if (!$this->settings->patrolsEnabled()) {
-            throw new PatrolOrderRefused('t_ingame.patrol.refusal_disabled');
+            throw new PatrolOrderRefused('disabled');
         }
 
         if ((int)$target->user_id === $attackerId) {
-            throw new PatrolOrderRefused('t_ingame.patrol.refusal_target_is_your_own_patrol');
+            throw new PatrolOrderRefused('target_is_your_own_patrol');
         }
 
         if ($this->watch->acquiredTierFor($attackerId, (int)$target->id, $now) === null) {
-            throw new PatrolOrderRefused('t_ingame.patrol.refusal_target_not_detected');
+            throw new PatrolOrderRefused('target_not_detected');
         }
 
         $proprietaire = User::query()->find((int)$target->user_id);
 
         if ($proprietaire === null) {
-            throw new PatrolOrderRefused('t_ingame.patrol.refusal_target_not_detected');
+            throw new PatrolOrderRefused('target_not_detected');
         }
 
         if ($proprietaire->username === User::SYSTEM_ACCOUNT_USERNAME) {
-            throw new PatrolOrderRefused('t_ingame.patrol.refusal_target_is_protected');
+            throw new PatrolOrderRefused('target_is_protected');
         }
 
         if ((bool)$proprietaire->vacation_mode) {
-            throw new PatrolOrderRefused('t_ingame.patrol.refusal_target_owner_on_vacation');
+            throw new PatrolOrderRefused('target_owner_on_vacation');
         }
 
         // En dernier, parce que c est le seul refus qui peut changer d une seconde a l autre : la

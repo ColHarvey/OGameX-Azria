@@ -292,7 +292,7 @@ class PatrolController extends OGameController
             // **Le meme refus que « non detectee »**, et c est voulu : distinguer « ce contact n est
             // pas a toi » de « cette patrouille n existe plus » apprendrait quelque chose sur une
             // cible qu on n a pas le droit de connaitre.
-            return $this->refused('t_ingame.patrol.refusal_target_not_detected', 409);
+            return $this->refused('target_not_detected', 409);
         }
 
         try {

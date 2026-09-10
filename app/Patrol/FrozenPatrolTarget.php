@@ -49,7 +49,7 @@ final class FrozenPatrolTarget
         $point = $patrouille->point();
 
         if (!$patrouille->state->isParked() || $point === null) {
-            throw new PatrolOrderRefused('t_ingame.patrol.refusal_target_not_parked');
+            throw new PatrolOrderRefused('target_not_parked');
         }
 
         return new self(

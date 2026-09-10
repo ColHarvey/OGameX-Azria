@@ -59,7 +59,7 @@ final class SpatialAttackOrder
         int $now,
     ): FleetMission {
         if (!$this->settings->patrolsEnabled()) {
-            throw new PatrolOrderRefused('t_ingame.patrol.refusal_disabled');
+            throw new PatrolOrderRefused('disabled');
         }
 
         if ($units->getAmount() === 0) {
@@ -70,6 +70,16 @@ final class SpatialAttackOrder
 
         if ($joueur === null) {
             throw new PatrolOrderRefused('no_owner');
+        }
+
+        // **La regle des unites immobiles, ecrite une fois et appliquee ici aussi.** Un satellite
+        // solaire, un foreur ou une defense n ont pas de vitesse : la duree du vol serait infinie.
+        // C etait le seul depart du chantier qui ne passait pas par ce garde, et rien ne l arretait
+        // sinon une division par zero au fond du calcul de duree — une protection accidentelle, qui
+        // tomberait le jour ou une defense recevrait une vitesse, et qui rendait une erreur 500 la
+        // ou le joueur attend un refus lisible.
+        if (PatrolOrders::hasImmobileUnit($joueur, $units)) {
+            throw new PatrolOrderRefused('immobile_unit');
         }
 
         // **Le devis d une patrouille, reutilise tel quel.** Aller frapper un point de l espace coute
