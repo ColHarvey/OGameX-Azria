@@ -24,6 +24,7 @@ use OGame\Patrol\Combat\SpatialFieldOpening;
 use OGame\Patrol\Geometry\SpatialPoint;
 use OGame\Services\ObjectService;
 use OGame\Services\SettingsService;
+use RuntimeException;
 use Tests\AccountTestCase;
 
 /**
@@ -101,6 +102,91 @@ class SpatialFieldResumeTest extends AccountTestCase
         }
 
         return $unites;
+    }
+
+    /**
+     * Le montage : le moteur d ouverture et le contexte de butin qui va avec.
+     *
+     * La reprise a besoin du second — c est lui qui porte la photographie des flottes attaquantes
+     * a l ouverture, et c est de la, jamais du monde vivant, que leurs identites se reconstruisent.
+     *
+     * @return array{0: SpatialFieldOpening, 1: LootContext}
+     */
+    private function montage(int $graine): array
+    {
+        $general = new FrozenCombatant($this->currentUserId, 5, 3, 2, 2, CharacterClass::GENERAL->value);
+        $defenseur = new FrozenCombatant($this->currentUserId, 4, 3, 2, 0, null);
+
+        $attaquant = new AttackerFleet();
+        $attaquant->units = self::effectif(['light_fighter' => 30]);
+        $attaquant->player = $general;
+        $attaquant->fleetMissionId = 101;
+        $attaquant->ownerId = $general->getId();
+        $attaquant->cargoResources = new Resources(0, 0, 0, 0);
+        $attaquant->isInitiator = true;
+        $attaquant->fleetMission = null;
+
+        $site = new SpatialCombatSite(
+            resolve(PlayerServiceFactory::class),
+            resolve(SettingsService::class),
+            $defenseur,
+            new SpatialPoint(100, 100),
+            1,
+            1,
+        );
+
+        $flotteDefenseuse = new DefenderFleet();
+        $flotteDefenseuse->units = self::effectif(['deathstar' => 1, 'light_fighter' => 2]);
+        $flotteDefenseuse->player = $defenseur;
+        $flotteDefenseuse->fleetMissionId = 202;
+        $flotteDefenseuse->ownerId = $defenseur->getId();
+        $flotteDefenseuse->fleetMission = null;
+
+        $contexte = LootContext::fromObservedFacts(
+            new LootPolicy(false, new AttackerCargoShare(0, 0)),
+            [AttackerFleetSnapshot::of($attaquant, ActorKind::Player, false, 0)],
+            ['body_key' => CombatParticipantKey::UNIDENTIFIED_BODY, 'owner_id' => $defenseur->getId()],
+            1_700_000_000,
+            LootAllocatorRegistry::default()->currentVersion(),
+        );
+
+        $ouverture = new SpatialFieldOpening(
+            [$attaquant],
+            $site,
+            [DefenderFleet::fromPlanet($site), $flotteDefenseuse],
+            resolve(SettingsService::class),
+            $contexte,
+        );
+
+        return [$ouverture->withDraws(new SeededDraws($graine)), $contexte];
+    }
+
+    /**
+     * Les memes faits que le lecteur rapporte, pris sur un champ vivant.
+     *
+     * Les mesurer par le meme jeu de champs des deux cotes est ce qui rend la comparaison
+     * significative : un releve plus riche d un cote laisserait passer ce qu il ne regarde pas.
+     *
+     * @return array<string, mixed>
+     */
+    private static function relevesDe(BattleFieldState $champ): array
+    {
+        $bataille = $champ->battleDraws;
+        $rounds = $champ->roundDraws;
+
+        if (!$bataille instanceof SeededDraws || !$rounds instanceof SeededDraws) {
+            throw new RuntimeException('Une bande sans graine ne se compare pas.');
+        }
+
+        return [
+            'rounds_joues' => $champ->roundsPlayed,
+            'unites_defenseuses' => count($champ->defenderUnits),
+            'unites_attaquantes' => count($champ->attackerUnits),
+            'etoiles_de_la_mort' => self::etoilesDe($champ),
+            'mot_bataille' => $bataille->rawState(),
+            'mot_rounds' => $rounds->rawState(),
+            'tirages_rounds' => $rounds->journal()->rawCount(),
+        ];
     }
 
     /**
@@ -224,7 +310,7 @@ class SpatialFieldResumeTest extends AccountTestCase
         $document = BattleFieldStateCodec::toStorage($champ);
         $fichier = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'champ-spatial-' . getmypid() . '.json';
 
-        file_put_contents($fichier, json_encode($document, JSON_THROW_ON_ERROR));
+        file_put_contents($fichier, json_encode(['champ' => $document], JSON_THROW_ON_ERROR));
 
         $lecteur = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'Support' . DIRECTORY_SEPARATOR . 'relire-champ-spatial.php';
 
@@ -271,5 +357,83 @@ class SpatialFieldResumeTest extends AccountTestCase
             'The round band did not resume where it stopped.'
         );
         $this->assertSame($graine, $releve['bande_rounds']['graine'], 'The round band lost the seed it was born from.');
+    }
+
+    /**
+     * **Une bataille interrompue puis reprise joue le meme round qu une bataille d une traite.**
+     *
+     * ## Ce que cet essai ajoute au precedent
+     *
+     * Le precedent etablit que l effet de Hamill et la position des bandes traversent la
+     * persistance. Il ne dit rien de la **suite** : un document fidele peut ne pas suffire a
+     * continuer, et c est justement ce que la lecture du moteur a montre — la boucle des rounds
+     * demande aussi les flottes.
+     *
+     * ## Deux chemins differents, un seul etat attendu
+     *
+     * La reference est menee par le moteur **qui a ouvert**, d une traite. L autre est interrompue,
+     * persistee, relue **ailleurs**, et sa suite est jouee par une reprise qui reconstruit les
+     * identites depuis les faits geles. Comparer une reprise a elle-meme ne dirait rien ; ce sont
+     * deux chemins qui doivent tomber sur le meme etat.
+     */
+    public function testAResumedFieldPlaysTheSameRoundAsAnUninterruptedRun(): void
+    {
+        $graine = 12345;
+
+        // --- La reference : ouvrir et jouer, sans jamais rien ecrire ---
+        [$ouvertureA] = $this->montage($graine);
+        $champA = $ouvertureA->initialField();
+        $ouvertureA->play($champA, 1);
+        $reference = self::relevesDe($champA);
+
+        $this->assertSame(1, $reference['rounds_joues'], 'The reference did not play its round.');
+        $this->assertGreaterThan(0, $reference['tirages_rounds'], 'The round consumed no draw: the comparison would be empty.');
+
+        // --- L interrompue : ouvrir, persister, reprendre ailleurs, jouer la-bas ---
+        [$ouvertureB, $contexteB] = $this->montage($graine);
+        $champB = $ouvertureB->initialField();
+
+        $fichier = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'suite-spatiale-' . getmypid() . '.json';
+        file_put_contents($fichier, json_encode([
+            'champ' => BattleFieldStateCodec::toStorage($champB),
+            'butin' => $contexteB->toFrozenFacts(),
+            'proprietaire' => $this->currentUserId,
+            'galaxie' => 1,
+            'systeme' => 1,
+        ], JSON_THROW_ON_ERROR));
+
+        $lecteur = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'Support' . DIRECTORY_SEPARATOR . 'relire-champ-spatial.php';
+
+        $sortie = [];
+        $code = 0;
+        exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($lecteur) . ' ' . escapeshellarg($fichier) . ' 1 2>&1', $sortie, $code);
+
+        @unlink($fichier);
+
+        $this->assertSame(0, $code, 'The second process failed: ' . implode("
+", $sortie));
+
+        // **Le releve se decode, ou l essai dit ce que le processus a repondu.** Sans cela, un
+        // second processus qui echoue fait rougir sur une erreur d encodage, et le message ne dit
+        // rien de la cause — une mutation l a montre.
+        $releve = json_decode(implode("
+", $sortie), true);
+
+        $this->assertIsArray(
+            $releve,
+            'The second process did not report a document. What it said:' . "
+" . implode("
+", $sortie)
+        );
+        $this->assertNotSame(getmypid(), $releve['processus'], 'The reader ran inside this very process.');
+
+        // --- Champ par champ : les deux chemins doivent dire la meme chose ---
+        foreach ($reference as $champ => $attendu) {
+            $this->assertSame(
+                $attendu,
+                $releve[$champ] ?? null,
+                'After one round, « ' . $champ . ' » differs between an uninterrupted battle and a resumed one.'
+            );
+        }
     }
 }

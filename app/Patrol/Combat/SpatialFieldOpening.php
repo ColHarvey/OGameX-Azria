@@ -105,4 +105,18 @@ final class SpatialFieldOpening extends PhpBattleEngine
 
         return $this->openTheField($resultat);
     }
+
+    /**
+     * Joue au plus ce nombre de rounds **sur le moteur qui vient d ouvrir**.
+     *
+     * Elle n existe pas pour la production — c est l avanceur qui jouera, depuis un etat relu.
+     * Elle existe pour qu une bataille menee d une traite serve de **reference independante** a
+     * une bataille interrompue puis reprise : comparer une reprise a elle-meme ne dirait rien.
+     *
+     * @return array<int, mixed> Les rounds joues par cet appel.
+     */
+    public function play(BattleFieldState $etat, int $rounds): array
+    {
+        return $this->playRounds($etat, $rounds);
+    }
 }
