@@ -676,6 +676,131 @@ class GalaxyTacticalMapTest extends UnitTestCase
     }
 
     /**
+     * **Chaque image que le module nomme existe sur le disque.**
+     *
+     * Une icone manquante ne casse rien : le navigateur rend un cadre vide, sans erreur, sans ligne
+     * de journal. C est le genre de defaut qui survit a toute la chaine et se decouvre en jeu — la
+     * croix de deplacement posee comme icone d etat a ete trouvee ainsi, par Keven, au premier
+     * controle navigateur.
+     *
+     * Le temoin lit les noms **dans le module**, il n en tient pas de liste : une liste ecrite a la
+     * main serait a jour le jour ou on l ecrit, et fausse la semaine d apres.
+     */
+    public function testEveryIconTheMapNamesExistsOnDisk(): void
+    {
+        $module = $this->module();
+
+        if (preg_match_all("#'([a-z0-9-]+\\.svg)'#i", $module, $trouvees) === false) {
+            $this->fail('Could not read the icon names out of the map module.');
+        }
+
+        $noms = array_values(array_unique($trouvees[1]));
+
+        $this->assertGreaterThan(
+            20,
+            count($noms),
+            'The module names almost no icon: the witness is reading the wrong thing.'
+        );
+
+        $absentes = [];
+
+        foreach ($noms as $nom) {
+            if (!is_file(public_path('img/galaxy-tactical/' . $nom))) {
+                $absentes[] = $nom;
+            }
+        }
+
+        $this->assertSame(
+            [],
+            $absentes,
+            'The map names icons that do not exist: the player sees empty frames. ' . implode(', ', $absentes)
+        );
+    }
+
+    /**
+     * **Chaque mot que le module affiche existe dans les deux langues.**
+     *
+     * `__('t_ingame.x.y')` ne signale jamais une clef absente : il **rend la clef elle-meme**. Un
+     * joueur francais lirait donc `t_ingame.galaxy.tactical_patrol_land` sur un bouton, ou — pire,
+     * parce que cela passe pour du texte — le repli anglais code en dur dans le module.
+     *
+     * Deux sens, et les deux comptent :
+     *
+     * 1. toute clef que le module **lit** (`locaFiche('x')`) est publiee par la vue — sinon le repli
+     *    anglais s affiche a tout le monde, sans erreur ;
+     * 2. toute clef que la vue **publie** existe en francais **et** en anglais.
+     *
+     * Les clefs a point (`labels.annuler`) viennent d un sous-objet et sortent du premier sens ; le
+     * second les couvre par la vue.
+     *
+     * **Le temoin resout les traductions par le tableau, jamais par un motif.** Un premier jet
+     * cherchait `'clef' =>` et rendait quatorze faux positifs : le fichier anglais aligne ses fleches
+     * avec des espaces. Chercher une forme de texte la ou un tableau existe est une faute, et elle a
+     * failli me faire « corriger » quatorze traductions qui allaient tres bien.
+     */
+    public function testEveryWordTheMapShowsExistsInBothLanguages(): void
+    {
+        $vue = $this->vue();
+        $module = $this->module();
+
+        // Ce que la vue publie : la clef du navigateur, et la clef de langue qu elle resout.
+        if (preg_match_all("#'([A-Za-z0-9_]+)' => __\('t_ingame\.([a-z0-9_]+)\.([a-z0-9_]+)'\)#", $vue, $publiees) === false) {
+            $this->fail('Could not read the published label table out of the galaxy view.');
+        }
+
+        $table = [];
+
+        foreach ($publiees[1] as $rang => $clefJs) {
+            $table[$clefJs] = [$publiees[2][$rang], $publiees[3][$rang]];
+        }
+
+        $this->assertGreaterThan(
+            50,
+            count($table),
+            'The view publishes almost no label: the witness is reading the wrong thing.'
+        );
+
+        // 1. Ce que le module lit doit etre publie.
+        preg_match_all("#locaFiche\('([A-Za-z0-9_.]+)'#", $module, $lues);
+        $nonPubliees = [];
+
+        foreach (array_unique($lues[1]) as $clef) {
+            if (str_contains($clef, '.')) {
+                continue;
+            }
+
+            if (!isset($table[$clef])) {
+                $nonPubliees[] = $clef;
+            }
+        }
+
+        $this->assertSame(
+            [],
+            $nonPubliees,
+            'The map reads labels the view never publishes: every player sees the hard-coded English fallback. ' . implode(', ', $nonPubliees)
+        );
+
+        // 2. Ce que la vue publie doit exister dans les deux langues.
+        $manquantes = [];
+
+        foreach (['fr', 'en'] as $langue) {
+            $lignes = require resource_path('lang/' . $langue . '/t_ingame.php');
+
+            foreach ($table as $clefJs => [$section, $clefLang]) {
+                if (!isset($lignes[$section][$clefLang])) {
+                    $manquantes[] = $langue . ':' . $section . '.' . $clefLang;
+                }
+            }
+        }
+
+        $this->assertSame(
+            [],
+            $manquantes,
+            'Labels the map shows have no translation: the player reads the key itself. ' . implode(', ', $manquantes)
+        );
+    }
+
+    /**
      * **Le marqueur d une patrouille montre son vaisseau, sans pastille — et le marqueur de
      * destination garde son anneau.**
      *
