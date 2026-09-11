@@ -77957,6 +77957,9 @@ window.playOGameXWormhole = function (canvas) {
         });
 
         carte.addEventListener('drop', function (evenement) {
+            /* Avant les gardes : un depot refuse doit rendre la fiche comme un depot accepte. */
+            carte.classList.remove('gtDragging');
+
             if (!carte.gtChoix || (evenement.target.closest && evenement.target.closest('.gtCard'))) {
                 return;
             }
@@ -77968,6 +77971,17 @@ window.playOGameXWormhole = function (canvas) {
             choisirLaDestination(carte, cible
                 ? destinationDuCorps(carte, cible, corpsClique(evenement.target))
                 : destinationDuClic(carte, evenement));
+        });
+
+        /*
+         * **La fin du geste rend la fiche, quelle qu'elle soit** : depot reussi, depot refuse,
+         * echappement, relachement hors de la fenetre. `dragend` part toujours de la source et il
+         * remonte — l'ecouter ici couvre donc tous les marqueurs, y compris ceux qu'un
+         * rafraichissement a recrees pendant le vol. Un ecouteur pose sur chaque marqueur serait
+         * perdu avec lui, et la carte resterait effacee.
+         */
+        carte.addEventListener('dragend', function () {
+            carte.classList.remove('gtDragging');
         });
 
         carte.addEventListener('keydown', function (evenement) {
@@ -79063,6 +79077,13 @@ window.playOGameXWormhole = function (canvas) {
 
                 choisirLaPatrouille(carte, p, true);
                 commencerUnDeplacement(carte, fiche(carte), p);
+
+                /*
+                 * La fiche vient de s'ouvrir sur le marqueur et recouvre une partie du systeme.
+                 * Elle s'efface le temps du geste : la feuille lui retire le pointeur et presque
+                 * toute son opacite, donc la destination cachee redevient visible et atteignable.
+                 */
+                carte.classList.add('gtDragging');
             });
 
             couche.appendChild(b);

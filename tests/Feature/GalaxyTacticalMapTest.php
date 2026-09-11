@@ -676,6 +676,70 @@ class GalaxyTacticalMapTest extends UnitTestCase
     }
 
     /**
+     * **La fiche laisse passer le pointeur pendant qu on vise, sinon elle rend une zone du systeme
+     * inatteignable.**
+     *
+     * `dragover` et `drop` ignorent volontairement tout evenement qui tombe sur `.gtCard` — relacher
+     * sur le panneau ne doit pas designer une destination. Mais le panneau fait 320 px et suit son
+     * marqueur : la portion de carte qu il recouvrait ne pouvait recevoir aucun depot. Keven l a
+     * constate au controle navigateur du 11 septembre 2026 ; le geste marchait, mais pas partout.
+     *
+     * Les deux declarations vont ensemble et aucune ne suffit seule : `pointer-events: none` rend le
+     * depot possible, l opacite le rend **vise**. Deposer a l aveugle ne vaut rien.
+     *
+     * La specificite est acquise par construction — `#galaxyTactical.gtDragging .gtCard` porte une
+     * classe de plus que `#galaxyTactical .gtCard`, meme identifiant — mais l essai exige quand meme
+     * que la regle de base existe encore : si elle disparaissait, celle-ci n aurait plus rien a
+     * battre et le constat serait faux pour une autre raison.
+     *
+     * Ce que ce temoin ne prouve pas : l effet a l ecran. La bascule de la classe est prouvee dans
+     * `tests/js/patrol-drag.test.js`, sur le module reel dans un DOM simule.
+     */
+    public function testTheCardLetsThePointerThroughWhileAiming(): void
+    {
+        $feuille = $this->feuille();
+
+        $this->assertMatchesRegularExpression(
+            '/#galaxyTactical \.gtCard \{/',
+            $feuille,
+            'The base card rule is gone: the drag rule has nothing left to outweigh.'
+        );
+
+        if (preg_match('/#galaxyTactical\.gtDragging \.gtCard \{([^}]*)\}/', $feuille, $bloc) !== 1) {
+            $this->fail('No rule makes the card transparent while a patrol is being dragged.');
+        }
+
+        $this->assertMatchesRegularExpression(
+            '/pointer-events:\s*none/',
+            $bloc[1],
+            'The card still catches the pointer while dragging: the map under it cannot receive the drop.'
+        );
+
+        if (preg_match('/opacity:\s*([0-9.]+)/', $bloc[1], $opacite) !== 1) {
+            $this->fail('The card stays opaque while dragging: the destination under it cannot be aimed at.');
+        }
+
+        $this->assertLessThan(
+            0.5,
+            (float)$opacite[1],
+            'The card is barely faded while dragging: what it covers is still unreadable.'
+        );
+
+        // Le module doit poser exactement cette classe — un nom qui derive laisserait la regle morte.
+        $this->assertStringContainsString(
+            "classList.add('gtDragging')",
+            $this->module(),
+            'Nothing in the module ever puts the map into the dragging state.'
+        );
+
+        $this->assertStringContainsString(
+            "classList.remove('gtDragging')",
+            $this->module(),
+            'Nothing in the module ever takes the map out of the dragging state: the card would stay faded for good.'
+        );
+    }
+
+    /**
      * **Un seul soleil, au centre des orbites, et des sprites entiers.** Les deux defauts de la
      * capture de Keven.
      *

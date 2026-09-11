@@ -666,6 +666,36 @@
     display: none;
 }
 
+/*
+ * ## La fiche s'efface pendant qu'on vise
+ *
+ * Le panneau fait 320 px, il suit son marqueur, et il **intercepte le pointeur** : `dragover` et
+ * `drop` ignorent volontairement tout ce qui tombe sur `.gtCard`, donc la portion de systeme qu'il
+ * recouvrait etait inatteignable au glisser. Keven l'a constate au controle navigateur.
+ *
+ * `pointer-events: none` suffit a rendre le depot possible — le navigateur vise alors la carte
+ * dessous — mais viser a l'aveugle ne vaut rien : l'opacite est ce qui rend la destination visible.
+ * Les deux vont ensemble.
+ *
+ * **Pendant le glisser seulement.** `gtChoosingDestination` dure tout l'ordre et le joueur a besoin
+ * du formulaire : ce serait la mauvaise classe. Celle-ci naît a `dragstart` et meurt a `dragend`.
+ */
+#galaxyTactical .gtCard {
+    transition: opacity 120ms ease-out;
+}
+
+#galaxyTactical.gtDragging .gtCard {
+    opacity: 0.15;
+    pointer-events: none;
+}
+
+/* Le mouvement est un confort, jamais une condition : sans lui la bascule reste nette. */
+@media (prefers-reduced-motion: reduce) {
+    #galaxyTactical .gtCard {
+        transition: none;
+    }
+}
+
 #galaxyTactical .gtCardHead {
     display: flex;
     align-items: center;
