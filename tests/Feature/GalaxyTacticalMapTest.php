@@ -676,6 +676,62 @@ class GalaxyTacticalMapTest extends UnitTestCase
     }
 
     /**
+     * **Le marqueur d une patrouille montre son vaisseau, sans pastille — et le marqueur de
+     * destination garde son anneau.**
+     *
+     * Les deux partagent la classe `patrol-marker` : le cadre rond y est declare une seule fois, et
+     * le marqueur de destination (`patrol-marker patrol-destination`) s en sert comme **dessin** —
+     * son anneau en tirets qui pulse n existe que par cette bordure. Retirer le cadre de la classe
+     * commune pour satisfaire la demande de Keven (« je vois un rond dessus, j ai pas envie de voir
+     * ca ») aurait donc efface l anneau de la destination sans un mot, et rien ne l aurait dit.
+     *
+     * Ce que ce temoin exige, dans l ordre de ce qui peut se casser :
+     *
+     * 1. la pastille part **des marqueurs de patrouille seulement**, par un selecteur a deux classes ;
+     * 2. la classe commune garde bordure et rayon, donc la destination garde son anneau ;
+     * 3. **la cible ne retrecit pas** : le retrait ne touche ni largeur ni hauteur. C est
+     *    l invariant qui compte pour le joueur — un fond transparent se survole encore, une boite de
+     *    18 px au lieu de 34 se rate.
+     */
+    public function testThePatrolMarkerIsItsShipAndTheDestinationKeepsItsRing(): void
+    {
+        $feuille = $this->feuille();
+
+        if (preg_match('/#galaxyTactical \.patrol-marker\.gtPatrolMarker \{([^}]*)\}/', $feuille, $nu) !== 1) {
+            $this->fail('No rule strips the badge from the patrol markers.');
+        }
+
+        $this->assertMatchesRegularExpression('/border-color:\s*transparent/', $nu[1], 'The patrol marker keeps its ring.');
+        $this->assertMatchesRegularExpression('/background:\s*none/', $nu[1], 'The patrol marker keeps its disc.');
+
+        // **La cible ne retrecit pas.** Le retrait est cosmetique, il ne touche pas a la boite.
+        $this->assertDoesNotMatchRegularExpression('/(?:^|[;{\s])width:/', $nu[1], 'Stripping the badge also shrank the grab target.');
+        $this->assertDoesNotMatchRegularExpression('/(?:^|[;{\s])height:/', $nu[1], 'Stripping the badge also shrank the grab target.');
+
+        // La classe commune garde de quoi dessiner l anneau de la destination.
+        if (preg_match('/#galaxyTactical \.patrol-marker \{([^}]*)\}/', $feuille, $commun) !== 1) {
+            $this->fail('The shared marker rule is gone: the destination ring has nothing left to draw with.');
+        }
+
+        $this->assertMatchesRegularExpression('/border:\s*1px/', $commun[1], 'The shared marker rule lost its border: the destination ring is gone.');
+        $this->assertMatchesRegularExpression('/border-radius:\s*50%/', $commun[1], 'The shared marker rule lost its radius: the destination ring is no longer round.');
+        $this->assertMatchesRegularExpression('/width:\s*34px/', $commun[1], 'The marker is no longer 34px: the grab target moved without being asked to.');
+
+        $this->assertMatchesRegularExpression(
+            '/#galaxyTactical \.patrol-destination \{[^}]*border-style:\s*dashed/',
+            $feuille,
+            'The destination marker no longer asks for its dashed ring.'
+        );
+
+        // La selection reste lisible : elle a quitte la bordure pour l icone.
+        $this->assertMatchesRegularExpression(
+            '/#galaxyTactical \.patrol-marker\.gtPatrolMarker\.gtSelected img \{[^}]*drop-shadow/',
+            $feuille,
+            'A selected patrol is no longer distinguishable: the ring is gone and nothing replaced it.'
+        );
+    }
+
+    /**
      * **La fiche laisse passer le pointeur pendant qu on vise, sinon elle rend une zone du systeme
      * inatteignable.**
      *

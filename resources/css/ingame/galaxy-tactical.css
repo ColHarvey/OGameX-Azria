@@ -1160,6 +1160,42 @@
     display: none;
 }
 
+/*
+ * ## Le marqueur d une patrouille est son vaisseau, pas une pastille
+ *
+ * Le cadre — disque sombre et anneau clair de 34 px — servait a trois choses : offrir une cible
+ * confortable au clic et au glisser, marquer la selection en epaississant sa bordure, et detacher
+ * l icone du fond etoile. Keven ne veut voir que la flotte. **Les trois fonctions restent, portees
+ * autrement** : la boite garde ses 34 px, donc la cible ne retrecit pas d un pixel (un fond
+ * transparent participe au test de survol, seul `pointer-events: none` l en retirerait) ; la
+ * selection passe sur l icone elle-meme ; et l icone grandit, puisqu il n y a plus d anneau pour la
+ * cadrer.
+ *
+ * **La regle vise `.patrol-marker.gtPatrolMarker`, jamais `.patrol-marker` seul.** Le marqueur de
+ * destination porte `patrol-marker patrol-destination`, et son anneau en tirets qui pulse **est** son
+ * dessin : retirer la bordure de la classe commune l effacerait sans un mot. Deux classes battent
+ * une, donc l ordre des regles ne decide de rien ici — et la variante selectionnee en porte trois,
+ * pour battre `#galaxyTactical .gtPatrolMarker.gtSelected` qui repose la bordure.
+ */
+#galaxyTactical .patrol-marker.gtPatrolMarker {
+    background: none;
+    border-color: transparent;
+}
+
+#galaxyTactical .patrol-marker.gtPatrolMarker img {
+    width: 24px;
+    height: 24px;
+}
+
+#galaxyTactical .patrol-marker.gtPatrolMarker.gtSelected {
+    border-color: transparent;
+}
+
+/* La selection se lit sur le vaisseau : une lueur, puisqu il n y a plus d anneau a epaissir. */
+#galaxyTactical .patrol-marker.gtPatrolMarker.gtSelected img {
+    filter: drop-shadow(0 0 3px #9bd9e9) drop-shadow(0 0 7px rgba(155, 217, 233, 0.6));
+}
+
 /* La destination proposee : un anneau en tirets qui pulse, decoratif, sans clic. */
 #galaxyTactical .patrol-destination {
     border-style: dashed;
