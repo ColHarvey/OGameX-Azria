@@ -77178,6 +77178,10 @@ window.playOGameXWormhole = function (canvas) {
                     return inactif(raison('destroyed'));
                 }
 
+                if (!patrouillesActives()) {
+                    return inactif(raison('patrolDisabled'));
+                }
+
                 if (!mienne) {
                     return inactif(raison('patrolFromOwn'));
                 }
@@ -77943,6 +77947,25 @@ window.playOGameXWormhole = function (canvas) {
 
             if (bloc) {
                 choisir(carte, bloc, corpsClique(evenement.target));
+
+                return;
+            }
+
+            /*
+             * ## Cliquer le vide compose une patrouille qui part la
+             *
+             * L entree inverse de celle qui existe (demande de Keven, 11 septembre 2026) : au lieu
+             * d ouvrir sa planete, de composer, puis de choisir ou, on **designe l endroit d abord**
+             * et la composition suit. Les deux chemins finissent au meme endroit — devis du serveur,
+             * puis confirmation —, et c est ce qui les rend sûrs tous les deux.
+             *
+             * Rien ne s ouvre si un ordre est deja en cours : le clic appartiendrait alors a cet
+             * ordre, et l ecraser ferait perdre au joueur la flotte qu il vient de composer.
+             */
+            var ouverte = carte.querySelector('.gtCard');
+
+            if ((!ouverte || !ouverte.gtOrdre) && patrouillesActives()) {
+                composerUnePatrouilleVers(carte, destinationDuClic(carte, evenement));
             }
         });
 
@@ -79372,6 +79395,71 @@ window.playOGameXWormhole = function (canvas) {
      * de la page : le serveur refuse (`not_enough_on_planet`) si la planete ne les porte plus, et
      * c'est lui qui a raison — une valeur affichee n'autorise rien.
      */
+    /**
+     * Le chantier des patrouilles est-il arme sur ce serveur ?
+     *
+     * **La carte n offre pas ce que le serveur refusera.** Le drapeau vient de la vue ; absent — une
+     * page servie par un cache anterieur a ce changement —, on suppose **oui**, parce que le serveur
+     * reste le decideur et qu une carte muette serait pire qu un refus lisible.
+     */
+    function patrouillesActives() {
+        return typeof galaxyPatrolsEnabled === 'undefined' ? true : !!galaxyPatrolsEnabled;
+    }
+
+    /**
+     * ## La carte dit ce qu on peut y faire
+     *
+     * Deux gestes, deux lignes, en bas a gauche. Keven l a demande en ces termes : « faut que le
+     * joueur comprenne facilement comment le faire ». Une fonction qu on ne peut pas deviner
+     * n existe pas — et ces deux-la ne s annoncaient nulle part.
+     *
+     * **Elle est transparente au pointeur, et ce n est pas un detail de style** : elle est posee sur
+     * la surface meme ou le joueur doit cliquer pour lancer une patrouille. Sans
+     * `pointer-events: none`, la legende volerait exactement les clics qu elle explique — dans le
+     * coin qu elle occupe, la carte deviendrait morte.
+     *
+     * Elle ne parait que si le chantier est arme : annoncer un geste que le serveur refuse serait
+     * pire que de ne rien dire.
+     */
+    function poserLaLegende(carte) {
+        carte.classList.toggle('gtPatrolsOn', patrouillesActives());
+
+        if (!patrouillesActives()) {
+            return;
+        }
+
+        var bloc = element('div', 'gtHints');
+
+        bloc.setAttribute('role', 'note');
+
+        [
+            ['patrol-patrol.svg', locaFiche('hintCompose', '')],
+            ['patrol-move.svg', locaFiche('hintDrag', '')]
+        ].forEach(function (paire) {
+            if (!paire[1]) {
+                return;
+            }
+
+            var ligne = element('span', 'gtHint');
+            var icone = element('img', '');
+
+            icone.src = '/img/galaxy-tactical/' + paire[0];
+            icone.alt = '';
+            icone.setAttribute('aria-hidden', 'true');
+
+            var texte = element('span', '');
+            texte.textContent = paire[1];
+
+            ligne.appendChild(icone);
+            ligne.appendChild(texte);
+            bloc.appendChild(ligne);
+        });
+
+        if (bloc.childNodes.length > 0) {
+            carte.appendChild(bloc);
+        }
+    }
+
     function vaisseauxDeLaPlanete() {
         return typeof galaxyPatrolShips !== 'undefined' && Array.isArray(galaxyPatrolShips) ? galaxyPatrolShips : [];
     }
@@ -79578,10 +79666,28 @@ window.playOGameXWormhole = function (canvas) {
             });
             panneau.appendChild(reserve.etiquette);
 
-            var suivant = boutonDePanneau(locaFiche('patrolChooseDestination', 'Choisir la destination'), 'deplacer', function () {
-                o.reserve = Math.max(0, Math.floor(Number(reserve.champ.value) || 0));
-                commencerLeChoixDeDestination(carte, f);
-            });
+            /*
+             * **Quand la destination est deja designee, il n y a plus rien a choisir.** Le bouton
+             * demande le devis directement : proposer « choisir la destination » apres un clic qui
+             * l a designee ferait refaire au joueur le geste qu il vient de faire.
+             */
+            var imposee = o.destinationImposee || null;
+
+            var suivant = boutonDePanneau(
+                imposee ? locaFiche('patrolQuote', 'Devis') : locaFiche('patrolChooseDestination', 'Choisir la destination'),
+                imposee ? 'confirmer' : 'deplacer',
+                function () {
+                    o.reserve = Math.max(0, Math.floor(Number(reserve.champ.value) || 0));
+
+                    if (imposee) {
+                        choisirLaDestination(carte, imposee);
+
+                        return;
+                    }
+
+                    commencerLeChoixDeDestination(carte, f);
+                }
+            );
 
             var majDuBoutonSuivant = function () {
                 suivant.disabled = Object.keys(o.composition).length === 0;
@@ -79706,8 +79812,64 @@ window.playOGameXWormhole = function (canvas) {
         choisirLaDestination(carte, null);
     }
 
-    function commencerUnLancement(carte, f, objet) {
-        poserLOrdre(carte, f, { genre: 'launch', planete: objet, etape: 'flotte', modeles: [], composition: {}, reserve: 0, destination: null, devis: null, erreur: null, enCours: false });
+    /**
+     * Ouvre la composition d une patrouille **vers un point deja designe**.
+     *
+     * La fiche n a aucun corps auquel se coller : elle se pose au point clique, comme celle d une
+     * patrouille sans marqueur. Le marqueur de destination est pose tout de suite — le joueur voit
+     * ou sa flotte ira pendant qu il la compose, au lieu de le decouvrir au devis.
+     *
+     * **Le depart reste la planete active.** C est la regle du lancement depuis toujours, et elle ne
+     * change pas ici : ce clic choisit une destination, jamais une origine.
+     */
+    function composerUnePatrouilleVers(carte, destination) {
+        if (!destination || typeof galaxyCurrentPlanetId === 'undefined') {
+            return;
+        }
+
+        var f = fiche(carte);
+
+        deselectionner(carte, false);
+
+        var titre = f.querySelector('.gtCardTitle');
+        var coords = f.querySelector('.gtCardCoords');
+        var contenant = f.querySelector('.gtCardBody');
+        var s = carte.gtSysteme || {};
+
+        f.setAttribute('data-corps', 'patrol');
+
+        if (coords) {
+            coords.textContent = '[' + s.galaxie + ':' + s.systeme + '] \u00b7 X ' + destination.x + ' \u00b7 Y ' + destination.y;
+        }
+
+        if (titre) {
+            titre.textContent = locaFiche('patrolNew', 'Nouvelle patrouille');
+        }
+
+        contenant.innerHTML = '';
+
+        var grille = element('div', 'gtCardActions');
+        grille.setAttribute('role', 'group');
+        grille.setAttribute('aria-label', locaFiche('actions', 'Actions'));
+        contenant.appendChild(grille);
+
+        f.gtPatrouille = null;
+        f.gtContexte = { carte: carte, fiche: f, ligne: {}, objet: null, systeme: carte.gtSystemeJson || {}, position: null, genre: 'patrouille', patrouille: null };
+        f.hidden = false;
+        f.gtBloc = null;
+
+        commencerUnLancement(carte, f, { planetId: galaxyCurrentPlanetId }, destination);
+        poserLeMarqueurDeDestination(carte, destination);
+
+        /* Le meme convertisseur que le marqueur : la fiche se pose exactement dessus. */
+        var p = pointDeDestination(destination);
+
+        f.style.left = Math.round(p.x) + 'px';
+        f.style.top = Math.round(p.y) + 'px';
+    }
+
+    function commencerUnLancement(carte, f, objet, destinationImposee) {
+        poserLOrdre(carte, f, { genre: 'launch', planete: objet, etape: 'flotte', modeles: [], composition: {}, reserve: 0, destination: null, destinationImposee: destinationImposee || null, devis: null, erreur: null, enCours: false });
 
         chargerLesFlottesStandard(carte, function (modeles) {
             if (f.gtOrdre && f.gtOrdre.genre === 'launch') {
@@ -80743,6 +80905,8 @@ window.playOGameXWormhole = function (canvas) {
         etoile.style.top = Math.round(c.y) + 'px';
         etoile.appendChild(soleilDeCodex());
         carte.appendChild(etoile);
+
+        poserLaLegende(carte);
 
         var parPosition = {};
 

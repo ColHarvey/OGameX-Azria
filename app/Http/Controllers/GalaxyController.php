@@ -98,6 +98,10 @@ class GalaxyController extends OGameController
             'patrol_grid_units' => $settingsService->patrolGridUnits(),
             // Les vaisseaux de la planete active, pour composer une patrouille sans flotte standard.
             'patrol_ships' => $this->patrolShipsOf($player, $planet),
+            // **L interrupteur voyage jusqu a la carte.** Sans lui, elle offrait « Patrouiller » sur
+            // un chantier eteint et le serveur refusait au devis : le joueur composait une flotte
+            // pour rien. Une action ne s offre que si l ordre qu elle prepare peut aboutir.
+            'patrols_enabled' => $settingsService->patrolsEnabled(),
         ]);
     }
 

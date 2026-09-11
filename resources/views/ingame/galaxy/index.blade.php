@@ -52,6 +52,7 @@
             var galaxyCurrentPlanetId = {{ $current_planet_id }};
             var galaxyPatrolGridUnits = {{ $patrol_grid_units }};
             var galaxyPatrolShips = @json($patrol_ships);
+            var galaxyPatrolsEnabled = @json($patrols_enabled);
             var preserveSystemOnPlanetChange = false;
             @php
                 $galaxyLocaData = [
@@ -173,6 +174,9 @@
                     'actions' => __('t_ingame.galaxy.tactical_actions'),
                     'targets' => __('t_ingame.galaxy.tactical_targets'),
                     'patrolTitle' => __('t_ingame.galaxy.tactical_patrol_title'),
+                    'patrolNew' => __('t_ingame.galaxy.tactical_patrol_new'),
+                    'hintCompose' => __('t_ingame.galaxy.tactical_hint_compose'),
+                    'hintDrag' => __('t_ingame.galaxy.tactical_hint_drag'),
                     'patrolLayer' => __('t_ingame.galaxy.tactical_patrol_layer'),
                     'surveillanceLayer' => __('t_ingame.galaxy.tactical_surveillance_layer'),
                     'surveillanceContact' => __('t_ingame.galaxy.tactical_surveillance_contact'),
@@ -252,6 +256,7 @@
                         'noAlliance' => __('t_ingame.galaxy.tactical_reason_no_alliance'),
                         'unavailable' => __('t_ingame.galaxy.tactical_reason_unavailable'),
                         'destroyed' => __('t_ingame.galaxy.tactical_reason_destroyed'),
+                        'patrolDisabled' => __('t_ingame.patrol.refusal_disabled'),
                         'noProbes' => __('t_ingame.galaxy.espionage_not_possible'),
                         'noSlots' => __('t_ingame.fleet.no_free_slots'),
                         'recyclers' => __('t_ingame.galaxy.recyclers_needed'),

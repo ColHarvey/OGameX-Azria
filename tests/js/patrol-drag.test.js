@@ -106,7 +106,21 @@ function unMonde() {
     window.galaxyPatrolQuoteUrl = '/ajax/galaxy/patrol/quote';
     window.playerId = 7;
     window.token = 'jeton';
-    window.galaxyTacticalLoca = {};
+    /*
+     * Les libelles de la legende, tels que la vue les publie. Les autres essais s appuient sur les
+     * replis codes dans le module : ne poser que ces deux clefs les laisse intacts.
+     */
+    window.galaxyTacticalLoca = {
+        hintCompose: 'Cliquez une case vide : composez une patrouille, elle partira la.',
+        hintDrag: 'Glissez une patrouille sur la carte pour lui donner un ordre.'
+    };
+    /* Ce que la vue publie pour composer une patrouille depuis la carte. */
+    window.galaxyCurrentPlanetId = 101;
+    window.galaxyPatrolGridUnits = 10;
+    window.galaxyPatrolsEnabled = true;
+    window.galaxyPatrolShips = [
+        { id: 206, name: 'cruiser', label: 'Croiseur', amount: 20, mobile: true }
+    ];
     window.renderContentGalaxy = function () {};
 
     const script = window.document.createElement('script');
@@ -142,7 +156,16 @@ function unMonde() {
         }));
     };
 
-    return { window, demandes, envois, amorcer, carte, marqueur, fiche, efface, fermer, geste, relacher };
+    const cliquer = (cible, x, y) => {
+        cible.dispatchEvent(new window.MouseEvent('click', {
+            bubbles: true,
+            cancelable: true,
+            clientX: x,
+            clientY: y
+        }));
+    };
+
+    return { window, demandes, envois, amorcer, carte, marqueur, fiche, efface, fermer, geste, relacher, cliquer };
 }
 
 /**
@@ -241,6 +264,178 @@ function unMondeEnTrainDeViser(lignes, options = {}) {
 
     return monde;
 }
+
+/**
+ * **La carte annonce ses gestes.**
+ *
+ * Une fonction qu'on ne peut pas deviner n'existe pas : le clic sur une case vide et le glisser
+ * d'une patrouille ne s'annoncaient nulle part, et Keven l'a dit — « via la vue galaxy c'est pas
+ * trop clair ».
+ */
+test('la carte affiche la legende de ses deux gestes', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5, [uneLigne(4)]);
+
+        const lignes = monde.window.document.querySelectorAll('#galaxyTactical .gtHints .gtHint');
+
+        assert.equal(lignes.length, 2, 'la legende ne montre pas ses deux gestes');
+        assert.ok(
+            Array.from(lignes).every((l) => (l.textContent || '').trim().length > 0),
+            'une ligne de la legende est vide : le joueur lit une icone sans phrase'
+        );
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Chantier eteint, la carte n'annonce rien.** Annoncer un geste que le serveur refusera est pire
+ * que de ne rien dire.
+ */
+test('chantier eteint, aucune legende', () => {
+    const monde = unMonde();
+
+    try {
+        monde.window.galaxyPatrolsEnabled = false;
+        monde.amorcer(1, 5, [uneLigne(4)]);
+
+        assert.equal(
+            monde.window.document.querySelector('#galaxyTactical .gtHints'),
+            null,
+            'la carte annonce des gestes que le serveur refuse'
+        );
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Et la legende ne mange pas le clic qu'elle explique.**
+ *
+ * Elle repose dans le coin bas gauche de la carte — exactement sur la surface ou le joueur doit
+ * cliquer pour lancer une patrouille. Un clic a cet endroit doit traverser et ouvrir la composition.
+ *
+ * jsdom ne fait pas de test de survol : il ne choisit pas la cible par `pointer-events`. Ce temoin
+ * etablit donc que le gestionnaire ne se laisse pas arreter par un clic **venu de** la legende ; la
+ * regle de style qui rend cette traversee possible dans un vrai navigateur est epinglee a part, dans
+ * `GalaxyTacticalMapTest`.
+ */
+test('un clic sur la legende ouvre quand meme la composition', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, []));
+
+        const legende = monde.window.document.querySelector('#galaxyTactical .gtHints');
+        assert.ok(legende, 'la premisse manque : aucune legende sur la carte');
+
+        monde.cliquer(legende, 40, 300);
+
+        const f = monde.fiche();
+
+        assert.ok(f && f.gtOrdre, 'un clic dans le coin de la legende ne compose rien : ce coin de la carte est mort');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/** Le libelle du bouton qui termine la composition, s'il y en a un. */
+function boutonDeFin(monde) {
+    const boutons = boutonsDuPanneau(monde);
+
+    return boutons.length > 0 ? boutons[boutons.length - 1] : null;
+}
+
+/**
+ * **Cliquer une case vide compose une patrouille qui partira la.**
+ *
+ * Demande de Keven, 11 septembre 2026. C'est l'entree inverse de celle qui existait : au lieu
+ * d'ouvrir sa planete, de composer, puis de choisir ou, on designe l'endroit d'abord.
+ */
+test('cliquer une case vide ouvre la composition d une patrouille', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, []));
+
+        monde.cliquer(monde.carte(), 120, 90);
+
+        const f = monde.fiche();
+
+        assert.ok(f, 'aucune fiche ne s est ouverte sur un clic dans le vide');
+        assert.equal(f.hidden, false, 'la fiche est ouverte mais cachee');
+        assert.ok(f.gtOrdre, 'la fiche s ouvre sans ordre a composer');
+        assert.equal(f.gtOrdre.genre, 'launch', 'le clic n ouvre pas un lancement');
+        assert.equal(f.gtOrdre.etape, 'flotte', 'le clic n ouvre pas la composition de la flotte');
+        assert.ok(f.gtOrdre.destinationImposee, 'la destination cliquee n est pas retenue');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Et elle part la, sans redemander ou.** C'est la moitie que Keven a decrite : une fois la flotte
+ * formee, elle s'en va vers l'endroit clique. Reproposer « choisir la destination » lui ferait
+ * refaire le geste qu'il vient de faire.
+ */
+test('la composition issue d un clic demande le devis, pas une destination', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, []));
+        monde.cliquer(monde.carte(), 120, 90);
+
+        assert.equal(boutonDeFin(monde), 'Devis', 'le bouton de fin de composition : ' + boutonsDuPanneau(monde).join(' | '));
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Un ordre en cours n'est jamais ecrase.** Le clic appartiendrait alors a cet ordre, et l'ecraser
+ * ferait perdre au joueur la flotte qu'il vient de composer.
+ */
+test('cliquer le vide pendant un ordre en cours ne l ecrase pas', () => {
+    const monde = unMondeEnTrainDeViser([uneLigne(4)]);
+
+    try {
+        const avant = monde.fiche().gtOrdre;
+        assert.equal(avant.genre, 'move', 'la premisse manque : aucun ordre de deplacement en cours');
+
+        monde.cliquer(monde.carte(), 120, 90);
+
+        assert.equal(monde.fiche().gtOrdre.genre, 'move', 'le clic a remplace l ordre en cours par un lancement');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **La carte n'offre pas ce que le serveur refusera.** Chantier eteint, composer une flotte ne
+ * menerait qu'a un devis refuse : le joueur aurait travaille pour rien.
+ */
+test('chantier eteint, cliquer le vide n ouvre rien', () => {
+    const monde = unMonde();
+
+    try {
+        monde.window.galaxyPatrolsEnabled = false;
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, []));
+
+        monde.cliquer(monde.carte(), 120, 90);
+
+        const f = monde.fiche();
+
+        assert.equal(f === null || f.hidden === true || !f.gtOrdre, true, 'un chantier eteint ouvre quand meme la composition');
+    } finally {
+        monde.fermer();
+    }
+});
 
 test('la premisse : un corps de la carte existe et se depose dessus', () => {
     const monde = unMondeEnTrainDeViser([uneLigne(4)]);

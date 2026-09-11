@@ -1207,6 +1207,57 @@
     50% { box-shadow: 0 0 12px rgba(133, 201, 221, 0.38); }
 }
 
+/*
+ * ## La legende des gestes
+ *
+ * Posee dans le coin bas gauche de la carte, muette et discrete. **`pointer-events: none` est
+ * obligatoire** : elle repose sur la surface meme ou le joueur clique pour lancer une patrouille, et
+ * sans cela elle volerait les clics qu elle explique.
+ *
+ * Elle est declaree **avant** la regle du choix de destination : a specificite egale, c est la
+ * derniere qui gagne, et le viseur doit l emporter sur le curseur ordinaire pendant un ordre.
+ */
+#galaxyTactical .gtHints {
+    position: absolute;
+    left: 10px;
+    bottom: 10px;
+    z-index: 8;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    max-width: 320px;
+    padding: 6px 9px;
+    background: rgba(6, 14, 20, 0.62);
+    border: 1px solid rgba(70, 88, 99, 0.55);
+    border-radius: 3px;
+    pointer-events: none;
+    color: #8fb0c4;
+    font: 11px/1.35 Arial, sans-serif;
+}
+
+#galaxyTactical .gtHint {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+#galaxyTactical .gtHint img {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    opacity: 0.8;
+}
+
+/* Le curseur annonce qu une case vide se clique — le viseur de l ordre le remplace juste apres. */
+#galaxyTactical.gtPatrolsOn {
+    cursor: cell;
+}
+
+#galaxyTactical.gtPatrolsOn .gtBody {
+    cursor: pointer;
+}
+
 /* En choix de destination, la carte le dit : le curseur devient un viseur, les corps restent des cibles. */
 #galaxyTactical.gtChoosingDestination,
 #galaxyTactical.gtChoosingDestination .gtBody {

@@ -67,8 +67,10 @@ class ReturnToASpatialPointTest extends UnitTestCase
         $this->assertTrue($plan->landsOnAPoint(), 'Le plan ne se dit pas pose sur un point.');
         $this->assertSame(ReturnDestinationKind::PatrolPoint, $plan->kind);
         $this->assertSame(9, $plan->patrolId);
-        $this->assertSame(-660, $plan->point?->x);
-        $this->assertSame(580, $plan->point?->y);
+        $point = $plan->point;
+        $this->assertNotNull($point, 'Un retour vers un point ne porte aucun point.');
+        $this->assertSame(-660, $point->x);
+        $this->assertSame(580, $point->y);
         $this->assertSame(self::JOUEUR, $plan->ownerId);
 
         // **Et aucun corps** : c est la moitie qui distingue cette forme de toutes les autres.

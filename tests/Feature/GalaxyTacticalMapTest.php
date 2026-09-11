@@ -676,6 +676,44 @@ class GalaxyTacticalMapTest extends UnitTestCase
     }
 
     /**
+     * **La legende des gestes ne vole pas les clics qu elle explique.**
+     *
+     * Elle est posee dans le coin bas gauche de la carte — exactement sur la surface ou un clic
+     * lance une patrouille. Sans `pointer-events: none`, ce coin deviendrait mort : le joueur
+     * cliquerait sur la phrase qui lui explique de cliquer la, et rien ne se passerait.
+     *
+     * Le temoin exige aussi que la regle du **viseur** vienne apres celle du curseur ordinaire : a
+     * specificite egale, c est la derniere qui gagne, et pendant un ordre le viseur doit l emporter.
+     * Une regle battue en cascade a deja coute trois fois sur cette carte.
+     */
+    public function testTheMapLegendDoesNotStealTheClicksItExplains(): void
+    {
+        $feuille = $this->feuille();
+
+        if (preg_match('/#galaxyTactical \.gtHints \{([^}]*)\}/', $feuille, $bloc) !== 1) {
+            $this->fail('The map has no legend rule at all.');
+        }
+
+        $this->assertMatchesRegularExpression(
+            '/pointer-events:\s*none/',
+            $bloc[1],
+            'The legend catches the pointer: the corner it sits in stops launching patrols.'
+        );
+
+        $ordinaire = strpos($feuille, '#galaxyTactical.gtPatrolsOn {');
+        $viseur = strpos($feuille, '#galaxyTactical.gtChoosingDestination,');
+
+        $this->assertNotFalse($ordinaire, 'The ordinary map cursor rule is gone.');
+        $this->assertNotFalse($viseur, 'The destination-choosing cursor rule is gone.');
+
+        $this->assertLessThan(
+            $viseur,
+            $ordinaire,
+            'The ordinary cursor is declared after the crosshair: at equal specificity it would win, and the map would stop showing that an order is in progress.'
+        );
+    }
+
+    /**
      * **Chaque image que le module nomme existe sur le disque.**
      *
      * Une icone manquante ne casse rien : le navigateur rend un cadre vide, sans erreur, sans ligne

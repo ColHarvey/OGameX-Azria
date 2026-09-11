@@ -600,6 +600,73 @@ class PatrolEndpointsTest extends AccountTestCase
     }
 
     /**
+     * **Une patrouille part vers un autre systeme, et elle y arrive.**
+     *
+     * Demande de Keven, 11 septembre 2026. La tarification le prevoyait deja —
+     * `PatrolPricing::distanceBetween()` bascule sur les regles de distance du jeu des que la galaxie
+     * ou le systeme different —, mais « c est prevu dans le code » n est pas « le joueur peut le
+     * faire » : trois blocages totaux de ce chantier ont ete trouves exactement dans cet ecart.
+     *
+     * Ce temoin traverse donc le parcours reel : devis, confirmation, puis le vrai travailleur a
+     * l heure de l arrivee.
+     *
+     * ## Ce qu il exige au-dela de « ca ne refuse pas »
+     *
+     * Le segment doit **viser l autre systeme** — un ordre accepte qui poserait la flotte dans le
+     * systeme de depart serait vert sur un simple « pas de refus ». Et le trajet doit couter plus
+     * cher qu un trajet interne : sans cela, la distance intersysteme ne serait pas comptee, et la
+     * valeur juste coinciderait avec la fausse.
+     */
+    public function testUnePatrouillePartVersUnAutreSystemeEtSYPose(): void
+    {
+        $this->arm();
+        $this->planetAddResources(new Resources(0, 0, 200000, 0));
+        $this->planetAddUnit('cruiser', 20);
+
+        $coords = $this->planetService->getPlanetCoordinates();
+        $ailleurs = $coords->system + 1;
+
+        $ici = $this->launchPayload();
+        $labas = $this->launchPayload();
+        $labas['system'] = $ailleurs;
+
+        $interne = $this->postJson(route('galaxy.patrol.quote'), $ici)->assertStatus(200)->json();
+
+        $lointain = $this->postJson(route('galaxy.patrol.quote'), $labas)->assertStatus(200)->json();
+
+        $this->assertTrue((bool)$lointain['quote']['possible'], 'Le devis vers un autre systeme est refuse : ' . ($lointain['quote']['refusal_reason'] ?? ''));
+
+        $this->assertGreaterThan(
+            (int)$interne['quote']['distance'],
+            (int)$lointain['quote']['distance'],
+            'Un trajet vers un autre systeme ne coute pas plus loin qu un trajet interne : la distance intersysteme n est pas comptee.'
+        );
+
+        // Le lancement reel, puis l arrivee par le vrai travailleur.
+        $this->postJson(route('galaxy.patrol.launch'), $labas + ['order_version' => (int)$lointain['quote']['order_version']])->assertStatus(200);
+
+        $patrouille = Patrol::query()->where('user_id', $this->currentUserId)->latest('id')->first();
+
+        $this->assertNotNull($patrouille, 'Aucune patrouille n a ete creee.');
+        $this->assertSame($ailleurs, (int)$patrouille->system, 'La patrouille n est pas partie vers le systeme demande.');
+
+        $segment = FleetMission::query()->findOrFail($patrouille->current_mission_id);
+
+        $this->assertSame($ailleurs, (int)$segment->system_to, 'Le segment ne vise pas l autre systeme.');
+        $this->assertSame((int)$coords->system, (int)$segment->system_from, 'Le segment ne part pas du systeme de la base.');
+
+        Date::setTestNow(Date::createFromTimestamp((int)$segment->time_arrival + 1));
+        $this->player()->updateFleetMissions();
+
+        $this->assertSame(
+            PatrolState::Stationed,
+            $patrouille->refresh()->state,
+            'La patrouille n est pas posee a l arrivee dans l autre systeme.'
+        );
+        $this->assertSame($ailleurs, (int)$patrouille->system, 'La patrouille a change de systeme en arrivant.');
+    }
+
+    /**
      * **Une patrouille se pose sur un corps choisi, et cesse d exister.** Le geste que Keven decrit :
      * on depose la flotte sur une de ses planetes, elle y rentre et la patrouille est dissoute.
      *
