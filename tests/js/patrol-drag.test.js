@@ -74,10 +74,26 @@ function faireJQuery() {
         return api;
     };
 
+    /*
+     * **Un `post` qu on peut resoudre.** Il rendait une promesse muette : le chemin du succes d un
+     * ordre — celui qui previent le bandeau du jeu — n etait donc atteignable par aucun essai.
+     */
     jq.post = function (url, donnees) {
-        envois.push({ url, donnees });
+        const rappels = {};
+        const api = {
+            done(cb) { rappels.done = cb; return api; },
+            fail(cb) { rappels.fail = cb; return api; },
+            always(cb) { rappels.always = cb; return api; }
+        };
 
-        return chainable();
+        envois.push({
+            url,
+            donnees,
+            repondre(reponse) { if (rappels.done) { rappels.done(reponse); } },
+            echouer(erreur) { if (rappels.fail) { rappels.fail(erreur); } }
+        });
+
+        return api;
     };
 
     jq.ajax = chainable;
@@ -104,6 +120,10 @@ function unMonde() {
     window.galaxyContentLink = '/ajax/galaxy';
     /* Sans cette adresse, `choisirLaDestination()` sort avant de demander quoi que ce soit. */
     window.galaxyPatrolQuoteUrl = '/ajax/galaxy/patrol/quote';
+    window.galaxyPatrolMoveUrl = '/ajax/galaxy/patrol/0/move';
+    window.galaxyPatrolRecallUrl = '/ajax/galaxy/patrol/0/recall';
+    window.galaxyPatrolLandUrl = '/ajax/galaxy/patrol/0/land';
+    window.galaxyPatrolLaunchUrl = '/ajax/galaxy/patrol/launch';
     window.playerId = 7;
     window.token = 'jeton';
     /*
@@ -120,6 +140,15 @@ function unMonde() {
     window.galaxyPatrolSystemRadius = 1800;
     window.galaxyPatrolStarExclusion = 60;
     window.galaxyPatrolsEnabled = true;
+
+    /*
+     * Les deux rafraichisseurs du jeu, remplaces par des temoins : le bandeau compact et la liste
+     * depliee « plus de details » se chargent separement.
+     */
+    const prevenus = [];
+
+    window.getAjaxEventbox = function () { prevenus.push('bandeau'); };
+    window.refreshFleetEvents = function () { prevenus.push('liste'); };
     window.galaxyPatrolShips = [
         { id: 206, name: 'cruiser', label: 'Croiseur', amount: 20, mobile: true }
     ];
@@ -167,7 +196,7 @@ function unMonde() {
         }));
     };
 
-    return { window, demandes, envois, amorcer, carte, marqueur, fiche, efface, fermer, geste, relacher, cliquer };
+    return { window, demandes, envois, prevenus, amorcer, carte, marqueur, fiche, efface, fermer, geste, relacher, cliquer };
 }
 
 /**
@@ -537,6 +566,114 @@ test('chantier eteint, cliquer le vide n ouvre rien', () => {
         const f = monde.fiche();
 
         assert.equal(f === null || f.hidden === true || !f.gtOrdre, true, 'un chantier eteint ouvre quand meme la composition');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Un ordre accepte previent le bandeau du jeu — les deux moities.**
+ *
+ * Keven, 12 septembre 2026 : le bandeau compact se mettait a jour, mais la liste depliee « plus de
+ * details » gardait l'etat d'avant et demandait un rechargement de page. Les deux se chargent
+ * separement ; il faut donc les prevenir toutes les deux.
+ *
+ * `refreshFleetEvents()` decide lui-meme de ne rien chercher si le panneau est replie : la carte
+ * previent, elle ne commande pas.
+ */
+test('un ordre accepte previent le bandeau et la liste depliee', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [unePatrouille()]));
+
+        // Un ordre de deplacement, jusqu'a la confirmation.
+        monde.geste(monde.marqueur(3), 'dragstart');
+        monde.relacher(monde.carte(), 400, 294);
+
+        assert.equal(monde.envois.length, 1, 'aucun devis n est parti');
+
+        monde.envois[0].repondre({
+            success: true,
+            quote: {
+                possible: true,
+                order_version: 1,
+                duration_seconds: 60,
+                fuel_cost: 1,
+                distance: 10,
+                speed_percent: 10,
+                reserve_on_arrival: 100,
+                safety_return_cost: 1,
+                safety_return_seconds: 60,
+                autonomy_seconds: null,
+                destination: { galaxy: 1, system: 5, orbit: 0, type: 5, x: 400, y: 0 }
+            }
+        });
+
+        const confirmer = Array.from(monde.window.document.querySelectorAll('.gtAction'))
+            .find((b) => (b.textContent || '').trim().toLowerCase() === 'confirmer');
+
+        assert.ok(confirmer, 'aucun bouton de confirmation apres un devis : ' + Array.from(monde.window.document.querySelectorAll('.gtAction')).map((b) => b.textContent).join(' | '));
+
+        confirmer.dispatchEvent(new monde.window.MouseEvent('click', { bubbles: true, cancelable: true }));
+
+        assert.equal(monde.envois.length, 2, 'la confirmation n est pas partie');
+
+        monde.envois[1].repondre({ success: true, message: 'Ordre transmis.' });
+
+        assert.deepEqual(
+            monde.prevenus.sort(),
+            ['bandeau', 'liste'],
+            'le jeu n a pas ete prevenu des deux cotes : ' + JSON.stringify(monde.prevenus)
+        );
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Une patrouille arrivee ne traine plus sa trajectoire.**
+ *
+ * Le segment d'une patrouille posee reste `processed = 0` — c'est ce qui lui donne son creneau de
+ * flotte —, donc le serveur continue de le publier comme mouvement. La carte dessinait sa ligne
+ * indefiniment, vers un point ou la flotte etait deja posee. Signale par Keven, 12 septembre 2026.
+ *
+ * Les deux moities comptent : arrivee, plus rien ; en vol, la trajectoire reste. Sans la seconde,
+ * masquer toutes les trajectoires passerait le premier temoin.
+ */
+test('une patrouille arrivee ne dessine plus sa trajectoire', () => {
+    const monde = unMonde();
+
+    try {
+        const arrive = unMouvementDePatrouille(3);
+        arrive.time_arrival = 1_700_000_050; // avant le `server_now` de la reponse
+
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [unePatrouille()], 1_700_000_100, [arrive]));
+
+        assert.equal(
+            monde.window.document.querySelector('.gtTrajectory'),
+            null,
+            'la trajectoire survit a l arrivee : une ligne figee reste sur la carte'
+        );
+        assert.ok(monde.marqueur(3), 'la patrouille posee a disparu de la carte avec sa trajectoire');
+    } finally {
+        monde.fermer();
+    }
+});
+
+test('une patrouille encore en vol garde sa trajectoire', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [unePatrouille({ etat: 'en_route' })], 1_700_000_100, [unMouvementDePatrouille(3)]));
+
+        assert.ok(
+            monde.window.document.querySelector('.gtTrajectory'),
+            'la trajectoire d une flotte en vol a disparu : on ne voit plus ou elle va'
+        );
     } finally {
         monde.fermer();
     }

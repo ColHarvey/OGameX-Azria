@@ -78479,6 +78479,23 @@ window.playOGameXWormhole = function (canvas) {
         }
 
         mouvements.forEach(function (mouvement) {
+            /*
+             * **Une patrouille arrivee n est plus un mouvement.**
+             *
+             * Le segment d une patrouille posee reste `processed = 0` — c est ce qui lui donne son
+             * creneau de flotte, sa presence dans la boite d evenements et son inscription au
+             * combat (journal §114). Le serveur continue donc de le publier comme mouvement, et la
+             * carte dessinait sa trajectoire indefiniment : une ligne bleue figee vers un point ou
+             * la flotte etait deja posee. Signale par Keven au controle du 12 septembre 2026.
+             *
+             * Le dessin s arrete a l arrivee ; l icone de la patrouille prend le relais, comme elle
+             * le fait pour tout etat pose. **Seules les patrouilles** sont concernees : une flotte
+             * ordinaire disparait d elle-meme des que son arrivee est traitee.
+             */
+            if (mouvement.patrol_id && Number(mouvement.time_arrival) <= maintenantServeur() / 1000) {
+                return;
+            }
+
             var bouts = extremites(mouvement, galaxie, systeme);
             var genre = Number(mouvement.mission_type) === MISSILE ? 'gtTrajMissile' : 'gtTraj' + mouvement.side.charAt(0).toUpperCase() + mouvement.side.slice(1);
             var groupe = svg('g', { 'class': 'gtMovement ' + genre + (mouvement.is_return ? ' gtTrajReturn' : '') });
@@ -80370,13 +80387,25 @@ window.playOGameXWormhole = function (canvas) {
      * ordre reussi ne doit pas echouer parce que le bandeau n a pas pu se rafraichir.
      */
     function annoncerLeMouvement() {
-        if (typeof window.getAjaxEventbox === 'function') {
+        /*
+         * **Deux choses a prevenir, pas une.** Le bandeau compact et la liste depliee « plus de
+         * details » se chargent separement : rafraichir le premier laissait la seconde afficher
+         * l etat d avant, et il fallait recharger la page pour l y voir.
+         *
+         * `refreshFleetEvents()` ne va chercher la liste que si elle est **ouverte** — il n y a
+         * rien a rafraichir dans un panneau replie, et c est le jeu lui-meme qui en decide.
+         */
+        [window.getAjaxEventbox, window.refreshFleetEvents].forEach(function (prevenir) {
+            if (typeof prevenir !== 'function') {
+                return;
+            }
+
             try {
-                window.getAjaxEventbox();
+                prevenir();
             } catch (e) {
                 /* Le bandeau du jeu ne doit jamais faire echouer un ordre accepte. */
             }
-        }
+        });
     }
 
     /* La confirmation : la version du devis part avec l'ordre ; un devis perime revient en refus, et le joueur en redemande un. */
