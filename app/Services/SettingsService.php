@@ -939,6 +939,17 @@ class SettingsService
     }
 
     /**
+     * La protection des debutants est-elle armee sur cet univers ?
+     *
+     * **Desarmee par defaut**, comme toute mecanique neuve de ce serveur : l armer change le jeu pour
+     * les joueurs en place, et ce moment appartient a l administrateur.
+     */
+    public function newbieProtectionEnabled(): bool
+    {
+        return $this->get('newbie_protection_enabled', '0') === '1';
+    }
+
+    /**
      * Delai d une manoeuvre en vol, en secondes, compte a partir de la confirmation serveur
      * (revue 121, R2). Le nouveau segment part de la position reellement atteinte a la fin du delai.
      */

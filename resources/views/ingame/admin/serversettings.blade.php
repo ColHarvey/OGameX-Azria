@@ -501,6 +501,17 @@
                                 </div>
                                 <div class="smallFont">{{ __('t_ingame.admin.hull_damage_enabled_desc') }}</div>
                             </div>
+                            {{-- La protection des debutants : son propre interrupteur, desarme par defaut. --}}
+                            <div class="fieldwrapper">
+                                <label class="styled textBeefy">{{ __('t_ingame.admin.newbie_protection_enabled') }}</label>
+                                <div class="thefield">
+                                    <square-checkbox class="square-checkbox">
+                                        <input type="checkbox" id="square-checkBoxNewbieProtectionEnabled" name="newbie_protection_enabled" value="1" {{ $newbie_protection_enabled ? 'checked' : '' }}>
+                                        <label for="square-checkBoxNewbieProtectionEnabled"></label>
+                                    </square-checkbox>
+                                </div>
+                                <div class="smallFont">{{ __('t_ingame.admin.newbie_protection_enabled_desc') }}</div>
+                            </div>
                             <div class="fieldwrapper">
                                 <label class="styled textBeefy">{{ __('t_ingame.admin.patrol_manoeuvre_delay') }}</label>
                                 <div class="thefield">

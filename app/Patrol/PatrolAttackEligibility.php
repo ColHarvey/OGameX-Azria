@@ -2,9 +2,12 @@
 
 namespace OGame\Patrol;
 
+use OGame\Alliance\AllianceOffensiveGuard;
+use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Models\Patrol;
 use OGame\Models\User;
 use OGame\Patrol\Exceptions\PatrolOrderRefused;
+use OGame\Protection\PlayerStrengthGuard;
 use OGame\Services\SettingsService;
 
 /**
@@ -75,6 +78,28 @@ final class PatrolAttackEligibility
 
         if ((bool)$proprietaire->vacation_mode) {
             throw new PatrolOrderRefused('target_owner_on_vacation');
+        }
+
+        /*
+         * **Les deux protections de joueur a joueur, apres la detection et jamais avant.**
+         *
+         * L ordre compte : un refus prononce avant la detection apprendrait qu il y a quelqu un la,
+         * et deviendrait un detecteur gratuit. Ici la cible est deja acquise, donc dire pourquoi elle
+         * est intouchable n apprend rien de neuf.
+         *
+         * **Ces deux-la manquaient.** L attaque d une planete les pose depuis toujours ; celle d une
+         * patrouille ne les posait pas. Armee, la protection d alliance aurait ete contournable — il
+         * aurait suffi de viser la patrouille d un allie au lieu de sa planete.
+         */
+        $genre = CombatMissionKind::Attack;
+        $attaque = (int)$target->user_id;
+
+        if (resolve(AllianceOffensiveGuard::class)->forbids($genre, $attackerId, $attaque)) {
+            throw new PatrolOrderRefused('target_is_an_ally');
+        }
+
+        if (resolve(PlayerStrengthGuard::class)->forbids($genre, $attackerId, $attaque)) {
+            throw new PatrolOrderRefused('target_strength_protected');
         }
 
         // En dernier, parce que c est le seul refus qui peut changer d une seconde a l autre : la

@@ -29,6 +29,7 @@ use OGame\Models\FleetUnion;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
 use OGame\Models\User;
+use OGame\Protection\PlayerStrengthGuard;
 use OGame\Services\FleetMissionService;
 use OGame\Services\FleetUnionService;
 use OGame\Services\MessageService;
@@ -602,6 +603,31 @@ abstract class GameMission
         }
 
         $garde = resolve(AllianceOffensiveGuard::class);
+
+        if (!$garde->forbids(CombatMissionKind::fromMissionType(static::$typeId), $attaquant->getId(), $cible->getId())) {
+            return null;
+        }
+
+        return new MissionPossibleStatus(false, __($garde->reason()));
+    }
+
+    /**
+     * L ecart de force entre les deux joueurs interdit-il cette offensive ?
+     *
+     * **Posee exactement ou la protection d alliance l est**, et pour la meme raison : une protection
+     * qui couvrirait trois chemins sur quatre n en serait pas une. Les deux se cumulent, et la
+     * premiere qui refuse parle.
+     */
+    protected function checkStrengthProtection(PlanetService $planet, PlanetService|null $targetPlanet): MissionPossibleStatus|null
+    {
+        $attaquant = $planet->getPlayer();
+        $cible = $targetPlanet?->getPlayer();
+
+        if ($attaquant === null || $cible === null) {
+            return null;
+        }
+
+        $garde = resolve(PlayerStrengthGuard::class);
 
         if (!$garde->forbids(CombatMissionKind::fromMissionType(static::$typeId), $attaquant->getId(), $cible->getId())) {
             return null;

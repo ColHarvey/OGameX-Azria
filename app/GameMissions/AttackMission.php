@@ -91,6 +91,11 @@ class AttackMission extends GameMission
             return $allianceCheck;
         }
 
+        // L ecart de force, pose au meme endroit que la protection d alliance.
+        if ($forceCheck = $this->checkStrengthProtection($planet, $targetPlanet)) {
+            return $forceCheck;
+        }
+
         // If target player is in vacation mode, the mission is not possible.
         if ($vacationCheck = $this->checkTargetVacationMode($targetPlanet)) {
             return $vacationCheck;

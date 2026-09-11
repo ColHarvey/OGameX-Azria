@@ -80,6 +80,11 @@ class MoonDestructionMission extends GameMission
             return $allianceCheck;
         }
 
+        // L ecart de force, pose au meme endroit que la protection d alliance.
+        if ($forceCheck = $this->checkStrengthProtection($planet, $targetMoon)) {
+            return $forceCheck;
+        }
+
         // Fleet must contain at least one Deathstar
         $deathstarCount = 0;
         foreach ($units->units as $unit) {

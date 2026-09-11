@@ -60,6 +60,7 @@ class ServerSettingsController extends OGameController
             'expedition_reward_multiplier_ships' => $settingsService->expeditionRewardMultiplierShips(),
             'patrols_enabled' => $settingsService->patrolsEnabled(),
             'hull_damage_enabled' => $settingsService->hullDamageEnabled(),
+            'newbie_protection_enabled' => $settingsService->newbieProtectionEnabled(),
             'alliance_offensive_protection_enabled' => $settingsService->allianceOffensiveProtectionEnabled(),
             'patrol_manoeuvre_delay_seconds' => $settingsService->patrolManoeuvreDelaySeconds(),
             'patrol_upkeep_divisor' => $settingsService->patrolUpkeepDivisor(),
@@ -147,6 +148,7 @@ class ServerSettingsController extends OGameController
         // Chantier des degats de coque (journal §118) : son interrupteur vit ici comme celui des
         // patrouilles. Sans lui, l armer et le desarmer demandait `tinker` sur la production.
         $settingsService->set('hull_damage_enabled', request('hull_damage_enabled', 0));
+        $settingsService->set('newbie_protection_enabled', request('newbie_protection_enabled', 0));
         $settingsService->set('alliance_offensive_protection_enabled', request('alliance_offensive_protection_enabled', 0));
         $settingsService->set('patrol_manoeuvre_delay_seconds', request('patrol_manoeuvre_delay_seconds', 60));
         $settingsService->set('patrol_upkeep_divisor', request('patrol_upkeep_divisor', 20));

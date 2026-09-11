@@ -124,7 +124,7 @@ class AdminChantierSwitchesTest extends AccountTestCase
         // **Une case a cocher decochee est absente de la requete, jamais a zero.** Les deux
         // interrupteurs ne viennent donc que de $interrupteurs : c est ainsi que le navigateur les
         // envoie, et c est ce qui rend le desarmement eprouvable.
-        unset($courant['patrols_enabled'], $courant['hull_damage_enabled']);
+        unset($courant['patrols_enabled'], $courant['hull_damage_enabled'], $courant['newbie_protection_enabled']);
 
         return array_merge($courant, $interrupteurs);
     }
@@ -138,6 +138,11 @@ class AdminChantierSwitchesTest extends AccountTestCase
         // **La forme du contrôle, pas le mot** : c est le nom du champ que le controleur lit.
         $reponse->assertSee('name="patrols_enabled"', false);
         $reponse->assertSee('name="hull_damage_enabled"', false);
+
+        // **La protection des debutants a son interrupteur, elle aussi.** Sans lui elle ne se
+        // desarmerait que par `tinker` sur la production — le defaut exact que ce banc a
+        // deja ferme une fois pour les degats de coque.
+        $reponse->assertSee('name="newbie_protection_enabled"', false);
     }
 
     public function testLesDeuxChantiersSArmentEtSeDesarment(): void

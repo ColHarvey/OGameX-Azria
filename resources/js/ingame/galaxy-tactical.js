@@ -2395,7 +2395,17 @@
     }
 
     var ICONES_DE_PATROUILLE = {
-        stationed: 'patrol-station.svg',
+        /*
+         * **Le nom a change avec le dessin, et c est la raison qui compte.** L icone etait un
+         * rectangle a deux barres — un glyphe « pause ». Remplacer son contenu sous le meme nom
+         * n a rien change pour les joueurs : un navigateur garde une image en cache **par son
+         * adresse**, et les icones n ont aucun cache-busting, contrairement aux bundles dont le
+         * nom porte une empreinte. Un nom neuf est la seule facon sure qu un dessin arrive.
+         *
+         * L ancien fichier reste en place, avec le meme vaisseau : une page encore en cache le
+         * demanderait, et une image cassee vaudrait moins qu un dessin juste.
+         */
+        stationed: 'patrol-stationed.svg',
         /*
          * **Un etat n est pas une action.** `patrol-move.svg` est la croix a quatre fleches, celle
          * que toutes les interfaces emploient pour dire « deplacer » — son propre `aria-label` le

@@ -800,6 +800,9 @@ return [
     // Alliance page
     // -------------------------------------------------------------------------
 
+    'protection' => [
+        'strength_difference' => 'The power gap between you and this player is too wide: this offensive is not possible.',
+    ],
     'alliance' => [
         'refusal_offensive_against_a_member' => 'You cannot launch an offensive against a member of your own alliance.',
         'err_adversaries_of_an_active_battle' => 'This player and a member of the alliance are fighting each other in an ongoing battle. Joining will be possible once that battle is settled; the battle itself runs its course.',
@@ -1760,6 +1763,8 @@ Improved fleet escape rate',
         'refusal_target_not_detected' => 'You do not detect any patrol at that location.',
         'refusal_target_is_protected' => 'This patrol belongs to an administrator and cannot be attacked.',
         'refusal_target_owner_on_vacation' => 'This player is in vacation mode.',
+        'refusal_target_is_an_ally' => 'This patrol belongs to a member of your own alliance.',
+        'refusal_target_strength_protected' => 'The power gap between you and this player is too wide: this offensive is not possible.',
         'refusal_bad_destination' => 'This destination does not exist.',
         'refusal_unknown_patrol' => 'This patrol does not exist.',
         'refusal_quote_cost_moved' => 'The cost has changed since the quote was shown: ask for a new one.',
@@ -1785,6 +1790,8 @@ Improved fleet escape rate',
         'patrols_enabled' => 'Patrols enabled:',
         'patrols_enabled_desc' => 'Switch for the patrols, stationing and surveillance project. Off, nothing changes in game.',
         'hull_damage_enabled' => 'Hull damage enabled:',
+        'newbie_protection_enabled' => 'Newbie protection',
+        'newbie_protection_enabled_desc' => 'Forbids offensives between two players more than five times apart in score, in both directions. An inactive account is not protected, and espionage stays open.',
         'hull_damage_enabled_desc' => 'Ships keep the hull they leave a battle with, and the space dock can repair them for a price. Off, nothing is erased: existing damage and running repairs are kept.',
         'patrol_manoeuvre_delay' => 'In-flight manoeuvre delay (seconds):',
         'patrol_manoeuvre_delay_desc' => 'Counted from the confirmation; the new leg departs from the position reached at the end of the delay.',

@@ -81,6 +81,11 @@ class MissileMission extends GameMission
             return $allianceCheck;
         }
 
+        // L ecart de force, pose au meme endroit que la protection d alliance.
+        if ($forceCheck = $this->checkStrengthProtection($planet, $targetPlanet)) {
+            return $forceCheck;
+        }
+
         // Les deux protections que cette mission etait seule a ne pas appliquer, alors
         // qu'elle vise la planete d'un autre joueur exactement comme une attaque. Les neuf
         // autres missions les portent depuis toujours ; leur absence ici laissait frapper
