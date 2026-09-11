@@ -439,6 +439,23 @@ class FleetController extends OGameController
             // leur silence : sur une planete, dix refus muets valent mieux que dix messages.
             if ($mission::getTypeId() === 15 && $position === 16 && $possible->error !== '') {
                 $errors[] = ['message' => $possible->error, 'error' => 0];
+
+                continue;
+            }
+
+            /*
+             * **Une protection se dit toujours, ou que le joueur regarde.** Alliance et ecart de
+             * puissance sont des regles du jeu, pas des missions hors sujet : les taire laissait un
+             * bouton grise sans un mot, et le joueur concluait que le jeu etait casse. Le refus le
+             * declare lui-meme (`explainToThePlayer`) — le deduire de « le message n est pas vide »
+             * aurait rouvert d un coup tous les refus muets.
+             *
+             * **Une seule fois, quel que soit le nombre de missions refusees.** Les quatre genres
+             * offensifs portent la meme protection : sans ce controle, le joueur lisait la meme
+             * phrase quatre fois.
+             */
+            if ($possible->explainToThePlayer && $possible->error !== '' && !in_array($possible->error, array_column($errors, 'message'), true)) {
+                $errors[] = ['message' => $possible->error, 'error' => 0];
             }
         }
 

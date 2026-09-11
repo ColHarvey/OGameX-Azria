@@ -2698,7 +2698,13 @@
         raison.hidden = true;
 
         bouton.addEventListener('click', function () {
-            var corps = { contact_id: contact.contact_id };
+            /*
+             * **Le jeton part avec l envoi.** Les trois autres `post` de la carte le portent ; celui-ci
+             * ne le portait pas, et rien dans le depot ne pose l en-tete CSRF globalement — le seul
+             * `ajaxSetup` pose `X-Socket-ID`. Le banc ne peut pas le voir : Laravel desactive la
+             * verification sous les essais.
+             */
+            var corps = { contact_id: contact.contact_id, _token: jetonCsrf() };
             var total = 0;
 
             champs.querySelectorAll('.gtContactShipInput').forEach(function (champ) {
@@ -2838,7 +2844,8 @@
                     contact_id: contact.contact_id,
                     speed: 10,
                     order_version: devis.order_version,
-                    quoted_fuel_cost: devis.fuel_cost
+                    quoted_fuel_cost: devis.fuel_cost,
+                    _token: jetonCsrf()
                 }, null, 'json')
                     .done(function () {
                         deselectionner(carte, true);
@@ -2876,13 +2883,21 @@
                 kind: 'attack',
                 patrol_id: p.id,
                 contact_id: contact.contact_id,
-                speed: 10
+                speed: 10,
+                _token: jetonCsrf()
             }, null, 'json')
                 .done(function (reponse) {
                     bouton.disabled = false;
 
-                    if (!reponse || !reponse.quote || reponse.quote.refusal) {
-                        dire(locaFiche('surveillanceRefused', 'Cette attaque a ete refusee.'));
+                    /*
+                     * **Le refus dit pourquoi.** Le serveur compose la phrase (`refusal_reason`) a
+                     * cote de la clef ; n afficher qu un message generique laissait le joueur sans
+                     * moyen de comprendre ce qui manque — carburant, reserve de retour, ecart de
+                     * puissance. La clef ne se montre jamais : elle est pour le code.
+                     */
+                    if (!reponse || !reponse.quote || reponse.quote.possible !== true) {
+                        dire((reponse && reponse.quote && reponse.quote.refusal_reason)
+                            || locaFiche('surveillanceRefused', 'Cette attaque a ete refusee.'));
 
                         return;
                     }

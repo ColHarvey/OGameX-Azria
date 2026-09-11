@@ -120,7 +120,12 @@ final class PatrolHomecoming
         // `park()` ecrit l etat, le point, les curseurs de facturation et le prochain rendez-vous.
         // Elle exige que la ligne de la mission soit tenue et que l etat admette le stationnement :
         // les deux le sont — le travailleur tient la mission, et nous sortons d un raid.
-        $this->orders->park($patrouille, $retour);
+        //
+        // **Le vol n a pas deplace la patrouille**, et c est ce qu il faut lui dire. Son point, sa
+        // galaxie et son systeme sont exactement ceux d avant le raid : ce sont ses vaisseaux qui
+        // sont alles ailleurs. Laisser `park()` deduire du segment qu elle a change de systeme
+        // revoquait tous les contacts poses sur elle et relancait l horloge d acquisition.
+        $this->orders->park($patrouille, $retour, false);
     }
 
     /**

@@ -608,7 +608,9 @@ abstract class GameMission
             return null;
         }
 
-        return new MissionPossibleStatus(false, __($garde->reason()));
+        // **Ce refus se dit.** C est une regle du jeu, pas une mission hors sujet : le joueur doit
+        // apprendre qu on ne frappe pas un allie, sinon il voit un bouton grise sans raison.
+        return new MissionPossibleStatus(false, __($garde->reason()), true);
     }
 
     /**
@@ -633,7 +635,10 @@ abstract class GameMission
             return null;
         }
 
-        return new MissionPossibleStatus(false, __($garde->reason()));
+        // **Ce refus se dit aussi**, et c est le plus important des deux : l ecart de puissance ne
+        // se devine pas. Sans un mot, le joueur ne peut pas savoir que la protection existe, encore
+        // moins qu elle joue dans les deux sens.
+        return new MissionPossibleStatus(false, __($garde->reason()), true);
     }
 
     /**

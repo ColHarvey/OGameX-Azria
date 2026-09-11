@@ -393,9 +393,22 @@ class PatrolRaidTest extends AccountTestCase
             'La premisse manque : cette frappe est deja refusee avec une reserve pleine.'
         );
 
-        // Juste de quoi faire l aller-retour, plus rien pour rentrer chez elle ensuite.
+        /*
+         * **Juste de quoi partir et revenir — et rien pour rentrer chez elle ensuite.**
+         *
+         * Le stationnement deja consomme entre dans le compte, parce que l ordre le preleve avant de
+         * chiffrer : l oublier ici faisait tomber l essai sur `not_enough_fuel`, un refus voisin mais
+         * different. L un dit « tu ne peux pas y aller », l autre « tu peux y aller mais tu ne
+         * pourras plus rentrer » — c est le second qui est juge ici.
+         */
         $allerRetour = $this->ordres()->quoteForAttack($patrouille, $gelee, 10, $instant)->fuelCost;
-        $patrouille->forceFill(['fuel_reserve' => (float)$allerRetour + 1.0])->save();
+        $du = resolve(PatrolUpkeep::class)->dueBetween(
+            $this->flotte(),
+            (int)$patrouille->upkeep_paid_at,
+            $instant
+        );
+
+        $patrouille->forceFill(['fuel_reserve' => (float)$allerRetour + $du + 1.0])->save();
 
         $devis = $this->ordres()->quoteForAttack($patrouille->refresh(), $gelee, 10, $instant);
 
@@ -770,6 +783,289 @@ class PatrolRaidTest extends AccountTestCase
 
         $reponse->assertStatus(200);
         $reponse->assertJsonPath('success', true);
+    }
+
+    /**
+     * **Un devis est refuse exactement quand son ordre le serait.**
+     *
+     * L ordre paie le stationnement du **avant** de chiffrer. Un devis qui partait de la reserve
+     * brute etait donc plus genereux que lui : « possible », puis refus a la confirmation, a une
+     * seconde d intervalle. Le joueur lisait deux verdicts contraires sans rien avoir fait.
+     *
+     * Le montage rend le faux **observable** : la reserve couvre l aller-retour, et rien de plus.
+     * Sans le stationnement du, les deux chemins coincideraient et l essai ne prouverait rien.
+     */
+    public function testUnDevisDeFrappeEstRefuseExactementQuandSonOrdreLeSerait(): void
+    {
+        [$patrouille, $pose] = $this->unePatrouillePosee();
+
+        $cible = $this->uneCible();
+        $instant = (int)$pose->time_arrival + 3600;
+
+        Date::setTestNow(Date::createFromTimestamp($instant));
+
+        $gelee = FrozenPatrolTarget::of($cible);
+        $allerRetour = $this->ordres()->quoteForAttack($patrouille, $gelee, 10, $instant)->fuelCost;
+        $du = resolve(PatrolUpkeep::class)->dueBetween(
+            $this->flotte(),
+            (int)$patrouille->upkeep_paid_at,
+            $instant
+        );
+
+        $this->assertGreaterThan(0.0, $du, 'La premisse manque : rien n est du, les deux chemins coincident.');
+
+        /*
+         * Exactement de quoi faire l aller-retour, plus le retour de securite — mais **pas** le
+         * stationnement deja consomme. C est la fenetre exacte ou les deux verdicts divergeaient.
+         */
+        $retourDeSecurite = $this->ordres()->safetyReturnCostOf($patrouille, $this->flotte());
+        $patrouille->forceFill(['fuel_reserve' => (float)$allerRetour + (float)$retourDeSecurite + ($du / 2)])->save();
+
+        $devis = $this->ordres()->quoteForAttack($patrouille->refresh(), $gelee, 10, $instant);
+
+        if ($devis->isPossible()) {
+            // Le devis dit oui : l ordre doit aboutir. Un refus ici serait la divergence meme.
+            $this->ordres()->attackFrom($patrouille, $gelee, 10, (int)$patrouille->order_version, $instant);
+            $this->assertSame(PatrolState::Attacking, $patrouille->refresh()->state);
+
+            return;
+        }
+
+        // Le devis dit non : l ordre doit refuser pour la meme raison, pas partir quand meme.
+        $this->expectException(PatrolOrderRefused::class);
+
+        $this->ordres()->attackFrom($patrouille, $gelee, 10, (int)$patrouille->order_version, $instant);
+    }
+
+    // --------------------------------------- ce que le joueur LIT quand c est refuse
+
+    /**
+     * **Un refus dit pourquoi, en francais, et jamais une clef.**
+     *
+     * `__()` rend la clef elle-meme quand la traduction manque — une chaine lisible, sans la moindre
+     * erreur. Comparer la clef d un service ne prouve donc rien de ce que le joueur lit : ce temoin
+     * poste la requete et refuse **toute** chaine `t_ingame.` dans la reponse entiere.
+     *
+     * Le cas choisi est celui que Keven a nomme : l ecart de puissance. Un refus qui dirait
+     * seulement « impossible » laisserait le joueur chercher ce qu il a mal fait.
+     */
+    public function testUnRefusPourEcartDePuissanceSeLitEnFrancais(): void
+    {
+        [$patrouille, $pose] = $this->unePatrouillePosee();
+
+        $cible = $this->uneCible();
+        $contact = $this->unContactSur($cible, (int)$pose->time_arrival);
+        $instant = (int)$pose->time_arrival + 3600;
+
+        Date::setTestNow(Date::createFromTimestamp($instant));
+
+        resolve(SettingsService::class)->set('newbie_protection_enabled', 1);
+        $this->poserLeScore($this->currentUserId, 500000);
+        $this->poserLeScore((int)$cible->user_id, 200);
+
+        $reponse = $this->post('/ajax/galaxy/patrol/attack', [
+            'patrol_id' => (int)$patrouille->id,
+            'contact_id' => $contact,
+            'speed' => 10,
+            'order_version' => (int)$patrouille->order_version,
+            '_token' => csrf_token(),
+        ]);
+
+        $reponse->assertStatus(409);
+
+        $corps = $reponse->getContent();
+
+        $this->assertIsString($corps);
+        $this->assertStringNotContainsString(
+            't_ingame.',
+            $corps,
+            'Le joueur recoit une clef de traduction a la place d une phrase : ' . $corps
+        );
+
+        $phrase = (string)$reponse->json('reason');
+
+        /*
+         * **La clef ne se fait pas passer pour une phrase.** `__()` rend la clef elle-meme quand la
+         * traduction manque : c est exactement ce qu il faut voir, et une comparaison a la clef nue
+         * le voit.
+         */
+        $this->assertNotSame('target_strength_protected', $phrase, 'Le joueur lit la clef brute.');
+        $this->assertGreaterThan(30, strlen($phrase), 'Le refus tient en trois mots : il ne peut rien expliquer. Lu : ' . $phrase);
+
+        /*
+         * **Et la phrase francaise nomme la cause.** Le banc tourne sous la locale par defaut, donc
+         * la reponse est en anglais ; le serveur de Keven est en francais. La langue du joueur se
+         * lit la ou elle vit — dans le fichier —, pas devinee d une reponse HTTP.
+         */
+        $langues = [
+            'fr' => ['puissance', 'offensive'],
+            'en' => ['power', 'offensive'],
+        ];
+
+        foreach ($langues as $langue => $mots) {
+            $table = require base_path('resources/lang/' . $langue . '/t_ingame.php');
+            $dite = (string)($table['patrol']['refusal_target_strength_protected'] ?? '');
+
+            foreach ($mots as $mot) {
+                $this->assertStringContainsString(
+                    $mot,
+                    mb_strtolower($dite),
+                    'Le refus ne nomme pas ce qui l a cause en ' . $langue . ' : ' . $dite
+                );
+            }
+        }
+
+        // **La meme phrase voyage dans `errors[0].message`**, la forme que le jeu affiche deja pour
+        // tous ses envois de flotte : un seul des deux canaux rempli laisserait la moitie des
+        // affichages muette.
+        $this->assertSame($phrase, (string)$reponse->json('errors.0.message'));
+    }
+
+    /**
+     * **Un devis refuse se dit refuse, et dit pourquoi.**
+     *
+     * Ce devis-la ne passait pas par le composeur unique et annoncait `possible: true` **en dur** :
+     * une frappe impossible etait presentee comme faisable, et le joueur ne decouvrait le refus qu a
+     * la confirmation — apres avoir cru pouvoir.
+     */
+    public function testUnDevisDeFrappeRefuseSeDitRefuseEtDitPourquoi(): void
+    {
+        [$patrouille, $pose] = $this->unePatrouillePosee();
+
+        $cible = $this->uneCible();
+        $contact = $this->unContactSur($cible, (int)$pose->time_arrival);
+        $instant = (int)$pose->time_arrival + 3600;
+
+        Date::setTestNow(Date::createFromTimestamp($instant));
+
+        // La premisse : avec une reserve pleine, ce devis est possible.
+        $possible = $this->post('/ajax/galaxy/patrol/quote', [
+            'kind' => 'attack',
+            'patrol_id' => (int)$patrouille->id,
+            'contact_id' => $contact,
+            'speed' => 10,
+            '_token' => csrf_token(),
+        ]);
+
+        $possible->assertStatus(200);
+        $possible->assertJsonPath('quote.possible', true);
+
+        // Plus de quoi faire l aller-retour : le meme devis doit se dire refuse.
+        $patrouille->forceFill(['fuel_reserve' => 1.0])->save();
+
+        $refuse = $this->post('/ajax/galaxy/patrol/quote', [
+            'kind' => 'attack',
+            'patrol_id' => (int)$patrouille->id,
+            'contact_id' => $contact,
+            'speed' => 10,
+            '_token' => csrf_token(),
+        ]);
+
+        $refuse->assertStatus(200);
+        $refuse->assertJsonPath('quote.possible', false);
+
+        $raison = (string)$refuse->json('quote.refusal_reason');
+
+        $this->assertNotSame('', $raison, 'Le devis refuse ne porte aucune phrase : la carte n aurait qu une clef a afficher.');
+        $this->assertStringNotContainsString('t_ingame.', $raison, 'La phrase du refus est une clef non traduite : ' . $raison);
+
+        $corps = $refuse->getContent();
+        $this->assertIsString($corps);
+        $this->assertStringNotContainsString('t_ingame.', $corps);
+    }
+
+    // ------------------------------------------- ce qu un raid ne doit PAS faire
+
+    /**
+     * **Un raid vers un autre systeme ne remet pas l horloge de surveillance a zero.**
+     *
+     * La patrouille n a pas bouge : son point, sa galaxie et son systeme sont exactement ceux
+     * d avant. Ce sont ses **vaisseaux** qui sont alles ailleurs et revenus.
+     *
+     * `park()` decide « a-t-elle change de systeme ? » en comparant les deux bouts du segment —
+     * juste pour un deplacement, faux pour un retour de raid, dont le segment part de la cible.
+     * Sans cette distinction, un joueur dont la patrouille allait etre acquise n avait qu a frapper
+     * le systeme voisin pour effacer tous les contacts poses sur elle et relancer le compteur.
+     *
+     * Le temoin exige les deux moities : le contact survit, et l instant d entree ne bouge pas.
+     */
+    public function testUnRaidVersUnAutreSystemeNeRelancePasLHorlogeDeSurveillance(): void
+    {
+        [$patrouille, $pose] = $this->unePatrouillePosee();
+
+        $entreeAvant = (int)$patrouille->entered_system_at;
+        $observateur = $this->unContactPoseSurMaPatrouille($patrouille, $entreeAvant);
+
+        $this->assertGreaterThan(0, $entreeAvant, 'La premisse manque : la patrouille n a pas d instant d entree.');
+
+        // Une cible dans le **systeme voisin** : c est le franchissement qui declenche le defaut.
+        $coords = $this->planetService->getPlanetCoordinates();
+        $cible = $this->uneCible();
+        $cible->forceFill(['system' => $coords->system + 1])->save();
+
+        $instant = (int)$pose->time_arrival + 3600;
+        Date::setTestNow(Date::createFromTimestamp($instant));
+
+        $attaque = $this->ordres()->attackFrom(
+            $patrouille,
+            FrozenPatrolTarget::of($cible->refresh()),
+            10,
+            (int)$patrouille->order_version,
+            $instant
+        );
+
+        $this->assertNotSame(
+            (int)$attaque->system_from,
+            (int)$attaque->system_to,
+            'La premisse manque : ce raid ne franchit aucun systeme, le defaut ne peut pas se produire.'
+        );
+
+        $cible->delete();
+
+        Date::setTestNow(Date::createFromTimestamp((int)$attaque->time_arrival + 1));
+        $this->joueur()->updateFleetMissions();
+
+        $retour = FleetMission::query()->where('parent_id', $attaque->id)->firstOrFail();
+
+        Date::setTestNow(Date::createFromTimestamp((int)$retour->time_arrival + 1));
+        $this->joueur()->updateFleetMissions();
+
+        $patrouille->refresh();
+
+        $this->assertSame(
+            $entreeAvant,
+            (int)$patrouille->entered_system_at,
+            'Le raid a relance l horloge d acquisition : il suffirait de frapper le systeme voisin pour echapper a toute detection.'
+        );
+
+        $this->assertNull(
+            SurveillanceContact::query()->whereKey($observateur)->value('revoked_at'),
+            'Le raid a revoque le contact pose sur la patrouille : le detecteur perd ce qu il avait acquis sans rien avoir perdu.'
+        );
+    }
+
+    /**
+     * Un contact qu un autre joueur tient sur MA patrouille — ce que le raid ne doit pas effacer.
+     */
+    private function unContactPoseSurMaPatrouille(Patrol $mienne, int $depuis): int
+    {
+        $etrangere = $this->getNearbyForeignPlanet();
+        $proprietaire = $etrangere->getPlayer();
+
+        $this->assertNotNull($proprietaire);
+
+        $contact = SurveillanceContact::query()->create([
+            'observer_planet_id' => $etrangere->getPlanetId(),
+            'observer_user_id' => $proprietaire->getId(),
+            'patrol_id' => (int)$mienne->id,
+            'entered_system_at' => $depuis,
+            'acquisition_from' => $depuis,
+            'visible_from' => $depuis,
+            'revoked_at' => null,
+            'tier' => 1,
+        ]);
+
+        return (int)$contact->id;
     }
 
     // ------------------------------------------------- le planificateur, seul

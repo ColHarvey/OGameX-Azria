@@ -267,6 +267,81 @@ class PlayerStrengthProtectionTest extends AccountTestCase
     }
 
     /**
+     * **Le joueur lit la raison, il ne devine pas un bouton grise.**
+     *
+     * La page Flotte ne surfacait la raison d un refus que pour l expedition en position 16 : toute
+     * autre mission refusee donnait un bouton eteint **et rien d autre**. Une protection n est pas
+     * un refus hors sujet — c est une regle du jeu, sur une mission que le joueur essayait
+     * d employer —, et sans un mot il conclut que le jeu est casse. Retour de Keven, 12 septembre
+     * 2026.
+     *
+     * Le temoin etablit la premisse : sans protection, aucun message. Puis la protection armee, le
+     * message apparait — et **une seule fois**, alors que quatre genres offensifs la portent.
+     */
+    public function testLaPageFlotteExpliqueLeRefusAuLieuDeGriserSansUnMot(): void
+    {
+        $etrangere = $this->getNearbyForeignPlanet();
+        $proprietaire = $etrangere->getPlayer();
+
+        $this->assertNotNull($proprietaire);
+
+        $coordonnees = $etrangere->getPlanetCoordinates();
+
+        $demander = fn () => $this->post('/ajax/fleet/dispatch/check-target', [
+            'galaxy' => $coordonnees->galaxy,
+            'system' => $coordonnees->system,
+            'position' => $coordonnees->position,
+            'type' => 1,
+            '_token' => csrf_token(),
+        ]);
+
+        $this->poserLeScore($this->currentUserId, self::FORT);
+        $this->poserLeScore($proprietaire->getId(), self::FAIBLE);
+
+        // **La premisse** : desarmee, la page ne dit rien de cet ecart.
+        resolve(SettingsService::class)->set('newbie_protection_enabled', 0);
+
+        $avant = $demander();
+        $avant->assertStatus(200);
+
+        $phrase = (string)__('t_ingame.protection.strength_difference');
+
+        $this->assertStringNotContainsString(
+            $phrase,
+            (string)$avant->getContent(),
+            'La premisse manque : la page annonce deja la protection alors qu elle est desarmee.'
+        );
+
+        // Armee, la raison atteint le joueur.
+        $this->armer();
+
+        $apres = $demander();
+        $apres->assertStatus(200);
+
+        $corps = (string)$apres->getContent();
+
+        $this->assertStringContainsString(
+            $phrase,
+            $corps,
+            'La page Flotte grise le bouton sans dire pourquoi : le joueur ne peut pas comprendre.'
+        );
+
+        $this->assertStringNotContainsString(
+            't_ingame.',
+            $corps,
+            'Le joueur recoit une clef de traduction au lieu d une phrase.'
+        );
+
+        // **Une seule fois.** Les quatre genres offensifs portent la meme protection ; sans le
+        // controle de doublon, le joueur lisait la meme phrase quatre fois.
+        $this->assertSame(
+            1,
+            substr_count($corps, $phrase),
+            'La meme protection est annoncee ' . substr_count($corps, $phrase) . ' fois.'
+        );
+    }
+
+    /**
      * **L espionnage reste ouvert**, comme dans le jeu d origine : on peut toujours sonder un
      * debutant. La garde ne juge que les genres offensifs.
      */

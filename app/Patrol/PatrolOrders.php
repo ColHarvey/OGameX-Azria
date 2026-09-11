@@ -578,7 +578,20 @@ final class PatrolOrders
 
         $units = $this->unitsOf($segment);
         $allerRetour = 2 * $aller->fuelCost;
-        $restant = (float)$patrol->fuel_reserve - $allerRetour;
+
+        /*
+         * **Le stationnement deja consomme compte, parce que l ordre le prelevera.**
+         *
+         * `attackFrom()` paie ce qui est du **avant** de chiffrer. Partir de la reserve brute ici
+         * donnait donc un devis plus genereux que l ordre : une patrouille dont la reserve couvrait
+         * tout juste l aller-retour lisait « possible », puis se voyait refuser la confirmation
+         * faute de carburant. Un devis est refuse exactement quand son ordre le serait.
+         *
+         * La patrouille est necessairement posee ici — `whyAttackIsRefused()` l exige —, donc le
+         * curseur court jusqu a maintenant.
+         */
+        $du = $this->upkeep->dueBetween($units, (int)($patrol->upkeep_paid_at ?? $now), $now);
+        $restant = (float)$patrol->fuel_reserve - $du - $allerRetour;
 
         $devis = new PatrolQuote(
             $vers,
@@ -1200,7 +1213,7 @@ final class PatrolOrders
      * deplacer ici demanderait de lui donner sa propre transaction, ce qui n a pas ete fait : c est
      * une obligation documentee, pas une protection en place.
      */
-    public function park(Patrol $patrol, FleetMission $segment): void
+    public function park(Patrol $patrol, FleetMission $segment, bool $theFlightMovedThePatrol = true): void
     {
         $arrivee = (int)$segment->time_arrival;
         $point = $this->pointOf($segment);
@@ -1210,8 +1223,16 @@ final class PatrolOrders
         // aurait alors porte la date de son ancien systeme, et l horloge d acquisition des reseaux de
         // surveillance — qui part de cet instant — aurait compte un sejour qui n a pas eu lieu.
         // Les deux bouts du segment, eux, sont des faits du trajet que rien ne reecrit.
-        $memeSysteme = (int)$segment->galaxy_from === (int)$segment->galaxy_to
-            && (int)$segment->system_from === (int)$segment->system_to;
+        //
+        // **Sauf quand le vol n a pas deplace la patrouille**, et l appelant le declare : le retour
+        // d un raid part de la cible, dans un autre systeme, alors que la patrouille n a jamais
+        // quitte son point. Deduire du segment qu elle a voyage revoquait alors tous les contacts
+        // poses sur elle et relancait l horloge d acquisition — il aurait suffi de frapper le
+        // systeme voisin pour echapper indefiniment a toute detection. Le segment decrit ou les
+        // **vaisseaux** sont alles ; ce n est pas la meme question.
+        $memeSysteme = !$theFlightMovedThePatrol
+            || ((int)$segment->galaxy_from === (int)$segment->galaxy_to
+                && (int)$segment->system_from === (int)$segment->system_to);
 
         $patrol->forceFill([
             'state' => PatrolState::Stationed,

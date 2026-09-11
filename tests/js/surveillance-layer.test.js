@@ -151,6 +151,10 @@ function unMonde({ avecDiffuseur = true } = {}) {
     window.galaxyTacticalLoca = {};
     window.renderContentGalaxy = function () {};
     /* Les adresses que la vue publie pour les ordres de patrouille : sans elles, rien ne part. */
+    /* Les vaisseaux du corps actif : sans eux, la composition depuis un corps ne rend aucune ligne. */
+    window.galaxyPatrolShips = [
+        { id: 206, title: 'Croiseur', name: 'cruiser', amount: 20, mobile: true }
+    ];
     window.galaxyPatrolQuoteUrl = '/ajax/galaxy/patrol/quote';
     window.galaxyPatrolAttackUrl = '/ajax/galaxy/patrol/attack';
 
@@ -692,6 +696,144 @@ test('une confirmation refusee oblige a redemander un devis', () => {
             '/ajax/galaxy/patrol/quote',
             'le clic suivant un refus reconfirme au lieu de redemander un devis'
         );
+    } finally {
+        monde.fermer();
+    }
+});
+/**
+ * **La carte montre la raison du serveur, jamais un message passe-partout.**
+ *
+ * Elle lisait `quote.refusal` — une clef, pas une phrase — et affichait « Cette attaque a ete
+ * refusee » quoi qu il arrive. Le joueur ne pouvait pas savoir ce qui manquait : carburant, reserve
+ * de retour, ecart de puissance. Le serveur compose la phrase a cote de la clef ; il suffisait de
+ * la lire.
+ */
+test('un devis refuse affiche la raison du serveur, pas un message generique', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5);
+        monde.demandes[0].repondre(reponse(1, 5, [unContact(11, 640, 480)], 1_700_000_000, [unePatrouille()]));
+        monde.cliquer(monde.contacts()[0]);
+
+        const bouton = monde.boutons().find((b) => (b.textContent || '').indexOf('Patrouille 1') !== -1);
+
+        monde.cliquer(bouton);
+
+        assert.equal(monde.envois.length, 1, 'la premisse manque : aucun devis n est parti');
+
+        monde.envois[0].repondre({
+            success: true,
+            quote: {
+                possible: false,
+                refusal: 'no_return_reserve',
+                refusal_reason: 'A l arrivee, la reserve ne couvrirait plus le retour de securite.',
+                order_version: 4,
+                fuel_cost: 9999,
+                duration_seconds: 750
+            }
+        });
+
+        const raison = bouton.parentNode.querySelector('.gtActionReason');
+
+        assert.ok(raison && !raison.hidden, 'aucune raison affichee apres un devis refuse');
+        assert.equal(
+            raison.textContent,
+            'A l arrivee, la reserve ne couvrirait plus le retour de securite.',
+            'la carte affiche un message generique au lieu de la raison du serveur : ' + raison.textContent
+        );
+
+        assert.equal(
+            raison.textContent.indexOf('no_return_reserve'),
+            -1,
+            'la clef de refus est montree au joueur : elle est pour le code, pas pour lui'
+        );
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Le cas comparable : un devis possible ne declenche aucun refus.**
+ *
+ * Sans lui, une carte qui afficherait toujours une raison passerait le temoin precedent.
+ */
+test('un devis possible passe a la confirmation sans afficher de refus', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5);
+        monde.demandes[0].repondre(reponse(1, 5, [unContact(11, 640, 480)], 1_700_000_000, [unePatrouille()]));
+        monde.cliquer(monde.contacts()[0]);
+
+        const bouton = monde.boutons().find((b) => (b.textContent || '').indexOf('Patrouille 1') !== -1);
+
+        monde.cliquer(bouton);
+        monde.envois[0].repondre({
+            success: true,
+            quote: { possible: true, refusal: null, refusal_reason: null, order_version: 4, fuel_cost: 1234, duration_seconds: 750 }
+        });
+
+        monde.cliquer(bouton);
+
+        assert.equal(monde.envois.length, 2, 'un devis possible ne mene pas a la confirmation');
+        assert.equal(monde.envois[1].url, '/ajax/galaxy/patrol/attack');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Aucun envoi de la carte ne part sans son jeton.**
+ *
+ * Rien dans le depot ne pose l en-tete CSRF globalement : le seul `ajaxSetup` pose `X-Socket-ID`, et
+ * les `X-CSRF-TOKEN` du paquet herite sont poses appel par appel. Trois des quatre `post` de la carte
+ * portaient `_token` ; celui du bouton d attaque d un contact, non.
+ *
+ * **Le banc PHP ne peut pas voir ce defaut** — Laravel desactive la verification CSRF quand il tourne
+ * sous les essais —, et lire le fichier ne prouverait que la presence d un mot. Ce temoin lit la
+ * charge **reellement envoyee**, telle que le faux l a retenue.
+ */
+test('chaque envoi de la fiche d un contact porte son jeton', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5);
+        monde.demandes[0].repondre(reponse(1, 5, [unContact(11, 640, 480)], 1_700_000_000, [unePatrouille()]));
+        monde.cliquer(monde.contacts()[0]);
+
+        // 1. Le devis d une frappe depuis la patrouille.
+        const depuisLaPatrouille = monde.boutons().find((b) => (b.textContent || '').indexOf('Patrouille 1') !== -1);
+
+        monde.cliquer(depuisLaPatrouille);
+        monde.envois[0].repondre({
+            success: true,
+            quote: { possible: true, refusal: null, refusal_reason: null, order_version: 4, fuel_cost: 1234, duration_seconds: 750 }
+        });
+
+        // 2. La confirmation.
+        monde.cliquer(depuisLaPatrouille);
+
+        // 3. L envoi depuis un corps, avec sa composition.
+        const champ = monde.window.document.querySelector('.gtContactShipInput');
+
+        assert.ok(champ, 'la premisse manque : aucune composition depuis un corps');
+        champ.value = '3';
+
+        const depuisUnCorps = monde.boutons().find((b) => b !== depuisLaPatrouille && !b.disabled);
+
+        assert.ok(depuisUnCorps, 'la premisse manque : aucun bouton d envoi depuis un corps');
+        monde.cliquer(depuisUnCorps);
+
+        assert.equal(monde.envois.length, 3, 'les trois envois attendus ne sont pas partis');
+
+        monde.envois.forEach((envoi, rang) => {
+            assert.equal(
+                typeof envoi.donnees._token === 'string' && envoi.donnees._token !== '',
+                true,
+                'l envoi ' + rang + ' vers ' + envoi.url + ' part sans jeton : le serveur le refusera avant de le lire'
+            );
+        });
     } finally {
         monde.fermer();
     }

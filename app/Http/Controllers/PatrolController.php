@@ -123,10 +123,18 @@ class PatrolController extends OGameController
 
                     $gelee = resolve(PatrolAttackEligibility::class)->frozenTargetFor($player->getId(), $cible, $now);
 
+                    /*
+                     * **Le composeur unique, ici comme partout.** Composer la charge a la main
+                     * annoncait `possible: true` en dur : une frappe refusee faute de carburant
+                     * etait presentee comme possible, et le joueur ne decouvrait le refus qu a la
+                     * confirmation. `quotePayload()` porte le verdict **et** sa phrase traduite.
+                     */
                     return response()->json([
                         'success' => true,
-                        'quote' => $this->orders->quoteForAttack($patrouille, $gelee, $this->speedFrom($request), $now)->toArray()
-                            + ['possible' => true],
+                        'server_now' => $now,
+                        'quote' => $this->quotePayload(
+                            $this->orders->quoteForAttack($patrouille, $gelee, $this->speedFrom($request), $now)
+                        ),
                     ]);
                 }
 
