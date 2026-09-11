@@ -7,6 +7,7 @@ use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Models\Highscore;
 use OGame\Models\User;
 use OGame\Protection\PlayerStrengthGuard;
+use OGame\Services\Npc\NpcBaseService;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
 
@@ -264,6 +265,47 @@ class PlayerStrengthProtectionTest extends AccountTestCase
                 'The patrol path no longer refuses with ' . $refus . '.'
             );
         }
+    }
+
+    /**
+     * **Une base pirate reste attaquable, protection armee.**
+     *
+     * Elle porte un score au classement, et il est petit : sans exception, `isStrong()` aurait
+     * repondu « oui » pour tout joueur un peu developpe, et l interrupteur arme aurait ferme tout le
+     * contenu que ces bases existent pour fournir.
+     *
+     * Le temoin etablit d abord la premisse — le meme ecart, entre deux **joueurs**, est bien
+     * refuse — sans quoi il serait vert pour n importe quelle autre raison.
+     */
+    public function testUneBasePirateResteAttaquableProtectionArmee(): void
+    {
+        $this->armer();
+        $this->poserLeScore($this->currentUserId, self::FORT);
+
+        // La premisse : entre deux joueurs, cet ecart est refuse.
+        $joueur = $this->unAutreJoueur(self::FAIBLE);
+
+        $this->assertTrue(
+            $this->garde()->forbids(CombatMissionKind::Attack, $this->currentUserId, $joueur),
+            'La premisse manque : cet ecart n est deja pas refuse entre deux joueurs.'
+        );
+
+        // Le meme ecart, contre un compte pilote par le serveur.
+        $base = resolve(NpcBaseService::class)->createBase(NpcBaseService::TYPE_PIRATE);
+
+        $this->assertNotNull($base, 'La premisse manque : aucune base pirate n a pu naitre.');
+
+        $proprietaire = $base->getPlayer();
+
+        $this->assertNotNull($proprietaire);
+        $this->assertTrue((bool)$proprietaire->getUser()->is_npc, 'La premisse manque : ce compte n est pas un PNJ.');
+
+        $this->poserLeScore($proprietaire->getId(), self::FAIBLE);
+
+        $this->assertFalse(
+            $this->garde()->forbids(CombatMissionKind::Attack, $this->currentUserId, $proprietaire->getId()),
+            'La protection interdit d attaquer une base pirate : armee, elle fermerait tout le contenu des bases.'
+        );
     }
 
     /**

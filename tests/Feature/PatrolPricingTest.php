@@ -10,6 +10,7 @@ use OGame\Models\Planet\Coordinate;
 use OGame\Patrol\Geometry\SpatialPoint;
 use OGame\Patrol\PatrolDestination;
 use OGame\Patrol\PatrolPricing;
+use OGame\Services\FleetMissionService;
 use OGame\Services\ObjectService;
 use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
@@ -97,6 +98,20 @@ class PatrolPricingTest extends AccountTestCase
      * recopie la formule sans ses deductions. Une copie fautive passerait la premiere et tomberait ici.
      *
      * L essai pose les deux interrupteurs qu il suppose, et les remet comme il les a trouves.
+     *
+     * ## L echec intermittent qui vivait ici, et pourquoi il n etait pas du hasard
+     *
+     * La seconde moitie affirmait autrefois `1 * 95 + 2700` — le plancher de la deduction. La formule
+     * du jeu est `max(20 - vides, 1)` avec `vides = 21 - habites`, soit `max(habites - 1, 1)` : elle
+     * quitte le plancher des que **trois** systemes de la portee traversee sont peuples. Or la base
+     * d un processus est partagee entre les classes, et colonies, bases pirates et planetes de banc
+     * des essais voisins peuplent cette portee. L essai affirmait donc un fait sur l univers qu il
+     * n etablissait pas, et passait selon l ordre d execution.
+     *
+     * La correction ne recopie pas la formule — ce serait remplacer une supposition par une copie,
+     * et une copie fautive passerait son propre essai. Elle compare la tarification a **la distance
+     * que le jeu calcule** pour les memes coordonnees : c est ce que « deleguer » veut dire, et c est
+     * vrai quel que soit le peuplement.
      */
     public function testBetweenSystemsTheGameRulesApplyAndTheStartingPointDoesNotMatter(): void
     {
@@ -122,7 +137,7 @@ class PatrolPricingTest extends AccountTestCase
             $this->assertSame($unBout->distance, $lAutre->distance, 'An inter-system distance changed with where the fleet stood in its own system.');
             $this->assertSame(20 * 95 + 2700, $unBout->distance, 'The bare inter-system formula of the game was not applied.');
 
-            // Deductions armees : l univers d essai est presque vide, donc l ecart tombe au plancher.
+            // Deductions armees : la portee traversee est peu peuplee, donc l ecart doit tomber.
             $settings->set('ignore_empty_systems_on', 1);
 
             $deduit = $pricing->quote($joueur, $flotte, 100000.0, $coords->galaxy, $coords->system, new SpatialPoint(0, 500), $ailleurs, 10, 1, $base);
@@ -132,7 +147,29 @@ class PatrolPricingTest extends AccountTestCase
                 $deduit->distance,
                 'Arming the empty-system deduction changed nothing: the pricing copied the formula instead of delegating to it.'
             );
-            $this->assertSame(1 * 95 + 2700, $deduit->distance, 'The deduction did not fall to the floor of one system.');
+
+            /*
+             * **La delegation se prouve contre le jeu, pas contre un nombre ecrit ici.**
+             *
+             * Un nombre en dur affirmerait un fait sur le peuplement de l univers que ce banc
+             * n etablit pas — c est exactement ce qui faisait rougir cet essai une fois sur
+             * plusieurs, selon les planetes que les classes voisines avaient laissees dans la
+             * portee traversee. Et recopier `max(habites - 1, 1)` remplacerait une supposition par
+             * une copie : une copie fautive passerait son propre essai.
+             *
+             * Comparer a `distanceBetweenCoordinates()` dit la seule chose qui compte, et la dit
+             * quel que soit l univers : la tarification rend **ce que le jeu rend**.
+             */
+            $duJeu = resolve(FleetMissionService::class)->distanceBetweenCoordinates(
+                $base,
+                new Coordinate($coords->galaxy, $coords->system + 20, $coords->position)
+            );
+
+            $this->assertSame(
+                $duJeu,
+                $deduit->distance,
+                'La tarification ne rend pas la distance du jeu une fois les deductions armees : elle a recopie la formule au lieu de la deleguer.'
+            );
         } finally {
             $settings->set('ignore_empty_systems_on', $videsAvant);
             $settings->set('ignore_inactive_systems_on', $inactifsAvant);

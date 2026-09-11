@@ -6,6 +6,8 @@ use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use OGame\Factories\PlanetServiceFactory;
+use OGame\GameMissions\BattleEngine\Draws\BattleDraws;
+use OGame\GameMissions\BattleEngine\Draws\SeededDraws;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\Planet\Coordinate;
@@ -28,6 +30,18 @@ use Tests\AccountTestCase;
  */
 class NpcBaseResilienceTest extends AccountTestCase
 {
+    /**
+     * La graine de toutes les batailles de ce banc.
+     *
+     * **Une mesure qui change d un passage a l autre ne mesure rien.** Sans elle, la case la plus
+     * serree — le plus faible attaquant contre la plus grosse base — tombait une fois sur trois du
+     * mauvais cote, et la matrice affirmait tantot une chose tantot son contraire.
+     *
+     * La valeur n a aucune signification : seule sa fixite compte. La changer changerait les
+     * chiffres du tableau, et il faudrait alors les relire.
+     */
+    private const int GRAINE = 20260912;
+
     private SettingsService $settings;
 
     /**
@@ -179,6 +193,24 @@ class NpcBaseResilienceTest extends AccountTestCase
      * La matrice mesuree le montre case par case : faible/moyen/fort contre faible/moyenne/forte
      * donnent neuf fois « 1 ». **La taille d'une base ne decide plus rien ; l'Etoile de la Mort
      * decide tout.**
+     *
+     * ## Ce que « neuf fois un » prouve, et ce qu'il ne prouve pas
+     *
+     * Cette matrice est mesuree **sous une graine fixe**. Elle dit ce que le moteur fait de ces
+     * neuf compositions, de facon reproductible ; elle ne dit pas que le jeu garantit une vague en
+     * toute circonstance.
+     *
+     * La case la plus serree — le plus faible attaquant contre la plus grosse base, quarante
+     * chasseurs et une Etoile contre deux cent cinquante lanceurs — se joue en six rounds, et tomber
+     * du mauvais cote y arrive. Sans graine, elle rendait « 2 » environ une fois sur six, et ce banc
+     * affirmait tantot une chose tantot son contraire. **Cinq passages verts ne refutaient pas ce
+     * taux** — 0,85^5 vaut 0,44 — et c'est le journal d'un passage rouge qui l'a montre.
+     *
+     * Ce qui est donc etabli ici : l'Etoile est la porte, elle est binaire, et sous une bande donnee
+     * aucune taille de base ne resiste. Ce qui ne l'est pas : qu'aucune bataille ne puisse jamais
+     * demander une seconde vague. Le jour ou un reglage redonnera du poids a la taille des bases,
+     * les chiffres monteront bien au-dela de deux et ce banc rougira — c'est ce qu'il est la pour
+     * voir.
      *
      * ## Pourquoi cet essai reste, et sous cette forme
      *
@@ -380,6 +412,25 @@ class NpcBaseResilienceTest extends AccountTestCase
 
         $this->travelTo(Date::createFromTimestamp($mission->time_arrival + 10));
         $this->reloadApplication();
+
+        /*
+         * **La bande se repose apres la reconstruction, et jamais avant.**
+         *
+         * Un envoi de flotte reconstruit le conteneur : toute liaison posee plus tot est effacee
+         * **en silence**, et la bataille reprendrait le hasard du systeme sans que rien ne le dise.
+         * La liaison est donc posee ici, entre la derniere reconstruction et la requete qui declenche
+         * l arrivee.
+         */
+        $this->app->bind(BattleDraws::class, fn (): BattleDraws => new SeededDraws(self::GRAINE));
+
+        // **Verifiee au point d usage, jamais par la couleur du temoin.** Une substitution orpheline
+        // laisserait la mesure au hasard tout en gardant son air de mesure.
+        $this->assertInstanceOf(
+            SeededDraws::class,
+            resolve(BattleDraws::class),
+            'La bande a graine n est pas en place au moment de la bataille : la mesure retombe au hasard.'
+        );
+
         $this->get('/overview');
     }
 

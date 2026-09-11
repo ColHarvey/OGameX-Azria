@@ -83,6 +83,25 @@ final class PlayerStrengthGuard
             return false;
         }
 
+        /*
+         * **Un adversaire pilote par le serveur n est pas un joueur a proteger.**
+         *
+         * Une base pirate porte un score au classement, et il est petit : `isStrong()` aurait donc
+         * repondu « oui » pour tout joueur un peu developpe, et l interrupteur arme aurait interdit
+         * d attaquer les bases — c est-a-dire tout le contenu qu elles existent pour fournir.
+         *
+         * La fenetre est exactement celle qui compte : `NpcBaseService` pose `time = maintenant` a
+         * la naissance, donc une base compte comme active pendant sept jours. Passe ce delai le
+         * controle d inactivite ci-dessous l aurait exemptee — mais une base de plus de sept jours
+         * n est pas le probleme.
+         *
+         * **Decision de jeu, et elle se retire d une ligne** si Keven veut l inverse : une
+         * protection entre joueurs ne protege pas un adversaire que le serveur conduit.
+         */
+        if ($cible->getUser()->is_npc) {
+            return false;
+        }
+
         // **Un compte inactif n est pas protege.** Le recolter est une mecanique du jeu, et la
         // protection des debutants n a jamais eu pour role de l empecher.
         if ($cible->isInactive()) {
