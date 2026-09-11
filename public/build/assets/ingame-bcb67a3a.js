@@ -79384,10 +79384,75 @@ window.playOGameXWormhole = function (canvas) {
         };
     }
 
+    /*
+     * ## L instant ou une patrouille rentre
+     *
+     * **Rien ne previent le navigateur.** Le serveur traite une arrivee a la premiere requete qui
+     * lui parvient, et sans requete il ne se passe rien du tout : les compteurs du bandeau — les
+     * creneaux occupes en tete — gardaient la valeur d avant le retour, et la liste d evenements
+     * gardait la mission. Keven, 12 septembre 2026 : « quand mes vaisseau rentre de ma patrouille
+     * les compteur ici ne ce met pas a jour en temps reel ».
+     *
+     * La boucle d animation, elle, voit l instant passer. Elle redemande alors les flottes — et
+     * cette requete-la traverse le meme intergiciel que les pages, donc elle **fait avancer**
+     * l arrivee au lieu de seulement la lire, et sa reponse porte les compteurs a jour.
+     *
+     * Trois precautions, chacune contre un defaut precis :
+     *
+     * - **Sur une transition observee seulement.** Au premier passage l etat precedent est inconnu
+     *   et rien ne se declenche. Sans cela, une patrouille deja posee — dont le segment porte une
+     *   arrivee passee, et qui reste publiee ainsi — relancerait une demande a chaque reponse,
+     *   indefiniment. C est la meme regle que les fenetres d hyperespace, pour la meme raison.
+     * - **Une seule demande.** Deux patrouilles qui rentrent a la meme seconde valent une requete.
+     * - **Un peu apres.** L horloge du navigateur peut devancer celle du serveur ; demander trop
+     *   tot rendrait l etat d avant, et on ne redemande pas une seconde fois.
+     */
+    var DELAI_APRES_UNE_ARRIVEE = 1200;
+    var demandeApresArrivee = null;
+
+    function signalerUneArrivee() {
+        if (demandeApresArrivee !== null) {
+            return;
+        }
+
+        demandeApresArrivee = window.setTimeout(function () {
+            demandeApresArrivee = null;
+
+            var carte = document.getElementById('galaxyTactical');
+
+            annoncerLeMouvement();
+
+            if (carte && carte.gtSysteme) {
+                chargerLesFlottes(carte, carte.gtSysteme.galaxie, carte.gtSysteme.systeme);
+            }
+        }, DELAI_APRES_UNE_ARRIVEE);
+    }
+
+    /**
+     * Une patrouille vient-elle de franchir son instant d arrivee ? Rend le constat au drapeau
+     * qu elle porte, et ne declenche la demande que sur la bascule.
+     */
+    function surveillerSonArrivee(p, maintenant) {
+        var arrivee = !!(p.segment && Number(p.segment.time_arrival) <= maintenant);
+
+        if (p._arrivee === false && arrivee) {
+            signalerUneArrivee();
+        }
+
+        p._arrivee = arrivee;
+    }
+
     function placerLesPatrouilles() {
         var maintenant = maintenantServeur() / 1000;
 
         patrouilles.forEach(function (p) {
+            /*
+             * **Avant le marqueur, pas apres.** Une patrouille en vol n en a aucun — c est le
+             * triangle de la couche des mouvements qui la porte —, et le controle ci-dessous
+             * sortait donc exactement pour celles dont on attend le retour.
+             */
+            surveillerSonArrivee(p, maintenant);
+
             if (!p._marqueur) {
                 return;
             }
@@ -80431,26 +80496,42 @@ window.playOGameXWormhole = function (canvas) {
      * Elle est **facultative** : une page servie sans le paquet herite n en dispose pas, et un
      * ordre reussi ne doit pas echouer parce que le bandeau n a pas pu se rafraichir.
      */
+    /**
+     * Une fonction du bandeau herite, appelee sans jamais pouvoir faire echouer l ordre qui vient
+     * d etre accepte : une page servie sans le paquet herite n en dispose pas.
+     */
+    function prevenirLeJeu(fonction, force) {
+        if (typeof fonction !== 'function') {
+            return;
+        }
+
+        try {
+            fonction(force);
+        } catch (e) {
+            /* Le bandeau du jeu ne doit jamais faire echouer un ordre accepte. */
+        }
+    }
+
     function annoncerLeMouvement() {
         /*
          * **Deux choses a prevenir, pas une.** Le bandeau compact et la liste depliee « plus de
          * details » se chargent separement : rafraichir le premier laissait la seconde afficher
          * l etat d avant, et il fallait recharger la page pour l y voir.
          *
-         * `refreshFleetEvents()` ne va chercher la liste que si elle est **ouverte** — il n y a
-         * rien a rafraichir dans un panneau replie, et c est le jeu lui-meme qui en decide.
+         * **Et le `true` n est pas un detail : c est toute la correction.** Sans lui,
+         * `refreshFleetEvents()` ne redemande la liste que si le panneau est **deja deplie** — ce
+         * qu il n est jamais pendant qu on glisse une patrouille sur la carte. Pire : le jeu retient
+         * dans `toggleEvents.loaded` qu elle a ete chargee une fois, au chargement de la page, et
+         * l ouvrir plus tard ne la redemande donc pas non plus. Le joueur lisait l etat d avant son
+         * ordre jusqu au prochain rechargement complet — mot pour mot ce que Keven decrivait :
+         * « dans le drop down de evenement toujours rien sauf si je refresh la page ».
+         *
+         * Les envois de flotte du jeu passent `true` depuis toujours — `sendShipsWithPopup()`, le
+         * rappel de la liste elle-meme, le chargement de page. La carte faisait bande a part.
+         * **Comparer un objet a ses pairs, champ par champ.**
          */
-        [window.getAjaxEventbox, window.refreshFleetEvents].forEach(function (prevenir) {
-            if (typeof prevenir !== 'function') {
-                return;
-            }
-
-            try {
-                prevenir();
-            } catch (e) {
-                /* Le bandeau du jeu ne doit jamais faire echouer un ordre accepte. */
-            }
-        });
+        prevenirLeJeu(window.getAjaxEventbox);
+        prevenirLeJeu(window.refreshFleetEvents, true);
     }
 
     /* La confirmation : la version du devis part avec l'ordre ; un devis perime revient en refus, et le joueur en redemande un. */

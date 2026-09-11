@@ -147,8 +147,28 @@ function unMonde() {
      */
     const prevenus = [];
 
+    /*
+     * **Le faux rejoue la regle du vrai, il ne la contourne pas.**
+     *
+     * `refreshFleetEvents(force)` du jeu ne va chercher la liste que si le panneau est **deja
+     * deplie**, ou si l appelant force. Or le panneau est replie pendant qu on glisse une
+     * patrouille sur la carte, et le jeu retient par ailleurs dans `toggleEvents.loaded` que la
+     * liste a ete chargee une fois : l ouvrir plus tard ne la redemande pas davantage.
+     *
+     * Le faux precedent se contentait de noter l appel. Il etait vert pendant que Keven lisait
+     * « toujours rien sauf si je refresh la page ». Un canal qu on ne mesure qu a son entree ne
+     * dit rien de ce qui en sort.
+     */
+    const panneauDEvenements = { replie: true, chargements: 0 };
+
     window.getAjaxEventbox = function () { prevenus.push('bandeau'); };
-    window.refreshFleetEvents = function () { prevenus.push('liste'); };
+    window.refreshFleetEvents = function (force) {
+        prevenus.push('liste');
+
+        if (!panneauDEvenements.replie || force === true) {
+            panneauDEvenements.chargements += 1;
+        }
+    };
     window.galaxyPatrolShips = [
         { id: 206, name: 'cruiser', label: 'Croiseur', amount: 20, mobile: true }
     ];
@@ -196,7 +216,7 @@ function unMonde() {
         }));
     };
 
-    return { window, demandes, envois, prevenus, amorcer, carte, marqueur, fiche, efface, fermer, geste, relacher, cliquer };
+    return { window, demandes, envois, prevenus, panneauDEvenements, amorcer, carte, marqueur, fiche, efface, fermer, geste, relacher, cliquer };
 }
 
 /**
@@ -572,16 +592,19 @@ test('chantier eteint, cliquer le vide n ouvre rien', () => {
 });
 
 /**
- * **Un ordre accepte previent le bandeau du jeu — les deux moities.**
+ * **Un ordre accepte previent le bandeau du jeu — les deux moities, panneau replie compris.**
  *
  * Keven, 12 septembre 2026 : le bandeau compact se mettait a jour, mais la liste depliee « plus de
  * details » gardait l'etat d'avant et demandait un rechargement de page. Les deux se chargent
  * separement ; il faut donc les prevenir toutes les deux.
  *
- * `refreshFleetEvents()` decide lui-meme de ne rien chercher si le panneau est replie : la carte
- * previent, elle ne commande pas.
+ * Et prevenir ne suffisait pas. `refreshFleetEvents(force)` ne va chercher la liste que si le
+ * panneau est **deja deplie** — il ne l est jamais pendant qu on glisse une patrouille — et le jeu
+ * retient qu elle a ete chargee une fois, donc l ouvrir ensuite ne la redemande pas non plus. Le
+ * joueur lisait l etat d avant son ordre jusqu au prochain rechargement de page. Ce temoin exige
+ * donc **l effet** — la liste effectivement redemandee, panneau replie —, pas la trace de l appel.
  */
-test('un ordre accepte previent le bandeau et la liste depliee', () => {
+test('un ordre accepte previent le bandeau et la liste, panneau replie compris', () => {
     const monde = unMonde();
 
     try {
@@ -626,6 +649,13 @@ test('un ordre accepte previent le bandeau et la liste depliee', () => {
             monde.prevenus.sort(),
             ['bandeau', 'liste'],
             'le jeu n a pas ete prevenu des deux cotes : ' + JSON.stringify(monde.prevenus)
+        );
+
+        assert.equal(monde.panneauDEvenements.replie, true, 'la premisse manque : le panneau est deja deplie, le defaut ne peut pas se produire');
+        assert.equal(
+            monde.panneauDEvenements.chargements,
+            1,
+            'la liste n a pas ete redemandee : panneau replie, le joueur lira l etat d avant son ordre jusqu au prochain rechargement de page'
         );
     } finally {
         monde.fermer();
@@ -995,6 +1025,126 @@ test('un deplacement refuse n efface rien', () => {
 
         assert.ok(monde.fiche(), 'la fiche ne s ouvre pas pour dire le refus');
         assert.equal(monde.efface(), false, 'un geste refuse efface quand meme la fiche qui porte sa raison');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Une patrouille qui rentre pendant qu on regarde fait bouger les compteurs.**
+ *
+ * Keven, 12 septembre 2026 : « quand mes vaisseau rentre de ma patrouille les compteur ici ne ce
+ * met pas a jour en temps reel ». Rien ne previent le navigateur : le serveur traite une arrivee a
+ * la premiere requete qui lui parvient, et sans requete il ne se passe rien du tout.
+ *
+ * Ce temoin prend le cas **ou le defaut vivait** : une patrouille au retour n a aucun marqueur — le
+ * triangle de la couche des mouvements la porte —, et le placeur sortait donc avant tout controle.
+ *
+ * Il exige les deux effets, parce qu ils repondent a deux plaintes distinctes : une demande de
+ * flottes (dont la reponse porte les compteurs, et dont le trajet fait avancer l arrivee cote
+ * serveur) et une liste d evenements redemandee.
+ */
+test('une patrouille qui rentre fait redemander les flottes et la liste, sans rechargement', async () => {
+    const monde = unMonde();
+
+    try {
+        const maintenant = Math.floor(Date.now() / 1000);
+        const rentre = unePatrouille({ etat: 'returning' });
+
+        rentre.segment.time_departure = maintenant - 60;
+        rentre.segment.time_arrival = maintenant + 1;
+
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [rentre], maintenant));
+
+        const flottesAvant = monde.demandes.length;
+        const listeAvant = monde.panneauDEvenements.chargements;
+
+        await new Promise((suite) => setTimeout(suite, 2600));
+
+        assert.ok(
+            monde.demandes.length > flottesAvant,
+            'personne ne redemande les flottes a l arrivee : les compteurs gardent la valeur d avant le retour jusqu a la prochaine veille'
+        );
+        assert.ok(
+            monde.panneauDEvenements.chargements > listeAvant,
+            'la liste d evenements n est pas redemandee a l arrivee : la mission finie y reste affichee'
+        );
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Le cas comparable, et il compte autant que le precedent.**
+ *
+ * Une patrouille posee garde un segment dont l arrivee est **deja passee** — c est ce segment qui
+ * lui donne son creneau de flotte, et le serveur continue de le publier. Declencher sur l etat au
+ * lieu de la bascule relancerait donc une demande a chaque reponse, indefiniment : une carte
+ * ouverte sur une patrouille posee mitraillerait le serveur.
+ *
+ * Sans ce temoin, la garde « sur une transition observee seulement » pourrait disparaitre sans que
+ * rien ne rougisse.
+ */
+test('une patrouille deja posee au chargement ne redemande rien', async () => {
+    const monde = unMonde();
+
+    try {
+        const maintenant = Math.floor(Date.now() / 1000);
+        const posee = unePatrouille();
+
+        posee.segment.time_departure = maintenant - 600;
+        posee.segment.time_arrival = maintenant - 300;
+
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [posee], maintenant));
+
+        const flottesAvant = monde.demandes.length;
+
+        await new Promise((suite) => setTimeout(suite, 2600));
+
+        assert.equal(
+            monde.demandes.length,
+            flottesAvant,
+            'une patrouille posee relance des demandes : son arrivee est passee depuis toujours, et la carte la redecouvre a chaque image'
+        );
+    } finally {
+        monde.fermer();
+    }
+});
+/**
+ * **Deux patrouilles qui rentrent a la meme seconde valent une seule demande.**
+ *
+ * Avec une seule patrouille, fondre les demandes ou ne pas les fondre donne le meme compte : le
+ * juste et le faux coincident, et le temoin precedent resterait vert si la fusion disparaissait.
+ * Deux arrivees simultanees rendent le faux observable — c est tout l objet de cet essai.
+ */
+test('deux patrouilles qui rentrent ensemble ne font qu une demande', async () => {
+    const monde = unMonde();
+
+    try {
+        const maintenant = Math.floor(Date.now() / 1000);
+        const rentrer = (id) => {
+            const p = unePatrouille({ id, etat: 'returning' });
+
+            p.segment.time_departure = maintenant - 60;
+            p.segment.time_arrival = maintenant + 1;
+
+            return p;
+        };
+
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [rentrer(3), rentrer(4)], maintenant));
+
+        const flottesAvant = monde.demandes.length;
+
+        await new Promise((suite) => setTimeout(suite, 2600));
+
+        assert.equal(
+            monde.demandes.length,
+            flottesAvant + 1,
+            'deux arrivees simultanees ont declenche ' + (monde.demandes.length - flottesAvant) + ' demandes : elles ne sont pas fondues'
+        );
     } finally {
         monde.fermer();
     }
