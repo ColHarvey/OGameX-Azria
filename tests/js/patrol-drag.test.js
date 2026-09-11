@@ -117,6 +117,8 @@ function unMonde() {
     /* Ce que la vue publie pour composer une patrouille depuis la carte. */
     window.galaxyCurrentPlanetId = 101;
     window.galaxyPatrolGridUnits = 10;
+    window.galaxyPatrolSystemRadius = 1800;
+    window.galaxyPatrolStarExclusion = 60;
     window.galaxyPatrolsEnabled = true;
     window.galaxyPatrolShips = [
         { id: 206, name: 'cruiser', label: 'Croiseur', amount: 20, mobile: true }
@@ -266,6 +268,90 @@ function unMondeEnTrainDeViser(lignes, options = {}) {
 }
 
 /**
+ * **La fiche ne sort jamais de la carte.**
+ *
+ * Keven l'a vue deborder : « le menu rentre dans la map au complet ». Je l'avais posee par
+ * `style.left/top` bruts au point clique, en contournant `placer()` — qui est precisement ce qui la
+ * borne. Les deux chemins partagent desormais le meme calcul.
+ *
+ * Le temoin clique **au bord droit**, la ou le debordement se produit, et exige que la fiche reste
+ * entre les marges. jsdom ne mesure pas les hauteurs (`offsetHeight` vaut zero), donc c'est le
+ * bornage horizontal qui est etabli ici — celui que la capture montrait.
+ */
+test('la fiche de composition reste dans la carte, meme au bord', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, []));
+
+        // Tout au bord droit de la carte, a hauteur du centre : le pire cas.
+        monde.cliquer(monde.carte(), 640, 294);
+
+        const f = monde.fiche();
+
+        assert.ok(f && f.gtOrdre, 'la premisse manque : aucune composition ouverte au bord');
+
+        const gauche = parseInt(f.style.left, 10);
+
+        assert.ok(Number.isFinite(gauche), 'la fiche n a pas de position horizontale');
+        assert.ok(gauche >= 8, 'la fiche sort par la gauche de la carte : left = ' + gauche);
+        assert.ok(gauche <= 656 - 320 - 8, 'la fiche sort par la droite de la carte : left = ' + gauche);
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Hors du systeme, rien ne s'ouvre.**
+ *
+ * Keven a clique bien au-dela de la derniere orbite : la composition s'ouvrait, et le serveur aurait
+ * refuse au devis (`point_outside_system`). Le joueur composait une flotte pour rien.
+ *
+ * Les deux moities comptent : dehors rien ne s'ouvre, **et dedans tout s'ouvre encore**. Sans la
+ * seconde, une borne trop serree fermerait la carte entiere sans que personne ne le voie.
+ */
+test('cliquer hors du systeme n ouvre pas la composition', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, []));
+
+        // Le coin de la carte : bien au-dela de la derniere orbite.
+        monde.cliquer(monde.carte(), 650, 20);
+
+        const f = monde.fiche();
+
+        assert.equal(
+            f === null || f.hidden === true || !f.gtOrdre,
+            true,
+            'un clic hors du systeme ouvre la composition : le joueur composera une flotte pour rien'
+        );
+    } finally {
+        monde.fermer();
+    }
+});
+
+test('cliquer dans le systeme ouvre toujours la composition', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, []));
+
+        // Pres du centre mais hors de l'etoile : dans l'anneau valide.
+        monde.cliquer(monde.carte(), 400, 294);
+
+        const f = monde.fiche();
+
+        assert.ok(f && f.gtOrdre, 'un clic dans le systeme n ouvre plus rien : la borne est trop serree');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
  * **La carte annonce ses gestes.**
  *
  * Une fonction qu'on ne peut pas deviner n'existe pas : le clic sur une case vide et le glisser
@@ -362,7 +448,7 @@ test('cliquer une case vide ouvre la composition d une patrouille', () => {
         monde.amorcer(1, 5, [uneLigne(4)]);
         monde.demandes[0].repondre(reponse(1, 5, []));
 
-        monde.cliquer(monde.carte(), 120, 90);
+        monde.cliquer(monde.carte(), 400, 294);
 
         const f = monde.fiche();
 
@@ -388,7 +474,7 @@ test('la composition issue d un clic demande le devis, pas une destination', () 
     try {
         monde.amorcer(1, 5, [uneLigne(4)]);
         monde.demandes[0].repondre(reponse(1, 5, []));
-        monde.cliquer(monde.carte(), 120, 90);
+        monde.cliquer(monde.carte(), 400, 294);
 
         assert.equal(boutonDeFin(monde), 'Devis', 'le bouton de fin de composition : ' + boutonsDuPanneau(monde).join(' | '));
     } finally {
@@ -407,7 +493,7 @@ test('cliquer le vide pendant un ordre en cours ne l ecrase pas', () => {
         const avant = monde.fiche().gtOrdre;
         assert.equal(avant.genre, 'move', 'la premisse manque : aucun ordre de deplacement en cours');
 
-        monde.cliquer(monde.carte(), 120, 90);
+        monde.cliquer(monde.carte(), 400, 294);
 
         assert.equal(monde.fiche().gtOrdre.genre, 'move', 'le clic a remplace l ordre en cours par un lancement');
     } finally {
@@ -427,7 +513,7 @@ test('chantier eteint, cliquer le vide n ouvre rien', () => {
         monde.amorcer(1, 5, [uneLigne(4)]);
         monde.demandes[0].repondre(reponse(1, 5, []));
 
-        monde.cliquer(monde.carte(), 120, 90);
+        monde.cliquer(monde.carte(), 400, 294);
 
         const f = monde.fiche();
 

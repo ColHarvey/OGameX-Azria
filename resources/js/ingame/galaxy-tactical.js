@@ -1369,19 +1369,35 @@
      * est, a gauche sinon. Une fiche coupee par le bord serait illisible, et le cahier des charges
      * l'interdit explicitement.
      */
-    function placer(f, bloc) {
-        var x = bloc.offsetLeft + 26;
+    /**
+     * Pose la fiche a cote d un point, **sans jamais sortir de la carte**.
+     *
+     * Elle se place a droite du point ; si elle debordait, a gauche ; et dans tous les cas elle est
+     * bornee aux marges, en largeur comme en hauteur. Le bornage vertical se fait sur la hauteur
+     * reelle de la fiche, donc il faut l appeler **une fois son contenu compose** — une fiche vide
+     * mesure quelques pixels et se poserait trop bas.
+     *
+     * **Un seul calcul pour les deux chemins.** Poser la fiche a la main par `style.left/top` a fait
+     * deborder le panneau de composition hors de la carte (controle navigateur du 12 septembre 2026) :
+     * dupliquer un bornage, c est garantir que les deux divergeront.
+     */
+    function placerAuPoint(f, gauche, haut) {
+        var x = gauche + 26;
 
         if (x + FICHE_LARGEUR + FICHE_MARGE > LARGEUR) {
-            x = bloc.offsetLeft - FICHE_LARGEUR - 26;
+            x = gauche - FICHE_LARGEUR - 26;
         }
 
         f.style.left = Math.max(FICHE_MARGE, Math.min(x, LARGEUR - FICHE_LARGEUR - FICHE_MARGE)) + 'px';
 
-        var y = bloc.offsetTop - 20;
+        var y = haut - 20;
         var hauteurUtile = HAUTEUR - PIED - FICHE_MARGE;
 
         f.style.top = Math.max(FICHE_MARGE, Math.min(y, hauteurUtile - f.offsetHeight)) + 'px';
+    }
+
+    function placer(f, bloc) {
+        placerAuPoint(f, bloc.offsetLeft, bloc.offsetTop);
     }
 
     /* Un corps secondaire — lune, debris — devient une cible clavier et souris a part entiere. */
@@ -1510,8 +1526,24 @@
              */
             var ouverte = carte.querySelector('.gtCard');
 
-            if ((!ouverte || !ouverte.gtOrdre) && patrouillesActives()) {
-                composerUnePatrouilleVers(carte, destinationDuClic(carte, evenement));
+            if (ouverte && ouverte.gtOrdre) {
+                return;
+            }
+
+            if (!patrouillesActives()) {
+                return;
+            }
+
+            /*
+             * **Hors du systeme, rien ne s ouvre.** Le serveur refuserait ce point au devis ; ouvrir
+             * la composition d une flotte entiere pour cela ferait travailler le joueur pour rien.
+             * Un glisser, lui, continue d aller jusqu au devis : la patrouille existe deja, et une
+             * raison lisible vaut mieux qu un geste sans effet.
+             */
+            var vise = destinationDuClic(carte, evenement);
+
+            if (pointStationnable(vise)) {
+                composerUnePatrouilleVers(carte, vise);
             }
         });
 
@@ -1783,6 +1815,41 @@
     var PATROUILLE_GRILLE = typeof galaxyPatrolGridUnits !== 'undefined' && Number(galaxyPatrolGridUnits) > 0
         ? Number(galaxyPatrolGridUnits)
         : 10;
+
+    /*
+     * ## Les bornes du systeme, telles que le serveur les fixe
+     *
+     * `SystemGeometry::refusalOf()` refuse un point plus pres que l exclusion de l etoile ou plus
+     * loin que le rayon du systeme. Les deux viennent de reglages d administration : la carte les
+     * recoit, elle ne les devine pas.
+     *
+     * **Elle ne redecide rien** — le serveur reste le seul juge, et il refuse au devis. Elle evite
+     * seulement d **offrir** un geste voue au refus : ouvrir la composition d une flotte entiere sur
+     * un point hors du systeme fait travailler le joueur pour rien.
+     */
+    var PATROUILLE_RAYON = typeof galaxyPatrolSystemRadius !== 'undefined' && Number(galaxyPatrolSystemRadius) > 0
+        ? Number(galaxyPatrolSystemRadius)
+        : 1800;
+
+    var PATROUILLE_EXCLUSION = typeof galaxyPatrolStarExclusion !== 'undefined' && Number(galaxyPatrolStarExclusion) >= 0
+        ? Number(galaxyPatrolStarExclusion)
+        : 60;
+
+    /**
+     * Ce point est-il dans l anneau ou une patrouille peut stationner ?
+     *
+     * Les comparaisons sont **larges des deux cotes**, comme celles du serveur : il refuse
+     * `norme < exclusion` et `norme > rayon`, donc les deux bornes elles-memes sont valides.
+     */
+    function pointStationnable(p) {
+        if (!p) {
+            return false;
+        }
+
+        var norme = Math.sqrt(Number(p.x) * Number(p.x) + Number(p.y) * Number(p.y));
+
+        return norme >= PATROUILLE_EXCLUSION && norme <= PATROUILLE_RAYON;
+    }
 
     /* La phase du moment, quantifiee comme celle des corps : un point tourne avec eux, jamais a cote. */
     function phaseDuMoment() {
@@ -2968,8 +3035,6 @@
      * pire que de ne rien dire.
      */
     function poserLaLegende(carte) {
-        carte.classList.toggle('gtPatrolsOn', patrouillesActives());
-
         if (!patrouillesActives()) {
             return;
         }
@@ -3407,11 +3472,14 @@
         commencerUnLancement(carte, f, { planetId: galaxyCurrentPlanetId }, destination);
         poserLeMarqueurDeDestination(carte, destination);
 
-        /* Le meme convertisseur que le marqueur : la fiche se pose exactement dessus. */
+        /*
+         * Le meme convertisseur que le marqueur, puis **le placeur du jeu** : la fiche se pose a cote
+         * du point vise et reste dans la carte. Elle est placee en dernier, une fois le panneau
+         * compose : le bornage vertical se fait sur sa hauteur reelle.
+         */
         var p = pointDeDestination(destination);
 
-        f.style.left = Math.round(p.x) + 'px';
-        f.style.top = Math.round(p.y) + 'px';
+        placerAuPoint(f, Math.round(p.x), Math.round(p.y));
     }
 
     function commencerUnLancement(carte, f, objet, destinationImposee) {

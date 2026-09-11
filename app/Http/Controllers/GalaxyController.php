@@ -96,6 +96,11 @@ class GalaxyController extends OGameController
             // serait refuse des que l administrateur la change : le serveur refuse un point hors
             // grille au lieu de l arrondir, et il a raison.
             'patrol_grid_units' => $settingsService->patrolGridUnits(),
+            // **Les bornes du systeme, pour la meme raison que la grille.** Codees en dur dans la
+            // carte, elle ouvrirait la composition sur un point que le serveur refuse — et le joueur
+            // composerait une flotte pour rien.
+            'patrol_system_radius' => $settingsService->patrolSystemRadiusUnits(),
+            'patrol_star_exclusion' => $settingsService->patrolStarExclusionUnits(),
             // Les vaisseaux de la planete active, pour composer une patrouille sans flotte standard.
             'patrol_ships' => $this->patrolShipsOf($player, $planet),
             // **L interrupteur voyage jusqu a la carte.** Sans lui, elle offrait « Patrouiller » sur

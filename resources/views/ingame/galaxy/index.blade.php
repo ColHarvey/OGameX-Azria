@@ -51,6 +51,8 @@
             var galaxyPatrolAttackUrl = "{{ route('galaxy.patrol.attack') }}";
             var galaxyCurrentPlanetId = {{ $current_planet_id }};
             var galaxyPatrolGridUnits = {{ $patrol_grid_units }};
+            var galaxyPatrolSystemRadius = {{ $patrol_system_radius }};
+            var galaxyPatrolStarExclusion = {{ $patrol_star_exclusion }};
             var galaxyPatrolShips = @json($patrol_ships);
             var galaxyPatrolsEnabled = @json($patrols_enabled);
             var preserveSystemOnPlanetChange = false;

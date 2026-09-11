@@ -700,17 +700,99 @@ class GalaxyTacticalMapTest extends UnitTestCase
             'The legend catches the pointer: the corner it sits in stops launching patrols.'
         );
 
-        $ordinaire = strpos($feuille, '#galaxyTactical.gtPatrolsOn {');
-        $viseur = strpos($feuille, '#galaxyTactical.gtChoosingDestination,');
-
-        $this->assertNotFalse($ordinaire, 'The ordinary map cursor rule is gone.');
-        $this->assertNotFalse($viseur, 'The destination-choosing cursor rule is gone.');
-
-        $this->assertLessThan(
-            $viseur,
-            $ordinaire,
-            'The ordinary cursor is declared after the crosshair: at equal specificity it would win, and the map would stop showing that an order is in progress.'
+        // **Le curseur du systeme reste sur la carte au repos** (decision de Keven, 12 septembre
+        // 2026) : un curseur different partout annoncait « ca se clique » en permanence, et la
+        // legende le dit deja avec des mots. Seul le viseur subsiste, parce qu il porte un **etat**.
+        $this->assertStringNotContainsString(
+            'cursor: cell',
+            $feuille,
+            'The map sets a special cursor at rest again: Keven asked for the system cursor.'
         );
+
+        $this->assertMatchesRegularExpression(
+            '/#galaxyTactical\.gtChoosingDestination,[^{]*\{[^}]*cursor:\s*crosshair/',
+            $feuille,
+            'The crosshair is gone: the map no longer shows that an order is in progress.'
+        );
+    }
+
+    /**
+     * **La fiche est posee par le placeur du jeu, qui la borne — jamais a la main.**
+     *
+     * Le panneau de composition debordait de la carte parce qu il etait pose par `style.left/top`
+     * bruts au point clique. `placer()` fait exactement ce qu il fallait : a droite du point, a
+     * gauche si cela deborde, puis borne aux marges dans les deux axes.
+     *
+     * Ce temoin exige qu il n existe **qu un seul** calcul de bornage. Deux bornages separes
+     * divergeraient — c est ainsi que celui-ci est ne.
+     */
+    public function testTheCardIsPlacedByTheClampingHelperAndNotByHand(): void
+    {
+        $module = $this->module();
+
+        $this->assertStringContainsString(
+            'function placerAuPoint(f, gauche, haut)',
+            $module,
+            'The clamping helper is gone: the card can leave the map again.'
+        );
+
+        // Le bornage n est ecrit qu une fois : `placer()` delegue au lieu de recopier.
+        $this->assertSame(
+            1,
+            substr_count($module, 'LARGEUR - FICHE_LARGEUR - FICHE_MARGE'),
+            'The horizontal clamp is written more than once: two clamps will drift apart.'
+        );
+
+        $this->assertMatchesRegularExpression(
+            '/function placer\(f, bloc\) \{\s*placerAuPoint\(f, bloc\.offsetLeft, bloc\.offsetTop\);\s*\}/',
+            $module,
+            'placer() no longer delegates to the clamping helper.'
+        );
+
+        // Et la composition depuis un point emploie le placeur, pas une pose a la main.
+        $this->assertMatchesRegularExpression(
+            '/placerAuPoint\(f, Math\.round\(p\.x\), Math\.round\(p\.y\)\)/',
+            $module,
+            'The composition card is positioned by hand again: it will overflow the map.'
+        );
+    }
+
+    /**
+     * **La carte ne propose pas un point que le serveur refuserait, et elle tient ses bornes du
+     * serveur.**
+     *
+     * `SystemGeometry::refusalOf()` refuse un point trop proche de l etoile ou hors du rayon du
+     * systeme, et les deux bornes sont des **reglages d administration**. Codees en dur dans la
+     * carte, elles mentiraient dès que l administrateur en change une — c est exactement la raison
+     * pour laquelle la grille est deja publiee.
+     */
+    public function testTheMapGetsTheSystemBoundsFromTheServer(): void
+    {
+        $vue = $this->vue();
+
+        foreach (['patrol_system_radius', 'patrol_star_exclusion'] as $cle) {
+            $this->assertStringContainsString(
+                '{{ $' . $cle . ' }}',
+                $vue,
+                'The view no longer publishes ' . $cle . ': the map would guess the bound.'
+            );
+        }
+
+        $module = $this->module();
+
+        $this->assertStringContainsString(
+            'function pointStationnable(p)',
+            $module,
+            'The map no longer checks whether a clicked point can hold a patrol.'
+        );
+
+        foreach (['galaxyPatrolSystemRadius', 'galaxyPatrolStarExclusion'] as $global) {
+            $this->assertStringContainsString(
+                $global,
+                $module,
+                'The map ignores ' . $global . ': it would use a hard-coded bound.'
+            );
+        }
     }
 
     /**

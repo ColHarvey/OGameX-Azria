@@ -1249,14 +1249,12 @@
     opacity: 0.8;
 }
 
-/* Le curseur annonce qu une case vide se clique — le viseur de l ordre le remplace juste apres. */
-#galaxyTactical.gtPatrolsOn {
-    cursor: cell;
-}
-
-#galaxyTactical.gtPatrolsOn .gtBody {
-    cursor: pointer;
-}
+/*
+ * **Le curseur reste celui du systeme sur la carte au repos** (decision de Keven, 12 septembre 2026).
+ * Un curseur different partout annoncait « ca se clique » en permanence ; la legende le dit deja, avec
+ * des mots. Le viseur ci-dessous reste, lui : il porte un **etat** — un ordre est en cours —, pas une
+ * invitation.
+ */
 
 /* En choix de destination, la carte le dit : le curseur devient un viseur, les corps restent des cibles. */
 #galaxyTactical.gtChoosingDestination,
