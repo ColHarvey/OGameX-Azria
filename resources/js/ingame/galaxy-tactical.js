@@ -1695,6 +1695,18 @@
     /* Le vaisseau de la page « Mouvement de flotte » : le meme GIF anime, il regarde vers la droite. */
     var VAISSEAU_BLANC = '/img/icons/f9cb590cdf265f499b0e2e5d91fc75.gif';
 
+    /*
+     * **La taille du vaisseau, une fois pour les deux couches.**
+     *
+     * Une flotte en vol vit dans la couche SVG des mouvements ; une patrouille posee vit dans la
+     * couche HTML des patrouilles. Deux dessins du meme vaisseau, donc — et leurs tailles vivaient a
+     * deux endroits sans se connaitre : 16 px en vol, 24 px pose. Elles ne pouvaient que diverger, et
+     * Keven a vu le resultat : « en stationnaire l icone est beaucoup trop gros ».
+     *
+     * Une constante, deux usages : le jour ou l une change, l autre suit sans qu on y pense.
+     */
+    var TAILLE_DU_VAISSEAU = 16;
+
     /* Le cap d'une trajectoire, en degres, dans le sens du vol. */
     function capDe(bouts) {
         return (Math.atan2(bouts.arrivee.y - bouts.depart.y, bouts.arrivee.x - bouts.depart.x) * 180) / Math.PI;
@@ -2070,7 +2082,12 @@
             }
 
             var marqueur = svg('g', { 'class': 'gtFleetMarker' });
-            var icone = svg('image', { width: 16, height: 16, x: -8, y: -8 });
+            var icone = svg('image', {
+                width: TAILLE_DU_VAISSEAU,
+                height: TAILLE_DU_VAISSEAU,
+                x: -TAILLE_DU_VAISSEAU / 2,
+                y: -TAILLE_DU_VAISSEAU / 2
+            });
 
             /*
              * **Le vaisseau blanc de la page de mouvement, tourne dans le sens du vol.** Le GIF regarde
@@ -2994,6 +3011,25 @@
             var dessin = ICONES_DE_PATROUILLE[p.state] || 'patrol-patrol.svg';
 
             icone.src = dessin.charAt(0) === '/' ? dessin : '/img/galaxy-tactical/' + dessin;
+
+            /*
+             * **Le vaisseau prend la taille du vaisseau ; un glyphe d etat garde la sienne.**
+             *
+             * Une patrouille immobilisee ou dont les vaisseaux sont partis frapper ne montre pas une
+             * flotte mais un pictogramme, dessine pour 24 px : le retrecir le rendrait illisible. La
+             * distinction se fait donc sur **l image reellement choisie**, jamais sur un nom d etat —
+             * le jour ou un autre etat montrera le vaisseau, il aura la bonne taille sans qu on
+             * revienne ici.
+             *
+             * En style en ligne parce que la feuille pose 24 px sur toutes les icones de ce marqueur :
+             * c est la seule facon de n en exempter qu une sans ajouter un selecteur qui devrait
+             * connaitre les etats.
+             */
+            if (dessin === VAISSEAU_BLANC) {
+                icone.style.width = TAILLE_DU_VAISSEAU + 'px';
+                icone.style.height = TAILLE_DU_VAISSEAU + 'px';
+            }
+
             icone.alt = '';
             icone.setAttribute('aria-hidden', 'true');
             b.appendChild(icone);

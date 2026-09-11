@@ -1149,3 +1149,82 @@ test('deux patrouilles qui rentrent ensemble ne font qu une demande', async () =
         monde.fermer();
     }
 });
+
+/**
+ * **Posee, une patrouille a exactement la taille qu elle a en vol.**
+ *
+ * Retour de Keven, 12 septembre 2026 : « en stationnaire l icone est beaucoup trop gros ». Mesure :
+ * 24 px pose contre 16 px en vol. Le defaut de fond n etait pas le nombre mais qu il y en avait
+ * **deux** — un dans le JS pour la couche des mouvements, un dans la feuille pour celle des
+ * patrouilles — sans que rien ne les relie.
+ *
+ * Ce temoin exige donc **l egalite des deux mesures**, jamais un nombre ecrit ici : en ecrire un
+ * recreerait une troisieme copie, libre de diverger des deux autres. Le jour ou le vaisseau
+ * changera de taille, la regle tiendra sans qu on y revienne.
+ */
+test('le vaisseau pose a exactement la taille du vaisseau en vol', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [unePatrouille()], 1_700_000_100, [unMouvementDePatrouille(9)]));
+
+        const pose = monde.marqueur(3).querySelector('img');
+        const enVol = monde.window.document.querySelector('.gtFleetMarker image');
+
+        assert.ok(pose, 'la patrouille posee n a pas d image');
+        assert.ok(enVol, 'la premisse manque : aucun marqueur de mouvement sur la carte');
+
+        const largeurEnVol = Number(enVol.getAttribute('width'));
+        const hauteurEnVol = Number(enVol.getAttribute('height'));
+
+        assert.ok(largeurEnVol > 0, 'la premisse manque : le vaisseau en vol n a pas de taille mesurable');
+
+        assert.equal(
+            parseFloat(pose.style.width),
+            largeurEnVol,
+            'le vaisseau pose n a pas la largeur du vaisseau en vol : ' + pose.style.width + ' contre ' + largeurEnVol + 'px'
+        );
+
+        assert.equal(
+            parseFloat(pose.style.height),
+            hauteurEnVol,
+            'le vaisseau pose n a pas la hauteur du vaisseau en vol : ' + pose.style.height + ' contre ' + hauteurEnVol + 'px'
+        );
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Le cas comparable : un glyphe d etat garde sa taille.**
+ *
+ * Une patrouille immobilisee ne montre pas une flotte mais un pictogramme, dessine pour 24 px. Le
+ * retrecir le rendrait illisible. Sans ce temoin, une regle qui retrecirait **toutes** les icones du
+ * marqueur passerait le precedent.
+ */
+test('un glyphe d etat ne prend pas la taille du vaisseau', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [unePatrouille({ etat: 'immobilised' })], 1_700_000_100, []));
+
+        const glyphe = monde.marqueur(3).querySelector('img');
+
+        assert.ok(glyphe, 'la premisse manque : la patrouille immobilisee n a pas d image');
+        assert.notEqual(
+            (glyphe.getAttribute('src') || '').indexOf('patrol-fuel'),
+            -1,
+            'la premisse manque : ce n est pas le glyphe attendu, mais ' + glyphe.getAttribute('src')
+        );
+
+        assert.equal(
+            glyphe.style.width,
+            '',
+            'le glyphe d etat s est vu imposer la taille du vaisseau : la feuille ne decide plus de rien'
+        );
+    } finally {
+        monde.fermer();
+    }
+});
