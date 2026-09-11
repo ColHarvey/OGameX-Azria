@@ -83,6 +83,7 @@ class PatrolController extends OGameController
         $now = (int)Date::now()->timestamp;
         $identifiant = $request->input('patrol_id');
         $rappel = $request->input('kind') === 'recall';
+        $atterrissage = $request->input('kind') === 'land';
 
         try {
             if ($identifiant !== null && $identifiant !== '') {
@@ -92,7 +93,31 @@ class PatrolController extends OGameController
                     return $this->notFound();
                 }
 
-                $refus = $this->orders->whyMoveIsRefused($patrouille, $now);
+                // **Le devis pose la question que la confirmation posera, pas une plus large.**
+                // `whyMoveIsRefused()` consulte l interrupteur ; `whyRecallIsRefused()` ne le consulte
+                // pas, et c est voulu — desarmer ferme les entrees, jamais les sorties. La poser a un
+                // rappel montrait un bouton arme dont le devis repondait « disabled » : le joueur
+                // cliquait dans le vide, et aucun des trois temoins voisins ne passait par la.
+                // **Le corps vise se resout avant de juger quoi que ce soit** : sans lui, « ce corps
+                // est-il a vous ? » n a pas de sens, et repondre par le refus general dirait la
+                // mauvaise chose au joueur.
+                $corps = null;
+
+                if ($atterrissage) {
+                    $resolu = $this->landingBodyFrom($request, $player);
+
+                    if (is_string($resolu)) {
+                        return $this->refused($resolu, 409);
+                    }
+
+                    $corps = $resolu;
+                }
+
+                $refus = match (true) {
+                    $rappel => $this->orders->whyRecallIsRefused($patrouille, $now),
+                    $corps !== null => $this->orders->whyLandingIsRefused($patrouille, $corps, $now),
+                    default => $this->orders->whyMoveIsRefused($patrouille, $now),
+                };
 
                 if ($refus !== null) {
                     throw new PatrolOrderRefused($refus);
@@ -111,6 +136,10 @@ class PatrolController extends OGameController
                     // c est le service qui les compose. La requete ne peut donc pas decrire un
                     // rappel qui ne serait pas celui que la confirmation executerait.
                     $devis = $this->orders->quoteForRecall($patrouille, $now);
+                } elseif ($corps !== null) {
+                    // Ni destination ni vitesse ne sont lues ici non plus : le corps est nomme, le
+                    // reste est compose par le service, exactement comme pour un rappel.
+                    $devis = $this->orders->quoteForLanding($patrouille, $corps, $now);
                 } else {
                     $to = $this->destinationFrom($request);
 
@@ -217,6 +246,42 @@ class PatrolController extends OGameController
         }
 
         return $this->done($patrouille, $now, 'order_recalled');
+    }
+
+    /**
+     * La patrouille se pose sur un corps choisi du joueur : tout revient, elle cesse d exister.
+     *
+     * C est le rappel, vers un corps que le joueur designe au lieu de sa base. Comme lui, il reste
+     * ouvert quand le chantier est desarme : se poser est une sortie.
+     */
+    public function land(Request $request, PlayerService $player, int $patrol): JsonResponse
+    {
+        $now = (int)Date::now()->timestamp;
+        $patrouille = $this->ownPatrol($player, $patrol);
+
+        if ($patrouille === null) {
+            return $this->notFound();
+        }
+
+        $corps = $this->landingBodyFrom($request, $player);
+
+        if (is_string($corps)) {
+            return $this->refused($corps, 409);
+        }
+
+        $version = $request->input('order_version');
+
+        if (!is_numeric($version)) {
+            return $this->refused('stale_quote', 409);
+        }
+
+        try {
+            $this->orders->landOn($patrouille, $corps, (int)$version, $now, $this->quotedCostFrom($request));
+        } catch (PatrolOrderRefused $refus) {
+            return $this->refused($refus->reason, 409);
+        }
+
+        return $this->done($patrouille, $now, 'order_landing');
     }
 
     /**
@@ -367,6 +432,34 @@ class PatrolController extends OGameController
 
         if ($demande === null || $demande === '') {
             return $player->planets->current();
+        }
+
+        foreach ($player->planets->all() as $corps) {
+            if ($corps->getPlanetId() === (int)$demande) {
+                return $corps;
+            }
+        }
+
+        return 'bad_origin';
+    }
+
+    /**
+     * Le corps sur lequel se poser, resolu **parmi ceux du joueur** — ou la clef du refus.
+     *
+     * **Aucune valeur par defaut.** `originFrom()` retombe sur la planete courante quand rien n est
+     * nomme, ce qui convient a un lancement : le joueur part forcement de quelque part. Ici ce serait
+     * faux — poser une flotte sur un corps que le joueur n a pas designe est exactement le genre
+     * d obligeance qui fait atterrir une flotte a l autre bout de l univers.
+     *
+     * La liste des corps du joueur est la seule source : un identifiant etranger rend `bad_origin`,
+     * le meme refus qu un lancement, et n apprend rien sur ce corps.
+     */
+    private function landingBodyFrom(Request $request, PlayerService $player): PlanetService|string
+    {
+        $demande = $request->input('body_id');
+
+        if ($demande === null || $demande === '' || !is_numeric($demande)) {
+            return 'bad_origin';
         }
 
         foreach ($player->planets->all() as $corps) {

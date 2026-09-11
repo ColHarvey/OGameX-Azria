@@ -14,11 +14,13 @@ use OGame\Models\Patrol;
 use OGame\Models\Resources;
 use OGame\Models\User;
 use OGame\Patrol\Enums\PatrolState;
+use OGame\Patrol\Exceptions\PatrolOrderRefused;
 use OGame\Patrol\Geometry\SpatialPoint;
 use OGame\Patrol\PatrolDestination;
 use OGame\Patrol\PatrolOrders;
 use OGame\Patrol\PatrolPricing;
 use OGame\Services\ObjectService;
+use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
@@ -575,6 +577,165 @@ class PatrolEndpointsTest extends AccountTestCase
         $this->postJson(route('galaxy.patrol.launch'), $avec)->assertStatus(409);
 
         $this->assertSame(0, Patrol::query()->where('user_id', $this->currentUserId)->count(), 'A refused launch created a patrol.');
+    }
+
+    /**
+     * Un corps du joueur qui n est **pas** celui d ou la patrouille est partie.
+     *
+     * Le nommer par « le second » plutot que par un identifiant ecrit garde le temoin lisible quand
+     * le banc change de decor ; et l essai s arrete si le compte n en a qu un, au lieu de retomber
+     * sur la base et de ne plus rien distinguer.
+     */
+    private function anotherBodyOfMine(): PlanetService
+    {
+        $base = (int)$this->planetService->getPlanetId();
+
+        foreach ($this->player()->planets->all() as $corps) {
+            if ((int)$corps->getPlanetId() !== $base) {
+                return $corps;
+            }
+        }
+
+        $this->fail('Le compte du banc n a qu un corps : cet essai ne distinguerait pas un atterrissage choisi d un rappel.');
+    }
+
+    /**
+     * **Une patrouille se pose sur un corps choisi, et cesse d exister.** Le geste que Keven decrit :
+     * on depose la flotte sur une de ses planetes, elle y rentre et la patrouille est dissoute.
+     *
+     * ## Pourquoi ce temoin va jusqu au sol
+     *
+     * Un essai qui s arreterait a « l ordre est accepte » ne prouverait pas le parcours : c est
+     * l arrivee qui credite, et c est elle qui a deja echoue une fois — un rappel parti « en vol »
+     * se posait **a cote** de la planete au lieu d y rendre ses vaisseaux. Le temoin traverse donc
+     * le vrai travailleur et compte les vaisseaux sur le corps choisi.
+     *
+     * Il vise **l autre** corps, jamais la base : viser la base rendrait ce temoin indistinguable de
+     * celui du rappel, et une regression qui ramenerait tout le monde a `homeOf()` y survivrait.
+     */
+    public function testUnePatrouilleSePoseSurUnCorpsChoisiEtCesseDExister(): void
+    {
+        [$patrouille] = $this->aParkedPatrol();
+        $autre = $this->anotherBodyOfMine();
+
+        $devis = $this->postJson(route('galaxy.patrol.quote'), [
+            'patrol_id' => $patrouille->id,
+            'kind' => 'land',
+            'body_id' => $autre->getPlanetId(),
+        ])->assertStatus(200)->json();
+
+        $this->assertSame(
+            (int)$autre->getPlanetId(),
+            (int)$devis['quote']['destination']['body_id'],
+            'Le devis ne vise pas le corps demande.'
+        );
+
+        // **L attendu vient de l entree, pas du resultat** : ce que la patrouille emporte est ce
+        // qu elle doit rendre. Ecrire un nombre en dur ferait passer le temoin pour une flotte et
+        // rougir pour une autre, sans que la regle ait bouge.
+        $embarques = $this->fleet()->getAmount();
+        $avant = $autre->getObjectAmount('cruiser');
+
+        $this->postJson(route('galaxy.patrol.land', ['patrol' => $patrouille->id]), [
+            'body_id' => $autre->getPlanetId(),
+            'order_version' => (int)$patrouille->order_version,
+        ])->assertStatus(200);
+
+        $patrouille->refresh();
+        $this->assertSame(PatrolState::Returning, $patrouille->state, 'L ordre accepte n a pas fait partir la patrouille.');
+
+        // **Jusqu au sol** : le vrai travailleur, a l heure de l arrivee.
+        $segment = FleetMission::query()->findOrFail($patrouille->current_mission_id);
+        Date::setTestNow(Date::createFromTimestamp((int)$segment->time_arrival + 1));
+        $this->player()->updateFleetMissions();
+
+        $this->assertSame(
+            PatrolState::Finished,
+            $patrouille->refresh()->state,
+            'La patrouille existe encore apres s etre posee.'
+        );
+
+        $apres = resolve(PlayerServiceFactory::class)->make($this->currentUserId, true);
+        $corps = null;
+
+        foreach ($apres->planets->all() as $p) {
+            if ((int)$p->getPlanetId() === (int)$autre->getPlanetId()) {
+                $corps = $p;
+            }
+        }
+
+        $this->assertNotNull($corps, 'Le corps choisi a disparu du compte.');
+        $this->assertSame(
+            $avant + $embarques,
+            $corps->getObjectAmount('cruiser'),
+            'Les vaisseaux ne sont pas rentres sur le corps choisi.'
+        );
+    }
+
+    /**
+     * **Se poser sur le corps d un autre est refuse**, et le refus le dit sans rien apprendre.
+     *
+     * Le joueur voit deja ce corps dans sa Galaxie : lui dire « il n est pas a vous » n ajoute aucune
+     * information. Ce qui compte est que rien ne parte — une flotte posee chez un adversaire serait
+     * un cadeau.
+     */
+    public function testSePoserSurLeCorpsDUnAutreEstRefuse(): void
+    {
+        [$patrouille, $segment] = $this->aParkedPatrol();
+        $etranger = $this->getNearbyForeignPlanet();
+        $reserveAvant = (float)$patrouille->fuel_reserve;
+
+        $this->postJson(route('galaxy.patrol.quote'), [
+            'patrol_id' => $patrouille->id,
+            'kind' => 'land',
+            'body_id' => $etranger->getPlanetId(),
+        ])->assertStatus(409)->assertJsonPath('reason_key', 'bad_origin');
+
+        $this->postJson(route('galaxy.patrol.land', ['patrol' => $patrouille->id]), [
+            'body_id' => $etranger->getPlanetId(),
+            'order_version' => (int)$patrouille->order_version,
+        ])->assertStatus(409);
+
+        $patrouille->refresh();
+        $this->assertSame(PatrolState::Stationed, $patrouille->state, 'Un atterrissage refuse a quand meme fait partir la patrouille.');
+        $this->assertSame((int)$segment->id, (int)$patrouille->current_mission_id, 'Un atterrissage refuse a remplace le segment.');
+        $this->assertSame($reserveAvant, (float)$patrouille->fuel_reserve, 'Un atterrissage refuse a debite la reserve.');
+    }
+
+    /**
+     * **Et le service refuse aussi, pour son propre compte.**
+     *
+     * Le point d entree filtre deja : `landingBodyFrom()` ne resout un corps que parmi ceux du
+     * joueur, donc `not_your_body` n est **pas atteignable par HTTP** aujourd hui. C est une defense
+     * en profondeur, et elle se garde : le service est appele ailleurs — le banc, l administration,
+     * un futur point d entree — et le jour ou le filtre du controleur s assouplirait, c est elle qui
+     * empecherait une flotte d atterrir chez un adversaire.
+     *
+     * **Ce temoin existe parce qu une mutation a survecu.** Supprimer le controle de propriete du
+     * service ne faisait rougir personne : l essai voisin lit `bad_origin`, le refus du controleur,
+     * et n atteint jamais la seconde garde. Une garde sans temoin n est pas une garde.
+     */
+    public function testLeServiceRefuseAussiDePoserLaFlotteChezUnAutre(): void
+    {
+        [$patrouille] = $this->aParkedPatrol();
+        $etranger = $this->getNearbyForeignPlanet();
+        $ordres = resolve(PatrolOrders::class);
+        $maintenant = (int)Date::now()->timestamp;
+
+        $this->assertSame(
+            'not_your_body',
+            $ordres->whyLandingIsRefused($patrouille, $etranger, $maintenant),
+            'Le service accepte de poser la flotte sur le corps d un autre joueur.'
+        );
+
+        // La premisse du temoin : sur un corps a soi, le meme appel ne refuse rien.
+        $this->assertNull(
+            $ordres->whyLandingIsRefused($patrouille, $this->anotherBodyOfMine(), $maintenant),
+            'Le service refuse aussi un corps du joueur : le refus ne distingue plus rien.'
+        );
+
+        $this->expectException(PatrolOrderRefused::class);
+        $ordres->landOn($patrouille, $etranger, (int)$patrouille->order_version, $maintenant);
     }
 
     /**

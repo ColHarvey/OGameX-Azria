@@ -1476,6 +1476,12 @@
             /* En choix de destination, le clic designe la cible d un ordre : un corps, ou un point de l espace. */
             if (carte.gtChoix) {
                 evenement.preventDefault();
+
+                /* Sur un corps, on ne devine pas ce que le joueur veut : la fiche le lui demande. */
+                if (bloc && proposerLesActionsDuCorps(carte, bloc, corpsClique(evenement.target))) {
+                    return;
+                }
+
                 choisirLaDestination(carte, bloc ? destinationDuCorps(carte, bloc, corpsClique(evenement.target)) : destinationDuClic(carte, evenement));
 
                 return;
@@ -1513,6 +1519,16 @@
             evenement.preventDefault();
 
             var cible = evenement.target.closest ? evenement.target.closest('.gtBody') : null;
+
+            /*
+             * **Deposer sur un corps ne veut pas dire une seule chose.** Stationner a cote pour le
+             * surveiller, ou s y poser et dissoudre la patrouille, sont deux ordres differents vers
+             * le meme point de la carte. La fiche les propose avec leur devis ; le depot, lui, ne
+             * decide de rien — c est la regle de toute la carte depuis le debut.
+             */
+            if (cible && proposerLesActionsDuCorps(carte, cible, corpsClique(evenement.target))) {
+                return;
+            }
 
             choisirLaDestination(carte, cible
                 ? destinationDuCorps(carte, cible, corpsClique(evenement.target))
@@ -3124,6 +3140,41 @@
             return;
         }
 
+        /*
+         * ## Le corps designe, et ce qu'on peut y faire
+         *
+         * **Deposer n'execute rien** : cette etape propose, avec un bouton par ordre possible, et
+         * chacun repart par le chemin ordinaire — devis du serveur, puis confirmation. Aucun
+         * raccourci, aucune action directe.
+         *
+         * « Atterrir » n'apparait que si le corps est au joueur **et** qu'il y a une patrouille a
+         * poser : un lancement compose une flotte qui n'existe pas encore, il n'a rien a faire
+         * atterrir. Le serveur refuse de toute facon un corps qui n'est pas le sien — c'est la
+         * garde qui compte —, mais offrir un bouton qui echoue a coup sur serait mentir.
+         */
+        if (o.etape === 'choix' && o.choix) {
+            var choix = o.choix;
+
+            panneau.appendChild(boutonDePanneau(locaFiche('patrolStationNear', 'Stationner a cote'), 'deplacer', function () {
+                o.genre = o.genre === 'land' ? 'move' : o.genre;
+                choisirLaDestination(carte, choix.destination);
+            }));
+
+            if (choix.mienne && choix.bodyId && o.patrouille) {
+                panneau.appendChild(boutonDePanneau(locaFiche('patrolLand', 'Atterrir'), 'rappeler', function () {
+                    o.genre = 'land';
+                    o.corpsVise = choix.bodyId;
+                    choisirLaDestination(carte, choix.destination);
+                }));
+            }
+
+            noteDOrdre(f, choix.nom
+                ? locaFiche('patrolBodyChoice', '') + ' ' + choix.nom
+                : locaFiche('patrolBodyChoice', ''), false);
+
+            return;
+        }
+
         if (o.etape === 'destination') {
             var x = champNumerique('X', 'x', o.destination && o.destination.x !== undefined ? o.destination.x : '', PATROUILLE_GRILLE);
             var y = champNumerique('Y', 'y', o.destination && o.destination.y !== undefined ? o.destination.y : '', PATROUILLE_GRILLE);
@@ -3269,6 +3320,57 @@
     }
 
     /* Le corps clique en choix de destination : sa position et son genre ; le serveur retrouvera son identite. */
+    /**
+     * Ouvre le choix des ordres possibles sur un corps. Rend `true` si elle a pris la main.
+     *
+     * **Elle rend `false` pour une position libre**, et c'est la moitie importante : une orbite sans
+     * corps n'offre aucun choix, et le depot doit alors continuer son chemin ordinaire vers le point
+     * de l'espace. La distinguer par la presence du corps dans la ligne — et non par ce que
+     * `destinationDuCorps()` a compose — evite de rejouer sa geometrie ici.
+     */
+    function proposerLesActionsDuCorps(carte, bloc, corps) {
+        var f = carte.querySelector('.gtCard');
+        var o = f ? f.gtOrdre : null;
+
+        if (!o) {
+            return false;
+        }
+
+        var position = Number(bloc.getAttribute('data-position'));
+        var ligne = (carte.gtLignes || {})[position];
+        var genre = corps === 'moon' ? corpsDeGenre(ligne, LUNE) : corpsDeGenre(ligne, PLANETE);
+
+        if (!genre) {
+            return false;
+        }
+
+        var destination = destinationDuCorps(carte, bloc, corps);
+
+        if (!destination) {
+            return false;
+        }
+
+        finirLeChoixDeDestination(carte);
+        retirerLeMarqueurDeDestination(carte);
+
+        o.choix = {
+            destination: destination,
+            bodyId: Number(genre.planetId) || null,
+            mienne: estLaMienne(ligne, carte.gtSysteme),
+            nom: genre.planetName || ''
+        };
+        o.destination = null;
+        o.devis = null;
+        o.erreur = null;
+        o.etape = 'choix';
+
+        composerLePanneau(carte, f);
+        composerLesActions(f);
+        replacerLaFiche(carte, f);
+
+        return true;
+    }
+
     function destinationDuCorps(carte, bloc, corps) {
         var s = carte.gtSysteme || {};
         var position = Number(bloc.getAttribute('data-position'));
@@ -3372,6 +3474,19 @@
         if (o.genre === 'recall') {
             charge.kind = 'recall';
             charge.patrol_id = o.patrouille.id;
+
+            return charge;
+        }
+
+        /*
+         * **Un atterrissage nomme son corps, et rien d autre.** Ni destination ni vitesse ne
+         * voyagent : le serveur les compose depuis le corps, exactement comme pour un rappel. La
+         * carte ne peut donc pas decrire un atterrissage que la confirmation n executerait pas.
+         */
+        if (o.genre === 'land') {
+            charge.kind = 'land';
+            charge.patrol_id = o.patrouille.id;
+            charge.body_id = o.corpsVise;
 
             return charge;
         }
@@ -3497,6 +3612,8 @@
             adresse = adresseDePatrouille(galaxyPatrolMoveUrl, o.patrouille.id);
         } else if (o.genre === 'recall' && typeof galaxyPatrolRecallUrl !== 'undefined') {
             adresse = adresseDePatrouille(galaxyPatrolRecallUrl, o.patrouille.id);
+        } else if (o.genre === 'land' && typeof galaxyPatrolLandUrl !== 'undefined') {
+            adresse = adresseDePatrouille(galaxyPatrolLandUrl, o.patrouille.id);
         } else if (o.genre === 'launch' && typeof galaxyPatrolLaunchUrl !== 'undefined') {
             adresse = galaxyPatrolLaunchUrl;
         }

@@ -166,6 +166,7 @@ Route::middleware(['auth', 'banned', 'globalgame', 'locale', 'firstlogin'])->gro
     Route::post('/ajax/galaxy/patrol/launch', [PatrolController::class, 'launch'])->name('galaxy.patrol.launch');
     Route::post('/ajax/galaxy/patrol/{patrol}/move', [PatrolController::class, 'move'])->name('galaxy.patrol.move');
     Route::post('/ajax/galaxy/patrol/{patrol}/recall', [PatrolController::class, 'recall'])->name('galaxy.patrol.recall');
+    Route::post('/ajax/galaxy/patrol/{patrol}/land', [PatrolController::class, 'land'])->name('galaxy.patrol.land');
     // Attaquer une patrouille detectee. **La requete nomme un contact, jamais une patrouille** : le
     // serveur resout la detection pour ce joueur, et l identifiant de la cible ne quitte jamais le
     // serveur. C est la protection centrale du chantier de surveillance.

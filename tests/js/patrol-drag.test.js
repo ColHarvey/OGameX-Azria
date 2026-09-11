@@ -37,6 +37,13 @@ const SOURCE = new URL('../../resources/js/ingame/galaxy-tactical.js', import.me
 function faireJQuery() {
     const demandes = [];
 
+    /*
+     * **Les devis partent par `post`, pas par `getJSON`.** Compter `demandes` pour savoir si un devis
+     * est parti mesurait la couche des flottes : l assertion « aucun devis n a demarre » etait verte
+     * quoi qu il arrive. Un canal qu on ne mesure pas ne prouve rien de ce qui y passe.
+     */
+    const envois = [];
+
     const chainable = () => {
         const api = {};
         api.done = () => api;
@@ -67,10 +74,15 @@ function faireJQuery() {
         return api;
     };
 
-    jq.post = chainable;
+    jq.post = function (url, donnees) {
+        envois.push({ url, donnees });
+
+        return chainable();
+    };
+
     jq.ajax = chainable;
 
-    return { jq, demandes };
+    return { jq, demandes, envois };
 }
 
 /**
@@ -84,12 +96,14 @@ function unMonde() {
     });
 
     const { window } = dom;
-    const { jq, demandes } = faireJQuery();
+    const { jq, demandes, envois } = faireJQuery();
 
     window.jQuery = jq;
     window.$ = jq;
     window.galaxyFleetsUrl = '/ajax/galaxy/fleets';
     window.galaxyContentLink = '/ajax/galaxy';
+    /* Sans cette adresse, `choisirLaDestination()` sort avant de demander quoi que ce soit. */
+    window.galaxyPatrolQuoteUrl = '/ajax/galaxy/patrol/quote';
     window.playerId = 7;
     window.token = 'jeton';
     window.galaxyTacticalLoca = {};
@@ -99,8 +113,8 @@ function unMonde() {
     script.textContent = readFileSync(SOURCE, 'utf8');
     window.document.body.appendChild(script);
 
-    const amorcer = (galaxie, systeme) => {
-        window.renderContentGalaxy({ system: { galaxy: galaxie, system: systeme, galaxyContent: [] } });
+    const amorcer = (galaxie, systeme, lignes = []) => {
+        window.renderContentGalaxy({ system: { galaxy: galaxie, system: systeme, galaxyContent: lignes } });
     };
 
     const carte = () => window.document.getElementById('galaxyTactical');
@@ -128,7 +142,7 @@ function unMonde() {
         }));
     };
 
-    return { window, demandes, amorcer, carte, marqueur, fiche, efface, fermer, geste, relacher };
+    return { window, demandes, envois, amorcer, carte, marqueur, fiche, efface, fermer, geste, relacher };
 }
 
 /**
@@ -192,6 +206,115 @@ function unMondeAvecPatrouille(options = {}) {
 
     return monde;
 }
+
+/**
+ * Une ligne de Galaxie telle que le serveur la rend : une position, un corps, un proprietaire.
+ */
+function uneLigne(position, { aMoi = true, bodyId = 4242, nom = 'Terra' } = {}) {
+    const proprietaire = aMoi ? 7 : 9;
+
+    return {
+        position,
+        playerId: proprietaire,
+        planets: [{ planetType: 1, planetId: bodyId, planetName: nom, playerId: proprietaire }]
+    };
+}
+
+/** Les intitules des boutons du panneau d'ordre, dans l'ordre ou ils s'affichent. */
+function boutonsDuPanneau(monde) {
+    return Array.from(monde.window.document.querySelectorAll('.patrol-button .gtActionLabel'))
+        .map((e) => e.textContent);
+}
+
+/** Le bloc d'un corps sur la carte. */
+function corps(monde, position) {
+    return monde.window.document.querySelector('.gtBody[data-position="' + position + '"]');
+}
+
+/** Un monde amorce avec des lignes, une patrouille, et le geste deja commence. */
+function unMondeEnTrainDeViser(lignes, options = {}) {
+    const monde = unMonde();
+
+    monde.amorcer(1, 5, lignes);
+    monde.demandes[0].repondre(reponse(1, 5, [unePatrouille(options)]));
+    monde.geste(monde.marqueur(3), 'dragstart');
+
+    return monde;
+}
+
+test('la premisse : un corps de la carte existe et se depose dessus', () => {
+    const monde = unMondeEnTrainDeViser([uneLigne(4)]);
+
+    try {
+        assert.ok(corps(monde, 4), 'la carte ne dessine aucun corps : les essais suivants ne prouveraient rien');
+        assert.ok(monde.fiche(), 'la fiche ne s est pas ouverte au debut du geste');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Deposer sur un corps propose, il n'execute pas.** C'est la regle de toute la carte : le glisser
+ * designe, le serveur chiffre, le joueur confirme. Un depot qui partirait tout seul serait la seule
+ * action de la carte a le faire.
+ */
+test('deposer sur une planete a soi propose de stationner ou d atterrir', () => {
+    const monde = unMondeEnTrainDeViser([uneLigne(4, { aMoi: true })]);
+
+    try {
+        monde.relacher(corps(monde, 4), 300, 200);
+
+        const boutons = boutonsDuPanneau(monde);
+
+        assert.ok(boutons.includes('Stationner a cote'), 'le choix « stationner a cote » n est pas propose : ' + boutons.join(' | '));
+        assert.ok(boutons.includes('Atterrir'), 'le choix « atterrir » n est pas propose sur une planete a soi : ' + boutons.join(' | '));
+        assert.equal(monde.envois.length, 0, 'un devis est parti tout seul : le depot a decide a la place du joueur');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Et sur la planete d'un autre, atterrir n'est pas offert.** Le serveur le refuserait de toute
+ * facon — c'est la garde qui compte —, mais montrer un bouton qui echoue a coup sur serait mentir.
+ */
+test('deposer sur la planete d un autre ne propose pas d atterrir', () => {
+    const monde = unMondeEnTrainDeViser([uneLigne(4, { aMoi: false })]);
+
+    try {
+        monde.relacher(corps(monde, 4), 300, 200);
+
+        const boutons = boutonsDuPanneau(monde);
+
+        assert.ok(boutons.includes('Stationner a cote'), 'surveiller la planete d un autre devrait rester possible');
+        assert.equal(boutons.includes('Atterrir'), false, 'la carte propose de poser la flotte chez un adversaire');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Une orbite vide n'offre aucun choix**, et le depot reprend son chemin ordinaire vers le point de
+ * l'espace. C'est la moitie que la correction pouvait casser sans bruit : tout deposer dans un choix
+ * aurait supprime le stationnement en espace libre, qui est la raison d'etre des patrouilles.
+ */
+test('deposer sur une orbite vide chiffre directement un point de l espace', () => {
+    const monde = unMondeEnTrainDeViser([uneLigne(4)]);
+
+    try {
+        // La position 9 n a pas de ligne : l orbite est libre.
+        const vide = corps(monde, 9);
+        assert.ok(vide, 'la premisse manque : la carte ne dessine pas l orbite libre');
+
+        monde.relacher(vide, 300, 200);
+
+        assert.equal(boutonsDuPanneau(monde).includes('Atterrir'), false, 'une orbite vide propose d atterrir sur rien');
+        assert.equal(monde.envois.length, 1, 'le depot sur une orbite libre n a demande aucun devis');
+        assert.equal(monde.envois[0].url, '/ajax/galaxy/patrol/quote', 'ce qui est parti n est pas une demande de devis');
+    } finally {
+        monde.fermer();
+    }
+});
 
 test('la premisse : le marqueur existe et se saisit', () => {
     const monde = unMondeAvecPatrouille();

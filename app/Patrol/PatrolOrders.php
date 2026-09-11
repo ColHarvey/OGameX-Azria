@@ -480,7 +480,7 @@ final class PatrolOrders
         // un ordre qui se dirait « retour » vers un autre point n aurait aucune raison d etre
         // dispense. Il faut qu il parte en retour **et** qu il vise exactement la base de cette
         // patrouille — c est la seule chose qu un chantier desarme doit encore laisser faire.
-        if (!$this->settings->patrolsEnabled() && !$this->bringsTheFleetHome($patrol, $to, $departureState)) {
+        if (!$this->settings->patrolsEnabled() && !$this->landsOnABodyOfItsOwner($patrol, $to, $departureState)) {
             throw new PatrolOrderRefused('disabled');
         }
 
@@ -665,9 +665,99 @@ final class PatrolOrders
         // courante rendait le controle toujours vrai : un devis de rappel affiche, un autre ordre
         // accepte entre-temps, et la confirmation partait quand meme depuis un autre point et pour
         // un autre cout que ceux qui avaient ete lus.
+        return $this->dispatchLanding($patrol, $base, $orderVersion, $now, $quotedFuelCost);
+    }
+
+    /**
+     * **Pourquoi le joueur peut-il se poser sur ce corps ?** — ou pourquoi il ne le peut pas.
+     *
+     * **Aucun interrupteur ici**, et c est deliberé : se poser est une **sortie**. Un chantier
+     * desarme ferme les nouvelles entrees, il ne retient aucune flotte deja en l air. C est la meme
+     * regle que le rappel, appliquee a une destination choisie au lieu de la base.
+     *
+     * Les deux refus propres a cet ordre disent ce qu ils refusent et rien de plus : le corps a
+     * disparu, ou il n est pas a vous. Aucun des deux n apprend quoi que ce soit sur un corps
+     * etranger que le joueur ne verrait pas deja dans sa Galaxie.
+     */
+    public function whyLandingIsRefused(Patrol $patrol, PlanetService $body, int $now): string|null
+    {
+        $refus = $this->whyAnyOrderIsRefused($patrol, $now);
+
+        if ($refus !== null) {
+            return $refus;
+        }
+
+        if ($body->isDestroyed()) {
+            return 'body_destroyed';
+        }
+
+        if (!$this->belongsToTheSameOwner($patrol, $body)) {
+            return 'not_your_body';
+        }
+
+        return null;
+    }
+
+    /**
+     * Le devis d un atterrissage sur un corps choisi : pleine vitesse, comme un rappel.
+     *
+     * Le rappel **est** ce meme ordre vers la base ; l un et l autre passent par la meme
+     * composition, pour que le devis ne puisse pas decrire un trajet que la confirmation
+     * n executerait pas.
+     *
+     * @throws PatrolOrderRefused
+     */
+    public function quoteForLanding(Patrol $patrol, PlanetService $body, int $now): PatrolQuote
+    {
+        $refus = $this->whyLandingIsRefused($patrol, $body, $now);
+
+        if ($refus !== null) {
+            throw new PatrolOrderRefused($refus);
+        }
+
+        return $this->quoteFor($patrol, $this->destinationOnto($body), self::RECALL_SPEED, $now);
+    }
+
+    /**
+     * Pose la patrouille sur un corps choisi : la flotte, la cargaison et la reserve y reviennent,
+     * et la patrouille cesse d exister.
+     *
+     * L arrivee n a rien de neuf a apprendre : `homecomingBase()` relit `planet_id_to`, verifie le
+     * proprietaire, et `land()` credite sous verrou. Tout ce que cet ordre ajoute est le choix du
+     * corps.
+     *
+     * @throws PatrolOrderRefused
+     */
+    public function landOn(Patrol $patrol, PlanetService $body, int $orderVersion, int $now, int|null $quotedFuelCost = null): FleetMission
+    {
+        $refus = $this->whyLandingIsRefused($patrol, $body, $now);
+
+        if ($refus !== null) {
+            throw new PatrolOrderRefused($refus);
+        }
+
+        return $this->dispatchLanding($patrol, $body, $orderVersion, $now, $quotedFuelCost);
+    }
+
+    /**
+     * La composition unique d un atterrissage, partagee par le rappel et par le choix du joueur.
+     *
+     * **Le segment part « en retour », et c est cet etat que l arrivee lit pour atterrir.** Parti
+     * « en vol », il se posait a cote du corps au lieu d y rendre ses vaisseaux. Et la cible porte
+     * l identite du corps **qui existe**, jamais l identifiant d une planete detruite a cote des
+     * coordonnees d une autre.
+     *
+     * **La version vient de l appelant, jamais de la ligne.** Se donner soi-meme la version courante
+     * rendait le controle toujours vrai : un devis affiche, un autre ordre accepte entre-temps, et
+     * la confirmation partait quand meme depuis un autre point et pour un autre cout que ceux lus.
+     *
+     * @throws PatrolOrderRefused
+     */
+    private function dispatchLanding(Patrol $patrol, PlanetService $body, int $orderVersion, int $now, int|null $quotedFuelCost): FleetMission
+    {
         return $this->dispatchOrder(
             $patrol,
-            $this->destinationOnto($base),
+            $this->destinationOnto($body),
             self::RECALL_SPEED,
             $orderVersion,
             $now,
@@ -677,30 +767,68 @@ final class PatrolOrders
     }
 
     /**
-     * **Cet ordre ramene-t-il vraiment la flotte a sa base ?**
+     * **Cet ordre pose-t-il vraiment la flotte sur un corps de son proprietaire ?**
      *
-     * Deux conditions, et les deux comptent. L etat de depart doit etre le retour — c est ce que
-     * `recall()` pose — et la destination doit etre **exactement** celle que `recall()` compose vers
-     * la base vivante de cette patrouille. Comparer les deux ferme la question : un appel qui
-     * emprunterait l etat `Returning` pour aller ailleurs ne passe pas, et l exception ne peut donc
-     * pas servir a contourner l interrupteur pour autre chose qu un retour.
+     * C est l unique exception de l interrupteur, et elle reste **semantique**, jamais un simple
+     * etat : trois conditions, et les trois comptent.
      *
-     * Sans base vivante, il n y a pas de retour possible : la reponse est non, et l ordre retombe
-     * sous la regle commune.
+     * 1. le depart se fait en retour — c est ce que `recall()` et `landOn()` posent ;
+     * 2. la destination **atterrit** (`landsOnTheBody`), elle ne se contente pas d en approcher ;
+     * 3. le corps vise vit encore et appartient au proprietaire de la patrouille, et la destination
+     *    est **exactement** celle que le service compose vers lui.
+     *
+     * Un appel qui emprunterait l etat `Returning` pour aller ailleurs ne passe donc pas, et
+     * l exception ne peut pas servir a deplacer une patrouille pendant que le chantier est desarme :
+     * tout ce qu elle autorise est une **sortie**, qui dissout la patrouille a l arrivee.
+     *
+     * ## Pourquoi elle s est elargie de la base a tous les corps du joueur
+     *
+     * Elle ne connaissait que `homeOf()`. Depuis que le joueur peut poser sa flotte sur n importe
+     * laquelle de ses planetes, s en tenir a la base aurait rendu l atterrissage impossible des que
+     * le chantier est desarme — soit exactement le defaut que cette exception existe pour empecher :
+     * **un interrupteur ferme les entrees, il n emprisonne jamais ce qui existe.** Le garde n a pas
+     * faibli pour autant, il a seulement change de question : « est-ce sa base ? » devient « est-ce
+     * un corps a lui, et s y pose-t-on vraiment ? ».
      */
-    private function bringsTheFleetHome(Patrol $patrol, PatrolDestination $to, PatrolState $departureState): bool
+    private function landsOnABodyOfItsOwner(Patrol $patrol, PatrolDestination $to, PatrolState $departureState): bool
     {
         if ($departureState !== PatrolState::Returning) {
             return false;
         }
 
-        $base = $this->homeOf($patrol);
-
-        if ($base === null) {
+        // Approcher un corps n est pas s y poser : seule la seconde forme dissout la patrouille.
+        if (!$to->landsOnTheBody || $to->bodyId === null) {
             return false;
         }
 
-        return $to->equals($this->destinationOnto($base));
+        $corps = $this->liveBodyOfTheOwner($patrol, (int)$to->bodyId);
+
+        if ($corps === null) {
+            return false;
+        }
+
+        return $to->equals($this->destinationOnto($corps));
+    }
+
+    /**
+     * Ce corps vit-il encore, et est-il a ce joueur ? Rend le service, ou rien.
+     *
+     * Le rendre plutot qu un booleen evite a l appelant une seconde resolution, et surtout une
+     * seconde chance de se tromper de corps entre la question et l usage.
+     */
+    private function liveBodyOfTheOwner(Patrol $patrol, int $bodyId): PlanetService|null
+    {
+        try {
+            $corps = resolve(PlanetServiceFactory::class)->make($bodyId, true);
+        } catch (Throwable) {
+            return null;
+        }
+
+        if (!$corps instanceof PlanetService || $corps->isDestroyed()) {
+            return null;
+        }
+
+        return $this->belongsToTheSameOwner($patrol, $corps) ? $corps : null;
     }
 
     /**

@@ -21,6 +21,7 @@ use OGame\Patrol\SpatialAttackOrder;
 use OGame\Patrol\SurveillanceProjection;
 use OGame\Patrol\SurveillanceWatch;
 use OGame\Services\ObjectService;
+use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
 use ReflectionMethod;
@@ -181,6 +182,54 @@ class PatrolDisarmedTest extends AccountTestCase
     }
 
     /**
+     * **Et le devis du rappel repond encore.** C est l etape que le navigateur fait EN PREMIER :
+     * montrer un bouton arme dont le devis est refuse laisse le joueur cliquer dans le vide.
+     *
+     * ## La regle que ce temoin pose
+     *
+     * **Un devis est refuse exactement quand l ordre le serait — ni plus, ni moins.** Le point
+     * d entree posait `whyMoveIsRefused()` a toutes les demandes, rappel compris ; cette
+     * methode-la consulte l interrupteur, et `whyRecallIsRefused()` ne le consulte pas, tout
+     * expres. Les deux moities de la meme decision ne repondaient donc pas la meme chose, et c est
+     * la moitie visible du joueur qui repondait faux.
+     *
+     * Les trois temoins voisins ne pouvaient pas le voir : l un appelle le service, l autre lit la
+     * charge utile de la carte, aucun ne passe par le devis. **Un parcours n est eprouve que par le
+     * chemin que le joueur emprunte.**
+     */
+    public function testLeDevisDuRappelRepondEncoreApresDesarmement(): void
+    {
+        [$patrouille] = $this->unePatrouillePosee();
+
+        $this->desarmer();
+
+        $reponse = $this->postJson(route('galaxy.patrol.quote'), [
+            'patrol_id' => $patrouille->id,
+            'kind' => 'recall',
+        ]);
+
+        $reponse->assertStatus(200);
+
+        $this->assertGreaterThan(
+            0,
+            (int)$reponse->json('quote.duration_seconds'),
+            'Le devis du rappel ne chiffre aucun trajet.'
+        );
+
+        // Et l autre moitie de la regle : le devis d une manoeuvre, lui, reste bien ferme.
+        $coords = $this->planetService->getPlanetCoordinates();
+
+        $this->postJson(route('galaxy.patrol.quote'), [
+            'patrol_id' => $patrouille->id,
+            'galaxy' => $coords->galaxy,
+            'system' => $coords->system,
+            'x' => 400,
+            'y' => 400,
+            'speed' => 10,
+        ])->assertStatus(409)->assertJsonPath('reason_key', 'disabled');
+    }
+
+    /**
      * **L exception ne porte pas sur l etat seul.** Un ordre qui se dirait « retour » vers un autre
      * point n a aucune raison d etre dispense de l interrupteur.
      *
@@ -217,6 +266,102 @@ class PatrolDisarmedTest extends AccountTestCase
             PatrolState::Returning,
             null
         );
+    }
+
+    /**
+     * **Se poser sur un corps choisi reste ouvert apres desarmement.** C est une sortie, et un
+     * chantier desarme ne retient rien de ce qui existe.
+     *
+     * L exception de l interrupteur ne connaissait que `homeOf()`. S en tenir a la base aurait rendu
+     * l atterrissage impossible des l arret d urgence — soit exactement le defaut que cette
+     * exception existe pour empecher.
+     */
+    public function testUnAtterrissageSurUnCorpsChoisiResteOuvertApresDesarmement(): void
+    {
+        [$patrouille] = $this->unePatrouillePosee();
+        $autre = $this->unAutreCorpsDuJoueur();
+
+        $this->desarmer();
+
+        $ordres = resolve(PatrolOrders::class);
+
+        $this->assertNull(
+            $ordres->whyLandingIsRefused($patrouille, $autre, (int)Date::now()->timestamp),
+            'Un chantier desarme empeche la flotte de se poser : elle est prisonniere de l espace.'
+        );
+
+        $retour = $ordres->landOn($patrouille, $autre, (int)$patrouille->order_version, (int)Date::now()->timestamp);
+
+        $this->assertNotNull($retour->id, 'L atterrissage n a cree aucun segment.');
+        $this->assertSame(
+            (int)$autre->getPlanetId(),
+            (int)$retour->planet_id_to,
+            'Le segment ne vise pas le corps choisi : il retombe sur la base.'
+        );
+    }
+
+    /**
+     * **Et l exception elargie garde sa frontiere : le corps doit etre a soi.**
+     *
+     * En passant de « sa base » a « un de ses corps », la garde a change de question. Celui-ci
+     * verifie que la nouvelle question est aussi fermee que l ancienne : un ordre force qui partirait
+     * en retour vers le corps d un **autre joueur** reste refuse, chantier desarme. Sans cela,
+     * l arret d urgence deviendrait un couloir pour livrer une flotte a un adversaire.
+     *
+     * L appel prive est force volontairement : aucun appelant du jeu ne le prend — `landOn()` refuse
+     * deja le corps d un autre —, et cet essai existe pour que personne ne l ouvre demain.
+     */
+    public function testUnRetourForceVersLeCorpsDUnAutreResteRefuse(): void
+    {
+        [$patrouille] = $this->unePatrouillePosee();
+        $etranger = $this->getNearbyForeignPlanet();
+
+        $this->desarmer();
+
+        $ordres = resolve(PatrolOrders::class);
+        $geometrie = resolve(PatrolPricing::class)->geometry();
+        $coords = $etranger->getPlanetCoordinates();
+
+        $chezLAutre = PatrolDestination::landingOn(
+            $geometrie,
+            $coords->galaxy,
+            $coords->system,
+            $coords->position,
+            $etranger->getPlanetType(),
+            (int)$etranger->getPlanetId()
+        );
+
+        $dispatch = new ReflectionMethod(PatrolOrders::class, 'dispatchOrder');
+
+        $this->expectException(PatrolOrderRefused::class);
+        $this->expectExceptionMessage('disabled');
+
+        $dispatch->invoke(
+            $ordres,
+            $patrouille,
+            $chezLAutre,
+            10.0,
+            (int)$patrouille->order_version,
+            (int)Date::now()->timestamp,
+            PatrolState::Returning,
+            null
+        );
+    }
+
+    /**
+     * Un corps du joueur qui n est pas celui d ou la patrouille est partie.
+     */
+    private function unAutreCorpsDuJoueur(): PlanetService
+    {
+        $base = (int)$this->planetService->getPlanetId();
+
+        foreach ($this->player()->planets->all() as $corps) {
+            if ((int)$corps->getPlanetId() !== $base) {
+                return $corps;
+            }
+        }
+
+        $this->fail('Le compte du banc n a qu un corps : cet essai ne distinguerait pas un atterrissage choisi d un rappel.');
     }
 
     /**

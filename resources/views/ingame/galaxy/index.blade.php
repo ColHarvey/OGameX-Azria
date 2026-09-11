@@ -47,6 +47,7 @@
             var galaxyPatrolLaunchUrl = "{{ route('galaxy.patrol.launch') }}";
             var galaxyPatrolMoveUrl = "{{ route('galaxy.patrol.move', ['patrol' => 0]) }}";
             var galaxyPatrolRecallUrl = "{{ route('galaxy.patrol.recall', ['patrol' => 0]) }}";
+            var galaxyPatrolLandUrl = "{{ route('galaxy.patrol.land', ['patrol' => 0]) }}";
             var galaxyPatrolAttackUrl = "{{ route('galaxy.patrol.attack') }}";
             var galaxyCurrentPlanetId = {{ $current_planet_id }};
             var galaxyPatrolGridUnits = {{ $patrol_grid_units }};
@@ -193,6 +194,9 @@
                     'patrolShips' => __('t_ingame.galaxy.tactical_patrol_ships'),
                     'patrolGauge' => __('t_ingame.galaxy.tactical_patrol_gauge'),
                     'patrolChoose' => __('t_ingame.galaxy.tactical_patrol_choose'),
+                    'patrolStationNear' => __('t_ingame.galaxy.tactical_patrol_station_near'),
+                    'patrolLand' => __('t_ingame.galaxy.tactical_patrol_land'),
+                    'patrolBodyChoice' => __('t_ingame.galaxy.tactical_patrol_body_choice'),
                     'patrolQuote' => __('t_ingame.galaxy.tactical_patrol_quote'),
                     'patrolQuoteWaiting' => __('t_ingame.galaxy.tactical_patrol_quote_waiting'),
                     'patrolDestination' => __('t_ingame.galaxy.tactical_patrol_destination'),
