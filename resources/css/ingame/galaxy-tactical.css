@@ -1227,11 +1227,11 @@
     gap: 3px;
     max-width: 320px;
     padding: 6px 9px;
-    background: rgba(6, 14, 20, 0.62);
+    background: rgba(8, 15, 21, 0.62);
     border: 1px solid rgba(70, 88, 99, 0.55);
     border-radius: 3px;
     pointer-events: none;
-    color: #8fb0c4;
+    color: #8aa8be;
     font: 11px/1.35 Arial, sans-serif;
 }
 
@@ -1438,17 +1438,17 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: 11px;
-    color: #b9c9d6;
+    color: #b9d7e8;
 }
 
 #galaxyTactical .gtContactShipInput {
     flex: 0 0 auto;
     width: 58px;
     padding: 1px 4px;
-    border: 1px solid #35566b;
+    border: 1px solid #3b5363;
     border-radius: 3px;
-    background: #0f1b24;
-    color: #e3edf5;
+    background: #10202c;
+    color: #e6f2f9;
     font-size: 11px;
     text-align: right;
     /* Les nombres s alignent en colonne d une ligne a l autre. */
