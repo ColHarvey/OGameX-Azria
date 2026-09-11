@@ -7,6 +7,7 @@ use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\ReturnDestinationKind;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\Planet\Coordinate;
+use OGame\Patrol\Geometry\SpatialPoint;
 
 /**
  * Ou une flotte renvoyee va reellement se poser.
@@ -51,6 +52,8 @@ final readonly class ReturnPlan
      * @param PlanetType|null $bodyType Planete ou lune.
      * @param int|null $ownerId Le proprietaire de la flotte, qui doit aussi posseder ce corps.
      * @param CombatReasonCode|null $reason Pourquoi aucun retour n'est possible, le cas echeant.
+     * @param int|null $patrolId La patrouille qui attend la flotte, pour un retour vers un point.
+     * @param SpatialPoint|null $point Le point exact du systeme, pour un retour vers un point.
      */
     private function __construct(
         public ReturnDestinationKind $kind,
@@ -59,10 +62,37 @@ final readonly class ReturnPlan
         public PlanetType|null $bodyType,
         public int|null $ownerId,
         public CombatReasonCode|null $reason = null,
+        public int|null $patrolId = null,
+        public SpatialPoint|null $point = null,
     ) {
+        $versUnPoint = $kind === ReturnDestinationKind::PatrolPoint;
         $aUneDestination = $kind !== ReturnDestinationKind::None;
 
-        if ($aUneDestination && ($planetId === null || $coordinate === null || $bodyType === null || $ownerId === null)) {
+        /*
+         * **Les deux formes s excluent, et c est la garde la plus importante de cet objet.** Un plan
+         * qui porterait a la fois un corps et un point laisserait a chaque lecteur le soin de choisir
+         * lequel compte — et deux lecteurs choisiraient differemment. Le genre decide seul, et
+         * l autre forme doit etre vide.
+         */
+        if ($versUnPoint && ($planetId !== null || $bodyType !== null)) {
+            throw new InvalidArgumentException(
+                'Un retour vers un point de l espace ne designe aucun corps celeste : il ne peut porter ni identifiant ni type de corps.'
+            );
+        }
+
+        if (!$versUnPoint && ($patrolId !== null || $point !== null)) {
+            throw new InvalidArgumentException(
+                'Seul un retour vers un point de l espace porte une patrouille et un point.'
+            );
+        }
+
+        if ($versUnPoint && ($patrolId === null || $patrolId < 1 || $point === null || $coordinate === null || $ownerId === null)) {
+            throw new InvalidArgumentException(
+                'Un retour vers un point doit porter sa patrouille, son point, ses coordonnees et son proprietaire.'
+            );
+        }
+
+        if ($aUneDestination && !$versUnPoint && ($planetId === null || $coordinate === null || $bodyType === null || $ownerId === null)) {
             throw new InvalidArgumentException(
                 'Un plan de retour avec destination doit porter son identifiant, ses coordonnees, son type de corps et son proprietaire.'
             );
@@ -102,6 +132,29 @@ final readonly class ReturnPlan
     }
 
     /**
+     * La flotte revient au point ou sa patrouille l attend.
+     *
+     * **Aucun corps n est designe**, et c est ce qui distingue ce plan de tous les autres : la
+     * destination est un point du systeme, tenu par une patrouille vivante du meme joueur.
+     *
+     * Les coordonnees restent exigees — elles nomment la galaxie et le systeme, que le rapport et
+     * l audit lisent comme pour n importe quel retour. C est l orbite qui n a pas de sens ici.
+     */
+    public static function toPatrolPoint(int $patrolId, Coordinate $coordinate, SpatialPoint $point, int $ownerId): self
+    {
+        return new self(
+            ReturnDestinationKind::PatrolPoint,
+            null,
+            $coordinate,
+            null,
+            $ownerId,
+            null,
+            $patrolId,
+            $point
+        );
+    }
+
+    /**
      * Aucune destination legitime ne subsiste.
      */
     public static function cannotReturn(CombatReasonCode $reason): self
@@ -126,5 +179,17 @@ final readonly class ReturnPlan
     {
         return $this->kind === ReturnDestinationKind::AssociatedPlanet
             || $this->kind === ReturnDestinationKind::Homeworld;
+    }
+
+    /**
+     * Si la flotte se pose sur un point de l espace plutot que sur un corps.
+     *
+     * Les ecrivains de la mission de retour en dependent : un point s ecrit dans `x_to`/`y_to` avec
+     * `planet_id_to` a vide, un corps fait l inverse. Demander le genre plutot que de tester
+     * `planetId === null` dit **pourquoi**, et ne se confond pas avec un plan impossible.
+     */
+    public function landsOnAPoint(): bool
+    {
+        return $this->kind === ReturnDestinationKind::PatrolPoint;
     }
 }

@@ -3,6 +3,7 @@
 namespace OGame\Combat\Support;
 
 use Illuminate\Support\Facades\Schema;
+use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Services\FleetMissionService;
 use OGame\Services\ObjectService;
@@ -103,12 +104,15 @@ final readonly class ExpectedReturn
             'system_from' => $aller->system_to === null ? null : (int)$aller->system_to,
             'position_from' => $aller->position_to === null ? null : (int)$aller->position_to,
 
-            // La destination est celle que l'ordre impose.
-            'planet_id_to' => $ordre->destination->bodyId,
-            'type_to' => $ordre->destination->type->value,
+            // La destination est celle que l'ordre impose — un corps, ou le point ou une patrouille
+            // attend la flotte. **Une seule des deux formes s'ecrit**, l'autre reste vide.
+            'planet_id_to' => $ordre->destination->landsOnAPoint() ? null : $ordre->destination->bodyIdOrFail(),
+            'type_to' => $ordre->destination->landsOnAPoint()
+                ? PlanetType::SpatialPoint->value
+                : $ordre->destination->bodyTypeOrFail()->value,
             'galaxy_to' => $ordre->destination->coordinate->galaxy,
             'system_to' => $ordre->destination->coordinate->system,
-            'position_to' => $ordre->destination->coordinate->position,
+            'position_to' => $ordre->destination->landsOnAPoint() ? 0 : $ordre->destination->coordinate->position,
 
             // Les heures : le depart impose, l'arrivee au bout de la duree de l'aller.
             'time_departure' => $ordre->departureAt,

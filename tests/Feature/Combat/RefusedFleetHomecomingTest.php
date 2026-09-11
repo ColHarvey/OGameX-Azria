@@ -940,7 +940,7 @@ class RefusedFleetHomecomingTest extends TestCase
             'system_from' => $parent->system_to,
             'position_from' => $parent->position_to,
             'planet_id_to' => $ordre->destination->bodyId,
-            'type_to' => $ordre->destination->type->value,
+            'type_to' => $ordre->destination->bodyTypeOrFail()->value,
             'galaxy_to' => $ordre->destination->coordinate->galaxy,
             'system_to' => $ordre->destination->coordinate->system,
             'position_to' => $ordre->destination->coordinate->position,

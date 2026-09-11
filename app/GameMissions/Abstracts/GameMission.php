@@ -831,18 +831,35 @@ abstract class GameMission
         // l'exposerait a atterrir ailleurs si quelque chose a bouge entre la decision et l'ecriture,
         // et personne ne le verrait.
         if ($destination !== null) {
-            $mission->planet_id_to = $destination->bodyId;
-            $mission->type_to = $destination->type->value;
             $mission->galaxy_to = $destination->coordinate->galaxy;
             $mission->system_to = $destination->coordinate->system;
-            $mission->position_to = $destination->coordinate->position;
 
-            // **Une destination resolue est un corps celeste**, jamais un point de l espace : sa fin
-            // de segment n a pas de coordonnees de reference. Sans cette remise a vide, la ligne
-            // aurait dit « destination = ce corps » et « fin de segment = ce point », deux endroits
-            // differents. `ExpectedReturn` impose la meme chose.
-            $mission->x_to = null;
-            $mission->y_to = null;
+            /*
+             * **Une seule des deux formes s ecrit, jamais les deux.** La ligne ne doit pas dire a la
+             * fois « destination = ce corps » et « fin de segment = ce point » : ce sont deux
+             * endroits differents, et deux lecteurs en choisiraient deux. `ExpectedReturn` impose la
+             * meme regle sur la mission qu il compose.
+             *
+             * Une flotte qui rentre a sa patrouille vise un point (decision de Keven, 11 septembre
+             * 2026) : aucun corps, aucune orbite. Ce commentaire affirmait autrefois qu une
+             * destination resolue **est** un corps ; ce n est plus vrai, et le laisser aurait servi a
+             * prouver le contraire de ce que fait le code.
+             */
+            if ($destination->landsOnAPoint()) {
+                $point = $destination->pointOrFail();
+
+                $mission->planet_id_to = null;
+                $mission->type_to = PlanetType::SpatialPoint->value;
+                $mission->position_to = 0;
+                $mission->x_to = $point->x;
+                $mission->y_to = $point->y;
+            } else {
+                $mission->planet_id_to = $destination->bodyIdOrFail();
+                $mission->type_to = $destination->bodyTypeOrFail()->value;
+                $mission->position_to = $destination->coordinate->position;
+                $mission->x_to = null;
+                $mission->y_to = null;
+            }
         }
 
         // Fill in the units

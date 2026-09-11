@@ -1789,7 +1789,7 @@ class CombatCancellationTest extends FleetDispatchTestCase
                         'system_from' => $retourDe->system_to,
                         'position_from' => $retourDe->position_to,
                         'planet_id_to' => $ou->bodyId,
-                        'type_to' => $ou->type->value,
+                        'type_to' => $ou->bodyTypeOrFail()->value,
                         'galaxy_to' => $ou->coordinate->galaxy,
                         'system_to' => $ou->coordinate->system,
                         'position_to' => $ou->coordinate->position,

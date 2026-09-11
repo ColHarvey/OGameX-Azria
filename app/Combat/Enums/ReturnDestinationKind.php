@@ -31,5 +31,15 @@ enum ReturnDestinationKind: string
     /**
      * Aucune destination : la flotte ne rentre pas.
      */
+    /**
+     * La flotte revient **au point de l espace d ou elle est partie** : sa patrouille l y attend.
+     *
+     * C est le seul genre qui ne designe **aucun corps celeste**. Une patrouille est un poste : elle
+     * frappe et retourne a son guet (decision de Keven, 11 septembre 2026). Les invariants de ce
+     * genre ne sont pas plus laches que ceux des autres — ils portent sur une autre chose : une
+     * patrouille vivante, du proprietaire de la flotte, exactement a ce point.
+     */
+    case PatrolPoint = 'patrol_point';
+
     case None = 'none';
 }

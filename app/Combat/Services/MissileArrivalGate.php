@@ -228,7 +228,13 @@ final class MissileArrivalGate
             return null;
         }
 
-        return $planetes->make($destination->bodyId, true);
+        /*
+         * **Un missile rentre sur un corps, jamais sur un point.** Il part d un silo, qui est pose
+         * sur une planete ; aucun plan de retour d un missile ne peut viser le point d une
+         * patrouille. Le cas est donc impossible — et `bodyIdOrFail()` le dit au lieu de fabriquer
+         * un identifiant a partir de rien.
+         */
+        return $planetes->make($destination->bodyIdOrFail(), true);
     }
 
     /**
