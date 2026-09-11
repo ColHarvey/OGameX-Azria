@@ -35785,7 +35785,12 @@ function getActions(galaxyContentObject, systemData) {
   // getEmptySlotActions pour les cases libres : les icones restent groupees et
   // tombent dans la meme colonne que celles des lignes voisines, tandis que la
   // cellule garde la largeur qu elle a partout ailleurs.
-  if (player.isPirate) {
+  //
+  // Un corps detruit tombe dans le meme cas, et pour la meme raison : son bloc joueur est
+  // inerte, donc le message et la demande d ami rendent chacun un emplacement vide. Places
+  // au milieu, ces deux vides de seize pixels ecartaient l oeil grise du missile grise —
+  // seule la ligne detruite le montrait, les autres restant correctes.
+  if (player.isPirate || (mainPlanet && mainPlanet.isDestroyed)) {
     return `
         ${discoverLink}
         ${espionageLink}

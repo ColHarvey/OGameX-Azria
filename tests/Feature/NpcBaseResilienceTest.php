@@ -91,7 +91,7 @@ class NpcBaseResilienceTest extends AccountTestCase
      */
     public function testAnOverwhelmingForceTakesABaseInOneWave(): void
     {
-        $courbe = $this->measureWaves(100, 500);
+        $courbe = $this->measureWaves(100, 500, 12, 1);
 
         fwrite(STDERR, sprintf(
             "\n  Force ecrasante (500 chasseurs contre 100 lanceurs) : %s\n",
@@ -158,16 +158,39 @@ class NpcBaseResilienceTest extends AccountTestCase
     }
 
     /**
-     * Measure how long each kind of player needs against each kind of base.
+     * Measure what the Deathstar rule did to the progression matrix.
      *
-     * La question qui decide si le systeme est amusant n'est pas « une base peut-elle
-     * tomber », mais « combien de temps faut-il, selon qui attaque ». Un joueur faible doit
-     * pouvoir se dire « je ne peux pas encore la battre », jamais « je ne pourrai jamais ».
-     * Un gros joueur doit pouvoir se dire « je peux la battre, mais ca va me couter ».
+     * ## Ce que cette matrice disait avant, et pourquoi elle ne peut plus le dire
      *
-     * La matrice le montre directement.
+     * Elle mesurait « combien de vagues faut-il, selon qui attaque » et defendait une
+     * progression : le petit joueur entame la petite base, la grosse lui resiste, le gros
+     * joueur vient a bout de tout. Trois assertions le tenaient.
+     *
+     * Cette progression reposait entierement sur la destruction : c'est elle qui retirait les
+     * defenses reparees, et donc elle seule qui faisait tomber la courbe a zero. Depuis que la
+     * destruction exige une Etoile de la Mort (decision de Keven, 9 septembre 2026), les deux
+     * regimes mesures sont sans nuance :
+     *
+     *     sans Etoile — aucune base ne tombe, la courbe plafonne (20 chasseurs : 99 lanceurs
+     *                   debout apres six vagues ; 80 chasseurs : 15, et le plateau approche) ;
+     *     avec une Etoile — toutes les bases tombent en UNE vague, quelle que soit leur taille
+     *                   et quelle que soit la flotte qui l'accompagne.
+     *
+     * La matrice mesuree le montre case par case : faible/moyen/fort contre faible/moyenne/forte
+     * donnent neuf fois « 1 ». **La taille d'une base ne decide plus rien ; l'Etoile de la Mort
+     * decide tout.**
+     *
+     * ## Pourquoi cet essai reste, et sous cette forme
+     *
+     * Le supprimer effacerait la mesure au moment ou elle devient interessante. Il affirme donc
+     * ce qui est vrai aujourd'hui — l'Etoile est la porte, et elle est binaire — et il rougira
+     * le jour ou un reglage redonnera du poids a la taille des bases. C'est alors qu'il faudra
+     * reecrire la progression, avec les chiffres de ce jour-la.
+     *
+     * Remonte a Keven le 9 septembre 2026 : ce contenu devient de fin de partie, un joueur sans
+     * Etoile de la Mort ne pouvant plus prendre aucune base.
      */
-    public function testHowLongEachPlayerNeedsAgainstEachBase(): void
+    public function testTheDeathstarDecidesEverythingAndTheBaseSizeNothing(): void
     {
         $bases = ['faible' => 30, 'moyenne' => 100, 'forte' => 250];
         $joueurs = ['faible' => 40, 'moyen' => 120, 'fort' => 400];
@@ -190,7 +213,7 @@ class NpcBaseResilienceTest extends AccountTestCase
             $ligne = ['faible' => null, 'moyenne' => null, 'forte' => null];
 
             foreach ($bases as $nomBase => $defenses) {
-                $courbe = $this->measureWaves($defenses, $chasseurs, 10);
+                $courbe = $this->measureWaves($defenses, $chasseurs, 10, 1);
                 $abattue = $courbe[count($courbe) - 1] === 0;
                 $ligne[$nomBase] = $abattue ? count($courbe) - 1 : null;
                 $resultats[$nomJoueur][$nomBase] = $ligne[$nomBase];
@@ -207,27 +230,56 @@ class NpcBaseResilienceTest extends AccountTestCase
 
         fwrite(STDERR, "\n");
 
-        // Le joueur faible doit pouvoir entamer quelque chose : sans cela, rien du contenu
-        // pirate ne lui est accessible et le systeme ne lui apporte que des ennuis.
-        $this->assertNotNull(
-            $resultats['faible']['faible'],
-            'The weakest player could not take even the smallest base, so nothing here is for them.'
+        // **Toutes les cases valent une vague, et c'est le fait a retenir.** Ce n'est pas une
+        // assertion molle : elle echoue des qu'une base resiste a une Etoile de la Mort, donc
+        // des que le reglage redonne du poids a la taille de la base.
+        foreach ($resultats as $nomJoueur => $ligne) {
+            foreach ($ligne as $nomBase => $vagues) {
+                $this->assertSame(
+                    1,
+                    $vagues,
+                    'Player « ' . $nomJoueur . ' » did not settle base « ' . $nomBase . ' » in a single wave: '
+                    . 'the size of a base has started to matter again, which contradicts the measured effect '
+                    . 'of the Deathstar rule and deserves a fresh reading.'
+                );
+            }
+        }
+
+        // Et l'autre moitie de la porte. Sans cette seconde mesure, la matrice ne dirait pas que
+        // c'est l'Etoile qui decide — seulement que ces flottes gagnent.
+        //
+        // **Le fait mesure est la destruction du corps, jamais le compte de defenses.** Les deux
+        // ne coincident plus : quatre cents chasseurs vident bel et bien la defense d'une petite
+        // base — 70 % d'un tres petit nombre revient a zero — sans pour autant l'abattre. Une
+        // assertion sur la courbe se serait donc trompee de sujet, et elle l'a fait.
+        $this->assertFalse(
+            $this->oneWaveTakesTheBase(30, 400, 0),
+            'Four hundred fighters brought a base down without a Deathstar, so the gate is elsewhere.'
         );
 
-        // La grosse base doit resister au petit joueur : sans cela il n y a pas de
-        // progression, et toutes les bases se valent.
-        $this->assertNull(
-            $resultats['faible']['forte'],
-            'The weakest player took the strongest base, so base size means nothing.'
+        $this->assertTrue(
+            $this->oneWaveTakesTheBase(30, 40, 1),
+            'Forty fighters and one Deathstar did not take the smallest base, so the matrix above measured something else.'
         );
+    }
 
-        // Mais rien ne doit rester definitivement hors de portee : ce que le petit joueur
-        // ne peut pas encore faire, le gros joueur le fait. C est la difference entre
-        // « pas encore » et « jamais ».
-        $this->assertNotNull(
-            $resultats['fort']['forte'],
-            'Even the strongest player could not take the strongest base: it is out of reach for good.'
-        );
+    /**
+     * Send exactly one wave at a fresh base and report whether the body itself came down.
+     *
+     * Le corps, pas la defense : c'est la seule mesure qui distingue « la base est desarmee »
+     * de « la base a cesse d'exister », et ces deux etats se sont separes le jour ou la
+     * destruction a exige une Etoile de la Mort.
+     */
+    private function oneWaveTakesTheBase(int $defences, int $fighters, int $deathstars): bool
+    {
+        $base = $this->placeBaseNextDoor();
+        $base->addUnit('rocket_launcher', $defences);
+
+        $planetId = $base->getPlanetId();
+
+        $this->sendWave($base->getPlanetCoordinates(), $fighters, $deathstars);
+
+        return resolve(PlanetServiceFactory::class)->make($planetId, true)?->isDestroyed() ?? true;
     }
 
     /**
@@ -270,7 +322,7 @@ class NpcBaseResilienceTest extends AccountTestCase
      * @return array<int, int> Le nombre de defenses debout avant la premiere vague, puis
      *                         apres chacune.
      */
-    private function measureWaves(int $defences, int $fighters, int $maxWaves = 12): array
+    private function measureWaves(int $defences, int $fighters, int $maxWaves = 12, int $deathstars = 0): array
     {
         $base = $this->placeBaseNextDoor();
         $base->addUnit('rocket_launcher', $defences);
@@ -282,7 +334,7 @@ class NpcBaseResilienceTest extends AccountTestCase
         $courbe = [$this->defenceCountOf($factory, $planetId)];
 
         while ($courbe[count($courbe) - 1] > 0 && count($courbe) <= $maxWaves) {
-            $this->sendWave($coordinate, $fighters);
+            $this->sendWave($coordinate, $fighters, $deathstars);
             $courbe[] = $this->defenceCountOf($factory, $planetId);
 
             // La base peut avoir ete rasee : la position n'existe plus, inutile d'insister.
@@ -297,15 +349,24 @@ class NpcBaseResilienceTest extends AccountTestCase
     /**
      * Send one wave at a coordinate and process its arrival.
      */
-    private function sendWave(Coordinate $target, int $fighters): void
+    private function sendWave(Coordinate $target, int $fighters, int $deathstars = 0): void
     {
         // Chaque vague est ravitaillee sur place : la precedente est encore en vol de retour,
         // et le test mesure la resilience de la base, pas la logistique de l'attaquant.
         $this->planetAddUnit('light_fighter', $fighters + 100);
-        $this->planetAddResources(new Resources(0, 0, 1000000, 0));
+        $this->planetAddResources(new Resources(0, 0, 5000000, 0));
 
         $fleet = new UnitCollection();
         $fleet->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), $fighters);
+
+        // **Sans Etoile de la Mort, aucune vague n'abat plus rien** (decision de Keven du
+        // 9 septembre 2026). Une vague qui n'en emmene pas mesure donc l'usure seule, et la
+        // courbe atteint le plateau que la reparation impose ; une vague qui en emmene une
+        // peut achever le corps, et la defense tombe alors reellement a zero.
+        if ($deathstars > 0) {
+            $this->planetAddUnit('deathstar', $deathstars);
+            $fleet->addUnit(ObjectService::getUnitObjectByMachineName('deathstar'), $deathstars);
+        }
 
         $mission = resolve(FleetMissionService::class)->createNewFromPlanet(
             $this->planetService,

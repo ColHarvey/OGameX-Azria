@@ -137,11 +137,17 @@ class NpcDestructionCycleTest extends AccountTestCase
         $this->assertEquals(0, $threatService->threatOf($player), 'The player started with threat already recorded.');
 
         // Force ecrasante : le but est de tester le cycle, pas l'issue du combat.
+        //
+        // **Et une Etoile de la Mort, sans quoi la base ne tombe plus** (decision de Keven du
+        // 9 septembre 2026). Elle est lente et couteuse en carburant : le deuterium est donc
+        // large, et l'essai voyage jusqu'a l'arrivee reelle plutot que vers un instant devine.
         $this->planetAddUnit('light_fighter', 200);
-        $this->planetAddResources(new Resources(0, 0, 200000, 0));
+        $this->planetAddUnit('deathstar', 1);
+        $this->planetAddResources(new Resources(0, 0, 5000000, 0));
 
         $fleet = new UnitCollection();
         $fleet->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 200);
+        $fleet->addUnit(ObjectService::getUnitObjectByMachineName('deathstar'), 1);
 
         $mission = resolve(FleetMissionService::class)->createNewFromPlanet(
             $this->planetService,
@@ -214,6 +220,77 @@ class NpcDestructionCycleTest extends AccountTestCase
         $this->assertFalse(
             resolve(PlanetServiceFactory::class)->planetExistsAtCoordinate($baseCoordinate),
             'The freed coordinate is still reported as occupied.'
+        );
+    }
+
+    /**
+     * Assert that wiping the defence is not enough without an Etoile de la Mort.
+     *
+     * ## Ce que cet essai rend observable
+     *
+     * Sans lui, la regle de Keven serait « prouvee » par un essai qui n'attaque jamais assez
+     * fort : une base qui survit parce que sa defense tient ne dit rien de l'Etoile de la Mort.
+     * L'essai etablit donc les deux moities separement — **la defense est bien tombee**
+     * (`stillStanding()` rend faux, mesure apres la bataille), **et pourtant le corps n'est pas
+     * detruit**. Retirer la condition du service fait rougir la seconde assertion, jamais la
+     * premiere.
+     */
+    public function testABaseSurvivesAFleetThatCarriesNoDeathstar(): void
+    {
+        $base = $this->placeBaseNextDoor();
+        $baseCoordinate = $base->getPlanetCoordinates();
+        $basePlanetId = $base->getPlanetId();
+
+        // Meme garnison que la chaine complete, et pour les memes raisons : des defenses pour
+        // que la base tienne debout au depart, quelques vaisseaux pour qu'elle ne fuie pas, et
+        // la reparation neutralisee pour que le resultat ne depende pas d'un tirage.
+        $base->addUnit('rocket_launcher', 2);
+        $base->addUnit('light_fighter', 3);
+        $baseUser = $base->getPlayer()?->getUser();
+        $this->assertNotNull($baseUser);
+        $baseUser->tactical_retreat_ratio = 0;
+        $baseUser->save();
+
+        $repairRate = $this->settings->get('defense_repair_rate', '70');
+        $this->settings->set('defense_repair_rate', '0');
+
+        $this->planetAddUnit('light_fighter', 200);
+        $this->planetAddResources(new Resources(0, 0, 5000000, 0));
+
+        $fleet = new UnitCollection();
+        $fleet->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 200);
+
+        $mission = resolve(FleetMissionService::class)->createNewFromPlanet(
+            $this->planetService,
+            $baseCoordinate,
+            PlanetType::Planet,
+            1,
+            $fleet,
+            new Resources(0, 0, 0, 0),
+            10
+        );
+
+        $this->travelTo(Date::createFromTimestamp($mission->time_arrival + 10));
+        $this->reloadApplication();
+        $this->get('/overview');
+
+        $this->settings->set('defense_repair_rate', $repairRate);
+
+        // La base est bien desarmee : l'attaque a porte, ce n'est pas elle qui a tenu.
+        $beaten = resolve(PlanetServiceFactory::class)->make($basePlanetId, true);
+        $this->assertNotNull($beaten, 'The base row vanished, so nothing can be concluded.');
+        $this->assertFalse(
+            resolve(NpcDestructionService::class)->stillStanding($beaten),
+            'The attack did not wipe the defence, so this test proves nothing about the Deathstar.'
+        );
+
+        // Et pourtant elle est toujours la.
+        $planetRow = Planet::find($basePlanetId);
+        $this->assertNotNull($planetRow, 'The base was removed although no Deathstar took part.');
+        $this->assertSame(
+            0,
+            (int)$planetRow->destroyed,
+            'A fleet without an Etoile de la Mort brought the base down.'
         );
     }
 
