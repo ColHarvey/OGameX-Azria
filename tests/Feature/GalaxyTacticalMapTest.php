@@ -717,6 +717,40 @@ class GalaxyTacticalMapTest extends UnitTestCase
     }
 
     /**
+     * **Seul le marqueur d une patrouille attrape le clic dans la couche des flottes.**
+     *
+     * La couche entiere est `pointer-events: none` pour qu une trajectoire qui croise une planete ne
+     * vole pas son clic — un temoin voisin l exige depuis longtemps. Depuis que l icone de patrouille
+     * disparait en vol (decision de Keven, 12 septembre 2026), ce marqueur est le **seul** moyen de
+     * selectionner une patrouille partie, donc de la rappeler : il lui faut le pointeur.
+     *
+     * Ce temoin garde les deux moities : l exception existe, et elle ne deborde pas sur la
+     * trajectoire.
+     */
+    public function testOnlyThePatrolMarkerCatchesClicksInTheFleetLayer(): void
+    {
+        $feuille = $this->feuille();
+
+        $this->assertMatchesRegularExpression(
+            '/#galaxyTactical \.gtFleetMarker--patrol \{[^}]*pointer-events:\s*auto/',
+            $feuille,
+            'The patrol marker no longer catches clicks: a patrol in flight cannot be selected, so it cannot be recalled.'
+        );
+
+        $this->assertMatchesRegularExpression(
+            '/#galaxyTactical \.gtFleetLayer \{[^}]*pointer-events:\s*none/',
+            $feuille,
+            'The fleet layer catches pointer events again: every trajectory crossing a planet makes it unclickable.'
+        );
+
+        $this->assertDoesNotMatchRegularExpression(
+            '/#galaxyTactical \.gtTrajectory \{[^}]*pointer-events:\s*auto/',
+            $feuille,
+            'The trajectory catches clicks: the exception was meant for the marker alone.'
+        );
+    }
+
+    /**
      * **La fiche est posee par le placeur du jeu, qui la borne — jamais a la main.**
      *
      * Le panneau de composition debordait de la carte parce qu il etait pose par `style.left/top`

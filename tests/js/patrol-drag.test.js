@@ -174,13 +174,13 @@ function unMonde() {
  * Une patrouille telle que `PatrolProjection` la compose. Les champs sont ceux du serveur, pas ceux
  * qui rendraient l'essai commode : un montage qui invente sa charge utile ne prouve rien du jeu.
  */
-function unePatrouille({ id = 3, galaxie = 1, systeme = 5, deplacementPermis = true } = {}) {
+function unePatrouille({ id = 3, galaxie = 1, systeme = 5, deplacementPermis = true, etat = 'stationed' } = {}) {
     const bout = (x, y) => ({ galaxy: galaxie, system: systeme, position: 0, type: 5, x, y });
 
     return {
         id,
-        state: 'stationed',
-        state_label: 'Stationnee',
+        state: etat,
+        state_label: etat === 'stationed' ? 'Stationnee' : 'En route',
         galaxy: galaxie,
         system: systeme,
         point: { x: -660, y: 580 },
@@ -209,13 +209,32 @@ function unePatrouille({ id = 3, galaxie = 1, systeme = 5, deplacementPermis = t
     };
 }
 
-function reponse(galaxie, systeme, patrouilles, maintenant = 1_700_000_100) {
+/**
+ * Le mouvement que le serveur publie pour le segment d'une patrouille en vol, tel que
+ * `FleetMovementProjection::project()` le compose.
+ */
+function unMouvementDePatrouille(patrolId, { galaxie = 1, systeme = 5 } = {}) {
+    return {
+        id: 900 + patrolId,
+        mission_type: 11,
+        label: 'Patrouille',
+        side: 'friendly',
+        is_return: false,
+        patrol_id: patrolId,
+        from: { galaxy: galaxie, system: systeme, position: 4, type: 1, x: null, y: null },
+        to: { galaxy: galaxie, system: systeme, position: 0, type: 5, x: -660, y: 580 },
+        time_departure: 1_700_000_000,
+        time_arrival: 1_700_000_600
+    };
+}
+
+function reponse(galaxie, systeme, patrouilles, maintenant = 1_700_000_100, mouvements = []) {
     return {
         success: true,
         galaxy: galaxie,
         system: systeme,
         server_now: maintenant,
-        movements: [],
+        movements: mouvements,
         patrols: patrouilles,
         surveillance: [],
         counters: {}
@@ -518,6 +537,74 @@ test('chantier eteint, cliquer le vide n ouvre rien', () => {
         const f = monde.fiche();
 
         assert.equal(f === null || f.hidden === true || !f.gtOrdre, true, 'un chantier eteint ouvre quand meme la composition');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **En vol, une patrouille n'est qu'un triangle blanc.**
+ *
+ * Decision de Keven, 12 septembre 2026 : elle dessinait deux marqueurs au meme endroit — le triangle
+ * que le jeu dessine pour toute flotte, et l'icone de patrouille par-dessus.
+ */
+test('une patrouille en vol ne dessine pas d icone de patrouille', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [unePatrouille({ etat: 'en_route' })], 1_700_000_100, [unMouvementDePatrouille(3)]));
+
+        assert.equal(monde.marqueur(3), null, 'la patrouille en vol dessine encore son icone : deux marqueurs pour une flotte');
+        assert.ok(
+            monde.window.document.querySelector('.gtFleetMarker--patrol'),
+            'aucun triangle ne porte la patrouille : elle ne serait plus selectionnable du tout'
+        );
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Et posee, elle garde la sienne** — aucun triangle ne vole pour elle.
+ *
+ * Sans cette moitie, masquer l'icone dans tous les etats passerait le temoin precedent et ferait
+ * disparaitre les patrouilles posees de la carte.
+ */
+test('une patrouille posee garde son icone', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [unePatrouille()]));
+
+        assert.ok(monde.marqueur(3), 'une patrouille posee n a plus de marqueur : elle est invisible sur la carte');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Le triangle est la poignee** : cliquer dessus ouvre la fiche, donc le rappel reste possible en
+ * vol. C'est la moitie fonctionnelle de la decision — sans elle, on aurait retire le seul moyen de
+ * rappeler une flotte partie.
+ */
+test('cliquer le triangle d une patrouille ouvre sa fiche', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [unePatrouille({ etat: 'en_route' })], 1_700_000_100, [unMouvementDePatrouille(3)]));
+
+        const triangle = monde.window.document.querySelector('.gtFleetMarker--patrol');
+        assert.ok(triangle, 'la premisse manque : aucun triangle de patrouille');
+
+        triangle.dispatchEvent(new monde.window.MouseEvent('click', { bubbles: true, cancelable: true }));
+
+        const f = monde.fiche();
+
+        assert.ok(f && !f.hidden, 'la fiche ne s ouvre pas : la patrouille en vol est devenue inatteignable');
+        assert.equal(Number(f.gtPatrouille && f.gtPatrouille.id), 3, 'la fiche ouverte n est pas celle de cette patrouille');
     } finally {
         monde.fermer();
     }

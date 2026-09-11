@@ -2071,6 +2071,41 @@
                 mouvement._cap = cap;
             }
 
+            /*
+             * **Le triangle d une patrouille est sa poignee.** En vol, l icone de patrouille n est
+             * plus dessinee : ce marqueur est le seul moyen de la selectionner, donc de la rappeler.
+             *
+             * L exception a « la couche des flottes n attrape aucun clic » s arrete ici : elle porte
+             * sur ce marqueur, jamais sur la trajectoire — une ligne qui croise une planete doit
+             * continuer de laisser passer le clic vers elle.
+             */
+            if (mouvement.patrol_id) {
+                marqueur.setAttribute('class', 'gtFleetMarker gtFleetMarker--patrol');
+                marqueur.addEventListener('click', function (evenement) {
+                    evenement.preventDefault();
+                    evenement.stopPropagation();
+
+                    /* En choix de destination, ce clic designerait une cible : il ne rechoisit rien. */
+                    if (carte.gtChoix) {
+                        return;
+                    }
+
+                    var p = patrouilleParId(mouvement.patrol_id);
+
+                    if (!p) {
+                        return;
+                    }
+
+                    choisirLaPatrouille(carte, p);
+
+                    var f = carte.querySelector('.gtCard');
+
+                    if (f && !f.hidden && mouvement._x !== undefined) {
+                        placerAuPoint(f, Math.round(mouvement._x), Math.round(mouvement._y));
+                    }
+                });
+            }
+
             var titre = svg('title', {});
             titre.textContent = mouvement.label
                 + (mouvement.is_return ? ' — ' + locaDeLaCarte(carte, 'return', 'Retour') : '')
@@ -2129,6 +2164,10 @@
             var y = mouvement._bouts.depart.y + (mouvement._bouts.arrivee.y - mouvement._bouts.depart.y) * local.avancement;
 
             mouvement._marqueur.setAttribute('transform', 'translate(' + x.toFixed(1) + ',' + y.toFixed(1) + ')');
+
+            /* Retenue pour la fiche : un element SVG n a pas d `offsetLeft`, le placeur veut un point. */
+            mouvement._x = x;
+            mouvement._y = y;
             mouvement._marqueur.classList.toggle('gtInTransit', local.enTransit);
 
             /* En hyperespace, le vaisseau n'est sur aucune carte : la trainee du bord le dit a sa place. */
@@ -2318,6 +2357,26 @@
      * clic fait la meme chose pour le tactile, et les champs X et Y pour le clavier. Ce
      * commentaire affirmait l inverse, et decrivait une version anterieure du geste.
      */
+    /**
+     * Les etats ou la patrouille est **en mouvement**, donc deja dessinee par la couche des flottes.
+     *
+     * Les autres — posee, immobilisee, engagee — la montrent a un point : elles gardent leur icone,
+     * parce qu aucun triangle ne vole pour elles.
+     */
+    var EN_VOL = ['en_route', 'returning'];
+
+    function patrouilleParId(id) {
+        var trouvee = null;
+
+        patrouilles.forEach(function (p) {
+            if (Number(p.id) === Number(id)) {
+                trouvee = p;
+            }
+        });
+
+        return trouvee;
+    }
+
     var ICONES_DE_PATROUILLE = {
         stationed: 'patrol-station.svg',
         /*
@@ -2666,9 +2725,21 @@
         couche.innerHTML = '';
 
         patrouilles.forEach(function (p) {
+            /*
+             * **En vol, le triangle blanc du mouvement suffit** (decision de Keven, 12 septembre
+             * 2026). Dessiner en plus l icone de patrouille posait deux marqueurs au meme endroit
+             * pour une seule flotte. C est ce triangle qui porte desormais le clic.
+             */
+            if (EN_VOL.indexOf(String(p.state || '')) !== -1) {
+                p._marqueur = null;
+                p._bouts = p.segment ? extremites(p.segment, galaxie, systeme) : null;
+
+                return;
+            }
+
             var b = element('button', 'patrol-marker gtPatrolMarker gtPatrol--' + String(p.state || ''));
             var icone = element('img', '');
-            var intitule = locaFiche('patrolTitle', 'Patrouille') + ' ' + p.id + ' — ' + (p.state_label || p.state);
+            var intitule = locaFiche('patrolTitle', 'Patrouille') + ' ' + (p.number || p.id) + ' — ' + (p.state_label || p.state);
 
             b.type = 'button';
             b.setAttribute('data-patrol-id', String(p.id));
@@ -2911,7 +2982,12 @@
         grille.setAttribute('aria-label', locaFiche('actions', 'Actions'));
         apres.push(grille);
 
-        return { avant: avant, apres: apres, titre: locaFiche('patrolTitle', 'Patrouille') + ' ' + p.id };
+        /*
+         * **Le numero vient du serveur, jamais l identifiant.** `p.id` compte toutes les patrouilles
+         * jamais creees et ne redescend jamais : la premiere du jour s affichait « Patrouille 4 ».
+         * Le repli sur `p.id` ne sert qu a une charge utile anterieure a ce changement.
+         */
+        return { avant: avant, apres: apres, titre: locaFiche('patrolTitle', 'Patrouille') + ' ' + (p.number || p.id) };
     }
 
     function choisirLaPatrouille(carte, p, sansBasculer) {
@@ -3828,6 +3904,27 @@
             });
     }
 
+    /**
+     * **Le bandeau du jeu apprend le mouvement tout de suite.**
+     *
+     * La boite d evenements en haut de page se recharge d elle-meme sur son propre rythme : une
+     * patrouille lancee depuis la carte n y apparaissait qu au rechargement de la page. Le jeu
+     * expose deja `getAjaxEventbox()` pour cela — c est la meme fonction que ses propres envois
+     * de flotte appellent. La carte ne reecrit donc rien : elle previent.
+     *
+     * Elle est **facultative** : une page servie sans le paquet herite n en dispose pas, et un
+     * ordre reussi ne doit pas echouer parce que le bandeau n a pas pu se rafraichir.
+     */
+    function annoncerLeMouvement() {
+        if (typeof window.getAjaxEventbox === 'function') {
+            try {
+                window.getAjaxEventbox();
+            } catch (e) {
+                /* Le bandeau du jeu ne doit jamais faire echouer un ordre accepte. */
+            }
+        }
+    }
+
     /* La confirmation : la version du devis part avec l'ordre ; un devis perime revient en refus, et le joueur en redemande un. */
     function envoyerLOrdre(carte, f) {
         var o = f.gtOrdre;
@@ -3904,6 +4001,8 @@
                 if (carte.gtSysteme) {
                     chargerLesFlottes(carte, carte.gtSysteme.galaxie, carte.gtSysteme.systeme);
                 }
+
+                annoncerLeMouvement();
             })
             .fail(function (xhr) {
                 if (f.gtOrdre !== o) {

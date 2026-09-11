@@ -318,6 +318,18 @@
     overflow: visible;
 }
 
+/*
+ * **Le marqueur d une patrouille attrape le clic ; rien d autre dans cette couche ne le fait.**
+ *
+ * La couche entiere est `pointer-events: none` pour qu une trajectoire qui croise une planete ne
+ * vole pas son clic. L exception s arrete a ce marqueur-la : en vol, il est le seul moyen de
+ * selectionner une patrouille, donc de la rappeler.
+ */
+#galaxyTactical .gtFleetMarker--patrol {
+    pointer-events: auto;
+    cursor: pointer;
+}
+
 #galaxyTactical .gtFleetMarker {
     pointer-events: auto;
     cursor: help;

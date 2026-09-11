@@ -60,7 +60,18 @@ final class PatrolProjection
             ->orderBy('id')
             ->get();
 
+        /*
+         * **Le rang compte toutes les patrouilles vivantes du joueur, pas celles d ici.**
+         *
+         * Il s incremente avant tout filtre d affichage : sinon une meme patrouille changerait de
+         * numero selon le systeme regarde, et deux patrouilles porteraient le meme dans deux
+         * systemes differents. La requete est deja ordonnee par identifiant, donc le rang est
+         * stable d un chargement a l autre tant qu aucune patrouille ne se termine.
+         */
+        $rang = 0;
+
         foreach ($patrouilles as $patrouille) {
+            $rang++;
             $segment = $patrouille->currentMission;
 
             if (!$segment instanceof FleetMission || (int)$segment->processed === 1) {
@@ -71,7 +82,7 @@ final class PatrolProjection
                 continue;
             }
 
-            $projections[] = $this->project($patrouille, $segment, $now);
+            $projections[] = $this->project($patrouille, $segment, $now, $rang);
         }
 
         return $projections;
@@ -80,7 +91,7 @@ final class PatrolProjection
     /**
      * @return array<string, mixed>
      */
-    private function project(Patrol $patrouille, FleetMission $segment, int $now): array
+    private function project(Patrol $patrouille, FleetMission $segment, int $now, int $rang): array
     {
         $units = $this->orders->unitsOf($segment);
         $point = $patrouille->point();
@@ -98,6 +109,13 @@ final class PatrolProjection
 
         return [
             'id' => (int)$patrouille->id,
+            /*
+             * **Le numero que le joueur lit, et qui n est pas l identifiant.** Celui-ci compte toutes
+             * les patrouilles jamais creees : la premiere d une nouvelle journee s appelait
+             * « Patrouille 4 » alors que le joueur n en avait aucune en vol. L identifiant reste,
+             * lui, la clef de tous les ordres — il n a simplement rien a faire dans un titre.
+             */
+            'number' => $rang,
             'state' => $patrouille->state->value,
             'state_label' => (string)__('t_ingame.patrol.state_' . $patrouille->state->value),
             'galaxy' => (int)$patrouille->galaxy,

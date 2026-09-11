@@ -48,6 +48,55 @@ final class PatrolPricing
     }
 
     /**
+     * La duree d un segment — **proportionnelle a la distance a l interieur d un systeme**.
+     *
+     * ## Pourquoi la formule du jeu ne convient pas ici
+     *
+     * `durationOverDistance()` vaut `35000 / vitesse x racine(distance x 10 / vitesseVaisseau) + 10`,
+     * divise par le facteur de flotte. Une **racine carree** : elle ecrase les longues distances et,
+     * a l inverse, fait payer un cout fixe enorme aux courtes.
+     *
+     * En OGame ordinaire cela ne se voit jamais — deux planetes d un meme systeme sont a 1000 unites
+     * au minimum. Mais la geometrie des patrouilles produit des distances **petites par
+     * construction** (`gameDistanceWithinSystem()` divise par `distanceDivisor`). Mesure du
+     * 12 septembre 2026, rapportee par Keven : une patrouille qui venait de parcourir 14 unites en
+     * 65 secondes se voyait reclamer **380 secondes** pour refaire ces memes 14 unites en sens
+     * inverse. La meme flotte, a la meme vitesse, volait six fois plus lentement sur le trajet court.
+     *
+     * ## Ce que fait cette methode
+     *
+     * A l interieur d un systeme, la duree devient **lineaire en distance**, calibree sur la
+     * traversee complete du systeme : traverser tout le systeme coute ce que la formule du jeu
+     * reclamerait pour cette distance-la, et tout trajet plus court coute sa part exacte. Aller et
+     * retour deviennent donc coherents, et un rappel immediat rentre en quelques secondes.
+     *
+     * **La vitesse reste celle du jeu** : la formule est evaluee une fois sur la traversee, donc le
+     * pourcentage de vitesse, la lenteur du vaisseau le plus lent et le facteur de flotte du serveur
+     * gouvernent toujours. Seule la **forme** de la courbe change, pas ce qui la regle.
+     *
+     * **Entre systemes, rien ne change** : les distances y sont celles du jeu, la formule du jeu leur
+     * convient, et une patrouille ne doit pas traverser la galaxie plus vite qu une flotte ordinaire.
+     *
+     * **Le carburant n est pas touche** : il se calcule sur la distance
+     * (`consumptionOverDistance()`), jamais sur la duree. Un trajet plus rapide ne coute donc pas
+     * moins cher — ce serait une tout autre decision de jeu.
+     */
+    private function durationOver(PlayerService $player, UnitCollection $units, int $distance, float $speedPercent, bool $withinOneSystem): int
+    {
+        if (!$withinOneSystem) {
+            return $this->fleetMissionService->durationOverDistance($player, $units, $distance, null, $speedPercent);
+        }
+
+        // La traversee complete : le diametre du systeme, le plus long trajet qui s y fasse.
+        $traversee = 2 * $this->geometry()->systemRadiusUnits();
+        $dureeDeLaTraversee = $this->fleetMissionService->durationOverDistance($player, $units, $traversee, null, $speedPercent);
+
+        // **Jamais zero** : une duree nulle ferait arriver la flotte a l instant du depart, et le
+        // travailleur reglerait le segment avant que le joueur ne l ait vu partir.
+        return (int)max(1, (int)round($distance * $dureeDeLaTraversee / $traversee));
+    }
+
+    /**
      * La distance de jeu entre deux endroits, quels qu ils soient.
      *
      * Meme systeme : la geometrie de reference, donc le vrai ecart entre les deux points. Sinon les
@@ -100,7 +149,7 @@ final class PatrolPricing
                 ->refusedBecause('no_units');
         }
 
-        $duree = $this->fleetMissionService->durationOverDistance($player, $units, $distance, null, $speedPercent);
+        $duree = $this->durationOver($player, $units, $distance, $speedPercent, $galaxyFrom === $to->galaxy && $systemFrom === $to->system);
         $cout = $this->fleetMissionService->consumptionOverDistance($player, $units, $distance, 0, $speedPercent);
 
         // Le retour de securite, depuis la destination vers la base, a sa propre vitesse.
@@ -123,7 +172,7 @@ final class PatrolPricing
             )
         );
         $coutRetour = $this->fleetMissionService->consumptionOverDistance($player, $units, $distanceRetour, 0, $vitesseRetour);
-        $dureeRetour = $this->fleetMissionService->durationOverDistance($player, $units, $distanceRetour, null, $vitesseRetour);
+        $dureeRetour = $this->durationOver($player, $units, $distanceRetour, $vitesseRetour, $to->galaxy === $home->galaxy && $to->system === $home->system);
 
         $reserveArrivee = $reserve - $cout;
         $autonomie = $this->upkeep->autonomySeconds($units, $reserveArrivee, (float)$coutRetour);
