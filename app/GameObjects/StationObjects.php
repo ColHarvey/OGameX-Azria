@@ -125,6 +125,12 @@ class StationObjects
             new GameObjectRequirement('espionage_technology', 4),
             new GameObjectRequirement('computer_technology', 2)
         ];
+        // **Sur une planete, et nulle part ailleurs.** `valid_planet_types` vide veut dire
+        // « partout, lune comprise » — et la veille, elle, ne regarde que des planetes
+        // (`SurveillanceWatch` filtre sur `planet_type`). Sans cette ligne, un joueur pouvait
+        // payer un detecteur sur une lune et n avoir strictement rien : construit, affiche,
+        // aveugle. Les cinq autres batiments propres aux planetes le declarent de la meme facon.
+        $surveillanceNetwork->valid_planet_types = [PlanetType::Planet];
         $surveillanceNetwork->price = new GameObjectPrice(30000, 60000, 15000, 0, 2);
         $surveillanceNetwork->assets = new GameObjectAssets();
         $surveillanceNetwork->assets->imgMicro = 'surveillance_network_micro.jpg';

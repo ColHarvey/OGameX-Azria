@@ -3,12 +3,14 @@
 namespace Tests\Feature;
 
 use Illuminate\Support\Facades\Date;
+use OGame\Models\Enums\PlanetType;
 use OGame\Models\Resources;
 use OGame\Patrol\SurveillanceWatch;
 use OGame\Services\BuildingQueueService;
 use OGame\Services\ObjectService;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
+use Throwable;
 
 /**
  * Le Reseau de surveillance se **construit vraiment**, par le chemin du joueur.
@@ -113,6 +115,93 @@ class SurveillanceNetworkIsBuildableTest extends AccountTestCase
             1,
             $this->planetService->getObjectLevel('surveillance_network'),
             'Le batiment termine ne monte pas le niveau : la colonne que la surveillance lit reste a zero.'
+        );
+    }
+
+    /**
+     * **Une demande sans jeton ne construit rien et ne debite rien.**
+     *
+     * `AbstractBuildingsController::addBuildRequest()` verifie le jeton lui-meme — la route accepte
+     * POST et GET — par `hash_equals($session, $request->input('_token'))`. Un champ absent rend
+     * `null`, et `hash_equals()` refuse `null` : le controleur tombe en **exception**, donc en 500,
+     * au lieu de rendre le refus propre qu il a pourtant ecrit juste en dessous.
+     *
+     * **Le defaut est anterieur a ce chantier et n est pas corrige ici** — le corriger elargirait le
+     * candidat. Il part en dette, priorite haute : une erreur provoquee par une entree utilisateur
+     * ne doit pas faire tomber un controleur.
+     *
+     * Ce que cet essai etablit, c est sa **portee**, parce qu une dette qu on garde doit etre une
+     * dette qu on connait : l exception part **avant** `queue->add()`, donc aucune file ne nait et
+     * aucune ressource ne bouge. Et il continuera de passer le jour ou le refus deviendra propre :
+     * il n exige pas le 500, il exige que rien ne se soit produit.
+     */
+    public function testUneDemandeSansJetonNeConstruitRienEtNeDebiteRien(): void
+    {
+        $objet = ObjectService::getObjectByMachineName('surveillance_network');
+
+        $this->playerSetResearchLevel('espionage_technology', 4);
+        $this->playerSetResearchLevel('computer_technology', 2);
+        $this->planetAddResources(new Resources(500_000, 500_000, 500_000, 0));
+        $this->planetService->reloadPlanet();
+
+        $metalAvant = (int)$this->planetService->metal()->get();
+        $cristalAvant = (int)$this->planetService->crystal()->get();
+        $fileAvant = resolve(BuildingQueueService::class)->retrieveQueueItems($this->planetService)->count();
+
+        try {
+            $this->post(route('facilities.addbuildrequest.post'), [
+                'technologyId' => $objet->id,
+                // Pas de `_token` : c est tout l objet de cet essai.
+            ]);
+        } catch (Throwable) {
+            // L exception est le defaut lui-meme. Ce qui suit mesure ce qu elle a laisse derriere.
+        }
+
+        $this->planetService->reloadPlanet();
+
+        $this->assertSame(
+            $fileAvant,
+            resolve(BuildingQueueService::class)->retrieveQueueItems($this->planetService)->count(),
+            'Une demande sans jeton a quand meme cree un element de file.'
+        );
+
+        $this->assertSame($metalAvant, (int)$this->planetService->metal()->get(), 'Une demande sans jeton a debite du metal.');
+        $this->assertSame($cristalAvant, (int)$this->planetService->crystal()->get(), 'Une demande sans jeton a debite du cristal.');
+
+        $this->assertSame(
+            0,
+            $this->planetService->getObjectLevel('surveillance_network'),
+            'Une demande sans jeton a fait monter un niveau.'
+        );
+    }
+
+    /**
+     * **Sur une planete, et nulle part ailleurs.**
+     *
+     * `valid_planet_types` vide ne veut pas dire « rien de precise » : `objectValidPlanetType()`
+     * rend **vrai** dans ce cas, donc « partout, lune comprise ». Or `SurveillanceWatch` ne
+     * regarde que des planetes — ses deux requetes filtrent sur `planet_type`. Un detecteur pose
+     * sur une lune aurait donc ete construit, paye, affiche, et aveugle.
+     *
+     * Ce defaut est sorti d une comparaison **champ par champ** avec les onze autres batiments de
+     * la station : cinq d entre eux se declarent propres aux planetes, trois propres aux lunes, et
+     * celui-ci ne declarait rien. Relire l objet seul ne l aurait pas montre.
+     */
+    public function testIlNeSeConstruitQueSurUnePlanete(): void
+    {
+        $objet = ObjectService::getObjectByMachineName('surveillance_network');
+
+        $this->assertSame(
+            [PlanetType::Planet],
+            $objet->valid_planet_types,
+            'Le reseau se laisse construire hors d une planete : il y serait aveugle.'
+        );
+
+        // Et la regle du jeu le dit, pas seulement la declaration : c est cette fonction que la
+        // page et la file interrogent.
+        $this->assertTrue(
+            ObjectService::objectValidPlanetType('surveillance_network', $this->planetService),
+            'Le reseau est refuse sur une planete ordinaire.'
         );
     }
 
