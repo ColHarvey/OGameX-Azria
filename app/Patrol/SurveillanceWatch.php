@@ -8,6 +8,7 @@ use OGame\Models\Patrol;
 use OGame\Models\SurveillanceContact;
 use OGame\Patrol\Enums\PatrolState;
 use OGame\Patrol\Enums\SurveillanceTier;
+use OGame\Services\SettingsService;
 
 /**
  * Ce que les Reseaux de surveillance apprennent d une patrouille etrangere, et ce qu ils oublient.
@@ -50,6 +51,10 @@ use OGame\Patrol\Enums\SurveillanceTier;
  */
 final class SurveillanceWatch
 {
+    public function __construct(private readonly SettingsService $settings)
+    {
+    }
+
     /**
      * Les contacts qu une patrouille ouvre dans le systeme ou elle vient d entrer.
      *
@@ -58,6 +63,14 @@ final class SurveillanceWatch
      */
     public function acquire(Patrol $patrol, int $now): void
     {
+        // **Rien de neuf n entre pendant qu un chantier est desarme.** Les contacts deja
+        // acquis restent lisibles — c est ce qui permet aux flottes de sortir proprement —,
+        // mais un interrupteur baisse ne doit plus produire d effet neuf chez les joueurs.
+        // La revocation n est pas fermee : ce qui existe doit pouvoir mourir.
+        if (!$this->settings->patrolsEnabled()) {
+            return;
+        }
+
         $entree = $patrol->entered_system_at === null ? $now : (int)$patrol->entered_system_at;
         $galaxie = $patrol->galaxy;
         $systeme = $patrol->system;
@@ -182,6 +195,12 @@ final class SurveillanceWatch
      */
     public function commission(int $observerPlanetId, int $level, int $now): int
     {
+        // La seconde naissance d un contact : un detecteur qui entre en service sur des
+        // patrouilles deja presentes. Elle obeit a la meme regle que la premiere.
+        if (!$this->settings->patrolsEnabled()) {
+            return 0;
+        }
+
         $palier = SurveillanceTier::fromLevel($level);
 
         if ($palier === null) {

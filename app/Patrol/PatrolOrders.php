@@ -368,10 +368,23 @@ final class PatrolOrders
      */
     public function whyMoveIsRefused(Patrol $patrol, int $now): string|null
     {
+        // **Une manoeuvre est une nouvelle entree** : l interrupteur la ferme.
         if (!$this->settings->patrolsEnabled()) {
             return 'disabled';
         }
 
+        return $this->whyAnyOrderIsRefused($patrol, $now);
+    }
+
+    /**
+     * Ce qui refuse **tout** ordre, interrupteur mis a part.
+     *
+     * Ces quatre controles ne dependent pas du chantier : ils decrivent une patrouille qui ne peut
+     * pas recevoir d ordre, quel qu il soit. Les separer de l interrupteur est ce qui permet au
+     * rappel de rester ouvert sans rien relacher d autre.
+     */
+    private function whyAnyOrderIsRefused(Patrol $patrol, int $now): string|null
+    {
         $segment = $patrol->currentMission;
 
         if (!$segment instanceof FleetMission || $this->playerOf($patrol) === null) {
@@ -400,7 +413,14 @@ final class PatrolOrders
      */
     public function whyRecallIsRefused(Patrol $patrol, int $now): string|null
     {
-        $refus = $this->whyMoveIsRefused($patrol, $now);
+        // **Rentrer chez soi n est pas une nouvelle entree.** Un interrupteur baisse doit fermer ce
+        // qui n a pas encore commence, jamais retenir une flotte deja en l air : sans cela, un arret
+        // d urgence laisserait les patrouilles du joueur sans aucun moyen d agir, en attendant que
+        // l usure de la reserve declenche le retour de securite des heures plus tard.
+        //
+        // La carte lit ce verdict pour armer son bouton (`PatrolProjection`) : la reponse de cette
+        // methode **est** l accessibilite du bouton, corriger l une corrige l autre.
+        $refus = $this->whyAnyOrderIsRefused($patrol, $now);
 
         if ($refus !== null) {
             return $refus;
@@ -443,7 +463,17 @@ final class PatrolOrders
      */
     private function dispatchOrder(Patrol $patrol, PatrolDestination $to, float $speedPercent, int $orderVersion, int $now, PatrolState $departureState, int|null $quotedFuelCost = null): FleetMission
     {
-        $refus = $this->whyMoveIsRefused($patrol, $now);
+        // **La porte de l interrupteur, et son unique exception.** Elle ne porte pas sur l etat seul :
+        // un ordre qui se dirait « retour » vers un autre point n aurait aucune raison d etre
+        // dispense. Il faut qu il parte en retour **et** qu il vise exactement la base de cette
+        // patrouille — c est la seule chose qu un chantier desarme doit encore laisser faire.
+        if (!$this->settings->patrolsEnabled() && !$this->bringsTheFleetHome($patrol, $to, $departureState)) {
+            throw new PatrolOrderRefused('disabled');
+        }
+
+        // Tout le reste est verifie comme avant, sans exception : ce qui suit ne connait pas
+        // l interrupteur et ne relache rien.
+        $refus = $this->whyAnyOrderIsRefused($patrol, $now);
 
         if ($refus !== null) {
             throw new PatrolOrderRefused($refus);
@@ -627,6 +657,33 @@ final class PatrolOrders
             PatrolState::Returning,
             $quotedFuelCost
         );
+    }
+
+    /**
+     * **Cet ordre ramene-t-il vraiment la flotte a sa base ?**
+     *
+     * Deux conditions, et les deux comptent. L etat de depart doit etre le retour — c est ce que
+     * `recall()` pose — et la destination doit etre **exactement** celle que `recall()` compose vers
+     * la base vivante de cette patrouille. Comparer les deux ferme la question : un appel qui
+     * emprunterait l etat `Returning` pour aller ailleurs ne passe pas, et l exception ne peut donc
+     * pas servir a contourner l interrupteur pour autre chose qu un retour.
+     *
+     * Sans base vivante, il n y a pas de retour possible : la reponse est non, et l ordre retombe
+     * sous la regle commune.
+     */
+    private function bringsTheFleetHome(Patrol $patrol, PatrolDestination $to, PatrolState $departureState): bool
+    {
+        if ($departureState !== PatrolState::Returning) {
+            return false;
+        }
+
+        $base = $this->homeOf($patrol);
+
+        if ($base === null) {
+            return false;
+        }
+
+        return $to->equals($this->destinationOnto($base));
     }
 
     /**

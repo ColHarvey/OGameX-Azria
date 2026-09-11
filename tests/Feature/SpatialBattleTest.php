@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\DB;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Hull\DamagedHulls;
+use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\Patrol;
 use OGame\Models\Resources;
@@ -187,12 +188,29 @@ class SpatialBattleTest extends AccountTestCase
         $instancesAvant = (int)DB::table('combat_instances')->count();
         $missionsAvant = (int)DB::table('fleet_missions')->where('user_id', $this->currentUserId)->count();
 
+        $deuteriumAvant = (int)$this->planetService->deuterium()->get();
+
         $attaque = resolve(SpatialAttackOrder::class)->launch(
             $this->planetService,
             $flotte,
             FrozenPatrolTarget::of($patrouille),
             10.0,
             (int)now()->timestamp
+        );
+
+        // **Le trajet coute vraiment.** Apres le defaut de la reserve a zero — qui refusait toute
+        // attaque —, il ne suffit pas que le depart passe : il faut etablir qu il n est pas devenu
+        // gratuit. Distance non nulle, carburant strictement positif, et le corps l a paye.
+        $carburant = (int)$attaque->deuterium_consumption;
+
+        $this->assertGreaterThan(0, $carburant, 'Le trajet ne coute rien : l attaque serait gratuite.');
+
+        $this->planetService->reloadPlanet();
+
+        $this->assertSame(
+            $deuteriumAvant - $carburant,
+            (int)$this->planetService->deuterium()->get(),
+            'Le corps n a pas paye exactement ce que la mission annonce.'
         );
 
         // Le vol n est pas l objet de cet essai : l arrivee est ramenee dans le passe pour que le
@@ -236,6 +254,17 @@ class SpatialBattleTest extends AccountTestCase
             'La flotte victorieuse doit repartir, et une seule fois.'
         );
 
+        // **Rien n est repris apres coup** : l aller et le retour ont ete preleves au depart, et le
+        // corps ne doit plus bouger de ce fait. Sans ce controle, corriger le refus total aurait pu
+        // introduire un second debit — ou un trajet de retour gratuit.
+        $this->planetService->reloadPlanet();
+
+        $this->assertSame(
+            $deuteriumAvant - $carburant,
+            (int)$this->planetService->deuterium()->get(),
+            'Le corps a ete debite une seconde fois par le trajet.'
+        );
+
         $retour = FleetMission::where('parent_id', $attaque->id)->first();
         $this->assertNotNull($retour, 'Aucun retour : la flotte est perdue en chemin.');
         $this->assertSame(
@@ -243,6 +272,67 @@ class SpatialBattleTest extends AccountTestCase
             (int)$retour->planet_id_to,
             'Le retour doit viser le corps de depart.'
         );
+    }
+
+    /**
+     * **L exception est etroite : une attaque planetaire sans cible garde son ancien comportement.**
+     *
+     * `GameMission::process()` renvoie chez elle toute mission arrivee sans corps a l arrivee — c est
+     * ainsi qu une attaque dont la planete a ete colonisee, detruite ou deplacee se termine sans
+     * incident. Le chantier des patrouilles a du y ouvrir une exception, sans quoi aucune attaque
+     * spatiale n atteignait jamais `processArrival()`.
+     *
+     * **Cette exception reconnait une cible spatiale, pas une planete manquante.** Ecrite
+     * « genre 1 sans `planet_id_to` », elle aurait laisse passer le cas ci-dessous jusqu a
+     * `processArrival()`, qui leve « Attack mission has no target planet » : une attaque ordinaire se
+     * serait mise a planter le travailleur du joueur la ou elle rendait tranquillement sa flotte.
+     *
+     * Le discriminant est `type_to` — celui que l administration emploie deja pour ne pas declarer
+     * ces missions bloquees.
+     */
+    public function testUneAttaquePlanetaireSansCibleGardeSonAncienComportement(): void
+    {
+        $this->planetService->addUnit('battle_ship', 10);
+        $this->planetService->reloadPlanet();
+
+        $coords = $this->planetService->getPlanetCoordinates();
+
+        // Une attaque **planetaire** — `type_to` est une planete — dont le corps vise a disparu.
+        $mission = new FleetMission();
+        $mission->user_id = $this->currentUserId;
+        $mission->mission_type = 1;
+        $mission->planet_id_from = $this->planetService->getPlanetId();
+        $mission->type_from = PlanetType::Planet->value;
+        $mission->galaxy_from = $coords->galaxy;
+        $mission->system_from = $coords->system;
+        $mission->position_from = $coords->position;
+        $mission->planet_id_to = null;
+        $mission->type_to = PlanetType::Planet->value;
+        $mission->galaxy_to = $coords->galaxy;
+        $mission->system_to = $coords->system;
+        $mission->position_to = $coords->position === 1 ? 2 : 1;
+        $mission->time_departure = (int)now()->timestamp - 600;
+        $mission->time_arrival = (int)now()->timestamp - 1;
+        $mission->processed = 0;
+        $mission->canceled = 0;
+        $mission->metal = 0;
+        $mission->crystal = 0;
+        $mission->deuterium = 0;
+        $mission->battle_ship = 10;
+        $mission->save();
+
+        // Aucune exception : c est la moitie du verdict, et elle ne se voit que si le travailleur
+        // tourne pour de vrai.
+        resolve(PlayerServiceFactory::class)->make($this->currentUserId, true)->updateFleetMissions();
+
+        $relue = FleetMission::query()->findOrFail($mission->id);
+
+        $this->assertSame(1, (int)$relue->processed, 'La mission sans cible n a pas ete traitee.');
+
+        $retour = FleetMission::where('parent_id', $mission->id)->first();
+
+        $this->assertNotNull($retour, 'La flotte d une attaque sans cible doit rentrer, comme elle l a toujours fait.');
+        $this->assertSame(10, (int)$retour->battle_ship, 'Elle rentre entiere : rien ne s est battu.');
     }
 
     public function testUneFlotteEcrasanteDetruitUnePatrouilleEtLaisseSesDebrisSurLePoint(): void

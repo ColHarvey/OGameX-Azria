@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Date;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
@@ -73,6 +74,77 @@ class HullRepairTest extends AccountTestCase
         $unites->addUnit(ObjectService::getUnitObjectByMachineName('cruiser'), $combien);
 
         return $unites;
+    }
+
+    /**
+     * **Desarmer n efface rien, et rearmer reprend tout.**
+     *
+     * C est la condition qui rend le retour arriere acceptable : si baisser l interrupteur effacait
+     * les degats ou perdait une reparation payee, decocher la case coûterait au joueur ce qu il a
+     * paye, et l « arret d urgence » serait lui-meme un incident.
+     *
+     * L essai suit la reparation a travers les deux bascules : elle survit au desarmement, elle
+     * n avance pas pendant qu il dure — le travailleur sort sans rien lire —, et elle se termine
+     * normalement une fois l interrupteur remis.
+     */
+    public function testUnDesarmementNEffaceNiLesDegatsNiUneReparationEnCours(): void
+    {
+        $this->unCorpsAvecDesCroiseursAbimes(20, 8, 5000);
+
+        $ordre = $this->reparations->confirm(
+            $this->planetService,
+            DamagedHulls::of(['cruiser' => [5000 => 8]]),
+            '',
+            (int)Date::now()->timestamp
+        );
+
+        $echeance = (int)$ordre->completed_at;
+        $unitesConfiees = $ordre->units;
+
+        // L interrupteur tombe pendant que la reparation court.
+        resolve(SettingsService::class)->set('hull_damage_enabled', '0');
+
+        $relu = HullRepairOrder::query()->findOrFail($ordre->id);
+
+        $this->assertSame(HullRepairOrder::STATUS_REPAIRING, $relu->status, 'Le desarmement a clos la reparation en cours.');
+        $this->assertSame($unitesConfiees, $relu->units, 'Le desarmement a efface les unites confiees au dock.');
+        $this->assertSame(
+            (int)$this->planetService->getPlanetId(),
+            (int)$relu->active_on_planet_id,
+            'Le desarmement a relache le verrou du dock : un second ordre pourrait naitre.'
+        );
+
+        // **Le travailleur ne fait rien tant que l interrupteur est baisse**, meme passe l echeance.
+        Date::setTestNow(Date::createFromTimestamp($echeance + 60));
+
+        $this->assertSame(0, Artisan::call('ogamex:coques:reparer'), 'Le travailleur du dock a rendu une erreur.');
+
+        $this->assertSame(
+            HullRepairOrder::STATUS_REPAIRING,
+            HullRepairOrder::query()->findOrFail($ordre->id)->status,
+            'Le travailleur a regle une reparation alors que le chantier est desarme.'
+        );
+
+        // Et l interrupteur revient : la reparation reprend exactement ou elle en etait.
+        resolve(SettingsService::class)->set('hull_damage_enabled', '1');
+
+        $this->assertSame(0, Artisan::call('ogamex:coques:reparer'), 'Le travailleur du dock a rendu une erreur.');
+
+        $apres = HullRepairOrder::query()->findOrFail($ordre->id);
+
+        $this->assertSame(HullRepairOrder::STATUS_SETTLED, $apres->status, 'Rearme, le chantier ne termine plus la reparation payee.');
+
+        $this->planetService->reloadPlanet();
+
+        $this->assertTrue(
+            $this->planetService->damagedHulls()->isEmpty(),
+            'Les vaisseaux ne sont pas revenus intacts apres le va-et-vient de l interrupteur.'
+        );
+        $this->assertSame(
+            20,
+            $this->planetService->getShipUnits()->getAmountByMachineName('cruiser'),
+            'Le va-et-vient de l interrupteur a cree ou detruit des unites.'
+        );
     }
 
     /**

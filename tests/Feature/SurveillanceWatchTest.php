@@ -10,6 +10,7 @@ use OGame\Patrol\Enums\PatrolState;
 use OGame\Patrol\Enums\SurveillanceTier;
 use OGame\Patrol\SurveillanceWatch;
 use OGame\Services\PlanetService;
+use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
 
 /**
@@ -42,8 +43,21 @@ class SurveillanceWatchTest extends AccountTestCase
      */
     private array $patrouillesPosees = [];
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // **Ces essais decrivent un chantier arme.** La veille n ouvre plus de contact quand
+        // `patrols_enabled` est baisse — un interrupteur eteint ne produit plus d effet neuf chez
+        // les joueurs — donc l essai pose ce qu il suppose, au lieu de dependre de l ancien
+        // comportement ou la veille ignorait l interrupteur.
+        resolve(SettingsService::class)->set('patrols_enabled', '1');
+    }
+
     protected function tearDown(): void
     {
+        resolve(SettingsService::class)->set('patrols_enabled', '0');
+
         if ($this->corpsPoses !== []) {
             SurveillanceContact::query()->whereIn('observer_planet_id', $this->corpsPoses)->delete();
             Planet::query()->whereIn('id', $this->corpsPoses)->delete();

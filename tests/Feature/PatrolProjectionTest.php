@@ -436,9 +436,18 @@ class PatrolProjectionTest extends AccountTestCase
     }
 
     /**
-     * L interrupteur eteint n efface pas la flotte : elle se voit, et ses commandes disent pourquoi.
+     * L interrupteur eteint n efface pas la flotte : elle se voit, et **elle peut rentrer**.
+     *
+     * Cet essai exigeait autrefois que le rappel soit refuse comme la manoeuvre. C etait l ancien
+     * comportement, et c etait un defaut : un arret d urgence qui ferme le rappel laisse les
+     * flottes du joueur en l air, sans aucun moyen d agir, jusqu a ce que l usure de la reserve
+     * declenche le retour de securite des heures plus tard.
+     *
+     * La regle est desormais : **un interrupteur baisse ferme les nouvelles entrees, il
+     * n emprisonne pas ce qui existe**. La manoeuvre reste donc refusee, avec sa raison ; le rappel
+     * reste offert. Voir `Tests\Feature\PatrolDisarmedTest` pour les neuf temoins de cette regle.
      */
-    public function testWithTheSwitchOffThePatrolIsStillShownAndItsCommandsSayWhy(): void
+    public function testWithTheSwitchOffThePatrolIsStillShownAndCanStillComeHome(): void
     {
         [$patrouille] = $this->aParkedPatrol();
 
@@ -447,9 +456,15 @@ class PatrolProjectionTest extends AccountTestCase
         $notre = $this->patrolIn($this->layer(), (int)$patrouille->id);
 
         $this->assertNotNull($notre, 'Turning the switch off hid the fleet from its owner.');
-        $this->assertFalse($notre['commands']['move']['allowed']);
+
+        $this->assertFalse($notre['commands']['move']['allowed'], 'Une manoeuvre est une nouvelle entree : elle reste fermee.');
         $this->assertSame('disabled', $notre['commands']['move']['reason_key']);
-        $this->assertSame('disabled', $notre['commands']['recall']['reason_key']);
+
+        $this->assertTrue(
+            $notre['commands']['recall']['allowed'],
+            'Le bouton Rappeler est grise : le joueur voit sa flotte sans pouvoir la faire rentrer.'
+        );
+        $this->assertNull($notre['commands']['recall']['reason_key']);
     }
 
     /**

@@ -370,6 +370,13 @@ class SpatialAttackOrderTest extends AccountTestCase
 
         $this->assertGreaterThan(0, $attendu, 'Un trajet gratuit ferait coincider le juste et le faux.');
         $this->assertSame($attendu, (int)$mission->deuterium_consumption, 'La mission doit porter le carburant de l aller et du retour.');
+
+        // **Aucune reserve de stationnement fictive.** Le devis des patrouilles a ete reutilise pour
+        // sa geometrie et ses formules, pas pour son modele : une attaque n est pas une patrouille,
+        // elle ne stationne pas, et rien ne doit lui fabriquer une reserve pour satisfaire le
+        // calcul. La reserve passee vaut zero, et la mission n est rattachee a aucune patrouille.
+        $this->assertNull($mission->patrol_id, 'L attaque a ete rattachee a une patrouille : ce n en est pas une.');
+        $this->assertNull($mission->x_from, 'Une attaque part d un corps, pas d un point de stationnement.');
         $this->assertSame(
             $deuteriumAvant - $attendu,
             (int)$this->planetService->deuterium()->get(),
