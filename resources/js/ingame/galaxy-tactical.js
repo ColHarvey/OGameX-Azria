@@ -2174,6 +2174,26 @@
                 return;
             }
 
+            /*
+             * **Une patrouille qui arrive pendant qu on regarde s efface tout de suite.**
+             *
+             * Le meme fait que celui du dessin — un segment de patrouille posee reste
+             * `processed = 0`, donc le serveur le publie encore — mais vu d ici. Le controle ne
+             * vivait qu au **dessin**, qui ne rejoue qu a chaque chargement de donnees : la ligne
+             * restait figee jusqu au prochain, et Keven a du recharger la page pour la voir partir.
+             *
+             * Cette boucle-ci tourne sur la minuterie, donc elle voit l instant passer. Le groupe
+             * entier est masque — trajectoire, marqueur et porte de bord ensemble : n en cacher
+             * qu une partie laisserait un triangle sans route ou une route sans flotte.
+             */
+            if (mouvement.patrol_id) {
+                var arrivee = mouvement._marqueur.parentNode;
+
+                if (arrivee) {
+                    arrivee.style.display = Number(mouvement.time_arrival) <= maintenant ? 'none' : '';
+                }
+            }
+
             var duree = Math.max(1, mouvement.time_arrival - mouvement.time_departure);
             var global = Math.min(1, Math.max(0, (maintenant - mouvement.time_departure) / duree));
             var local = progressionLocale(global, mouvement._bouts);
@@ -2396,16 +2416,24 @@
 
     var ICONES_DE_PATROUILLE = {
         /*
-         * **Le nom a change avec le dessin, et c est la raison qui compte.** L icone etait un
-         * rectangle a deux barres — un glyphe « pause ». Remplacer son contenu sous le meme nom
-         * n a rien change pour les joueurs : un navigateur garde une image en cache **par son
-         * adresse**, et les icones n ont aucun cache-busting, contrairement aux bundles dont le
-         * nom porte une empreinte. Un nom neuf est la seule facon sure qu un dessin arrive.
+         * **Le meme vaisseau que sur une trajectoire** (decision de Keven, 12 septembre 2026) — le
+         * meme fichier, pas un dessin approchant. Une flotte reste une flotte, qu elle avance ou
+         * qu elle tienne sa position, et deux dessins pour une meme chose se lisent comme deux
+         * choses.
          *
-         * L ancien fichier reste en place, avec le meme vaisseau : une page encore en cache le
-         * demanderait, et une image cassee vaudrait moins qu un dessin juste.
+         * Il est donne en **chemin absolu** : c est une image du jeu, pas du pack de la carte. Le
+         * composeur du marqueur reconnait la barre initiale et n y prefixe rien.
+         *
+         * Deux icones ont precede celle-ci, et chacune a appris quelque chose. Un rectangle a deux
+         * barres — un glyphe « pause » — que Keven lisait comme un artefact ; puis une fleche dessinee
+         * pour l occasion, qui ressemblait au vaisseau sans etre lui. **Ressembler ne suffit pas.**
+         *
+         * Au passage : changer le contenu d une icone **sous le meme nom** ne parvient jamais aux
+         * joueurs. Un navigateur la garde en cache par son adresse, et les icones n ont aucune
+         * empreinte dans leur nom, contrairement aux bundles. Ici la question ne se pose plus — ce
+         * fichier est celui que le jeu sert deja partout ailleurs.
          */
-        stationed: 'patrol-stationed.svg',
+        stationed: VAISSEAU_BLANC,
         /*
          * **Un etat n est pas une action.** `patrol-move.svg` est la croix a quatre fleches, celle
          * que toutes les interfaces emploient pour dire « deplacer » — son propre `aria-label` le
@@ -2772,7 +2800,14 @@
             b.setAttribute('data-patrol-id', String(p.id));
             b.setAttribute('aria-label', intitule);
             b.title = intitule;
-            icone.src = '/img/galaxy-tactical/' + (ICONES_DE_PATROUILLE[p.state] || 'patrol-patrol.svg');
+            /*
+             * Un nom nu vient du pack de la carte ; un chemin qui commence par une barre est une
+             * image du jeu et se prend telle quelle. Prefixer les deux donnerait une adresse qui
+             * n existe pas, et le navigateur afficherait un cadre vide **sans la moindre erreur**.
+             */
+            var dessin = ICONES_DE_PATROUILLE[p.state] || 'patrol-patrol.svg';
+
+            icone.src = dessin.charAt(0) === '/' ? dessin : '/img/galaxy-tactical/' + dessin;
             icone.alt = '';
             icone.setAttribute('aria-hidden', 'true');
             b.appendChild(icone);

@@ -633,6 +633,89 @@ test('un ordre accepte previent le bandeau et la liste depliee', () => {
 });
 
 /**
+ * **Une patrouille qui arrive PENDANT qu on regarde perd sa ligne tout de suite.**
+ *
+ * Le masquage vivait d abord dans la fonction de **dessin**, qui ne rejoue qu a chaque chargement
+ * de donnees : la ligne restait figee jusqu au suivant, et Keven devait recharger la page. Le
+ * replacement des marqueurs, lui, tourne sur `requestAnimationFrame` — il voit l instant passer.
+ *
+ * Ce temoin attend donc du **temps reel** : le mouvement arrive une seconde apres le dessin, et la
+ * ligne doit disparaitre sans que rien ne soit recharge.
+ */
+test('une patrouille qui arrive en cours de route perd sa ligne sans rechargement', async () => {
+    const monde = unMonde();
+
+    try {
+        const maintenant = Math.floor(Date.now() / 1000);
+        const bientot = unMouvementDePatrouille(3);
+
+        bientot.time_departure = maintenant - 60;
+        bientot.time_arrival = maintenant + 1;
+
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [unePatrouille({ etat: 'en_route' })], maintenant, [bientot]));
+
+        const groupe = monde.window.document.querySelector('.gtMovement');
+
+        assert.ok(groupe, 'la premisse manque : aucun mouvement dessine');
+        assert.notEqual(groupe.style.display, 'none', 'le mouvement est masque avant meme d etre arrive');
+
+        await new Promise((suite) => setTimeout(suite, 1500));
+
+        assert.equal(
+            groupe.style.display,
+            'none',
+            'la ligne survit a l arrivee : il faut recharger la page pour la voir partir'
+        );
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Posee, une patrouille porte le meme vaisseau que sur une trajectoire.**
+ *
+ * Decision de Keven, 12 septembre 2026 : « je veux le meme que le trajet ». Deux icones l ont
+ * precedee — un glyphe « pause » qu il lisait comme un artefact, puis une fleche dessinee pour
+ * l occasion qui ressemblait au vaisseau sans etre lui.
+ *
+ * Ce temoin exige l **egalite des deux sources**, jamais un nom de fichier ecrit ici : le jour ou
+ * le jeu changera son vaisseau, la regle « les deux sont le meme » doit tenir sans qu on y touche.
+ */
+test('une patrouille posee porte le meme vaisseau que sur une trajectoire', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [unePatrouille()], 1_700_000_100, [unMouvementDePatrouille(9)]));
+
+        const posee = monde.marqueur(3).querySelector('img');
+        const enVol = monde.window.document.querySelector('.gtFleetMarker image');
+
+        assert.ok(posee, 'la patrouille posee n a pas d image');
+        assert.ok(enVol, 'la premisse manque : aucun marqueur de mouvement sur la carte');
+
+        const surLaCarte = posee.getAttribute('src');
+        const surLaTrajectoire = enVol.getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+
+        assert.equal(
+            surLaCarte,
+            surLaTrajectoire,
+            'posee et en vol ne montrent pas le meme vaisseau : ' + surLaCarte + ' contre ' + surLaTrajectoire
+        );
+
+        // Et le chemin absolu n a pas ete prefixe une seconde fois.
+        assert.equal(
+            surLaCarte.indexOf('/img/galaxy-tactical/'),
+            -1,
+            'le chemin du jeu a ete prefixe par celui du pack : l image serait un cadre vide'
+        );
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
  * **Une patrouille arrivee ne traine plus sa trajectoire.**
  *
  * Le segment d'une patrouille posee reste `processed = 0` — c'est ce qui lui donne son creneau de
