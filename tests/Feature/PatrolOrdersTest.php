@@ -291,6 +291,86 @@ class PatrolOrdersTest extends AccountTestCase
     /**
      * Le rappel ramene la patrouille chez elle, et paie son segment comme un autre.
      */
+    /**
+     * **Un rappel rentre a pleine vitesse, pas a celle du secours.**
+     *
+     * Les deux chemins se ressemblent — tous deux ramenent la flotte a sa base — et le code les avait
+     * confondus : `recall()` empruntait `patrolSafetyReturnSpeed()`, soit 3 sur 10.
+     *
+     * Les 30 % ont une raison, et elle ne vaut que pour l urgence : une patrouille dont la reserve
+     * touche le strict necessaire doit voler lentement, parce qu un vol lent consomme moins. Un
+     * rappel n a pas ce probleme — le joueur a du carburant et veut sa flotte. Il payait pourtant la
+     * lenteur de l urgence **sans que sa reserve soit jamais consultee** : un aller de huit minutes
+     * rentrait en vingt-six.
+     *
+     * Constate en jeu, sous maintenance, au premier controle navigateur du 11 septembre 2026.
+     *
+     * L essai compare les deux devis pour la **meme** destination : celui du rappel doit etre
+     * strictement plus court. Comparer a une constante ecrirait mon choix ; comparer les deux
+     * vitesses entre elles ecrit la regle.
+     */
+    public function testUnRappelRentreAPleineVitesseEtNonACelleDuSecours(): void
+    {
+        [$patrouille, $pose] = $this->aParkedPatrol();
+
+        $instant = (int)$pose->time_arrival + 60;
+        Date::setTestNow(Date::createFromTimestamp($instant));
+
+        $tarif = resolve(PatrolPricing::class);
+        $coords = $this->planetService->getPlanetCoordinates();
+        $versLaBase = PatrolDestination::nearBody(
+            $tarif->geometry(),
+            $coords->galaxy,
+            $coords->system,
+            $coords->position,
+            PlanetType::Planet,
+            (int)$this->planetService->getPlanetId()
+        );
+
+        $vitesseDuSecours = resolve(SettingsService::class)->patrolSafetyReturnSpeed();
+
+        $this->assertLessThan(
+            PatrolOrders::RECALL_SPEED,
+            $vitesseDuSecours,
+            'Le secours vole deja aussi vite qu un rappel : cet essai ne distinguerait rien.'
+        );
+
+        $devis = function (float $vitesse) use ($tarif, $patrouille, $versLaBase, $coords): int {
+            return $tarif->quote(
+                resolve(PlayerServiceFactory::class)->make($this->currentUserId, true),
+                $this->fleet(),
+                (float)$patrouille->fuel_reserve,
+                (int)$patrouille->galaxy,
+                (int)$patrouille->system,
+                new SpatialPoint((int)$patrouille->x, (int)$patrouille->y),
+                $versLaBase,
+                $vitesse,
+                (int)$patrouille->order_version,
+                $coords
+            )->durationSeconds;
+        };
+
+        $aPleineVitesse = $devis(PatrolOrders::RECALL_SPEED);
+        $aLaVitesseDuSecours = $devis($vitesseDuSecours);
+
+        $this->assertGreaterThan(0, $aPleineVitesse, 'Un trajet instantane ne prouverait rien.');
+        $this->assertLessThan(
+            $aLaVitesseDuSecours,
+            $aPleineVitesse,
+            'Le rappel met aussi longtemps que le retour de secours : il a herite de la vitesse de l urgence.'
+        );
+
+        // Et l ordre reellement pose porte la duree du rappel, pas celle du secours.
+        $retour = $this->orders()->recall($patrouille, (int)$patrouille->order_version, $instant);
+        $dureeReelle = (int)$retour->time_arrival - (int)$retour->time_departure;
+
+        $this->assertSame(
+            $aPleineVitesse,
+            $dureeReelle,
+            'Le segment de retour ne vole pas a la vitesse que le devis du rappel annonce.'
+        );
+    }
+
     public function testARecallSendsThePatrolHomeAndPaysForIt(): void
     {
         [$patrouille, $pose] = $this->aParkedPatrol();
@@ -317,7 +397,10 @@ class PatrolOrdersTest extends AccountTestCase
                 PlanetType::Planet,
                 (int)$this->planetService->getPlanetId()
             ),
-            resolve(SettingsService::class)->patrolSafetyReturnSpeed(),
+            // **La vitesse du rappel, pas celle du secours.** Compare au tarif du secours, ce
+            // temoin restait vert quoi qu il arrive : le rappel coute desormais plus cher, donc
+            // la reserve descend forcement plus bas que ce plancher-la.
+            PatrolOrders::RECALL_SPEED,
             (int)$patrouille->order_version,
             $this->planetService->getPlanetCoordinates()
         );

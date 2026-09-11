@@ -1270,6 +1270,80 @@
 }
 
 /*
+ * ## La couche des contacts
+ *
+ * Elle porte les marqueurs de detection, comme `gtFleetLayer` porte les flottes et `gtPatrolLayer`
+ * les patrouilles. Elle n avait **aucune regle** : restee un bloc dans le flux, elle allongeait la
+ * carte par le bas, interceptait les clics sur toute sa largeur, et ses marqueurs n avaient pas de
+ * plan a eux.
+ *
+ * Son plan est **entre les deux autres** : au-dessus des flottes, sous ses propres patrouilles. Ce
+ * qui est a soi passe devant ce qu on ne fait que detecter.
+ */
+#galaxyTactical .gtSurveillanceLayer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 6;
+}
+
+/*
+ * ## La composition d une attaque contre un contact
+ *
+ * `gtCardActions` est une grille a **deux colonnes** : sans regle, la liste des vaisseaux tombait
+ * dans une demi-largeur avec des champs numeriques a la largeur par defaut du navigateur. Elle
+ * prend donc les deux colonnes, et chaque ligne tient sur une seule.
+ *
+ * Les vaisseaux viennent de `galaxyPatrolShips` — la meme liste que les patrouilles, jamais une
+ * seconde interface de selection.
+ */
+#galaxyTactical .gtContactShips {
+    grid-column: 1 / span 2;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    max-height: 148px;
+    overflow-y: auto;
+}
+
+#galaxyTactical .gtContactShipRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    cursor: pointer;
+}
+
+/* Un nom trop long se coupe plutot que de pousser le champ hors de la fiche. */
+#galaxyTactical .gtContactShipName {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    color: #b9c9d6;
+}
+
+#galaxyTactical .gtContactShipInput {
+    flex: 0 0 auto;
+    width: 58px;
+    padding: 1px 4px;
+    border: 1px solid #35566b;
+    border-radius: 3px;
+    background: #0f1b24;
+    color: #e3edf5;
+    font-size: 11px;
+    text-align: right;
+    /* Les nombres s alignent en colonne d une ligne a l autre. */
+    font-variant-numeric: tabular-nums;
+}
+
+#galaxyTactical .gtContactShipInput:focus {
+    border-color: #ff8a5c;
+    outline: none;
+}
+
+/*
  * ## Les contacts de surveillance
  *
  * Ils existaient dans le rendu depuis le chantier de la surveillance, **sans une ligne de style** :

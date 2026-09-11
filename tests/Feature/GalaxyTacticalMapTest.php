@@ -1529,7 +1529,7 @@ class GalaxyTacticalMapTest extends UnitTestCase
         $this->assertStringContainsString('x: Math.round((unites * Math.cos(angle)) / PATROUILLE_GRILLE) * PATROUILLE_GRILLE,', $module, 'A click is no longer rounded to the server grid: every click would be refused.');
         $this->assertStringContainsString("if (Number(bout.type) === TYPE_POINT_SPATIAL && bout.x !== null", $module, 'A leg toward a free point is drawn toward an orbit slot again.');
 
-        /* La version du devis part avec la confirmation ; pas de glisser-deposer. */
+        /* La version du devis part avec la confirmation, glisser-deposer compris. */
         $this->assertStringContainsString('charge.order_version = o.devis.order_version;', $module, 'The confirmation no longer carries the version of the quote it confirms.');
 
         /* Le marqueur est un vrai bouton ; la raison grisee est celle du serveur. */

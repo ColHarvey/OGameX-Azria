@@ -2191,12 +2191,23 @@
      * maintenant, l'echeance du retour de securite, les commandes avec leur raison. Rien n'est
      * calcule ici — pas un cout, pas une autorisation, pas une distance. Un ordre est un devis du
      * serveur, puis une confirmation qui rapporte la version du devis ; le serveur refuse un devis
-     * perime au lieu de debiter autre chose (revue 121). Le glisser-deposer n'existe pas : le clic
-     * designe, le serveur chiffre, le joueur confirme — et le clavier fait la meme chose par X et Y.
+     * perime au lieu de debiter autre chose (revue 121).
+     *
+     * **Le marqueur se saisit a la souris** (`draggable`, plus bas) : glisser designe une
+     * destination, et rien de plus — le serveur chiffre, le joueur confirme, la flotte voyage. Le
+     * clic fait la meme chose pour le tactile, et les champs X et Y pour le clavier. Ce
+     * commentaire affirmait l inverse, et decrivait une version anterieure du geste.
      */
     var ICONES_DE_PATROUILLE = {
         stationed: 'patrol-station.svg',
-        en_route: 'patrol-move.svg',
+        /*
+         * **Un etat n est pas une action.** `patrol-move.svg` est la croix a quatre fleches, celle
+         * que toutes les interfaces emploient pour dire « deplacer » — son propre `aria-label` le
+         * dit. La poser sur une patrouille en vol la faisait lire comme une poignee collee sur le
+         * marqueur, pas comme une flotte : Keven l a signalee au premier controle navigateur.
+         * La croix reste l icone du bouton ; l etat a desormais son vaisseau.
+         */
+        en_route: 'patrol-flight.svg',
         returning: 'patrol-return.svg',
         attacking: 'patrol-locked.svg',
         immobilised: 'patrol-fuel.svg'

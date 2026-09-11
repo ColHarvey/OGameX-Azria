@@ -416,6 +416,11 @@ class PatrolDisarmedTest extends AccountTestCase
         $etranger = (int)User::factory()->create()->id;
         $patrouille->forceFill(['user_id' => $etranger])->save();
 
+        // **L essai etablit son compte, il ne le suppose pas.** La veille peut avoir ouvert un
+        // contact sur cette patrouille pendant le montage — un retour d essai voisin qui aboutit
+        // pendant un saut d horloge suffit. Le compte attendu ne serait alors plus le sien.
+        DB::table('surveillance_contacts')->where('patrol_id', (int)$patrouille->id)->delete();
+
         DB::table('surveillance_contacts')->insert([
             'observer_user_id' => $this->currentUserId,
             'patrol_id' => (int)$patrouille->id,

@@ -180,6 +180,19 @@ final class PatrolOrders
      * vient apres, avec ses propres refus chiffres (carburant du trajet, reserve de retour) : ceux-ci
      * ne se disent pas sans nombres.
      */
+    /**
+     * La vitesse d un rappel : **pleine**, comme toute flotte qu on rappelle dans le jeu.
+     *
+     * Elle ne se confond pas avec `patrolSafetyReturnSpeed()`. Celle-la est la vitesse de l urgence,
+     * decidee a 30 % pour qu une patrouille a court de reserve puisse rentrer malgre tout — un vol
+     * lent consomme moins. Un rappel, lui, est une decision du joueur qui a du carburant : il paie
+     * son trajet au prix plein et rentre au plus vite.
+     *
+     * Les deux valaient la meme chose, et le rappel heritait donc de la lenteur de l urgence sans
+     * que rien ne l ait decide : un aller de huit minutes rentrait en vingt-six.
+     */
+    public const float RECALL_SPEED = 10.0;
+
     public function whyLaunchIsRefused(PlanetService $from, UnitCollection $units, Resources $cargo, int $reserve): string|null
     {
         if (!$this->settings->patrolsEnabled()) {
@@ -612,15 +625,19 @@ final class PatrolOrders
             throw new PatrolOrderRefused('no_home_left');
         }
 
-        return $this->quoteFor($patrol, $this->destinationOnto($base), $this->settings->patrolSafetyReturnSpeed(), $now);
+        return $this->quoteFor($patrol, $this->destinationOnto($base), self::RECALL_SPEED, $now);
     }
 
     /**
-     * Rappelle la patrouille : elle rentre chez elle par le meme chemin qu un retour de securite.
+     * Rappelle la patrouille : elle rentre chez elle, **a pleine vitesse**.
      *
      * Le rappel n est pas un privilege : il paie son segment comme un autre, il rapporte la version
      * du devis comme un autre, et il est refuse aux memes conditions. Ce qu il ajoute, c est de
      * pouvoir partir sans attendre l echeance.
+     *
+     * **Il emprunte le chemin du retour de securite, pas sa vitesse.** La lenteur de l urgence a une
+     * raison — consommer moins quand la reserve est presque vide — que le rappel n a pas : le joueur
+     * a du carburant et veut sa flotte. Les confondre triplait la duree du retour.
      *
      * @throws PatrolOrderRefused
      */
@@ -651,7 +668,7 @@ final class PatrolOrders
         return $this->dispatchOrder(
             $patrol,
             $this->destinationOnto($base),
-            $this->settings->patrolSafetyReturnSpeed(),
+            self::RECALL_SPEED,
             $orderVersion,
             $now,
             PatrolState::Returning,

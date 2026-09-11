@@ -578,17 +578,31 @@ class PatrolEndpointsTest extends AccountTestCase
     }
 
     /**
-     * Le devis d un rappel est celui de l ordre : la vitesse du retour de securite, et la base que
-     * le serveur resout — pas ce qu une requete propose.
+     * Le devis d un rappel est celui de l ordre : **la pleine vitesse**, et la base que le serveur
+     * resout — pas ce qu une requete propose.
      *
      * ## Le defaut que ce temoin a trouve
      *
      * Le rappel etait chiffre a 100 % vers un corps que la carte composait de coordonnees, en
-     * supposant une planete. L ordre confirme, lui, vole a `patrolSafetyReturnSpeed()` vers
-     * `homeOf()`. Le joueur lisait donc une duree environ trois fois trop courte et un cout trop
-     * eleve, et le verdict `possible` du devis pouvait differer de celui de la confirmation.
+     * supposant une planete. L ordre confirme, lui, volait vers `homeOf()`. Le joueur lisait donc
+     * une duree fausse et une destination approximative, et le verdict `possible` du devis pouvait
+     * differer de celui de la confirmation.
+     *
+     * ## Pourquoi la valeur attendue a change le 11 septembre 2026
+     *
+     * Ce temoin exigeait `patrolSafetyReturnSpeed()` des deux cotes, et il avait raison sur le fond :
+     * le devis doit dire ce que l ordre fera. Mais **la valeur commune etait la mauvaise**. Les 30 %
+     * du retour de securite ont une raison qui ne vaut que pour l urgence — une patrouille dont la
+     * reserve touche le strict necessaire vole lentement parce qu un vol lent consomme moins. Un
+     * rappel n a pas ce probleme : le joueur a du carburant et veut sa flotte. Il payait pourtant la
+     * lenteur de l urgence **sans que sa reserve soit jamais consultee**, et un aller de huit minutes
+     * rentrait en vingt-six. Constate en jeu par Keven, sous maintenance, au premier controle
+     * navigateur.
+     *
+     * L exigence, elle, n a pas bouge : le devis dit ce que l ordre fera, et il le dit maintenant sur
+     * la bonne vitesse.
      */
-    public function testARecallIsQuotedAtItsOwnSpeedTowardTheHomeTheServerResolves(): void
+    public function testARecallIsQuotedAtFullSpeedTowardTheHomeTheServerResolves(): void
     {
         [$patrouille] = $this->aParkedPatrol();
         $coords = $this->planetService->getPlanetCoordinates();
@@ -596,19 +610,25 @@ class PatrolEndpointsTest extends AccountTestCase
         $rappel = $this->postJson(route('galaxy.patrol.quote'), [
             'patrol_id' => $patrouille->id,
             'kind' => 'recall',
-            // Ce que la requete propose est ignore : ni cette vitesse, ni cette destination.
-            'speed' => 10,
+            // Ce que la requete propose est ignore : ni cette vitesse, ni cette destination. Elle
+            // demande ici la vitesse du secours, precisement pour qu une reponse qui la lirait soit
+            // indistinguable d une regression — et le temoin la refuse deux lignes plus bas.
+            'speed' => 3,
             'x' => -600,
             'y' => 600,
         ])->assertStatus(200)->json();
 
-        $vitesseDuRetour = resolve(SettingsService::class)->patrolSafetyReturnSpeed();
-        $this->assertEqualsWithDelta($vitesseDuRetour, (float)$rappel['quote']['speed_percent'], 0.001, 'The recall is quoted at a speed that is not the safety return speed.');
-        $this->assertLessThan(10.0, $vitesseDuRetour, 'The witness needs a safety return slower than full speed to tell the two apart.');
+        $vitesseDuSecours = resolve(SettingsService::class)->patrolSafetyReturnSpeed();
+        $this->assertLessThan(PatrolOrders::RECALL_SPEED, $vitesseDuSecours, 'The witness needs a safety return slower than a recall to tell the two apart.');
+
+        $this->assertEqualsWithDelta(PatrolOrders::RECALL_SPEED, (float)$rappel['quote']['speed_percent'], 0.001, 'The recall is quoted at a speed that is not the recall speed.');
+        $this->assertNotEqualsWithDelta($vitesseDuSecours, (float)$rappel['quote']['speed_percent'], 0.001, 'The recall is still quoted at the speed of the emergency return.');
         $this->assertSame($coords->position, $rappel['quote']['destination']['orbit'], 'The recall is not quoted toward the home body.');
         $this->assertSame((int)$this->planetService->getPlanetId(), $rappel['quote']['destination']['body_id'], 'The recall destination is not the home body itself.');
 
-        // **L attendu se calcule a part** : le meme trajet chiffre a 100 % coute plus et dure moins.
+        // **L attendu se calcule a part** : le meme trajet demande a 100 % doit rendre exactement les
+        // memes nombres. C est cela, « a pleine vitesse » — une comparaison plus large (« plus court
+        // que le secours ») laisserait passer n importe quelle valeur intermediaire.
         $centPourCent = $this->postJson(route('galaxy.patrol.quote'), $this->here() + [
             'patrol_id' => $patrouille->id,
             'position' => $coords->position,
@@ -617,8 +637,9 @@ class PatrolEndpointsTest extends AccountTestCase
         ])->assertStatus(200)->json();
 
         $this->assertSame($rappel['quote']['distance'], $centPourCent['quote']['distance'], 'The witness compares two different journeys.');
-        $this->assertGreaterThan($centPourCent['quote']['duration_seconds'], $rappel['quote']['duration_seconds'], 'The recall is quoted as fast as a full-speed leg.');
-        $this->assertLessThan($centPourCent['quote']['fuel_cost'], $rappel['quote']['fuel_cost'], 'The recall is quoted as expensive as a full-speed leg.');
+        $this->assertGreaterThan(0, (int)$centPourCent['quote']['duration_seconds'], 'A journey of no duration would tell the two speeds apart by nothing.');
+        $this->assertSame($centPourCent['quote']['duration_seconds'], $rappel['quote']['duration_seconds'], 'The recall is not quoted as fast as a full-speed leg.');
+        $this->assertSame($centPourCent['quote']['fuel_cost'], $rappel['quote']['fuel_cost'], 'The recall is not quoted at the price of a full-speed leg.');
     }
 
     /**
