@@ -7,6 +7,7 @@ use OGame\Combat\Exceptions\ReturnDestinationMoved;
 use OGame\Combat\Support\ForeseenReturn;
 use OGame\GameMissions\Models\ResolvedReturnDestination;
 use OGame\Models\FleetMission;
+use OGame\Models\Patrol;
 use OGame\Models\Planet;
 
 /**
@@ -52,7 +53,8 @@ final class ReturnDestinationResolver
     {
         return new ForeseenReturn(
             $this->planner->planFor($mission),
-            $this->planner->bodiesThatDecideFor($mission)
+            $this->planner->bodiesThatDecideFor($mission),
+            $this->planner->patrolsThatDecideFor($mission)
         );
     }
 
@@ -71,6 +73,27 @@ final class ReturnDestinationResolver
     }
 
     /**
+     * Tient les patrouilles qui decident, **apres les corps** et par identifiant croissant.
+     *
+     * ## L ordre n est pas une preference
+     *
+     * `planets` vient avant `patrols`, partout, sans exception. C est l ordre mesure sur les chemins
+     * existants : aucun ne tient deja une patrouille avant un corps. L inverser ici ferait un
+     * interblocage que SQLite ne montrerait **jamais** — `lockForUpdate()` n y compile a rien — et
+     * qui n apparaitrait qu en production, sous MariaDB, entre deux annulations concurrentes.
+     *
+     * @param array<int, int> $identifiants
+     */
+    public function holdTheDecidingPatrols(array $identifiants): void
+    {
+        if ($identifiants === []) {
+            return;
+        }
+
+        Patrol::query()->whereIn('id', $identifiants)->orderBy('id')->lockForUpdate()->get();
+    }
+
+    /**
      * Seconde passe : la decision reprise sous verrou, ou un refus.
      *
      * @throws ReturnDestinationMoved Si l'ensemble decisif ou le verdict a bouge entre les passes.
@@ -84,13 +107,62 @@ final class ReturnDestinationResolver
             throw new ReturnDestinationMoved($combatInstanceId, $mission->id, $pressenti->plan->planetId, null);
         }
 
+        // **La patrouille decide autant qu un corps**, et son ensemble se recompare pareillement :
+        // dissoute ou apparue entre les deux passes, elle deplacerait le verdict sans qu aucune
+        // ligne tenue n ait bouge.
+        if ($this->planner->patrolsThatDecideFor($mission) !== $pressenti->decidingPatrolIds) {
+            throw new ReturnDestinationMoved(
+                $combatInstanceId,
+                $mission->id,
+                $pressenti->plan->planetId,
+                null,
+                'La patrouille nommee par la mission a change entre les deux passes.'
+            );
+        }
+
         $plan = $this->planner->planFor($mission);
 
-        if (!$plan->isPossible() || $plan->planetId === null) {
+        if (!$plan->isPossible()) {
             throw new FleetHasNowhereToReturn($combatInstanceId, $mission->id, $plan->reason?->value);
         }
 
-        if ($plan->planetId !== $pressenti->plan->planetId || $plan->kind !== $pressenti->plan->kind) {
+        // **Le genre se compare avant la destination**, parce qu il decide de ce qu il faut
+        // comparer. Un plan qui passe d un corps a un point garde `planetId` a `null` des deux
+        // cotes : comparer les identifiants d abord aurait laisse passer ce glissement.
+        if ($plan->kind !== $pressenti->plan->kind) {
+            throw new ReturnDestinationMoved(
+                $combatInstanceId,
+                $mission->id,
+                $pressenti->plan->planetId,
+                $plan->planetId,
+                'Le genre de destination a change : ' . $pressenti->plan->kind->value . ' puis ' . $plan->kind->value . '.'
+            );
+        }
+
+        if ($plan->landsOnAPoint()) {
+            $avant = $pressenti->plan;
+
+            // **Le point compte autant que la patrouille.** Une patrouille qui se deplace entre les
+            // deux passes garde son identifiant et change de position : ne comparer que
+            // l identifiant ferait poser la flotte a l ancien point.
+            if ($plan->patrolId !== $avant->patrolId || $avant->point === null || $plan->point === null || !$plan->point->equals($avant->point)) {
+                throw new ReturnDestinationMoved(
+                    $combatInstanceId,
+                    $mission->id,
+                    null,
+                    null,
+                    'Le point de la patrouille a bouge entre les deux passes.'
+                );
+            }
+
+            return ResolvedReturnDestination::from($plan, $mission);
+        }
+
+        if ($plan->planetId === null) {
+            throw new FleetHasNowhereToReturn($combatInstanceId, $mission->id, $plan->reason?->value);
+        }
+
+        if ($plan->planetId !== $pressenti->plan->planetId) {
             throw new ReturnDestinationMoved($combatInstanceId, $mission->id, $pressenti->plan->planetId, $plan->planetId);
         }
 
@@ -108,6 +180,7 @@ final class ReturnDestinationResolver
         $pressenti = $this->foreseeFor($mission);
 
         $this->holdTheDecidingBodies($pressenti->decidingBodyIds);
+        $this->holdTheDecidingPatrols($pressenti->decidingPatrolIds);
 
         return $this->confirm($mission, $pressenti, $combatInstanceId);
     }

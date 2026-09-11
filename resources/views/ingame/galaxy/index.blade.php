@@ -191,6 +191,12 @@
                     'surveillanceNoShips' => __('t_ingame.galaxy.tactical_surveillance_no_ships'),
                     'surveillanceSent' => __('t_ingame.galaxy.tactical_surveillance_sent'),
                     'surveillanceRefused' => __('t_ingame.galaxy.tactical_surveillance_refused'),
+                    // Frapper depuis une patrouille deja posee, plutot que depuis un corps.
+                    'surveillanceFromPatrol' => __('t_ingame.galaxy.tactical_surveillance_from_patrol'),
+                    'surveillanceFromPlanet' => __('t_ingame.galaxy.tactical_surveillance_from_planet'),
+                    'surveillanceRaidQuote' => __('t_ingame.galaxy.tactical_surveillance_raid_quote'),
+                    'surveillanceRaidConfirm' => __('t_ingame.galaxy.tactical_surveillance_raid_confirm'),
+                    'surveillanceRaidRoundTrip' => __('t_ingame.galaxy.tactical_surveillance_raid_round_trip'),
                     'patrolReserve' => __('t_ingame.galaxy.tactical_patrol_reserve'),
                     'patrolUpkeep' => __('t_ingame.galaxy.tactical_patrol_upkeep'),
                     'patrolSafetyReturn' => __('t_ingame.galaxy.tactical_patrol_safety_return'),

@@ -212,11 +212,28 @@ final class CombatCancellationService
             $corpsDeRetour = array_keys($decisifs);
             sort($corpsDeRetour);
 
+            // **Les patrouilles qui decident, reunies de la meme facon.** Une flotte partie du point
+            // d une patrouille y revient ; l existence de cette patrouille fait donc pencher le
+            // choix exactement comme celle d un corps.
+            $patrouillesDecisives = [];
+
+            foreach ($aRendre as [, , $pressenti]) {
+                foreach ($pressenti->decidingPatrolIds as $identifiant) {
+                    $patrouillesDecisives[$identifiant] = true;
+                }
+            }
+
+            $patrouillesDeRetour = array_keys($patrouillesDecisives);
+            sort($patrouillesDeRetour);
+
             // **L'union de tous les corps decisifs, d'un seul coup.** Verrouiller mission par
             // mission romprait l'ordre croissant global : deux annulations concurrentes
             // s'attendraient mutuellement. C'est la seule raison pour laquelle ce chemin compose
             // les trois etapes au lieu d'appeler la resolution complete.
             $this->destinations->holdTheDecidingBodies($corpsDeRetour);
+
+            // **Apres les corps, jamais avant** : `planets` puis `patrols`, l ordre global du jeu.
+            $this->destinations->holdTheDecidingPatrols($patrouillesDeRetour);
 
             $plans = [];
 

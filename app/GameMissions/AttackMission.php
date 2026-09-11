@@ -38,6 +38,7 @@ use OGame\Models\Resources;
 use OGame\Patrol\Combat\SpatialBattle;
 use OGame\Patrol\Combat\SpatialSettlement;
 use OGame\Patrol\FrozenPatrolTarget;
+use OGame\Patrol\PatrolHomecoming;
 use OGame\Patrol\PatrolTargetLock;
 use OGame\Services\CharacterClassService;
 use OGame\Services\PlanetService;
@@ -510,6 +511,23 @@ class AttackMission extends GameMission
      */
     protected function processReturn(FleetMission $mission): void
     {
+        /*
+         * **Une flotte partie d une patrouille rentre a un point, pas sur un corps.**
+         *
+         * Elle se reconnait a deux faits ensemble, et il en faut deux : `patrol_id` seul designe
+         * aussi les segments ordinaires d une patrouille, qui ne passent jamais par ici ; une
+         * destination en point de l espace seule designerait toute flotte visant un point.
+         *
+         * Sans ce branchement, le controle suivant levait « Attack return mission has no target
+         * planet » : la colonne est vide **par construction** pour ce retour, et le message aurait
+         * ressemble a une corruption de donnees alors que rien n etait casse.
+         */
+        if (PatrolHomecoming::isHomecomingOfAPatrol($mission)) {
+            resolve(PatrolHomecoming::class)->receive($mission);
+
+            return;
+        }
+
         // Load the target planet
         if ($mission->planet_id_to === null) {
             throw new RuntimeException('Attack return mission has no target planet.');

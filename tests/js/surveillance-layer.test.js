@@ -46,6 +46,14 @@ const SOURCE = new URL('../../resources/js/ingame/galaxy-tactical.js', import.me
 function faireJQuery() {
     const demandes = [];
 
+    /*
+     * **Les envois passent par `post`, et un faux muet ne prouve rien de ce qui y passe.** Ce banc
+     * rendait une promesse qui ne se resolvait jamais : tout ce qui suit une reponse — un devis
+     * affiche, un ordre confirme — etait inatteignable, et une assertion dessus serait verte quoi
+     * qu il arrive. Le piege est le meme que celui deja paye sur le banc du glisser.
+     */
+    const envois = [];
+
     const chainable = () => {
         const api = {};
         api.done = () => api;
@@ -76,10 +84,27 @@ function faireJQuery() {
         return api;
     };
 
-    jq.post = chainable;
+    jq.post = function (url, donnees) {
+        const rappels = {};
+        const api = {
+            done(cb) { rappels.done = cb; return api; },
+            fail(cb) { rappels.fail = cb; return api; },
+            always(cb) { rappels.always = cb; return api; }
+        };
+
+        envois.push({
+            url,
+            donnees,
+            repondre(reponse) { if (rappels.done) { rappels.done(reponse); } },
+            echouer(erreur) { if (rappels.fail) { rappels.fail(erreur); } }
+        });
+
+        return api;
+    };
+
     jq.ajax = chainable;
 
-    return { jq, demandes };
+    return { jq, demandes, envois };
 }
 
 /**
@@ -112,7 +137,7 @@ function unMonde({ avecDiffuseur = true } = {}) {
     });
 
     const { window } = dom;
-    const { jq, demandes } = faireJQuery();
+    const { jq, demandes, envois } = faireJQuery();
     const diffuseur = faireConnexion();
 
     window.jQuery = jq;
@@ -125,6 +150,9 @@ function unMonde({ avecDiffuseur = true } = {}) {
     window.token = 'jeton';
     window.galaxyTacticalLoca = {};
     window.renderContentGalaxy = function () {};
+    /* Les adresses que la vue publie pour les ordres de patrouille : sans elles, rien ne part. */
+    window.galaxyPatrolQuoteUrl = '/ajax/galaxy/patrol/quote';
+    window.galaxyPatrolAttackUrl = '/ajax/galaxy/patrol/attack';
 
     /*
      * Les ecouteurs du diffuseur sont retenus, pas ignores : `FleetMovementChanged` est le seul
@@ -166,22 +194,71 @@ function unMonde({ avecDiffuseur = true } = {}) {
         rappel({ from: { galaxy: galaxie, system: systeme }, to: { galaxy: galaxie, system: systeme } });
     };
 
-    return { window, demandes, diffuseur, amorcer, contacts, fermer, unMouvementAnnonce };
+    /* La fiche ouverte, et les boutons qu elle propose. */
+    const fiche = () => window.document.querySelector('.gtCard');
+    const boutons = () => Array.from(window.document.querySelectorAll('.gtCard .gtAction--attack'));
+
+    const cliquer = (cible) => {
+        cible.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
+    };
+
+    return { window, demandes, envois, diffuseur, amorcer, contacts, fiche, boutons, cliquer, fermer, unMouvementAnnonce };
 }
 
 /**
  * Une reponse du serveur portant ces contacts.
  */
-function reponse(galaxie, systeme, contacts, maintenant = 1_700_000_000) {
+function reponse(galaxie, systeme, contacts, maintenant = 1_700_000_000, patrouilles = []) {
     return {
         success: true,
         galaxy: galaxie,
         system: systeme,
         server_now: maintenant,
         movements: [],
-        patrols: [],
+        patrols: patrouilles,
         surveillance: contacts,
         counters: {}
+    };
+}
+
+/**
+ * Une patrouille du joueur telle que `PatrolProjection` la compose, avec son verdict de frappe.
+ *
+ * Les champs sont ceux du serveur, pas ceux qui rendraient l essai commode : un montage qui invente
+ * sa charge utile ne prouve rien du jeu.
+ */
+function unePatrouille({ id = 3, numero = 1, frappePermise = true } = {}) {
+    return {
+        id,
+        number: numero,
+        state: 'stationed',
+        state_label: 'Stationnee',
+        galaxy: 1,
+        system: 5,
+        point: { x: -660, y: 580 },
+        segment: {
+            id: 900 + id,
+            from: { galaxy: 1, system: 5, position: 0, type: 5, x: -660, y: 580 },
+            to: { galaxy: 1, system: 5, position: 0, type: 5, x: -660, y: 580 },
+            time_departure: 1_699_999_000,
+            time_arrival: 1_699_999_900
+        },
+        units: [{ id: 204, label: 'Chasseur leger', amount: 5 }],
+        cargo: { metal: 0, crystal: 0, deuterium: 0 },
+        fuel_reserve: 500,
+        upkeep_per_hour: 5,
+        safety_return_cost: 1,
+        safety_return_at: 1_700_100_000,
+        stationed_since: 1_699_999_900,
+        order_version: 4,
+        home: { galaxy: 1, system: 5, position: 4 },
+        commands: {
+            move: { allowed: true, reason_key: null, reason: null },
+            recall: { allowed: true, reason_key: null, reason: null },
+            attack: frappePermise
+                ? { allowed: true, reason_key: null, reason: null }
+                : { allowed: false, reason_key: 'must_be_stationed_to_attack', reason: 'Seule une patrouille posee peut frapper.' }
+        }
     };
 }
 
@@ -459,6 +536,162 @@ test('une demande d avant la revocation arrivant avant la demande d apres ne rea
         const vus = monde.contacts();
         assert.equal(vus.length, 1, 'la reponse courante n a pas ete affichee');
         assert.equal(vus[0].getAttribute('data-contact-id'), '22');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Une patrouille posee est offerte comme point de depart d une frappe.**
+ *
+ * C est le geste neuf du chantier : une patrouille voyait une cible sans aucun moyen de l atteindre.
+ * Le bouton la propose ; le serveur decide de tout le reste.
+ */
+test('la fiche d un contact offre la frappe depuis une patrouille posee', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5);
+        monde.demandes[0].repondre(reponse(1, 5, [unContact(11, 640, 480)], 1_700_000_000, [unePatrouille()]));
+
+        const marqueur = monde.contacts()[0];
+
+        assert.ok(marqueur, 'la premisse manque : aucun contact affiche');
+
+        monde.cliquer(marqueur);
+
+        const offerts = monde.boutons().filter((b) => !b.disabled);
+
+        assert.ok(
+            offerts.some((b) => (b.textContent || '').indexOf('Patrouille 1') !== -1),
+            'aucune frappe depuis la patrouille n est offerte : ' + monde.boutons().map((b) => b.textContent).join(' | ')
+        );
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Le cas comparable, et il compte autant.** Sans lui, une fiche qui offrirait tout — y compris ce
+ * que le serveur refuserait — passerait le temoin precedent.
+ *
+ * Une action ne s offre que si elle peut aboutir : refusee, elle reste visible mais grisee, et elle
+ * **dit pourquoi**. La raison vient du serveur, jamais d une phrase inventee ici.
+ */
+test('une frappe refusee est grisee et porte la raison du serveur', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5);
+        monde.demandes[0].repondre(
+            reponse(1, 5, [unContact(11, 640, 480)], 1_700_000_000, [unePatrouille({ frappePermise: false })])
+        );
+
+        monde.cliquer(monde.contacts()[0]);
+
+        const bouton = monde.boutons().find((b) => (b.textContent || '').indexOf('Patrouille 1') !== -1);
+
+        assert.ok(bouton, 'la patrouille refusee a disparu de la fiche au lieu d etre grisee');
+        assert.equal(bouton.disabled, true, 'la frappe refusee est cliquable : le joueur cliquerait dans le vide');
+
+        const raison = bouton.parentNode.querySelector('.gtActionReason');
+
+        assert.ok(raison && !raison.hidden, 'la raison du refus n est pas affichee');
+        assert.equal(
+            raison.textContent,
+            'Seule une patrouille posee peut frapper.',
+            'la raison affichee n est pas celle que le serveur a donnee'
+        );
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Chiffrer puis confirmer, comme tout ordre de patrouille.**
+ *
+ * Le devis porte la version d ordre et le cout ; la confirmation les **rapporte**, et le serveur
+ * refuse un devis perime au lieu de debiter autre chose que ce que le joueur a lu. Une frappe
+ * confirmee sans avoir ete lue serait le seul ordre du chantier a echapper a cette regle.
+ */
+test('la frappe se chiffre, puis se confirme en rapportant sa version et son cout', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5);
+        monde.demandes[0].repondre(reponse(1, 5, [unContact(11, 640, 480)], 1_700_000_000, [unePatrouille()]));
+        monde.cliquer(monde.contacts()[0]);
+
+        const bouton = monde.boutons().find((b) => (b.textContent || '').indexOf('Patrouille 1') !== -1);
+
+        assert.ok(bouton, 'aucun bouton de frappe');
+
+        monde.cliquer(bouton);
+
+        assert.equal(monde.envois.length, 1, 'aucun devis n est parti');
+        assert.equal(monde.envois[0].url, '/ajax/galaxy/patrol/quote');
+        assert.equal(monde.envois[0].donnees.kind, 'attack');
+        assert.equal(monde.envois[0].donnees.patrol_id, 3);
+        assert.equal(monde.envois[0].donnees.contact_id, 11);
+
+        monde.envois[0].repondre({
+            success: true,
+            quote: { possible: true, order_version: 4, fuel_cost: 1234, duration_seconds: 750, refusal: null }
+        });
+
+        assert.notEqual(
+            (bouton.textContent || '').indexOf('Patrouille 1'),
+            0,
+            'le bouton n a pas change de role apres le devis'
+        );
+
+        monde.cliquer(bouton);
+
+        assert.equal(monde.envois.length, 2, 'la confirmation n est pas partie');
+        assert.equal(monde.envois[1].url, '/ajax/galaxy/patrol/attack');
+        assert.equal(monde.envois[1].donnees.patrol_id, 3);
+        assert.equal(monde.envois[1].donnees.contact_id, 11);
+        assert.equal(monde.envois[1].donnees.order_version, 4, 'la version du devis n est pas rapportee : un devis perime serait debite');
+        assert.equal(monde.envois[1].donnees.quoted_fuel_cost, 1234, 'le cout lu n est pas rapporte : le serveur pourrait debiter davantage');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Un refus perime le devis.** Le garder permettrait de reconfirmer sans rien relire, sur un monde
+ * qui vient precisement de changer — c est le scenario meme que la version d ordre existe pour
+ * fermer.
+ */
+test('une confirmation refusee oblige a redemander un devis', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5);
+        monde.demandes[0].repondre(reponse(1, 5, [unContact(11, 640, 480)], 1_700_000_000, [unePatrouille()]));
+        monde.cliquer(monde.contacts()[0]);
+
+        const bouton = monde.boutons().find((b) => (b.textContent || '').indexOf('Patrouille 1') !== -1);
+
+        monde.cliquer(bouton);
+        monde.envois[0].repondre({
+            success: true,
+            quote: { possible: true, order_version: 4, fuel_cost: 1234, duration_seconds: 750, refusal: null }
+        });
+
+        monde.cliquer(bouton);
+        assert.equal(monde.envois.length, 2, 'la premisse manque : la confirmation n est pas partie');
+
+        monde.envois[1].echouer({ responseJSON: { message: 'Refuse.' } });
+
+        monde.cliquer(bouton);
+
+        assert.equal(monde.envois.length, 3, 'le troisieme clic n a rien envoye');
+        assert.equal(
+            monde.envois[2].url,
+            '/ajax/galaxy/patrol/quote',
+            'le clic suivant un refus reconfirme au lieu de redemander un devis'
+        );
     } finally {
         monde.fermer();
     }

@@ -2622,6 +2622,22 @@
         etat.textContent = intituleDuContact(contact);
         contenant.appendChild(etat);
 
+        /*
+         * **Deux departs, dans l ordre ou le joueur les lit.** D abord ses patrouilles deja sur
+         * place — c est le geste neuf, et le plus court : elles sont a portee, elles partent
+         * entieres, elles reviennent a leur point. Ensuite le depart depuis un corps, qui demande de
+         * composer une flotte.
+         */
+        var depuisUnePatrouille = frappesDepuisLesPatrouilles(carte, contact);
+
+        if (depuisUnePatrouille) {
+            contenant.appendChild(depuisUnePatrouille);
+        }
+
+        var titreDepuisUnCorps = element('div', 'gtCardNote');
+        titreDepuisUnCorps.textContent = locaFiche('surveillanceFromPlanet', 'Depuis une planete');
+        contenant.appendChild(titreDepuisUnCorps);
+
         contenant.appendChild(compositionDAttaque(carte, contact));
 
         if (titre) {
@@ -2732,6 +2748,161 @@
         boite.appendChild(raison);
 
         return boite;
+    }
+
+    /*
+     * ## Frapper depuis une patrouille deja posee
+     *
+     * Une patrouille voit une cible et n avait aucun moyen de l atteindre : il fallait la rappeler
+     * chez elle, recomposer une flotte et repartir — le temps que la cible s en aille. Elle frappe
+     * desormais depuis son point, et **y revient** : c est ce retour qui distingue ce geste d un
+     * depart ordinaire, et c est le serveur qui le garantit.
+     *
+     * ### Ce que la carte ne decide pas
+     *
+     * Ni le cout, ni la duree, ni le droit. `commands.attack` vient du serveur et porte sa raison ;
+     * un bouton grise dit exactement ce que la confirmation refuserait. **Une action ne s offre que
+     * si elle peut aboutir.**
+     *
+     * ### Deux temps, comme tout ordre de patrouille
+     *
+     * Chiffrer, puis confirmer. Le devis porte la version d ordre et le cout lu ; la confirmation les
+     * rapporte, et le serveur refuse un devis perime au lieu de debiter autre chose. Une frappe
+     * confirmee sans avoir ete lue serait le seul ordre du chantier a ne pas suivre cette regle.
+     */
+    function frappesDepuisLesPatrouilles(carte, contact) {
+        if (patrouilles.length === 0) {
+            return null;
+        }
+
+        var bloc = element('div', 'gtCardActions');
+        var titre = element('div', 'gtCardNote');
+
+        titre.textContent = locaFiche('surveillanceFromPatrol', 'Depuis une patrouille');
+        bloc.appendChild(titre);
+
+        var offertes = 0;
+
+        patrouilles.forEach(function (p) {
+            if (!p.commands || !p.commands.attack) {
+                return;
+            }
+
+            offertes += 1;
+            bloc.appendChild(uneFrappeDepuisUnePatrouille(carte, contact, p));
+        });
+
+        /*
+         * **Absent plutot que vide.** Un titre seul, sans une seule patrouille dessous, apprendrait
+         * qu il y a quelque chose a savoir et occuperait la fiche pour rien.
+         */
+        return offertes === 0 ? null : bloc;
+    }
+
+    /* Une patrouille, son verdict, et le bouton qui chiffre puis confirme. */
+    function uneFrappeDepuisUnePatrouille(carte, contact, p) {
+        var ligne = element('div', 'gtCardNote');
+        var bouton = element('button', 'gtAction gtAction--attack');
+        var raison = element('div', 'gtActionReason');
+        var permis = p.commands.attack.allowed === true;
+
+        bouton.type = 'button';
+        bouton.textContent = locaFiche('patrolTitle', 'Patrouille') + ' ' + (p.number || p.id)
+            + ' — ' + locaFiche('surveillanceRaidQuote', 'Chiffrer');
+        raison.hidden = true;
+
+        if (!permis) {
+            bouton.disabled = true;
+            raison.hidden = false;
+            raison.textContent = p.commands.attack.reason || '';
+        }
+
+        /* Le devis lu, s il a ete demande : sa presence fait du second clic une confirmation. */
+        var devis = null;
+
+        var dire = function (texte) {
+            raison.hidden = false;
+            raison.textContent = texte;
+        };
+
+        bouton.addEventListener('click', function () {
+            if (!window.jQuery || typeof galaxyPatrolQuoteUrl === 'undefined' || typeof galaxyPatrolAttackUrl === 'undefined') {
+                return;
+            }
+
+            bouton.disabled = true;
+
+            if (devis) {
+                window.jQuery.post(galaxyPatrolAttackUrl, {
+                    patrol_id: p.id,
+                    contact_id: contact.contact_id,
+                    speed: 10,
+                    order_version: devis.order_version,
+                    quoted_fuel_cost: devis.fuel_cost
+                }, null, 'json')
+                    .done(function () {
+                        deselectionner(carte, true);
+
+                        if (typeof window.fadeBox === 'function') {
+                            window.fadeBox(locaFiche('surveillanceSent', 'Flotte envoyee.'), false);
+                        }
+
+                        /* Le bandeau du jeu et la carte apprennent le depart tout de suite. */
+                        annoncerLeMouvement();
+
+                        if (carte.gtSysteme) {
+                            chargerLesFlottes(carte, carte.gtSysteme.galaxie, carte.gtSysteme.systeme);
+                        }
+                    })
+                    .fail(function (reponse) {
+                        /*
+                         * **Un refus perime le devis.** Le garder permettrait de reconfirmer sans
+                         * rien relire, sur un monde qui vient precisement de changer.
+                         */
+                        devis = null;
+                        bouton.disabled = false;
+                        bouton.textContent = locaFiche('patrolTitle', 'Patrouille') + ' ' + (p.number || p.id)
+                            + ' — ' + locaFiche('surveillanceRaidQuote', 'Chiffrer');
+                        dire(raisonDeLaReponse(reponse && reponse.responseJSON ? reponse.responseJSON : null)
+                            || locaFiche('surveillanceRefused', 'Cette attaque a ete refusee.'));
+                    });
+
+                return;
+            }
+
+            raison.hidden = true;
+
+            window.jQuery.post(galaxyPatrolQuoteUrl, {
+                kind: 'attack',
+                patrol_id: p.id,
+                contact_id: contact.contact_id,
+                speed: 10
+            }, null, 'json')
+                .done(function (reponse) {
+                    bouton.disabled = false;
+
+                    if (!reponse || !reponse.quote || reponse.quote.refusal) {
+                        dire(locaFiche('surveillanceRefused', 'Cette attaque a ete refusee.'));
+
+                        return;
+                    }
+
+                    devis = reponse.quote;
+                    bouton.textContent = locaFiche('surveillanceRaidConfirm', 'Confirmer la frappe');
+                    dire(locaFiche('surveillanceRaidRoundTrip', 'Aller-retour') + ' : '
+                        + Math.round(devis.fuel_cost) + ' \u00b7 ' + dureeLisible(devis.duration_seconds));
+                })
+                .fail(function (reponse) {
+                    bouton.disabled = false;
+                    dire(raisonDeLaReponse(reponse && reponse.responseJSON ? reponse.responseJSON : null)
+                        || locaFiche('surveillanceRefused', 'Cette attaque a ete refusee.'));
+                });
+        });
+
+        ligne.appendChild(bouton);
+        ligne.appendChild(raison);
+
+        return ligne;
     }
 
     /*

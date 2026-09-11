@@ -24,11 +24,16 @@ class ReturnDestinationMoved extends RuntimeException
         public readonly int $fleetMissionId,
         public readonly int|null $chosenBodyId,
         public readonly int|null $lockedBodyId,
+        // **Ce que deux identifiants de corps ne savent pas dire.** Une flotte qui rentre au point
+        // de sa patrouille n en designe aucun : le message aurait annonce « aucun » des deux cotes,
+        // et aurait coute une heure a qui le lit. Le detail nomme alors ce qui a reellement bouge.
+        public readonly string|null $detail = null,
     ) {
         parent::__construct(
             'Le combat ' . $combatInstanceId . ' avait choisi le corps ' . ($chosenBodyId ?? 'aucun')
             . ' pour la flotte ' . $fleetMissionId . ', et sous verrou c est le corps '
             . ($lockedBodyId ?? 'aucun') . ' : la destination a bouge, rien n est ecrit.'
+            . ($detail === null ? '' : ' ' . $detail)
         );
     }
 }

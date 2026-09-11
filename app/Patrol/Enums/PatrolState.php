@@ -62,6 +62,20 @@ enum PatrolState: string
     }
 
     /**
+     * La patrouille **tient un point du systeme** : ses unites y sont, ou y reviendront.
+     *
+     * `Attacking` en fait partie, et c est tout l objet de cette question : le point reste celui de
+     * la patrouille pendant que ses unites frappent ailleurs, et c est la que leur retour se pose.
+     * `isParked()` repond a une autre question — la patrouille consomme-t-elle au temps reel et
+     * peut-elle recevoir un ordre — et repondre « non » aux deux pour une attaque en cours est juste
+     * dans un cas, faux dans l autre. Deux questions, deux methodes.
+     */
+    public function holdsAPoint(): bool
+    {
+        return $this->isParked() || $this === self::Attacking;
+    }
+
+    /**
      * La patrouille peut recevoir un nouvel ordre de mouvement.
      *
      * Posee ou en vol dans son systeme (manoeuvre, revue 120). Pas en retour : le retour se

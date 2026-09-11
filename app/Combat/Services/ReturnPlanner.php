@@ -6,8 +6,10 @@ use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Support\ReturnPlan;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
+use OGame\Models\Patrol;
 use OGame\Models\Planet;
 use OGame\Models\Planet\Coordinate;
+use OGame\Patrol\Geometry\SpatialPoint;
 
 /**
  * Ou une flotte renvoyee se posera, decide sous verrou et une seule fois.
@@ -45,6 +47,15 @@ class ReturnPlanner
      */
     public function planFor(FleetMission $mission): ReturnPlan
     {
+        // **Une flotte partie d une patrouille revient a son point**, avant tout recours vers un
+        // corps : elle n a pas de corps d origine du tout, et le premier recours l aurait envoyee
+        // directement a la planete mere.
+        $versSonPoint = $this->patrolPointPlanFor($mission);
+
+        if ($versSonPoint !== null) {
+            return $versSonPoint;
+        }
+
         $proprietaire = (int)$mission->user_id;
 
         $origine = $mission->planet_id_from === null
@@ -107,6 +118,79 @@ class ReturnPlanner
         }
 
         return ReturnPlan::cannotReturn(CombatReasonCode::NoReturnDestination);
+    }
+
+    /**
+     * Le plan d une flotte partie du point d une patrouille, ou `null` si ce n est pas son cas.
+     *
+     * ## Les quatre choses exigees, et pourquoi chacune
+     *
+     * - **la mission nomme une patrouille.** C est la seule marque : `planet_id_from` est vide pour
+     *   toute flotte partie d un point, y compris celles qui n ont rien a voir avec une patrouille ;
+     * - **la patrouille existe encore.** Dissoute pendant le vol, elle n attend plus personne, et la
+     *   flotte prend la suite des recours ordinaires — c est la retombee sur la base ;
+     * - **elle appartient au meme joueur.** Meme regle qu un corps : une flotte de repli ne se pose
+     *   jamais chez quelqu un d autre. Une patrouille ne change pas de mains aujourd hui, et c est
+     *   precisement pourquoi cette garde doit etre ecrite : le jour ou elle le pourrait, personne ne
+     *   penserait a revenir ici ;
+     * - **elle tient un point.** Une patrouille en vol ou en retour n a pas de position posee : la
+     *   colonne est vide, et il n y a aucun endroit ou se poser. La question se pose au genre
+     *   (`holdsAPoint()`) **et** aux colonnes, parce que l etat et la position sont deux faits
+     *   distincts et qu un etat juste avec une position vide ferait fabriquer un point `0,0` —
+     *   l etoile — au lieu d un refus.
+     *
+     * Aucun `??` ici, et c est voulu : chaque absence renvoie `null`, et l appelant reprend l ordre
+     * des recours. Fabriquer une valeur par defaut poserait la flotte quelque part que personne n a
+     * decide.
+     */
+    private function patrolPointPlanFor(FleetMission $mission): ReturnPlan|null
+    {
+        if ($mission->patrol_id === null) {
+            return null;
+        }
+
+        $patrouille = Patrol::query()->whereKey((int)$mission->patrol_id)->first();
+
+        if (!$patrouille instanceof Patrol) {
+            return null;
+        }
+
+        if ((int)$patrouille->user_id !== (int)$mission->user_id) {
+            return null;
+        }
+
+        if (!$patrouille->state->holdsAPoint() || $patrouille->x === null || $patrouille->y === null) {
+            return null;
+        }
+
+        return ReturnPlan::toPatrolPoint(
+            (int)$patrouille->id,
+            // **L orbite vaut zero, comme sur toute mission visant un point.** La galaxie et le
+            // systeme, eux, sont lus : ce sont eux que le rapport et l audit nomment.
+            new Coordinate((int)$patrouille->galaxy, (int)$patrouille->system, 0),
+            new SpatialPoint((int)$patrouille->x, (int)$patrouille->y),
+            (int)$patrouille->user_id
+        );
+    }
+
+    /**
+     * Les patrouilles dont l'etat decide du recours retenu, pour cette mission.
+     *
+     * **Zero ou une**, jamais plus : une mission ne nomme qu une patrouille. La liste garde
+     * neanmoins la forme d un ensemble trie, comme celle des corps, parce que c est elle qui est
+     * comparee d une passe a l autre et verrouillee dans l ordre.
+     *
+     * **Elle est nommee meme quand elle ne gagne pas.** Une patrouille dissoute ne rend aucun plan,
+     * mais son absence est exactement ce qui fait gagner le recours suivant : ne pas la tenir
+     * laisserait sa resurrection — ou sa dissolution — deplacer le verdict entre les deux passes
+     * sans qu aucune ligne tenue n ait bouge. C est le meme raisonnement que la planete associee,
+     * tenue quel que soit son proprietaire.
+     *
+     * @return array<int, int>
+     */
+    public function patrolsThatDecideFor(FleetMission $mission): array
+    {
+        return $mission->patrol_id === null ? [] : [(int)$mission->patrol_id];
     }
 
     /**

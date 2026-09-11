@@ -84,6 +84,7 @@ class PatrolController extends OGameController
         $identifiant = $request->input('patrol_id');
         $rappel = $request->input('kind') === 'recall';
         $atterrissage = $request->input('kind') === 'land';
+        $offensive = $request->input('kind') === 'attack';
 
         try {
             if ($identifiant !== null && $identifiant !== '') {
@@ -101,6 +102,34 @@ class PatrolController extends OGameController
                 // **Le corps vise se resout avant de juger quoi que ce soit** : sans lui, « ce corps
                 // est-il a vous ? » n a pas de sens, et repondre par le refus general dirait la
                 // mauvaise chose au joueur.
+                /*
+                 * **Une attaque se chiffre avant de se confirmer, comme tout le reste.** La cible
+                 * est resolue et jugee **ici**, par le meme code que la confirmation : un devis
+                 * possible pour une cible que l ordre refuserait serait exactement le mensonge
+                 * d interface que tout ce chantier evite.
+                 */
+                if ($offensive) {
+                    $cible = $this->patrolBehindTheContact($request, $player, $now);
+
+                    if ($cible === null) {
+                        return $this->refused('target_not_detected', 409);
+                    }
+
+                    $refusOffensif = $this->orders->whyAttackIsRefused($patrouille, $now);
+
+                    if ($refusOffensif !== null) {
+                        throw new PatrolOrderRefused($refusOffensif);
+                    }
+
+                    $gelee = resolve(PatrolAttackEligibility::class)->frozenTargetFor($player->getId(), $cible, $now);
+
+                    return response()->json([
+                        'success' => true,
+                        'quote' => $this->orders->quoteForAttack($patrouille, $gelee, $this->speedFrom($request), $now)->toArray()
+                            + ['possible' => true],
+                    ]);
+                }
+
                 $corps = null;
 
                 if ($atterrissage) {
@@ -345,10 +374,33 @@ class PatrolController extends OGameController
     public function attack(Request $request, PlayerService $player): JsonResponse
     {
         $now = (int)Date::now()->timestamp;
-        $origine = $this->originFrom($request, $player);
+
+        /*
+         * **Deux origines, un seul ordre.** Une attaque contre une patrouille detectee peut partir
+         * d un corps du joueur ou d une de ses patrouilles : c est le meme geste de jeu, la meme
+         * cible, les memes protections. Seul le depart change — et avec lui l endroit ou la flotte
+         * reviendra.
+         *
+         * L origine par patrouille se reconnait a `patrol_id`. Rien n est devine : sans cette clef,
+         * le corps nomme decide comme avant.
+         */
+        $identifiant = $request->input('patrol_id');
+        $depuisUnePatrouille = $identifiant !== null && $identifiant !== '';
+
+        $origine = $depuisUnePatrouille ? null : $this->originFrom($request, $player);
 
         if (is_string($origine)) {
             return $this->refused($origine, 409);
+        }
+
+        $patrouille = null;
+
+        if ($depuisUnePatrouille) {
+            $patrouille = $this->ownPatrol($player, (int)$identifiant);
+
+            if ($patrouille === null) {
+                return $this->notFound();
+            }
         }
 
         $cible = $this->patrolBehindTheContact($request, $player, $now);
@@ -367,13 +419,24 @@ class PatrolController extends OGameController
         }
 
         try {
-            $mission = resolve(SpatialAttackOrder::class)->launch(
-                $origine,
-                $this->unitsFrom($request),
-                $gelee,
-                $this->speedFrom($request),
-                $now
-            );
+            $mission = $patrouille !== null
+                ? $this->orders->attackFrom(
+                    $patrouille,
+                    $gelee,
+                    $this->speedFrom($request),
+                    (int)$request->input('order_version', 0),
+                    $now,
+                    $this->quotedCostFrom($request)
+                )
+                : resolve(SpatialAttackOrder::class)->launch(
+                    // Deja etabli plus haut ; redit pour l analyse statique, qui ne suit pas le
+                    // chemin a travers le drapeau.
+                    $origine instanceof PlanetService ? $origine : throw new PatrolOrderRefused('bad_origin'),
+                    $this->unitsFrom($request),
+                    $gelee,
+                    $this->speedFrom($request),
+                    $now
+                );
         } catch (PatrolOrderRefused $refus) {
             return $this->refused($refus->reason, 409);
         }

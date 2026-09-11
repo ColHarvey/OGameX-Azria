@@ -149,6 +149,9 @@ final class PatrolProjection
             'commands' => [
                 'move' => $this->command($this->orders->whyMoveIsRefused($patrouille, $now)),
                 'recall' => $this->command($this->orders->whyRecallIsRefused($patrouille, $now)),
+                // **Frapper depuis le point.** La carte grise son bouton avec ce verdict, et
+                // `attackFrom()` refuse avec le meme : les deux lisent la meme methode.
+                'attack' => $this->command($this->orders->whyAttackIsRefused($patrouille, $now)),
             ],
         ];
     }

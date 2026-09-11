@@ -300,8 +300,14 @@ final class PatrolOrders
      * Il part de l endroit ou la patrouille **sera** quand l ordre prendra effet : son point actuel
      * si elle est posee, la position atteinte a la fin du delai de manoeuvre si elle vole. Le devis
      * porte la version d ordre courante, que la confirmation devra rapporter.
+     *
+     * `$fleetWillStation` dit si la flotte **restera** a destination. Les deux refus qui protegent
+     * une patrouille posee — reserve insuffisante, plus de quoi rentrer une fois la-bas — n ont de
+     * sens que dans ce cas. Une attaque, elle, frappe et revient au point : les lui appliquer la
+     * refuserait pour une situation qui n arrivera jamais, et le refus le plus courant du jeu
+     * deviendrait faux.
      */
-    public function quoteFor(Patrol $patrol, PatrolDestination $to, float $speedPercent, int $now): PatrolQuote
+    public function quoteFor(Patrol $patrol, PatrolDestination $to, float $speedPercent, int $now, bool $fleetWillStation = true): PatrolQuote
     {
         $proprietaire = $this->playerOf($patrol);
         $segment = $patrol->currentMission;
@@ -323,7 +329,8 @@ final class PatrolOrders
             $to,
             $speedPercent,
             (int)$patrol->order_version,
-            $base ?? $to->coordinate()
+            $base ?? $to->coordinate(),
+            $fleetWillStation
         );
     }
 
@@ -463,6 +470,319 @@ final class PatrolOrders
     public function orderMove(Patrol $patrol, PatrolDestination $to, float $speedPercent, int $orderVersion, int $now, int|null $quotedFuelCost = null): FleetMission
     {
         return $this->dispatchOrder($patrol, $to, $speedPercent, $orderVersion, $now, PatrolState::EnRoute, $quotedFuelCost);
+    }
+
+    /**
+     * **Pourquoi cette patrouille ne peut pas frapper maintenant** — ou rien, si elle le peut.
+     *
+     * La carte grise son bouton avec cette reponse, et `attackFrom()` refuse avec la meme : un
+     * bouton actif qui mene a un refus est un mensonge d interface.
+     *
+     * ## Pourquoi « posee » et rien d autre
+     *
+     * Une patrouille en vol n a pas de point : ses unites sont entre deux endroits, et il n y aurait
+     * **aucun endroit ou son attaque pourrait revenir**. Une patrouille immobilisee n a plus de quoi
+     * rentrer chez elle : lui laisser depenser le peu qui reste en offensive la condamnerait.
+     *
+     * `whyAnyOrderIsRefused()` ecarte deja le segment manquant, l engagement et les etats qui ne
+     * recoivent aucun ordre ; ce qui reste a dire tient en une phrase, et le refus la dit.
+     */
+    public function whyAttackIsRefused(Patrol $patrol, int $now): string|null
+    {
+        // **Attaquer est une entree neuve, sans l exception du rappel.** Un chantier desarme ferme
+        // ce qui n a pas commence ; rentrer reste ouvert, frapper non.
+        if (!$this->settings->patrolsEnabled()) {
+            return 'disabled';
+        }
+
+        $refus = $this->whyAnyOrderIsRefused($patrol, $now);
+
+        if ($refus !== null) {
+            return $refus;
+        }
+
+        // L etat **et** la position, parce que ce sont deux faits distincts : un etat juste avec une
+        // colonne vide ferait partir la flotte d un point fabrique.
+        if ($patrol->state !== PatrolState::Stationed || $patrol->x === null || $patrol->y === null) {
+            return 'must_be_stationed_to_attack';
+        }
+
+        return $this->homeCoordinateOf($patrol) === null ? 'no_home_left' : null;
+    }
+
+    /**
+     * Le devis d une attaque lancee depuis le point de la patrouille.
+     *
+     * @throws PatrolOrderRefused
+     */
+    public function quoteForAttack(Patrol $patrol, FrozenPatrolTarget $target, float $speedPercent, int $now): PatrolQuote
+    {
+        $refus = $this->whyAttackIsRefused($patrol, $now);
+
+        if ($refus !== null) {
+            throw new PatrolOrderRefused($refus);
+        }
+
+        return $this->attackQuote($patrol, $target, $speedPercent, $now);
+    }
+
+    /**
+     * Ce que coute une frappe depuis le point, et ce qu il en restera.
+     *
+     * ## Le carburant est celui d un **aller-retour**, et c est la difference avec tout le reste
+     *
+     * Un deplacement paie un trajet : la patrouille reste ou elle arrive. Une attaque revient
+     * toujours a son point — c est ce qui la distingue d un ordre de mouvement vers la cible — donc
+     * elle paie les deux trajets, au depart, sur la reserve. Ne prelever que l aller rendrait le
+     * retour gratuit, et une patrouille pourrait frapper indefiniment en payant moitie prix.
+     *
+     * La distance et la vitesse etant les memes dans les deux sens, le double du cout d un trajet
+     * **est** le cout reel : rien n est estime ici.
+     *
+     * ## Ce que les deux derniers champs decrivent, et pourquoi ce ne sont pas ceux de l aller
+     *
+     * `safety_return_*` repond a « et apres, peut-elle rentrer ? ». Apres une attaque, la patrouille
+     * est **de retour a son point** : le retour de securite part donc de la, pas de la cible. Prendre
+     * les nombres du devis aller aurait decrit un trajet que personne ne fera jamais.
+     */
+    private function attackQuote(Patrol $patrol, FrozenPatrolTarget $target, float $speedPercent, int $now): PatrolQuote
+    {
+        $segment = $patrol->currentMission;
+
+        if (!$segment instanceof FleetMission) {
+            throw new PatrolOrderRefused('no_current_segment');
+        }
+
+        $vers = PatrolDestination::spatialPoint(
+            $this->pricing->geometry(),
+            $target->galaxy,
+            $target->system,
+            $target->point()
+        );
+
+        $aller = $this->quoteFor($patrol, $vers, $speedPercent, $now, false);
+
+        // Un refus de geometrie ou de flotte vide se transmet tel quel : il decrit deja ce qui ne va
+        // pas, et le reecrire ici en dirait moins.
+        if (!$aller->isPossible()) {
+            return $aller;
+        }
+
+        $base = $this->homeOf($patrol);
+
+        if ($base === null) {
+            return $aller->refusedBecause('no_home_left');
+        }
+
+        $retourDeSecurite = $this->quoteFor($patrol, $this->destinationOnto($base), $this->settings->patrolSafetyReturnSpeed(), $now, false);
+
+        $units = $this->unitsOf($segment);
+        $allerRetour = 2 * $aller->fuelCost;
+        $restant = (float)$patrol->fuel_reserve - $allerRetour;
+
+        $devis = new PatrolQuote(
+            $vers,
+            $aller->distance,
+            $aller->durationSeconds,
+            $speedPercent,
+            $allerRetour,
+            $restant,
+            $retourDeSecurite->fuelCost,
+            $retourDeSecurite->durationSeconds,
+            $this->upkeep->autonomySeconds($units, $restant, (float)$retourDeSecurite->fuelCost),
+            (int)$patrol->order_version
+        );
+
+        if ($restant < 0.0) {
+            return $devis->refusedBecause('not_enough_fuel');
+        }
+
+        // **Frapper ne doit pas immobiliser.** Une patrouille qui rentrerait de son raid sans de quoi
+        // regagner sa base serait condamnee a l immobilisation : le refus est prononce avant, pas
+        // constate apres.
+        if ($restant < (float)$retourDeSecurite->fuelCost) {
+            return $devis->refusedBecause('no_return_reserve');
+        }
+
+        return $devis;
+    }
+
+    /**
+     * La patrouille envoie ses vaisseaux frapper une cible detectee, et garde son point.
+     *
+     * ## Ce qui change sur la patrouille, et ce qui ne change pas
+     *
+     * Son segment pose est consomme et remplace par la mission d attaque : **un seul vol a la fois**,
+     * comme toujours. Elle passe a `Attacking`, ce qui la rend inattaquable a son point — il n y a
+     * plus rien la — sans lui faire perdre ce point : `x` et `y` restent, et c est la que le retour
+     * se posera.
+     *
+     * Aucun creneau de flotte n est consomme : la mission d attaque **remplace** le segment pose,
+     * qui en occupait deja un. La patrouille ne paie pas deux fois le meme vol.
+     *
+     * ## Ce qui est revalide sous verrou, et pourquoi chacun
+     *
+     * La **version d ordre**, comme tout ordre : un autre ordre a pu passer depuis le devis. Le
+     * **segment relu** : deux confirmations simultanees consommeraient deux fois le meme vol. La
+     * **barriere de suppression** : une flotte ne part pas pendant qu on efface son proprietaire.
+     *
+     * @throws PatrolOrderRefused
+     */
+    public function attackFrom(
+        Patrol $patrol,
+        FrozenPatrolTarget $target,
+        float $speedPercent,
+        int $orderVersion,
+        int $now,
+        int|null $quotedFuelCost = null,
+    ): FleetMission {
+        $refus = $this->whyAttackIsRefused($patrol, $now);
+
+        if ($refus !== null) {
+            throw new PatrolOrderRefused($refus);
+        }
+
+        $segment = $patrol->currentMission;
+
+        if (!$segment instanceof FleetMission) {
+            throw new PatrolOrderRefused('no_current_segment');
+        }
+
+        if ((int)$patrol->order_version !== $orderVersion) {
+            throw new PatrolOrderRefused('stale_quote');
+        }
+
+        $units = $this->unitsOf($segment);
+
+        // **Ce qui est du se paie avant que le devis soit refait**, comme pour un deplacement : sans
+        // cela, un ordre donne juste avant l echeance effacerait la periode ecoulee.
+        $this->bill($patrol, $units, $now);
+
+        $devis = $this->attackQuote($patrol, $target, $speedPercent, $now);
+
+        if (!$devis->isPossible()) {
+            throw new PatrolOrderRefused((string)$devis->refusal);
+        }
+
+        // Le cout lu decide s il a ete rapporte : un cout devenu superieur est refuse, jamais debite
+        // en silence.
+        if ($quotedFuelCost !== null && $devis->fuelCost > $quotedFuelCost) {
+            throw new PatrolOrderRefused('quote_cost_moved');
+        }
+
+        $depart = $this->departurePointFor($patrol, $segment, $now);
+
+        return DB::transaction(function () use ($patrol, $segment, $units, $target, $devis, $depart, $now): FleetMission {
+            if (AccountDeletionBarrier::heldState((int)$patrol->user_id) === AccountDeletionState::Pending) {
+                throw new PatrolOrderRefused('account_being_deleted');
+            }
+
+            $tenu = FleetMission::query()->whereKey($segment->id)->lockForUpdate()->first();
+
+            if (!$tenu instanceof FleetMission || (int)$tenu->processed === 1) {
+                throw new PatrolOrderRefused('segment_already_settled');
+            }
+
+            $tenu->forceFill(['processed' => 1])->save();
+            $segment->forceFill(['processed' => 1])->syncOriginal();
+
+            $attaque = $this->createSpatialAttack($patrol, $tenu, $units, $target, $depart, $devis, $now);
+
+            $patrol->forceFill([
+                'state' => PatrolState::Attacking,
+                'current_mission_id' => $attaque->id,
+                // **Le point ne bouge pas.** Il reste celui de la patrouille pendant tout le raid :
+                // c est l adresse a laquelle ses vaisseaux reviennent, et l effacer ferait retomber
+                // le retour sur la base alors que rien ne l exige.
+                'fuel_reserve' => max(0.0, (float)$patrol->fuel_reserve - $devis->fuelCost),
+                'order_version' => (int)$patrol->order_version + 1,
+                'stationed_since' => null,
+            ])->save();
+
+            return $attaque;
+        });
+    }
+
+    /**
+     * Ecrit la mission d attaque partie du point d une patrouille.
+     *
+     * C est une **attaque ordinaire de genre 1** : elle passe par `AttackMission`, occupe le creneau
+     * du segment qu elle remplace, se voit sur la carte et rentre par le retour habituel. Trois
+     * choses la distinguent : elle part d un point au lieu d un corps, elle nomme sa patrouille par
+     * `patrol_id` — c est ce lien qui ramenera ses vaisseaux au bon endroit —, et elle porte
+     * l identite gelee de sa cible.
+     */
+    private function createSpatialAttack(
+        Patrol $patrol,
+        FleetMission $segment,
+        UnitCollection $units,
+        FrozenPatrolTarget $target,
+        SpatialPoint $depart,
+        PatrolQuote $devis,
+        int $now,
+    ): FleetMission {
+        // **L ancre administrative reste une planete vivante**, pour la meme raison qu un segment :
+        // le travailleur des pages cherche les missions par les planetes du joueur, et une mission
+        // ancree nulle part ne serait jamais reprise — la flotte ne rentrerait jamais.
+        $ancre = $this->homeOf($patrol)?->getPlanetId();
+
+        if ($ancre === null) {
+            throw new PatrolOrderRefused('no_home_left');
+        }
+
+        $attaque = new FleetMission();
+
+        $attaque->user_id = (int)$patrol->user_id;
+        $attaque->patrol_id = (int)$patrol->id;
+        $attaque->mission_type = 1;
+
+        $attaque->planet_id_from = $ancre;
+        $attaque->type_from = PlanetType::SpatialPoint->value;
+        $attaque->galaxy_from = (int)$patrol->galaxy;
+        $attaque->system_from = (int)$patrol->system;
+        $attaque->position_from = $this->pricing->geometry()->orbitIndexOf($depart);
+        $attaque->x_from = $depart->x;
+        $attaque->y_from = $depart->y;
+
+        $attaque->planet_id_to = null;
+        $attaque->type_to = PlanetType::SpatialPoint->value;
+        $attaque->galaxy_to = $target->galaxy;
+        $attaque->system_to = $target->system;
+        $attaque->position_to = 0;
+        $attaque->x_to = $target->x;
+        $attaque->y_to = $target->y;
+
+        $attaque->target_patrol_id = $target->patrolId;
+        $attaque->target_patrol_owner_id = $target->ownerId;
+
+        $attaque->time_departure = $now;
+        $attaque->time_arrival = $now + $devis->durationSeconds;
+        $attaque->time_holding = null;
+        $attaque->processed = 0;
+        $attaque->canceled = 0;
+
+        // **La cargaison suit la flotte.** Ce que la patrouille transportait part avec elle : il n y
+        // a pas d endroit ou le laisser, son point n est pas un entrepot.
+        $attaque->metal = (int)$segment->metal;
+        $attaque->crystal = (int)$segment->crystal;
+        $attaque->deuterium = (int)$segment->deuterium;
+
+        // Le carburant vient de la reserve, jamais d une planete : rien a rendre a personne.
+        $attaque->deuterium_consumption = 0;
+
+        foreach ($units->units as $unite) {
+            $attaque->{$unite->unitObject->machine_name} = $unite->amount;
+        }
+
+        $degats = DamagedHulls::fromStorage($segment->damaged_hulls);
+
+        if (!$degats->isEmpty()) {
+            $attaque->damaged_hulls = $degats->toStorage();
+        }
+
+        $attaque->save();
+
+        return $attaque;
     }
 
     /**

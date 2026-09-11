@@ -13,10 +13,12 @@ final readonly class ForeseenReturn
 {
     /**
      * @param array<int, int> $decidingBodyIds Les corps dont l'etat fait pencher le choix, par identifiant croissant.
+     * @param array<int, int> $decidingPatrolIds La patrouille qui attend la flotte, si elle en a une : zero ou un.
      */
     public function __construct(
         public ReturnPlan $plan,
         public array $decidingBodyIds,
+        public array $decidingPatrolIds = [],
     ) {
     }
 }
