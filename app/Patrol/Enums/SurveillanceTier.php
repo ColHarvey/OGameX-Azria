@@ -37,7 +37,9 @@ namespace OGame\Patrol\Enums;
 enum SurveillanceTier: int
 {
     /**
-     * Un contact et sa position dans le systeme. Rien de plus : ni qui, ni ou il va.
+     * Un contact, sa position dans le systeme, son mouvement en temps reel et sa relation avec
+     * l observateur (allie ou etranger). Ni qui, ni sa taille ; sa direction ne se lit que sur la
+     * carte, pas en clair (decision de Keven, 12 septembre 2026 — voir `SurveillanceProjection`).
      */
     case Contact = 1;
 

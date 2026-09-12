@@ -71,8 +71,12 @@ class SurveillanceBrowserLayerTest extends TestCase
     {
         $bundle = $this->bundleServi();
 
+        /*
+         * La liste est **adoptee** depuis le 12 septembre 2026 : l ensemble est celui de la reponse,
+         * les objets deja affiches gardent leur identite. C est encore un remplacement de l ensemble.
+         */
         $this->assertStringContainsString(
-            'contactsDeSurveillance = Array.isArray(reponse.surveillance)',
+            "contactsDeSurveillance = adopter(contactsDeSurveillance, Array.isArray(reponse.surveillance) ? reponse.surveillance : [], 'contact_id');",
             $bundle,
             'Le bundle servi ne consomme pas la couche de surveillance : le travail n a aucun effet en jeu.'
         );
@@ -116,7 +120,7 @@ class SurveillanceBrowserLayerTest extends TestCase
         // fonction, donc le garde precede l affectation.
         $corps = $this->corpsDe($bundle, 'chargerLesFlottes', 'redemanderLeSysteme');
         $garde = strpos($corps, 'generation !== generationDuContexte');
-        $affectation = strpos($corps, 'contactsDeSurveillance = Array.isArray(reponse.surveillance)');
+        $affectation = strpos($corps, 'contactsDeSurveillance = adopter(contactsDeSurveillance, Array.isArray(reponse.surveillance)');
 
         $this->assertIsInt($garde);
         $this->assertIsInt($affectation);
@@ -148,7 +152,7 @@ class SurveillanceBrowserLayerTest extends TestCase
      * bundle servi : masquer apres l appel reseau serait une autre regle, verte a la lecture et
      * fausse a l execution.
      */
-    public function testTheLayerIsClearedBeforeTheRequestLeaves(): void
+    public function testTheGenerationIsBumpedBeforeTheRequestLeavesAndAFailureClears(): void
     {
         $bundle = $this->bundleServi();
 
@@ -156,12 +160,22 @@ class SurveillanceBrowserLayerTest extends TestCase
 
         $corps = $this->corpsDe($bundle, 'chargerLesFlottes', 'redemanderLeSysteme');
 
-        $invalidation = strpos($corps, 'invaliderLaSurveillance(carte);');
+        /*
+         * **Perimer avant de partir, masquer a l echec.** Depuis le 12 septembre 2026 (decision de
+         * Keven : tout en temps reel), la demande ordinaire ne masque plus la couche au depart —
+         * une veille toutes les dix secondes aurait fait clignoter chaque contact. La generation,
+         * elle, est toujours incrementee **avant** la requete, pour qu une reponse ancienne soit
+         * jetee ; et une requete qui echoue masque, au lieu de laisser l ancien contenu.
+         */
+        $generation = strpos($corps, 'generationDuContexte++;');
         $requete = strpos($corps, 'window.jQuery.getJSON(galaxyFleetsUrl');
+        $echec = strpos($corps, 'invaliderLaSurveillance(carte);');
 
-        $this->assertIsInt($invalidation, 'Rien n invalide la couche dans la demande : une reponse tardive laisserait l interdit a l ecran.');
+        $this->assertIsInt($generation, 'Rien ne perime la demande precedente : une reponse tardive laisserait l interdit a l ecran.');
         $this->assertIsInt($requete);
-        $this->assertLessThan($requete, $invalidation, 'La couche est masquee apres le depart de la requete, donc trop tard.');
+        $this->assertLessThan($requete, $generation, 'La generation est incrementee apres le depart de la requete, donc trop tard.');
+        $this->assertIsInt($echec, 'Une requete echouee laisse l ancien contenu a l ecran.');
+        $this->assertGreaterThan($requete, $echec, 'Le masquage est au depart de la demande, pas a son echec : la couche clignote a chaque veille.');
     }
 
     /**
@@ -200,7 +214,7 @@ class SurveillanceBrowserLayerTest extends TestCase
 
         $corps = $this->corpsDe($bundle, 'chargerLesFlottes', 'redemanderLeSysteme');
 
-        $affectation = strpos($corps, 'contactsDeSurveillance = Array.isArray(reponse.surveillance)');
+        $affectation = strpos($corps, 'contactsDeSurveillance = adopter(contactsDeSurveillance, Array.isArray(reponse.surveillance)');
         $appel = strpos($corps, 'dessinerLaSurveillance(carte);');
 
         $this->assertIsInt($affectation);

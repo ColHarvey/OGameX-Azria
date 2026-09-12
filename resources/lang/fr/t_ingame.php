@@ -376,6 +376,8 @@ return [
         'tactical_surveillance_raid_round_trip' => 'Aller-retour',
         'tactical_surveillance_refused' => 'Cette attaque a été refusée.',
         'tactical_surveillance_leaving' => 'quitte le système',
+        'tactical_surveillance_ally' => 'allié',
+        'tactical_surveillance_stranger' => 'ni ami ni allié',
         'tactical_patrol_layer' => 'Patrouilles',
         'tactical_patrol_reserve' => 'Réserve',
         'tactical_patrol_upkeep' => 'Consommation',

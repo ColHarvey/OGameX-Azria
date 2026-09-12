@@ -3,6 +3,7 @@
 namespace OGame\Patrol;
 
 use Illuminate\Support\Facades\DB;
+use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\Patrol;
 use OGame\Patrol\Enums\SurveillanceFact;
@@ -25,15 +26,29 @@ use OGame\Patrol\Enums\SurveillanceTier;
  * rechargement ni un evenement. La reponse porte l instant de son calcul : une reponse retardee est
  * ainsi reconnaissable comme ancienne, et ne peut pas rehabiller ce qui vient d etre revoque.
  *
- * ## Ce que chaque palier ajoute (R5)
+ * ## Ce que chaque palier ajoute (R5, amendee le 12 septembre 2026)
  *
- * N1 le contact et sa **position tenue a jour** — promettre de suivre un contact puis lui refuser sa
- * position des qu il bouge serait se contredire. N2 l identite du proprietaire. N3 la direction, et
- * la destination **seulement si elle reste dans le systeme observe** : livrer une destination hors
- * couverture en l appelant « destination » reviendrait a voir sans detecteur. N4 un ordre de
- * grandeur. N5 l effectif exact.
+ * N1 le contact, sa **position tenue a jour**, **son mouvement dans le systeme en temps reel** et
+ * **sa relation** avec l observateur — allie ou etranger, ce qui decide de sa couleur sur la carte.
+ * Le mouvement en temps reel exige la route : les deux bouts du segment en cours et ses deux
+ * instants, sans quoi le navigateur ne pourrait qu attendre la reponse suivante pour deplacer le
+ * point. Un bout **hors du systeme observe** n est pas livre — il est reduit a « ailleurs »
+ * (`outside`), sans galaxie ni systeme : la flotte se dirige vers le bord, et c est tout ce qu on
+ * sait. Un bout qui **nomme un corps** n est livre qu a partir de N2 ; en dessous il est reduit a
+ * son point (la vue Galaxie donnerait sinon le proprietaire par la position). La cible d un raid,
+ * elle, est un point : elle voyage — c est la ou la flotte va, et le mouvement en temps reel le
+ * montrerait de toute facon. N2 l identite du proprietaire. N3 la direction dite en clair, et la
+ * destination **seulement si elle reste dans le systeme observe**. N4 un ordre de grandeur. N5
+ * l effectif exact.
  *
- * Jamais, a aucun palier : la composition d une flotte, sa reserve, sa cargaison.
+ * **Decision de Keven** (adaptation d Azria, pas une regle d origine) : « tout ce qui se passe sur
+ * la carte en temps reel ». Avant cette date, N1 ne livrait qu une position — nulle pendant un vol —
+ * et la destination dans le systeme etait un fait du N3. Un point qui bouge sous les yeux revele sa
+ * direction de toute facon ; le N3 garde le fait dit en clair. Reversible en retirant `segment` du
+ * premier palier.
+ *
+ * Jamais, a aucun palier : la composition d une flotte, sa reserve, sa cargaison, ni l identifiant
+ * de sa mission.
  */
 final class SurveillanceProjection
 {
@@ -53,8 +68,11 @@ final class SurveillanceProjection
         [200, null],
     ];
 
-    public function __construct(private readonly SurveillanceWatch $watch)
-    {
+    public function __construct(
+        private readonly SurveillanceWatch $watch,
+        private readonly FleetRelation $relation,
+        private readonly PatrolPricing $pricing,
+    ) {
     }
 
     /**
@@ -114,6 +132,13 @@ final class SurveillanceProjection
                 'x' => $patrol->x === null ? null : (int)$patrol->x,
                 'y' => $patrol->y === null ? null : (int)$patrol->y,
             ];
+            $projection['relation'] = $this->relation->between($userId, (int)$patrol->user_id);
+
+            $route = $this->route($patrol, $galaxy, $system, $tier->reveals(SurveillanceFact::Owner));
+
+            if ($route !== null) {
+                $projection['segment'] = $route;
+            }
         }
 
         if ($tier->reveals(SurveillanceFact::Owner)) {
@@ -136,6 +161,93 @@ final class SurveillanceProjection
         }
 
         return $projection;
+    }
+
+    /**
+     * La route de la patrouille dans le systeme observe : les deux bouts de son segment en cours et
+     * ses deux instants. C est ce qui permet au navigateur de la faire avancer a chaque image, et
+     * de la poser dans son cap une fois arrivee — la meme forme que pour les patrouilles du lecteur.
+     *
+     * Un bout hors du systeme observe est reduit a `['outside' => true]` : ni galaxie, ni systeme,
+     * ni position. « Absent, jamais masque » vaut ici aussi — la clef qui dirait ou n existe pas.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function route(Patrol $patrol, int $galaxy, int $system, bool $bodiesMayBeNamed): array|null
+    {
+        $segment = $patrol->currentMission;
+
+        if (!$segment instanceof FleetMission) {
+            return null;
+        }
+
+        /*
+         * **Le vol courant d une patrouille qui attaque est l attaque — deja traitee quand la flotte
+         * rentre.** Le retour du raid est une autre mission, nee de l attaque, que la patrouille ne
+         * nomme qu une fois posee (`parkAgain`). Sans lui, la carte de l observateur laissait le
+         * glyphe au point de la patrouille pendant tout le retour. Relecture du lot.
+         */
+        if ((int)$segment->processed === 1) {
+            $segment = FleetMission::query()
+                ->where('parent_id', (int)$segment->id)
+                ->where('processed', 0)
+                ->orderBy('id')
+                ->first();
+
+            if (!$segment instanceof FleetMission) {
+                return null;
+            }
+        }
+
+        return [
+            'from' => $this->bout($segment->galaxy_from, $segment->system_from, $segment->position_from, $segment->type_from, $segment->x_from, $segment->y_from, $galaxy, $system, $bodiesMayBeNamed),
+            'to' => $this->bout($segment->galaxy_to, $segment->system_to, $segment->position_to, $segment->type_to, $segment->x_to, $segment->y_to, $galaxy, $system, $bodiesMayBeNamed),
+            'time_departure' => (int)$segment->time_departure,
+            'time_arrival' => (int)$segment->time_arrival,
+        ];
+    }
+
+    /**
+     * Un bout de segment, tel que la carte le lit — ou « ailleurs » s il sort du systeme observe.
+     *
+     * **Un corps n est nomme qu a partir du palier de l identite.** La position d orbite d une
+     * planete se lit dans la vue Galaxie avec son proprietaire : un segment de lancement qui nomme
+     * la planete de depart aurait livre l identite des le premier palier (relecture du lot). En
+     * dessous, le corps est reduit a son **point** — l adresse de son orbite dans la geometrie du
+     * systeme —, ce qui suffit a la carte pour faire partir ou arriver le glyphe au bon endroit,
+     * sans dire quel corps c est.
+     *
+     * @return array<string, mixed>
+     */
+    private function bout(mixed $galaxy, mixed $system, mixed $position, mixed $type, mixed $x, mixed $y, int $observedGalaxy, int $observedSystem, bool $bodiesMayBeNamed): array
+    {
+        if ((int)$galaxy !== $observedGalaxy || (int)$system !== $observedSystem) {
+            return ['outside' => true];
+        }
+
+        $estUnCorps = (int)$type !== PlanetType::SpatialPoint->value && ($x === null || $y === null);
+
+        if ($estUnCorps && !$bodiesMayBeNamed) {
+            $point = $this->pricing->geometry()->bodyPoint((int)$position);
+
+            return [
+                'galaxy' => (int)$galaxy,
+                'system' => (int)$system,
+                'position' => 0,
+                'type' => PlanetType::SpatialPoint->value,
+                'x' => $point->x,
+                'y' => $point->y,
+            ];
+        }
+
+        return [
+            'galaxy' => (int)$galaxy,
+            'system' => (int)$system,
+            'position' => (int)$position,
+            'type' => (int)$type,
+            'x' => $x === null ? null : (int)$x,
+            'y' => $y === null ? null : (int)$y,
+        ];
     }
 
     /**

@@ -2,6 +2,7 @@
 
 namespace OGame\Observers;
 
+use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use OGame\Events\FleetMovementChanged;
 use OGame\Models\FleetMission;
@@ -86,7 +87,44 @@ class FleetMissionObserver
             'system_to' => (int)$mission->system_to,
         ];
 
-        DB::afterCommit(static function () use ($destinataires, $charge): void {
+        /*
+         * **Ceux qui observent la patrouille apprennent son ordre a l instant — et rien d autre.**
+         * Un joueur dont le reseau tient un contact visible sur cette patrouille verrait sinon sa
+         * carte ignorer le depart jusqu a la veille suivante. Decision de Keven, 12 septembre 2026 :
+         * tout ce qui se passe sur la carte en temps reel.
+         *
+         * Mais l annonce du proprietaire porte la destination reelle et l identifiant de la mission :
+         * livree telle quelle a l observateur, elle lui aurait dit ou part la patrouille — ce que la
+         * projection lui refuse (`outside`) — et nomme une mission etrangere. Relecture du lot,
+         * constat bloquant. L observateur recoit donc une annonce **reduite** : le seul systeme ou
+         * il tient le contact, des deux cotes, et aucun identifiant. Sa carte y redemande ce qu il
+         * a le droit de voir ; c est tout ce que l annonce doit permettre.
+         *
+         * Le systeme est celui de la planete observatrice, qui doit exister encore et lui
+         * appartenir — le meme predicat que la lecture du palier. Un observateur dont le corps a
+         * ete detruit ou cede n est plus prevenu.
+         */
+        $observateurs = [];
+
+        if ($mission->patrol_id !== null) {
+            $observateurs = DB::table('surveillance_contacts')
+                ->join('planets', 'planets.id', '=', 'surveillance_contacts.observer_planet_id')
+                ->whereColumn('planets.user_id', 'surveillance_contacts.observer_user_id')
+                ->where(static function ($requete): void {
+                    $requete->whereNull('planets.destroyed')->orWhere('planets.destroyed', 0);
+                })
+                ->where('surveillance_contacts.patrol_id', (int)$mission->patrol_id)
+                ->whereNull('surveillance_contacts.revoked_at')
+                ->where('surveillance_contacts.visible_from', '<=', Date::now()->timestamp)
+                ->distinct()
+                ->get(['surveillance_contacts.observer_user_id', 'planets.galaxy', 'planets.system'])
+                ->map(static fn (object $ligne): array => [(int)$ligne->observer_user_id, (int)$ligne->galaxy, (int)$ligne->system])
+                ->filter(static fn (array $o): bool => $o[0] !== 0 && !in_array($o[0], $destinataires, true))
+                ->values()
+                ->all();
+        }
+
+        DB::afterCommit(static function () use ($destinataires, $observateurs, $charge): void {
             foreach ($destinataires as $joueur) {
                 if ($joueur === 0) {
                     continue;
@@ -100,6 +138,10 @@ class FleetMissionObserver
                     $charge['galaxy_to'],
                     $charge['system_to'],
                 ));
+            }
+
+            foreach ($observateurs as [$observateur, $galaxie, $systeme]) {
+                broadcast(new FleetMovementChanged($observateur, 0, $galaxie, $systeme, $galaxie, $systeme));
             }
         });
     }

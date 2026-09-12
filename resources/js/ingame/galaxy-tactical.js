@@ -1353,7 +1353,7 @@
 
         finirLOrdre(carte, f);
 
-        var choisis = carte.querySelectorAll('.gtBody.gtSelected, .gtPatrolMarker.gtSelected');
+        var choisis = carte.querySelectorAll('.gtBody.gtSelected, .gtPatrolMarker.gtSelected, .gtSurveillanceContact.gtSelected');
 
         for (var i = 0; i < choisis.length; i++) {
             choisis[i].classList.remove('gtSelected');
@@ -1771,12 +1771,18 @@
 
     /*
      * La porte de bord : le point ou une trajectoire quitte ou rejoint la carte. Elle est prise dans
-     * la direction du corps local, poussee jusqu'au bord — un vol vers l'exterieur part donc du
-     * cote ou il se dirige, et un vol entrant arrive par le cote oppose a l'etoile.
+     * la direction du bout local — corps ou point de l espace —, poussee jusqu'au bord : un vol vers
+     * l'exterieur part donc du cote ou il se dirige, et un vol entrant arrive par le cote oppose a
+     * l'etoile.
+     *
+     * **Le bout, pas sa position d orbite.** La porte se prenait par `pointDe(position)` : pour un
+     * point de l espace (`position` 0) cela ne designait aucune orbite et rendait `NaN` — un vol
+     * inter-systemes vers un point de patrouille n avait pas de porte. `pointDeBout()` sait lire
+     * un point comme un corps.
      */
-    function porteDeBord(position) {
+    function porteVers(bout) {
         var c = centre();
-        var p = pointDe(position);
+        var p = pointDeBout(bout);
         var dx = p.x - c.x;
         var dy = p.y - c.y;
         var longueur = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -1945,12 +1951,21 @@
         return p;
     }
 
-    function extremites(mouvement, galaxie, systeme) {
-        var partIci = Number(mouvement.from.galaxy) === galaxie && Number(mouvement.from.system) === systeme;
-        var arriveIci = Number(mouvement.to.galaxy) === galaxie && Number(mouvement.to.system) === systeme;
+    /*
+     * Un bout est-il dans le systeme affiche ? Un bout « ailleurs » (`outside`) — celui qu un
+     * contact de surveillance porte quand sa route sort du systeme observe, sans dire ou — n y est
+     * jamais : la carte ne connait de lui que la direction du bord.
+     */
+    function estIci(bout, galaxie, systeme) {
+        return !!bout && !bout.outside && Number(bout.galaxy) === galaxie && Number(bout.system) === systeme;
+    }
 
-        var depart = partIci ? pointDeBout(mouvement.from) : porteDeBord(mouvement.to.position);
-        var arrivee = arriveIci ? pointDeBout(mouvement.to) : porteDeBord(mouvement.from.position);
+    function extremites(mouvement, galaxie, systeme) {
+        var partIci = estIci(mouvement.from, galaxie, systeme);
+        var arriveIci = estIci(mouvement.to, galaxie, systeme);
+
+        var depart = partIci ? pointDeBout(mouvement.from) : porteVers(mouvement.to);
+        var arrivee = arriveIci ? pointDeBout(mouvement.to) : porteVers(mouvement.from);
 
         return { depart: depart, arrivee: arrivee, partIci: partIci, arriveIci: arriveIci };
     }
@@ -2474,13 +2489,14 @@
     function animer() {
         arreterLAnimation();
 
-        if ((mouvements.length === 0 && patrouilles.length === 0) || document.hidden) {
+        if ((mouvements.length === 0 && patrouilles.length === 0 && contactsDeSurveillance.length === 0) || document.hidden) {
             return;
         }
 
         var boucle = function () {
             placerLesPatrouilles();
             placerLesMarqueurs();
+            placerLesContacts();
             animation = window.requestAnimationFrame(boucle);
         };
 
@@ -2613,6 +2629,13 @@
     function intituleDuContact(contact) {
         var morceaux = [locaFiche('surveillanceContact', 'Contact')];
 
+        /* Ami ou allie, ou ni l un ni l autre : c est la couleur du glyphe, dite avec des mots. */
+        if (contact.relation) {
+            morceaux.push(relationDe(contact) === 'ally'
+                ? locaFiche('surveillanceAlly', 'allie')
+                : locaFiche('surveillanceStranger', 'ni ami ni allie'));
+        }
+
         if (contact.owner && contact.owner.name) {
             morceaux.push(contact.owner.name);
         }
@@ -2641,34 +2664,349 @@
      * disparait de l ecran sans rechargement, et sans qu aucun code n ait a se souvenir de ce
      * qu il fallait retirer.
      */
+    /*
+     * ## Les glyphes des flottes detectees
+     *
+     * Les deux dessins de Keven (12 septembre 2026) : **rouge** pour ce qui n est ni ami ni allie —
+     * neutre, inconnu, pirate, ennemi declare, tous etrangers au meme titre —, **bleu** pour un ami
+     * ou un membre de son alliance. C est le serveur qui dit la relation (`relation`), a chaque
+     * reponse ; la carte ne la devine jamais.
+     *
+     * Ils pointent vers le haut. Le vaisseau du jeu regarde a droite, et `capDe()` compte depuis la
+     * droite : la rotation ajoute donc un quart de tour pour qu un glyphe pointe la ou il va.
+     */
+    var GLYPHES_DE_RELATION = { ally: 'fleet-ally.png', stranger: 'fleet-stranger.png' };
+    var ROTATION_NATIVE_DES_GLYPHES = 90;
+
+    /* La route d un contact se dessine a partir de ce palier : en dessous, le point qui bouge suffit. */
+    var PALIER_DE_LA_ROUTE = 3;
+
+    function relationDe(contact) {
+        return contact.relation === 'ally' ? 'ally' : 'stranger';
+    }
+
+    function contactParId(id) {
+        var trouve = null;
+
+        contactsDeSurveillance.forEach(function (contact) {
+            if (contact && Number(contact.contact_id) === Number(id)) {
+                trouve = contact;
+            }
+        });
+
+        return trouve;
+    }
+
+    /* Les routes des contacts : un SVG dans la couche, sous les marqueurs, qui n attrape aucun clic. */
+    function coucheDesRoutes(carte) {
+        var couche = coucheDeSurveillance(carte);
+        var routes = couche.querySelector('.gtSurveillanceRoutes');
+
+        if (routes) {
+            return routes;
+        }
+
+        routes = svg('svg', {
+            'class': 'gtSurveillanceRoutes',
+            viewBox: '0 0 ' + LARGEUR + ' ' + (HAUTEUR - PIED),
+            width: LARGEUR,
+            height: HAUTEUR - PIED,
+            'aria-hidden': 'true'
+        });
+        couche.insertBefore(routes, couche.firstChild);
+
+        return routes;
+    }
+
+    /*
+     * Le marqueur d un contact, compose une fois. Ses gestionnaires lisent le contact **au moment du
+     * geste**, par sa clef : le marqueur survit aux reponses, l objet est adopte, et un gestionnaire
+     * qui retiendrait l objet de sa creation se tromperait le jour ou l adoption changerait.
+     */
+    function composerLeContact(carte, id) {
+        var marqueur = element('div', 'gtSurveillanceContact');
+        var icone = element('img', '');
+
+        marqueur.setAttribute('data-contact-id', String(id));
+        marqueur.setAttribute('role', 'button');
+        marqueur.setAttribute('tabindex', '0');
+        icone.alt = '';
+        icone.setAttribute('aria-hidden', 'true');
+        marqueur.appendChild(icone);
+
+        var ouvrir = function (evenement) {
+            evenement.stopPropagation();
+
+            var contact = contactParId(id);
+
+            if (contact) {
+                choisirLeContact(carte, contact, marqueur);
+            }
+        };
+
+        marqueur.addEventListener('click', ouvrir);
+        marqueur.addEventListener('keydown', function (evenement) {
+            if (evenement.key === 'Enter' || evenement.key === ' ') {
+                evenement.preventDefault();
+                ouvrir(evenement);
+            }
+        });
+
+        return marqueur;
+    }
+
+    /*
+     * Le palier, la relation, l intitule et le glyphe — chacun ecrit **seulement s il change** :
+     * reposer la meme adresse sur un `<img>` fait repartir un GIF, et un marqueur qui change de
+     * classe a chaque image scintille.
+     */
+    function habillerLeContact(contact) {
+        var marqueur = contact._marqueur;
+        var icone = marqueur.querySelector('img');
+        var palier = String(contact.tier);
+        var relation = relationDe(contact);
+        var intitule = intituleDuContact(contact);
+        var adresse = '/img/galaxy-tactical/' + GLYPHES_DE_RELATION[relation];
+
+        if (marqueur.getAttribute('data-tier') !== palier) {
+            marqueur.setAttribute('data-tier', palier);
+        }
+
+        if (marqueur.getAttribute('data-relation') !== relation) {
+            marqueur.setAttribute('data-relation', relation);
+        }
+
+        if (marqueur.title !== intitule) {
+            marqueur.title = intitule;
+            marqueur.setAttribute('aria-label', intitule);
+        }
+
+        if (icone.getAttribute('src') !== adresse) {
+            icone.src = adresse;
+        }
+
+        contact._vaisseau = icone;
+    }
+
+    function retirerLeContact(contact) {
+        if (contact._marqueur && contact._marqueur.parentNode) {
+            contact._marqueur.parentNode.removeChild(contact._marqueur);
+        }
+
+        if (contact._route && contact._route.parentNode) {
+            contact._route.parentNode.removeChild(contact._route);
+        }
+
+        contact._marqueur = null;
+        contact._vaisseau = null;
+        contact._route = null;
+    }
+
+    /*
+     * ## Dessiner les contacts sans rien recreer
+     *
+     * Deux defauts fermes en meme temps que le clignotement. Un contact etait place a
+     * `left: <x>px` avec les **unites du serveur** (par exemple −660) au lieu de passer par la
+     * projection de la carte : il etait dessine hors carte. Et un contact en vol — x et y nuls
+     * pendant un vol — tombait dans le coin. Personne ne l avait vu : aucun joueur n avait encore de
+     * contact.
+     *
+     * Desormais chaque contact a un marqueur compose une fois puis habille a chaque reponse, et
+     * `placerLesContacts()` le pose a chaque image : par la projection quand il est pose, sur sa
+     * route quand il vole — la meme route que le serveur livre des le premier palier (journal §132).
+     * Sa route se dessine a partir du troisieme palier ; en dessous, le point qui bouge suffit. Ce
+     * n est pas une protection — la route est dans la reponse, donc chez le lecteur — mais ce que
+     * chaque palier **montre** : au troisieme, le serveur dit la direction en clair, et la carte
+     * la trace.
+     */
     function dessinerLaSurveillance(carte) {
         var couche = coucheDeSurveillance(carte);
-
-        couche.innerHTML = '';
+        var routes = coucheDesRoutes(carte);
+        var retenus = {};
+        var galaxie = carte.gtSysteme ? carte.gtSysteme.galaxie : 0;
+        var systeme = carte.gtSysteme ? carte.gtSysteme.systeme : 0;
 
         contactsDeSurveillance.forEach(function (contact) {
             if (!contact || !contact.position) {
                 return;
             }
 
-            var marqueur = element('div', 'gtSurveillanceContact');
-            var intitule = intituleDuContact(contact);
+            retenus[String(contact.contact_id)] = true;
+            contact._bouts = contact.segment ? extremites(contact.segment, galaxie, systeme) : null;
 
-            marqueur.setAttribute('data-contact-id', String(contact.contact_id));
-            marqueur.setAttribute('data-tier', String(contact.tier));
-            marqueur.setAttribute('aria-label', intitule);
-            marqueur.title = intitule;
-            marqueur.setAttribute('role', 'button');
-            marqueur.setAttribute('tabindex', '0');
-            marqueur.addEventListener('click', function (evenement) {
-                evenement.stopPropagation();
-                choisirLeContact(carte, contact, marqueur);
-            });
+            if (!contact._marqueur || contact._marqueur.parentNode !== couche) {
+                contact._marqueur = composerLeContact(carte, Number(contact.contact_id));
+                couche.appendChild(contact._marqueur);
+            }
 
-            marqueur.style.left = String(contact.position.x) + 'px';
-            marqueur.style.top = String(contact.position.y) + 'px';
+            habillerLeContact(contact);
 
-            couche.appendChild(marqueur);
+            var avecRoute = Number(contact.tier) >= PALIER_DE_LA_ROUTE && contact._bouts !== null;
+
+            if (avecRoute) {
+                if (!contact._route || contact._route.parentNode !== routes) {
+                    contact._route = svg('line', { 'data-contact-id': String(contact.contact_id) });
+                    routes.appendChild(contact._route);
+                }
+
+                var classe = 'gtContactRoute gtContactRoute--' + relationDe(contact);
+
+                if (contact._route.getAttribute('class') !== classe) {
+                    contact._route.setAttribute('class', classe);
+                }
+            } else if (contact._route) {
+                if (contact._route.parentNode) {
+                    contact._route.parentNode.removeChild(contact._route);
+                }
+
+                contact._route = null;
+            }
+        });
+
+        balayer(couche, '.gtSurveillanceContact', 'data-contact-id', retenus);
+        balayer(routes, '.gtContactRoute', 'data-contact-id', retenus);
+
+        /*
+         * **Un contact revoque emporte sa fiche.** La revocation s applique a la reponse, et la
+         * fiche etait le seul endroit ou un renseignement revoque restait lisible — proprietaire,
+         * effectif, bouton de frappe vers un contact qui n existe plus. Relecture du lot.
+         */
+        var f = carte.querySelector('.gtCard');
+
+        if (f && !f.hidden && f.gtContact && !retenus[String(f.gtContact.contact_id)]) {
+            deselectionner(carte, false);
+        }
+
+        placerLesContacts();
+    }
+
+    /* La carte qui contient un noeud de la couche : le marqueur ne la retient pas, il la retrouve. */
+    function carteDe(noeud) {
+        var carte = noeud;
+
+        while (carte && carte.id !== 'galaxyTactical') {
+            carte = carte.parentNode;
+        }
+
+        return carte || document.getElementById('galaxyTactical');
+    }
+
+    /*
+     * Ou est un contact a cet instant. En vol sur sa route : interpole comme une flotte du joueur,
+     * hors carte pendant l hyperespace. Pose : son point, par la projection. Arrive d apres
+     * l horloge mais pas encore pose par le serveur (x et y nuls) : au bout de sa route — ou parti,
+     * si cette route sort du systeme.
+     */
+    function pointDeContact(contact, maintenant) {
+        var segment = contact.segment;
+
+        if (segment && contact._bouts) {
+            if (Number(segment.time_arrival) > maintenant) {
+                var duree = Math.max(1, segment.time_arrival - segment.time_departure);
+                var global = Math.min(1, Math.max(0, (maintenant - segment.time_departure) / duree));
+                var local = progressionLocale(global, contact._bouts);
+
+                return {
+                    point: {
+                        x: contact._bouts.depart.x + (contact._bouts.arrivee.x - contact._bouts.depart.x) * local.avancement,
+                        y: contact._bouts.depart.y + (contact._bouts.arrivee.y - contact._bouts.depart.y) * local.avancement
+                    },
+                    enTransit: local.enTransit,
+                    enVol: true
+                };
+            }
+
+            /*
+             * **Arrive, le segment l emporte sur la position.** Pour une patrouille posee les deux
+             * coincident. Pendant un raid, non : la patrouille garde son point (c est l adresse du
+             * retour) tandis que sa flotte est sur la cible, puis rentre. Retomber sur la position
+             * faisait sauter le glyphe au point a l instant d arrivee, et l y laissait pendant
+             * tout le retour. Relecture du lot. Une route qui sort du systeme laisse le glyphe
+             * hors carte.
+             */
+            return { point: contact._bouts.arrivee, enTransit: !contact._bouts.arriveIci, enVol: false };
+        }
+
+        var position = contact.position;
+
+        if (position && position.x !== null && position.x !== undefined && position.y !== null && position.y !== undefined) {
+            return { point: pointSpatial(Number(position.x), Number(position.y)), enTransit: false, enVol: false };
+        }
+
+        return null;
+    }
+
+    /* Chaque contact a sa place du moment, son glyphe dans son cap, et sa route quand il vole. */
+    function placerLesContacts() {
+        var maintenant = maintenantServeur() / 1000;
+
+        contactsDeSurveillance.forEach(function (contact) {
+            if (!contact || !contact._marqueur) {
+                return;
+            }
+
+            var ou = pointDeContact(contact, maintenant);
+
+            if (!ou) {
+                contact._marqueur.hidden = true;
+
+                if (contact._route && contact._route.style.display !== 'none') {
+                    contact._route.style.display = 'none';
+                }
+
+                return;
+            }
+
+            var gauche = ou.point.x.toFixed(1) + 'px';
+            var haut = ou.point.y.toFixed(1) + 'px';
+            var aBouge = contact._marqueur.style.left !== gauche || contact._marqueur.style.top !== haut;
+
+            contact._marqueur.hidden = ou.enTransit;
+            contact._marqueur.style.left = gauche;
+            contact._marqueur.style.top = haut;
+
+            /*
+             * **La fiche suit le glyphe.** Un contact est le seul objet de la carte a la fois
+             * mobile a chaque image et porteur d une fiche ; posee une fois au clic, elle restait
+             * ou l on avait clique pendant que le glyphe s eloignait. Relecture du lot.
+             */
+            if (aBouge) {
+                var f = carteDe(contact._marqueur).querySelector('.gtCard');
+
+                if (f && !f.hidden && f.gtBloc === contact._marqueur) {
+                    /* Par le point, pas par la mise en page : le point est connu, et jsdom n a pas d `offsetLeft`. */
+                    placerAuPoint(f, Math.round(ou.point.x), Math.round(ou.point.y));
+                }
+            }
+
+            if (contact._vaisseau) {
+                var cap = (contact._bouts ? capDe(contact._bouts) : 0) + ROTATION_NATIVE_DES_GLYPHES;
+                var rotation = 'rotate(' + cap.toFixed(1) + 'deg)';
+
+                if (contact._vaisseau.style.transform !== rotation) {
+                    contact._vaisseau.style.transform = rotation;
+                }
+            }
+
+            if (contact._route) {
+                var affichage = ou.enVol ? '' : 'none';
+
+                if (contact._route.style.display !== affichage) {
+                    contact._route.style.display = affichage;
+                }
+
+                if (ou.enVol) {
+                    var bouts = [['x1', contact._bouts.depart.x], ['y1', contact._bouts.depart.y], ['x2', contact._bouts.arrivee.x], ['y2', contact._bouts.arrivee.y]];
+
+                    bouts.forEach(function (paire) {
+                        var valeur = paire[1].toFixed(1);
+
+                        if (contact._route.getAttribute(paire[0]) !== valeur) {
+                            contact._route.setAttribute(paire[0], valeur);
+                        }
+                    });
+                }
+            }
         });
     }
 
@@ -2715,8 +3053,11 @@
         f.classList.add('gtCard--contact');
 
         if (coords && contact.position) {
+            /* En vol, le serveur ne donne pas de point : la fiche le dit au lieu d ecrire « null ». */
             coords.textContent = '[' + contact.position.galaxy + ':' + contact.position.system + ']'
-                + ' · X ' + contact.position.x + ' · Y ' + contact.position.y;
+                + (contact.position.x === null || contact.position.x === undefined
+                    ? ' · ' + locaFiche('surveillanceMoving', 'en deplacement')
+                    : ' · X ' + contact.position.x + ' · Y ' + contact.position.y);
         }
 
         contenant.innerHTML = '';
@@ -4586,17 +4927,24 @@
     }
 
     /*
-     * ## Les compteurs du bandeau
+     * ## Les compteurs du bandeau, et la veille de la carte
      *
      * « Esp.Sonde », « Recy. », « IPM » et « Emplacements utilises » ne se mettaient a jour qu'au
      * chargement du systeme (retour de Keven). Le point d'entree des flottes porte desormais ces
      * compteurs (`counters`, meme source que la photographie : `GalaxyHeaderCounters`), et la carte
      * les ecrit a chaque reponse — a chaque mouvement annonce sur le canal du joueur, qu'il touche
-     * ou non le systeme affiche —, puis en veille toutes les VEILLE_DES_COMPTEURS millisecondes : le
+     * ou non le systeme affiche —, puis en veille toutes les VEILLE_DE_LA_CARTE millisecondes : le
      * chantier spatial n'annonce rien, et c'est la requete qui fait avancer sa file.
+     *
+     * **La veille applique toute la reponse, pas seulement les compteurs.** Elle demandait deja les
+     * flottes toutes les trente secondes et n en gardait que les compteurs : un contact de
+     * surveillance devenu visible, une route changee chez un contact, n atteignaient l ecran qu au
+     * prochain mouvement du joueur. Decision de Keven, 12 septembre 2026 : tout en temps reel. La
+     * reponse est adoptee sur place — rien ne clignote —, donc dix secondes ne coutent que la
+     * requete, que le serveur recevait deja.
      */
-    var VEILLE_DES_COMPTEURS = 30000;
-    var veilleDesCompteurs = null;
+    var VEILLE_DE_LA_CARTE = 10000;
+    var veilleDeLaCarte = null;
 
     function mettreAJourLesCompteurs(compteurs) {
         if (!compteurs) {
@@ -4626,18 +4974,28 @@
             });
     }
 
-    function arreterLaVeilleDesCompteurs() {
-        if (veilleDesCompteurs !== null) {
-            window.clearInterval(veilleDesCompteurs);
-            veilleDesCompteurs = null;
+    function arreterLaVeilleDeLaCarte() {
+        if (veilleDeLaCarte !== null) {
+            window.clearInterval(veilleDeLaCarte);
+            veilleDeLaCarte = null;
         }
     }
 
-    function demarrerLaVeilleDesCompteurs(carte) {
-        arreterLaVeilleDesCompteurs();
-        veilleDesCompteurs = window.setInterval(function () {
-            rafraichirLesCompteurs(carte);
-        }, VEILLE_DES_COMPTEURS);
+    /*
+     * **La veille laisse finir la demande en cours.** Chaque demande perime la precedente : une
+     * reponse plus lente que dix secondes aurait ete jetee par la veille suivante, et ainsi de
+     * suite — la carte figee sous un serveur lent, sans que rien ne le dise. Relecture du lot.
+     * `demandeEnVol` retombe a la fin de toute demande, reussie ou non (`.always`).
+     */
+    var demandeEnVol = false;
+
+    function demarrerLaVeilleDeLaCarte(carte) {
+        arreterLaVeilleDeLaCarte();
+        veilleDeLaCarte = window.setInterval(function () {
+            if (carte.gtSysteme && !demandeEnVol) {
+                chargerLesFlottes(carte, carte.gtSysteme.galaxie, carte.gtSysteme.systeme);
+            }
+        }, VEILLE_DE_LA_CARTE);
     }
 
     /*
@@ -4650,19 +5008,32 @@
      * obligeait a tout reconstruire — et tout reconstruire, c etait le clignotement general que
      * Keven voyait a chaque arrivee : « tout disparait et apres l icone des patrouilles revient ».
      */
-    function adopter(anciens, nouveaux) {
+    function adopter(anciens, nouveaux, clef) {
+        var nom = clef || 'id';
         var parId = {};
 
         anciens.forEach(function (a) {
-            parId[String(a.id)] = a;
+            parId[String(a[nom])] = a;
         });
 
         return nouveaux.map(function (n) {
-            var a = parId[String(n.id)];
+            var a = parId[String(n[nom])];
 
             if (!a) {
                 return n;
             }
+
+            /*
+             * **Ce que la reponse ne porte plus est oublie.** Pour un contact, l absence d une clef
+             * EST la protection (« absent, jamais masque ») : un palier qui redescend retire le
+             * proprietaire, la route, l effectif — et l objet adopte ne doit pas les garder. Seules
+             * les proprietes de la carte (`_marqueur`, `_bouts`...) survivent. Relecture du lot.
+             */
+            Object.keys(a).forEach(function (clef) {
+                if (clef.charAt(0) !== '_' && !Object.prototype.hasOwnProperty.call(n, clef)) {
+                    delete a[clef];
+                }
+            });
 
             Object.keys(n).forEach(function (clef) {
                 a[clef] = n[clef];
@@ -4696,16 +5067,39 @@
         }
 
         /*
-         * **Invalider d abord, adopter la generation ensuite.** Le droit est inconnu tant que la
-         * reponse n est pas la : on masque des maintenant, ce qui perime du meme geste toute
-         * demande plus ancienne encore en vol. La demande qui part prend la generation qui en
-         * resulte — l inverse ferait qu elle se perimerait elle-meme.
+         * **Perimer d abord, adopter la generation ensuite.** Toute demande plus ancienne encore en
+         * vol est perimee des maintenant ; la demande qui part prend la generation qui en resulte —
+         * l inverse ferait qu elle se perimerait elle-meme.
+         *
+         * **Et l ecran reste tel quel jusqu a la reponse.** La couche etait masquee des le depart de
+         * chaque demande (revue 124 de Codex : une revocation en cours ne doit pas rester visible).
+         * Avec une demande toutes les dix secondes, ce masquage faisait clignoter chaque contact dix
+         * fois par minute. Decision de Keven, 12 septembre 2026 : tout ce qui se passe sur la carte
+         * en temps reel. La revocation est appliquee **a la reponse** — ce que le serveur ne rend
+         * plus quitte la carte —, et la reponse perimee reste jetee. Le masquage immediat demeure
+         * la ou l ecran a pu rater une revocation sans que rien ne le lui dise : la perte de
+         * connexion (`perdre`) et le retour d un onglet endormi.
          */
-        invaliderLaSurveillance(carte);
+        generationDuContexte++;
 
         var generation = generationDuContexte;
 
+        demandeEnVol = true;
+
         window.jQuery.getJSON(galaxyFleetsUrl, { galaxy: galaxie, system: systeme })
+            .always(function () {
+                demandeEnVol = false;
+            })
+            /*
+             * **Une demande qui echoue masque.** Depuis que la demande ordinaire ne masque plus au
+             * depart, un echec (serveur en erreur, session tombee, reseau coupe sans evenement)
+             * laissait l ancien contenu a l ecran indefiniment. La regle etait : une requete echouee
+             * laisse la couche vide plutot que l ancien contenu. Elle vaut toujours ; elle s applique
+             * a l echec, plus au depart. Relecture du lot.
+             */
+            .fail(function () {
+                invaliderLaSurveillance(carte);
+            })
             .done(function (reponse) {
                 if (generation !== generationDuContexte || !reponse || !reponse.success) {
                     return;
@@ -4725,7 +5119,7 @@
                  */
                 mouvements = adopter(mouvements, Array.isArray(reponse.movements) ? reponse.movements : []);
                 patrouilles = adopter(patrouilles, Array.isArray(reponse.patrols) ? reponse.patrols : []);
-                contactsDeSurveillance = Array.isArray(reponse.surveillance) ? reponse.surveillance : [];
+                contactsDeSurveillance = adopter(contactsDeSurveillance, Array.isArray(reponse.surveillance) ? reponse.surveillance : [], 'contact_id');
                 dessinerLesMouvements(carte, galaxie, systeme);
                 dessinerLesPatrouilles(carte, galaxie, systeme);
                 dessinerLaSurveillance(carte);
@@ -4899,7 +5293,7 @@
         ecouterLeSysteme(carte, galaxie, systeme);
         ecouterLeJoueur(carte);
         surveillerLaConnexion(carte);
-        demarrerLaVeilleDesCompteurs(carte);
+        demarrerLaVeilleDeLaCarte(carte);
     }
 
     /*
@@ -4994,6 +5388,12 @@
                 p._bouts = extremites(p.segment, carte.gtSysteme.galaxie, carte.gtSysteme.systeme);
             }
         });
+
+        contactsDeSurveillance.forEach(function (contact) {
+            if (contact && contact._marqueur && contact.segment) {
+                contact._bouts = extremites(contact.segment, carte.gtSysteme.galaxie, carte.gtSysteme.systeme);
+            }
+        });
     }
 
     function arreterLesOrbites() {
@@ -5018,7 +5418,7 @@
         if (document.hidden) {
             arreterLAnimation();
             arreterLesOrbites();
-            arreterLaVeilleDesCompteurs();
+            arreterLaVeilleDeLaCarte();
 
             return;
         }
@@ -5027,15 +5427,16 @@
 
         if (carte && carte.gtSysteme) {
             demarrerLesOrbites(carte);
-            demarrerLaVeilleDesCompteurs(carte);
-            rafraichirLesCompteurs(carte);
+            demarrerLaVeilleDeLaCarte(carte);
 
             /*
              * **Un onglet qui revient ne sait plus ce qu il a le droit de voir.** Il a pu manquer
              * une revocation pendant qu il dormait : reprendre l animation sans redemander aurait
-             * laisse a l ecran des renseignements devenus interdits, indefiniment. La demande
-             * masque d abord, puis repeint ce que le serveur autorise encore.
+             * laisse a l ecran des renseignements devenus interdits, indefiniment. Ici — et a la
+             * perte de connexion — la couche est masquee **avant** la demande, puis repeinte avec
+             * ce que le serveur autorise encore ; la demande ordinaire, elle, ne masque plus.
              */
+            invaliderLaSurveillance(carte);
             chargerLesFlottes(carte, carte.gtSysteme.galaxie, carte.gtSysteme.systeme);
         }
     });

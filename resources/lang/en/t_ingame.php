@@ -490,6 +490,8 @@ return [
         'tactical_surveillance_raid_round_trip' => 'Round trip',
         'tactical_surveillance_refused' => 'This attack was refused.',
         'tactical_surveillance_leaving' => 'leaving the system',
+        'tactical_surveillance_ally' => 'ally',
+        'tactical_surveillance_stranger' => 'neither friend nor ally',
         'tactical_patrol_layer' => 'Patrols',
         'tactical_patrol_reserve' => 'Reserve',
         'tactical_patrol_upkeep' => 'Upkeep',

@@ -77,8 +77,9 @@ function faireJQuery() {
         demandes.push({
             url,
             donnees,
-            repondre(reponse) { if (rappels.done) { rappels.done(reponse); } },
-            echouer(erreur) { if (rappels.fail) { rappels.fail(erreur); } }
+            /* Le faux porte la regle du vrai : jQuery appelle `always` apres `done` comme apres `fail`. */
+            repondre(reponse) { if (rappels.done) { rappels.done(reponse); } if (rappels.always) { rappels.always(); } },
+            echouer(erreur) { if (rappels.fail) { rappels.fail(erreur); } if (rappels.always) { rappels.always(); } }
         });
 
         return api;
@@ -95,8 +96,9 @@ function faireJQuery() {
         envois.push({
             url,
             donnees,
-            repondre(reponse) { if (rappels.done) { rappels.done(reponse); } },
-            echouer(erreur) { if (rappels.fail) { rappels.fail(erreur); } }
+            /* Le faux porte la regle du vrai : jQuery appelle `always` apres `done` comme apres `fail`. */
+            repondre(reponse) { if (rappels.done) { rappels.done(reponse); } if (rappels.always) { rappels.always(); } },
+            echouer(erreur) { if (rappels.fail) { rappels.fail(erreur); } if (rappels.always) { rappels.always(); } }
         });
 
         return api;
@@ -175,12 +177,26 @@ function unMonde({ avecDiffuseur = true } = {}) {
         };
     }
 
+    /*
+     * **Les veilles sont retenues, pas attendues.** La veille de la carte tourne toutes les dix
+     * secondes ; un essai qui l attendrait durerait dix secondes. Le monde garde chaque minuterie
+     * armee, et l essai declenche celle qu il vise.
+     */
+    const veilles = [];
+    const setIntervalReel = window.setInterval.bind(window);
+
+    window.setInterval = (fonction, delai) => {
+        veilles.push({ fonction, delai });
+
+        return setIntervalReel(fonction, delai);
+    };
+
     const script = window.document.createElement('script');
     script.textContent = readFileSync(SOURCE, 'utf8');
     window.document.body.appendChild(script);
 
-    const amorcer = (galaxie, systeme) => {
-        window.renderContentGalaxy({ system: { galaxy: galaxie, system: systeme, galaxyContent: [] } });
+    const amorcer = (galaxie, systeme, lignes = []) => {
+        window.renderContentGalaxy({ system: { galaxy: galaxie, system: systeme, galaxyContent: lignes } });
     };
 
     const contacts = () => Array.from(window.document.querySelectorAll('.gtSurveillanceContact'));
@@ -206,22 +222,55 @@ function unMonde({ avecDiffuseur = true } = {}) {
         cible.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }));
     };
 
-    return { window, demandes, envois, diffuseur, amorcer, contacts, fiche, boutons, cliquer, fermer, unMouvementAnnonce };
+    return { window, demandes, envois, diffuseur, veilles, amorcer, contacts, fiche, boutons, cliquer, fermer, unMouvementAnnonce };
 }
 
 /**
  * Une reponse du serveur portant ces contacts.
  */
-function reponse(galaxie, systeme, contacts, maintenant = 1_700_000_000, patrouilles = []) {
+function reponse(galaxie, systeme, contacts, maintenant = 1_700_000_000, patrouilles = [], mouvements = []) {
     return {
         success: true,
         galaxy: galaxie,
         system: systeme,
         server_now: maintenant,
-        movements: [],
+        movements: mouvements,
         patrols: patrouilles,
         surveillance: contacts,
         counters: {}
+    };
+}
+
+/** Une ligne de Galaxie telle que le serveur la rend : une position, un corps, un proprietaire. */
+function uneLigne(position) {
+    return { position, playerId: 9, planets: [{ planetType: 1, planetId: 5000 + position, planetName: 'Terra', playerId: 9 }] };
+}
+
+/** Un bout de segment : la planete en position 4, ou un point de l espace. */
+const PLANETE_4 = { galaxy: 1, system: 5, position: 4, type: 1, x: null, y: null };
+const POINT = { galaxy: 1, system: 5, position: 0, type: 5, x: -660, y: 580 };
+
+/** La route de la planete 4 au point, en vol autour de l instant 1_700_000_000. */
+function uneRoute(depart = 1_699_999_700, arrivee = 1_700_000_300) {
+    return { from: PLANETE_4, to: POINT, time_departure: depart, time_arrival: arrivee };
+}
+
+/**
+ * Un mouvement du joueur sur la meme route, tel que `FleetMovementProjection` le compose : c est
+ * lui, dessine par la couche des flottes, qui sert d etalon au contact — meme point, meme cap.
+ */
+function unMouvementSurLaRoute(route = uneRoute()) {
+    return {
+        id: 777,
+        mission_type: 3,
+        label: 'Transport',
+        side: 'friendly',
+        is_return: false,
+        patrol_id: null,
+        from: route.from,
+        to: route.to,
+        time_departure: route.time_departure,
+        time_arrival: route.time_arrival
     };
 }
 
@@ -231,7 +280,7 @@ function reponse(galaxie, systeme, contacts, maintenant = 1_700_000_000, patroui
  * Les champs sont ceux du serveur, pas ceux qui rendraient l essai commode : un montage qui invente
  * sa charge utile ne prouve rien du jeu.
  */
-function unePatrouille({ id = 3, numero = 1, frappePermise = true } = {}) {
+function unePatrouille({ id = 3, numero = 1, frappePermise = true, x = -660, y = 580 } = {}) {
     return {
         id,
         number: numero,
@@ -239,7 +288,7 @@ function unePatrouille({ id = 3, numero = 1, frappePermise = true } = {}) {
         state_label: 'Stationnee',
         galaxy: 1,
         system: 5,
-        point: { x: -660, y: 580 },
+        point: { x, y },
         segment: {
             id: 900 + id,
             from: { galaxy: 1, system: 5, position: 0, type: 5, x: -660, y: 580 },
@@ -266,8 +315,25 @@ function unePatrouille({ id = 3, numero = 1, frappePermise = true } = {}) {
     };
 }
 
-function unContact(id, x, y) {
-    return { contact_id: id, tier: 1, computed_at: 1_700_000_000, position: { galaxy: 1, system: 5, x, y } };
+/**
+ * Un contact tel que `SurveillanceProjection` le compose depuis le 12 septembre 2026 : sa position
+ * (nulle pendant un vol), sa relation, et sa route dans le systeme quand il en a une.
+ */
+function unContact(id, x, y, { tier = 1, relation = 'stranger', segment = null } = {}) {
+    const contact = { contact_id: id, tier, computed_at: 1_700_000_000, relation, position: { galaxy: 1, system: 5, x, y } };
+
+    if (segment) {
+        contact.segment = segment;
+    }
+
+    return contact;
+}
+
+/** L angle d une rotation, ecrite en SVG (`rotate(12.3)`) ou en CSS (`rotate(12.3deg)`). */
+function angleDe(rotation) {
+    const m = /rotate\((-?[\d.]+)(?:deg)?\)/.exec(rotation || '');
+
+    return m ? Number(m[1]) : null;
 }
 
 test('le module s amorce et demande la couche des flottes', () => {
@@ -283,18 +349,31 @@ test('le module s amorce et demande la couche des flottes', () => {
     }
 });
 
-test('un contact autorise apparait, et rien de plus', () => {
+/**
+ * **Un contact autorise apparait — la ou la carte projette son point.**
+ *
+ * La premiere version de ce temoin exigeait `left: 640px` pour un contact a x = 640 : elle
+ * epinglait le defaut. Le serveur donne des **unites** du systeme (un point de patrouille vaut par
+ * exemple −660), et la carte les projette — comme elle le fait pour les patrouilles du joueur. Le
+ * temoin compare donc au marqueur d une patrouille posee au **meme point** : egalite des deux
+ * sources, jamais un nombre.
+ */
+test('un contact autorise apparait, la ou la carte projette son point', () => {
     const monde = unMonde();
 
     try {
         monde.amorcer(1, 5);
-        monde.demandes[0].repondre(reponse(1, 5, [unContact(11, 640, 480)]));
+        monde.demandes[0].repondre(reponse(1, 5, [unContact(11, -660, 580)], 1_700_000_000, [unePatrouille()]));
 
         const vus = monde.contacts();
+        const patrouille = monde.window.document.querySelector('.gtPatrolMarker[data-patrol-id="3"]');
 
         assert.equal(vus.length, 1, 'le contact autorise n apparait pas');
         assert.equal(vus[0].getAttribute('data-contact-id'), '11');
-        assert.equal(vus[0].style.left, '640px');
+        assert.ok(patrouille, 'la premisse manque : aucune patrouille posee a comparer');
+        assert.notEqual(vus[0].style.left, '-660px', 'le contact est place en unites brutes : hors carte');
+        assert.equal(vus[0].style.left, patrouille.style.left, 'le contact n est pas la ou la carte projette son point (x)');
+        assert.equal(vus[0].style.top, patrouille.style.top, 'le contact n est pas la ou la carte projette son point (y)');
     } finally {
         monde.fermer();
     }
@@ -332,30 +411,44 @@ test('une liste vide retire ce qui etait affiche', () => {
  * mouvements et les patrouilles — jamais les contacts. Seule l invalidation dans la demande peut
  * donc vider la couche.
  */
-test('la couche est masquee des le depart de la demande, sans attendre la reponse', () => {
+/**
+ * **Une simple demande ne masque plus la couche ; la reponse la met a jour sur place.**
+ *
+ * La premiere version de ce temoin exigeait le contraire — la couche vidée des le depart de la
+ * demande (revue 124 de Codex). Avec une veille toutes les dix secondes, ce masquage faisait
+ * clignoter chaque contact dix fois par minute. Decision de Keven, 12 septembre 2026 : tout ce qui
+ * se passe sur la carte en temps reel. La revocation est appliquee a la reponse (temoin de la liste
+ * vide), la reponse perimee reste jetee (temoin suivant), et le masquage immediat demeure a la
+ * perte de connexion et au retour d onglet (deux temoins plus bas).
+ *
+ * Meme montage qu avant : une annonce de mouvement recharge la couche SANS redessiner la carte.
+ */
+test('une simple demande ne masque plus la couche, et la reponse la met a jour sans la recreer', () => {
     const monde = unMonde();
 
     try {
         monde.amorcer(1, 5);
-        monde.demandes[0].repondre(reponse(1, 5, [unContact(11, 640, 480)]));
-        assert.equal(monde.contacts().length, 1);
+        monde.demandes[0].repondre(reponse(1, 5, [unContact(11, 640, 480), unContact(12, 100, 100)]));
+        assert.equal(monde.contacts().length, 2);
 
-        // Une annonce de mouvement recharge la couche SANS redessiner la carte : le DOM reste en
-        // place, donc seule l invalidation dans la demande peut vider les contacts.
+        const avant = monde.contacts()[0];
+        const imageAvant = avant.querySelector('img');
+
         monde.unMouvementAnnonce(1, 5);
 
         assert.ok(monde.demandes.length > 1, 'l annonce n a pas relance de demande : le cas ne prouverait rien');
+        assert.equal(monde.contacts().length, 2, 'les contacts sont masques pendant le vol de la requete : ils clignotent a chaque veille');
 
-        assert.equal(
-            monde.contacts().length,
-            0,
-            'les contacts restent affiches pendant le vol de la requete : une revocation en cours serait invisible'
-        );
+        // La reponse : le contact 11 reste, le 12 est revoque.
+        monde.demandes[monde.demandes.length - 1].repondre(reponse(1, 5, [unContact(11, 640, 480)], 1_700_000_010));
+
+        assert.equal(monde.contacts().length, 1, 'la revocation n est pas appliquee a la reponse');
+        assert.strictEqual(monde.contacts()[0], avant, 'le contact qui reste a ete recree : il a clignote');
+        assert.strictEqual(monde.contacts()[0].querySelector('img'), imageAvant, 'son glyphe a ete recree');
     } finally {
         monde.fermer();
     }
 });
-
 test('une ancienne reponse arrivant apres une revocation ne reintroduit rien', () => {
     const monde = unMonde();
 
@@ -418,6 +511,12 @@ test('un changement de systeme rejette la reponse de l ancien', () => {
     }
 });
 
+/**
+ * **C est l echec qui masque, pas une coupure.** La premiere version de ce temoin provoquait la
+ * demande par une deconnexion — qui masque elle aussi —, et restait verte alors que rien ne
+ * masquait a l echec (relecture du lot). Ici la demande vient d une annonce de mouvement, qui ne
+ * masque rien : seul l echec peut vider la couche.
+ */
 test('une requete echouee laisse la couche vide plutot que l ancien contenu', () => {
     const monde = unMonde();
 
@@ -426,8 +525,8 @@ test('une requete echouee laisse la couche vide plutot que l ancien contenu', ()
         monde.demandes[0].repondre(reponse(1, 5, [unContact(11, 640, 480)]));
         assert.equal(monde.contacts().length, 1);
 
-        monde.diffuseur.declencher('disconnected');
-        monde.diffuseur.declencher('connected');
+        monde.unMouvementAnnonce(1, 5);
+        assert.equal(monde.contacts().length, 1, 'la premisse manque : la demande a masque avant son echec');
 
         const derniere = monde.demandes[monde.demandes.length - 1];
         derniere.echouer({ status: 500 });
@@ -834,6 +933,463 @@ test('chaque envoi de la fiche d un contact porte son jeton', () => {
                 'l envoi ' + rang + ' vers ' + envoi.url + ' part sans jeton : le serveur le refusera avant de le lire'
             );
         });
+    } finally {
+        monde.fermer();
+    }
+});
+
+
+/**
+ * **Un contact en vol avance sur sa route, comme une flotte du joueur.**
+ *
+ * Le meme segment, deux dessins : un mouvement du joueur trace par la couche des flottes, et un
+ * contact porte par la couche de surveillance. A un meme instant ils sont au meme point — egalite
+ * des deux sources, a un pas d arrondi pres (deux calculs du meme point, arrondis au dixieme).
+ * Un contact en vol n a pas de position (x et y nuls) : sans sa route, il n aurait rien a montrer.
+ */
+test('un contact en vol avance sur sa route comme une flotte du joueur', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [unContact(11, null, null, { segment: uneRoute() })], 1_700_000_000, [], [unMouvementSurLaRoute()]));
+
+        const contact = monde.contacts()[0];
+        const etalon = monde.window.document.querySelector('.gtMovement[data-mission-id="777"] .gtFleetMarker');
+        const position = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(etalon ? etalon.getAttribute('transform') : '');
+
+        assert.ok(contact && etalon && position, 'la premisse manque : pas de contact ou pas d etalon');
+        assert.equal(contact.hidden, false, 'le contact en vol est masque');
+
+        const ecartX = Math.abs(parseFloat(contact.style.left) - Number(position[1]));
+        const ecartY = Math.abs(parseFloat(contact.style.top) - Number(position[2]));
+
+        assert.ok(ecartX < 0.15 && ecartY < 0.15, 'le contact n est pas la ou vole la flotte etalon : ' + contact.style.left + '/' + contact.style.top + ' contre ' + position[1] + '/' + position[2]);
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Rouge pour un etranger, bleu pour un allie** — les deux glyphes de Keven, et l attribut que la
+ * feuille lit. La relation vient du serveur ; la carte ne la devine pas.
+ */
+test('un contact etranger porte le glyphe rouge, un allie le bleu', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5);
+        monde.demandes[0].repondre(reponse(1, 5, [unContact(11, 640, 480, { relation: 'stranger' }), unContact(12, 100, 100, { relation: 'ally' })]));
+
+        const [etranger, allie] = monde.contacts();
+
+        assert.equal(etranger.getAttribute('data-relation'), 'stranger');
+        assert.equal(allie.getAttribute('data-relation'), 'ally');
+        assert.notEqual(etranger.querySelector('img').getAttribute('src').indexOf('fleet-stranger'), -1, 'l etranger ne porte pas le glyphe rouge');
+        assert.notEqual(allie.querySelector('img').getAttribute('src').indexOf('fleet-ally'), -1, 'l allie ne porte pas le glyphe bleu');
+        assert.notEqual(etranger.title.indexOf('ni ami ni allie'), -1, 'l intitule de l etranger ne dit pas sa relation : ' + etranger.title);
+        assert.notEqual(allie.title.indexOf('allie'), -1, 'l intitule de l allie ne dit pas sa relation : ' + allie.title);
+        assert.equal(allie.title.indexOf('ni ami'), -1, 'l intitule de l allie est celui de l etranger : ' + allie.title);
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Le glyphe pointe la ou il va : le cap de la route, plus le quart de tour de son orientation.**
+ *
+ * Le vaisseau du jeu regarde a droite, les glyphes de Keven regardent en haut. L etalon est le cap
+ * que la couche des flottes donne au meme segment ; le glyphe doit en differer d exactement 90
+ * degres. La premisse refuse un cap nul, ou tourne et non tourne coincideraient.
+ */
+test('le glyphe pointe dans le cap de sa route, un quart de tour apres le vaisseau du jeu', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [unContact(11, null, null, { segment: uneRoute() })], 1_700_000_000, [], [unMouvementSurLaRoute()]));
+
+        const glyphe = monde.contacts()[0].querySelector('img');
+        const etalon = monde.window.document.querySelector('.gtMovement[data-mission-id="777"] .gtShip');
+        const capEtalon = angleDe(etalon && etalon.getAttribute('transform'));
+
+        assert.ok(capEtalon !== null && capEtalon !== 0, 'la premisse manque : pas de cap etalon non nul');
+
+        const ecart = Math.abs(angleDe(glyphe.style.transform) - (capEtalon + 90));
+
+        assert.ok(ecart < 0.15, 'le glyphe ne pointe pas dans le cap de sa route : ' + glyphe.style.transform + ' contre ' + capEtalon + ' + 90');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **La route se trace a partir du troisieme palier, jamais avant.** Au troisieme, ses bouts sont
+ * ceux que la couche des flottes donne au meme segment. Les deux moities comptent : sans la
+ * premiere, tracer toutes les routes passerait la seconde.
+ */
+test('la route d un contact se dessine a partir du troisieme palier, et pas avant', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [unContact(11, null, null, { tier: 1, segment: uneRoute() })], 1_700_000_000, [], [unMouvementSurLaRoute()]));
+
+        assert.equal(monde.window.document.querySelector('.gtContactRoute'), null, 'la route d un contact du premier palier est tracee');
+
+        monde.unMouvementAnnonce(1, 5);
+        monde.demandes[monde.demandes.length - 1].repondre(reponse(1, 5, [unContact(11, null, null, { tier: 3, segment: uneRoute() })], 1_700_000_010, [], [unMouvementSurLaRoute()]));
+
+        const route = monde.window.document.querySelector('.gtContactRoute');
+        const etalon = monde.window.document.querySelector('.gtMovement[data-mission-id="777"] .gtTrajectory');
+
+        assert.ok(route && etalon, 'la premisse manque : pas de route au troisieme palier, ou pas d etalon');
+        assert.notEqual(route.style.display, 'none', 'la route est tracee mais masquee');
+
+        ['x1', 'y1', 'x2', 'y2'].forEach((bout) => {
+            assert.ok(Math.abs(parseFloat(route.getAttribute(bout)) - parseFloat(etalon.getAttribute(bout))) < 0.15, 'le bout ' + bout + ' de la route ne suit pas la trajectoire etalon');
+        });
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Sans position ni route, un contact ne se dessine nulle part** — jamais dans le coin. Un contact
+ * en vol dont le palier ne livrerait pas la route serait invisible plutot que faux.
+ */
+test('un contact sans position ni route n est dessine nulle part', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5);
+        monde.demandes[0].repondre(reponse(1, 5, [unContact(11, null, null)]));
+
+        const contact = monde.contacts()[0];
+
+        assert.ok(contact, 'la premisse manque : le contact n a pas de marqueur');
+        assert.equal(contact.hidden, true, 'un contact sans position ni route est dessine — dans le coin');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Le retour d un onglet masque avant de redemander.** C est l un des deux cas ou le masquage
+ * immediat demeure : l onglet a pu rater une revocation pendant qu il dormait.
+ */
+test('le retour d un onglet masque la couche avant de redemander', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5);
+        monde.demandes[0].repondre(reponse(1, 5, [unContact(11, 640, 480)]));
+        assert.equal(monde.contacts().length, 1);
+
+        const avant = monde.demandes.length;
+
+        monde.window.document.dispatchEvent(new monde.window.Event('visibilitychange'));
+
+        assert.equal(monde.contacts().length, 0, 'l onglet revenu garde a l ecran ce qu il a peut-etre perdu le droit de voir');
+        assert.ok(monde.demandes.length > avant, 'l onglet revenu ne redemande pas la couche');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **La veille de la carte applique toute la reponse, pas seulement les compteurs.** Elle est
+ * declenchee a la main (le monde retient les minuteries) : sa reponse porte un contact, et le
+ * contact apparait. Avant, la veille demandait les flottes et n en gardait que les compteurs.
+ */
+test('la veille de la carte applique toute la reponse, contacts compris', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5);
+        monde.demandes[0].repondre(reponse(1, 5, []));
+        assert.equal(monde.contacts().length, 0);
+
+        const veille = monde.veilles.find((v) => v.delai === 10000);
+
+        assert.ok(veille, 'la premisse manque : aucune veille de dix secondes n est armee (' + monde.veilles.map((v) => v.delai).join(', ') + ')');
+
+        const avant = monde.demandes.length;
+
+        veille.fonction();
+
+        assert.ok(monde.demandes.length > avant, 'la veille ne demande rien');
+        monde.demandes[monde.demandes.length - 1].repondre(reponse(1, 5, [unContact(11, 640, 480)], 1_700_000_010));
+
+        assert.equal(monde.contacts().length, 1, 'la veille n applique pas les contacts de sa reponse');
+    } finally {
+        monde.fermer();
+    }
+});
+
+
+/**
+ * **Une route qui quitte le systeme mene au bord, sans destination.**
+ *
+ * Le serveur retient le bout lointain (`outside`, sans galaxie ni systeme) ; la carte doit tracer
+ * jusqu a la porte de bord, dans la direction du point de depart. L etalon est un mouvement du
+ * joueur qui part du meme point vers un autre systeme : la couche des flottes lui donne la meme
+ * porte. **Ce trajet part d un point de l espace** : la porte se prenait par la position d orbite
+ * du bout (`pointDe(0)`), qui n existe pas, et rendait `NaN`.
+ */
+test('une route qui quitte le systeme mene au bord, dans la direction de son depart', () => {
+    const monde = unMonde();
+
+    try {
+        const route = { from: POINT, to: { outside: true }, time_departure: 1_699_999_700, time_arrival: 1_700_000_300 };
+        const etalon = unMouvementSurLaRoute({ from: POINT, to: { galaxy: 1, system: 6, position: 8, type: 1, x: null, y: null }, time_departure: 1_699_999_700, time_arrival: 1_700_000_300 });
+
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [unContact(11, null, null, { tier: 3, segment: route })], 1_700_000_000, [], [etalon]));
+
+        const tracee = monde.window.document.querySelector('.gtContactRoute');
+        const trajectoire = monde.window.document.querySelector('.gtMovement[data-mission-id="777"] .gtTrajectory');
+
+        assert.ok(tracee && trajectoire, 'la premisse manque : pas de route tracee ou pas d etalon');
+
+        ['x1', 'y1', 'x2', 'y2'].forEach((bout) => {
+            const valeur = parseFloat(tracee.getAttribute(bout));
+
+            assert.ok(Number.isFinite(valeur), 'le bout ' + bout + ' de la route n est pas un nombre : ' + tracee.getAttribute(bout));
+            assert.ok(Math.abs(valeur - parseFloat(trajectoire.getAttribute(bout))) < 0.15, 'le bout ' + bout + ' ne mene pas a la meme porte que l etalon');
+        });
+
+        // Et le contact lui-meme suit cette route, sans revelation : aucun « 6 » de systeme dans la charge.
+        assert.equal(JSON.stringify(route).indexOf('"system":6'), -1, 'la premisse manque : la route du contact revele le systeme de destination');
+    } finally {
+        monde.fermer();
+    }
+});
+
+
+/**
+ * **Un palier qui redescend retire ce qu il ne donne plus.** `adopter()` garde l objet ; il doit
+ * oublier les clefs absentes de la reponse neuve — pour un contact, l absence EST la protection.
+ * Relecture du lot : le proprietaire et la route survivaient a la baisse du palier.
+ */
+test('un contact adopte oublie les faits que la reponse ne porte plus', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        const riche = unContact(11, null, null, { tier: 3, segment: uneRoute() });
+        riche.owner = { id: 42, name: 'Zorg' };
+        monde.demandes[0].repondre(reponse(1, 5, [riche]));
+
+        const marqueur = monde.contacts()[0];
+
+        assert.notEqual(marqueur.title.indexOf('Zorg'), -1, 'la premisse manque : le proprietaire n est pas dans l intitule');
+        assert.ok(monde.window.document.querySelector('.gtContactRoute'), 'la premisse manque : pas de route au troisieme palier');
+
+        monde.unMouvementAnnonce(1, 5);
+        monde.demandes[monde.demandes.length - 1].repondre(reponse(1, 5, [unContact(11, 640, 480, { tier: 1 })], 1_700_000_010));
+
+        assert.strictEqual(monde.contacts()[0], marqueur, 'la premisse manque : le marqueur a ete recree');
+        assert.equal(marqueur.title.indexOf('Zorg'), -1, 'le proprietaire survit a la baisse du palier : ' + marqueur.title);
+        assert.equal(monde.window.document.querySelector('.gtContactRoute'), null, 'la route survit a la baisse du palier');
+        assert.equal(marqueur.getAttribute('data-tier'), '1');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Un contact qui porte une position ET une route en vol est sur sa route.** Le cas du raid :
+ * la patrouille garde son point (l adresse du retour) pendant que sa flotte vole. Inverser la
+ * priorite laissait le temoin du vol vert, puisque sa position etait nulle. Relecture du lot.
+ */
+test('un contact qui a une position et une route en vol est sur sa route, pas a sa position', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [unContact(11, -660, 580, { segment: uneRoute() })], 1_700_000_000, [unePatrouille()], [unMouvementSurLaRoute()]));
+
+        const contact = monde.contacts()[0];
+        const posee = monde.window.document.querySelector('.gtPatrolMarker[data-patrol-id="3"]');
+        const etalon = monde.window.document.querySelector('.gtMovement[data-mission-id="777"] .gtFleetMarker');
+        const position = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(etalon ? etalon.getAttribute('transform') : '');
+
+        assert.ok(contact && posee && position, 'la premisse manque');
+        assert.notEqual(contact.style.left, posee.style.left, 'le contact est a sa position posee alors que sa route est en vol');
+        assert.ok(Math.abs(parseFloat(contact.style.left) - Number(position[1])) < 0.15, 'le contact n est pas sur sa route');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Arrivee, la route l emporte encore sur la position.** Le raid a l instant d arrivee : la flotte
+ * est sur la cible, la patrouille garde son point. Le glyphe reste au bout de la route — l etalon
+ * est une patrouille posee exactement la —, il ne saute pas au point.
+ */
+test('un contact dont la route est arrivee reste au bout de sa route, pas a sa position', () => {
+    const monde = unMonde();
+
+    try {
+        const arrivee = { from: PLANETE_4, to: { galaxy: 1, system: 5, position: 0, type: 5, x: 700, y: 500 }, time_departure: 1_699_999_000, time_arrival: 1_699_999_900 };
+
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [unContact(11, -660, 580, { segment: arrivee })], 1_700_000_000, [unePatrouille({ id: 3, x: -660, y: 580 }), unePatrouille({ id: 4, x: 700, y: 500 })]));
+
+        const contact = monde.contacts()[0];
+        const auPoint = monde.window.document.querySelector('.gtPatrolMarker[data-patrol-id="3"]');
+        const auBout = monde.window.document.querySelector('.gtPatrolMarker[data-patrol-id="4"]');
+
+        assert.ok(contact && auPoint && auBout, 'la premisse manque');
+        assert.notEqual(auPoint.style.left, auBout.style.left, 'la premisse manque : le point et le bout coincident');
+        assert.equal(contact.style.left, auBout.style.left, 'le glyphe a saute au point de la patrouille a l arrivee de sa route');
+        assert.equal(contact.style.top, auBout.style.top);
+        assert.equal(contact.hidden, false);
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **En hyperespace, le contact n est sur aucune carte.** Une route sortante au-dela du premier
+ * quart, une route entrante avant le dernier quart : masque ; dans le dernier quart d une route
+ * entrante : visible. Relecture du lot : `hidden = enTransit` n etait mesure nulle part.
+ */
+test('un contact en hyperespace est masque, et reparait dans le dernier quart d une route entrante', () => {
+    const monde = unMonde();
+
+    try {
+        // Sortante, a mi-vol : au-dela du quart local, donc partie.
+        const sortante = { from: POINT, to: { outside: true }, time_departure: 1_699_999_000, time_arrival: 1_700_001_000 };
+        // Entrante, a un dixieme : pas encore la. Une autre, a neuf dixiemes : dans le dernier quart.
+        const entranteLoin = { from: { outside: true }, to: POINT, time_departure: 1_699_999_900, time_arrival: 1_700_000_900 };
+        const entranteProche = { from: { outside: true }, to: POINT, time_departure: 1_699_999_100, time_arrival: 1_700_000_100 };
+
+        monde.amorcer(1, 5);
+        monde.demandes[0].repondre(reponse(1, 5, [
+            unContact(11, null, null, { segment: sortante }),
+            unContact(12, null, null, { segment: entranteLoin }),
+            unContact(13, null, null, { segment: entranteProche })
+        ]));
+
+        const [partie, pasEncore, presque] = monde.contacts();
+
+        assert.equal(partie.hidden, true, 'un contact parti en hyperespace reste dessine au bord');
+        assert.equal(pasEncore.hidden, true, 'un contact pas encore arrive est dessine au bord');
+        assert.equal(presque.hidden, false, 'un contact dans le dernier quart de son approche est masque');
+        assert.ok(Number.isFinite(parseFloat(presque.style.left)), 'le contact entrant n a pas de position finie : ' + presque.style.left);
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Les contacts seuls animent la carte.** Le cas de l observateur : un reseau sur sa planete,
+ * aucune flotte ni patrouille a lui dans le systeme. Sans la troisieme condition de `animer()`, le
+ * contact ne bougerait qu a chaque veille. Mesure sur deux images.
+ */
+test('un contact seul, sans flotte ni patrouille du joueur, avance a chaque image', async () => {
+    const monde = unMonde();
+
+    try {
+        const maintenant = Math.floor(Date.now() / 1000);
+        const route = { from: PLANETE_4, to: POINT, time_departure: maintenant - 30, time_arrival: maintenant + 30 };
+
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [unContact(11, null, null, { segment: route })], maintenant));
+
+        const contact = monde.contacts()[0];
+        const avant = contact.style.left;
+
+        await new Promise((suite) => setTimeout(suite, 250));
+
+        assert.notEqual(contact.style.left, avant, 'le contact seul ne bouge pas entre deux images : la boucle ne s arme pas pour lui');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Un contact revoque emporte sa fiche.** La revocation s applique a la reponse ; la fiche ouverte
+ * etait le seul endroit ou le renseignement revoque restait lisible. Relecture du lot.
+ */
+test('un contact revoque pendant que sa fiche est ouverte la referme', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5);
+        monde.demandes[0].repondre(reponse(1, 5, [unContact(11, 640, 480)]));
+
+        monde.cliquer(monde.contacts()[0]);
+
+        const f = monde.fiche();
+
+        assert.ok(f && !f.hidden && f.gtContact, 'la premisse manque : la fiche du contact ne s est pas ouverte');
+
+        monde.unMouvementAnnonce(1, 5);
+        monde.demandes[monde.demandes.length - 1].repondre(reponse(1, 5, [], 1_700_000_010));
+
+        assert.equal(monde.contacts().length, 0);
+        assert.equal(f.hidden, true, 'la fiche d un contact revoque reste ouverte, avec son bouton de frappe');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **La fiche suit le glyphe.** Un contact en vol : sa fiche, ouverte au clic, se replace avec lui.
+ */
+test('la fiche d un contact en vol suit son glyphe', async () => {
+    const monde = unMonde();
+
+    try {
+        const maintenant = Math.floor(Date.now() / 1000);
+        const route = { from: PLANETE_4, to: POINT, time_departure: maintenant - 30, time_arrival: maintenant + 30 };
+
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [unContact(11, null, null, { segment: route })], maintenant));
+
+        monde.cliquer(monde.contacts()[0]);
+
+        const f = monde.fiche();
+
+        assert.ok(f && !f.hidden, 'la premisse manque : la fiche ne s est pas ouverte');
+
+        const avant = f.style.left + '/' + f.style.top;
+
+        await new Promise((suite) => setTimeout(suite, 250));
+
+        assert.notEqual(f.style.left + '/' + f.style.top, avant, 'la fiche reste ou l on a clique pendant que le glyphe s eloigne');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **La veille laisse finir la demande en cours.** Chaque demande perime la precedente : sous un
+ * serveur lent, une veille qui repartait quand meme jetait toute reponse de plus de dix secondes,
+ * indefiniment. Relecture du lot. La veille reprend des que la demande a repondu.
+ */
+test('la veille de la carte ne repart pas tant qu une demande est en vol', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5);
+
+        const veille = monde.veilles.find((v) => v.delai === 10000);
+
+        assert.ok(veille, 'la premisse manque : aucune veille de dix secondes');
+        assert.equal(monde.demandes.length, 1, 'la premisse manque : la demande d amorcage n est pas en vol');
+
+        veille.fonction();
+
+        assert.equal(monde.demandes.length, 1, 'la veille a ecrase une demande en vol : sa reponse sera jetee');
+
+        monde.demandes[0].repondre(reponse(1, 5, []));
+        veille.fonction();
+
+        assert.equal(monde.demandes.length, 2, 'la veille ne repart pas une fois la demande finie');
     } finally {
         monde.fermer();
     }

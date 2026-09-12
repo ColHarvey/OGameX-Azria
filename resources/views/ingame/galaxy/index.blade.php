@@ -185,6 +185,9 @@
                     'surveillanceStationed' => __('t_ingame.galaxy.tactical_surveillance_stationed'),
                     'surveillanceMoving' => __('t_ingame.galaxy.tactical_surveillance_moving'),
                     'surveillanceLeaving' => __('t_ingame.galaxy.tactical_surveillance_leaving'),
+                    // La relation d un contact : la couleur de son glyphe, dite avec des mots.
+                    'surveillanceAlly' => __('t_ingame.galaxy.tactical_surveillance_ally'),
+                    'surveillanceStranger' => __('t_ingame.galaxy.tactical_surveillance_stranger'),
                     // Le panneau d'attaque d'un contact : le libelle du bouton, et chaque refus.
                     'surveillanceOwner' => __('t_ingame.galaxy.tactical_surveillance_owner'),
                     'surveillanceAttack' => __('t_ingame.galaxy.tactical_surveillance_attack'),

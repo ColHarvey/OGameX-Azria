@@ -1488,36 +1488,52 @@
 /*
  * ## Les contacts de surveillance
  *
- * Ils existaient dans le rendu depuis le chantier de la surveillance, **sans une ligne de style** :
- * le marqueur etait pose sur la carte et restait invisible. Le renseignement etait calcule, protege,
- * transmis — et personne ne le voyait.
+ * Ce que les Reseaux de surveillance detectent d une flotte etrangere, et que la carte montre.
  *
- * ### Un contact n'est pas une flotte, et ne doit pas y ressembler
+ * ### Une flotte detectee est une flotte, et elle a une couleur
  *
- * Une flotte amie porte son dessin et sa trajectoire : on sait ce qu'elle est. Un contact est une
- * **detection**, c'est-a-dire une incertitude qui a une position. Le vocabulaire graphique le dit :
- * un cercle ouvert plutot qu'une forme pleine, une teinte d'alerte plutot que le cyan des siens, et
- * un halo qui respire — ce qu'on suit sur un ecran radar, pas ce qu'on regarde par un hublot.
+ * La premiere version dessinait un cercle d alerte qui respirait — une « detection », pas une
+ * flotte. Decision de Keven, 12 septembre 2026 : ce qui est detecte se dessine **comme une
+ * flotte**, avec ses deux glyphes — **rouge** pour ce qui n est ni ami ni allie, **bleu** pour un ami
+ * ou un membre de son alliance (`data-relation`, dit par le serveur). Les glyphes portent leur lueur
+ * dans l image ; la feuille ne leur ajoute rien, sinon la taille, la selection et le survol.
  *
- * ### Le palier se lit sur le marqueur
+ * ### Le palier se lit encore sur le marqueur
  *
- * `data-tier` porte ce que le joueur a le droit de savoir. Au premier palier il y a « quelque chose
- * la » : le cercle est seul et faible. Aux paliers superieurs le contact se precise, et le marqueur
- * gagne en presence. **Aucun palier n'ajoute d'information dans le style** — c'est la fiche qui dit
- * quoi ; le style dit seulement a quel point on en sait.
+ * `data-tier` porte ce que le joueur a le droit de savoir. Aux deux premiers paliers, le contact
+ * respire : un signal, pas une identification. A partir du troisieme il est franc, et sa route se
+ * trace (`.gtContactRoute`, un SVG sous les marqueurs). **Aucun palier n ajoute d information dans
+ * le style** — c est la fiche qui dit quoi ; le style dit a quel point on en sait.
  */
 #galaxyTactical .gtSurveillanceContact {
     position: absolute;
-    width: 18px;
-    height: 18px;
-    margin-left: -9px;
-    margin-top: -9px;
-    border: 1px solid rgba(255, 138, 92, 0.75);
-    border-radius: 50%;
-    background: radial-gradient(circle at 50% 50%, rgba(255, 138, 92, 0.28) 0%, rgba(255, 138, 92, 0) 70%);
+    width: 34px;
+    height: 34px;
+    margin-left: -17px;
+    margin-top: -17px;
+    display: grid;
+    place-items: center;
+    background: none;
+    border: 0;
     cursor: pointer;
     pointer-events: auto;
     animation: gtContactSweep 3.2s ease-in-out infinite;
+}
+
+#galaxyTactical .gtSurveillanceContact img {
+    width: 20px;
+    height: 20px;
+    display: block;
+}
+
+/*
+ * **`display: grid` bat le `[hidden]` du navigateur** — la meme faute d identite que pour les
+ * marqueurs de patrouille, trouvee par la relecture du lot : un contact en hyperespace ou sans
+ * point restait affiche. La regle du navigateur est d origine UA, battue par toute declaration
+ * d auteur ; celle-ci la remet, avec la specificite de la regle qu elle bat.
+ */
+#galaxyTactical .gtSurveillanceContact[hidden] {
+    display: none;
 }
 
 /*
@@ -1529,52 +1545,56 @@
     50% { opacity: 1; }
 }
 
-/* Plus le palier est haut, plus le contact est franc. */
-#galaxyTactical .gtSurveillanceContact[data-tier="2"] {
-    width: 20px;
-    height: 20px;
-    margin-left: -10px;
-    margin-top: -10px;
-    border-color: rgba(255, 138, 92, 0.9);
+/* A partir du troisieme palier, le contact est franc : plus de balayage. */
+#galaxyTactical .gtSurveillanceContact[data-tier="3"],
+#galaxyTactical .gtSurveillanceContact[data-tier="4"],
+#galaxyTactical .gtSurveillanceContact[data-tier="5"] {
+    animation: none;
 }
 
-#galaxyTactical .gtSurveillanceContact[data-tier="3"] {
-    width: 22px;
-    height: 22px;
-    margin-left: -11px;
-    margin-top: -11px;
-    border-width: 2px;
-    border-color: rgba(255, 105, 63, 1);
-    background: radial-gradient(circle at 50% 50%, rgba(255, 105, 63, 0.35) 0%, rgba(255, 105, 63, 0) 72%);
+#galaxyTactical .gtSurveillanceContact:hover img,
+#galaxyTactical .gtSurveillanceContact:focus-visible img {
+    filter: brightness(1.35);
 }
 
-/* Le point central : ce qui a ete detecte, par opposition au halo qui est la portee. */
-#galaxyTactical .gtSurveillanceContact::after {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    width: 4px;
-    height: 4px;
-    margin-left: -2px;
-    margin-top: -2px;
-    border-radius: 50%;
-    background: rgba(255, 196, 168, 0.95);
-}
-
-#galaxyTactical .gtSurveillanceContact:hover,
 #galaxyTactical .gtSurveillanceContact:focus-visible {
-    border-color: rgba(255, 210, 190, 1);
-    box-shadow: 0 0 8px rgba(255, 105, 63, 0.65);
     outline: none;
 }
 
-/* Le contact que la fiche decrit en ce moment. */
+/* Le contact que la fiche decrit en ce moment : une lueur blanche par-dessus la sienne. */
 #galaxyTactical .gtSurveillanceContact.gtSelected {
-    border-color: rgba(255, 236, 224, 1);
-    box-shadow: 0 0 10px rgba(255, 138, 92, 0.9);
     animation: none;
 }
+
+#galaxyTactical .gtSurveillanceContact.gtSelected img {
+    filter: drop-shadow(0 0 3px #ffffff) drop-shadow(0 0 7px rgba(255, 255, 255, 0.6));
+}
+
+/*
+ * ## Les routes des contacts
+ *
+ * Un SVG dans la couche de surveillance, sous les marqueurs, qui n attrape aucun clic. Une route se
+ * trace a partir du troisieme palier, dans la couleur de la relation, en tirets comme les
+ * trajectoires du joueur — et s efface quand le contact n est plus en vol.
+ */
+/* Comme `.gtFleetLayer` : les attributs du SVG font foi, aucune largeur CSS ne le met a l echelle. */
+#galaxyTactical .gtSurveillanceRoutes {
+    position: absolute;
+    left: 0;
+    top: 0;
+    pointer-events: none;
+}
+
+#galaxyTactical .gtContactRoute {
+    fill: none;
+    stroke-width: 1.2;
+    stroke-dasharray: 5 4;
+    stroke-linecap: round;
+    opacity: 0.75;
+}
+
+#galaxyTactical .gtContactRoute--stranger { stroke: #ff4040; }
+#galaxyTactical .gtContactRoute--ally { stroke: #2f80ff; }
 
 /*
  * ## La fiche d'un contact

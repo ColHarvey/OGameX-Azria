@@ -650,7 +650,7 @@ class GalaxyTacticalMapTest extends UnitTestCase
          * les faisait sauter (retour de Keven) ; les effets decoratifs s'eteignent par leurs regles.
          */
         $this->assertStringContainsString(
-            "            placerLesMarqueurs();\n            animation = window.requestAnimationFrame(boucle);",
+            "            placerLesMarqueurs();\n            placerLesContacts();\n            animation = window.requestAnimationFrame(boucle);",
             str_replace("\r\n", "\n", $module),
             'The markers are no longer placed on every animation frame.'
         );
@@ -1402,9 +1402,10 @@ class GalaxyTacticalMapTest extends UnitTestCase
         foreach ([
             "                mettreAJourLesCompteurs(reponse.counters);\n                decalageHorloge = " => 'the counters written with every fleet payload',
             "                } else {\n                    rafraichirLesCompteurs(carte);\n                }\n" => 'the counters refreshed for a movement elsewhere',
-            'var VEILLE_DES_COMPTEURS = 30000;' => 'the watch for shipyard deliveries',
-            "            arreterLaVeilleDesCompteurs();\n" => 'the watch stopped with the tab',
-            "        demarrerLaVeilleDesCompteurs(carte);\n    }\n" => 'the watch started with the system',
+            'var VEILLE_DE_LA_CARTE = 10000;' => 'the ten-second watch of the map',
+            "            arreterLaVeilleDeLaCarte();\n" => 'the watch stopped with the tab',
+            "        demarrerLaVeilleDeLaCarte(carte);\n    }\n" => 'the watch started with the system',
+            "        veilleDeLaCarte = window.setInterval(function () {\n            if (carte.gtSysteme && !demandeEnVol) {\n                chargerLesFlottes(carte, carte.gtSysteme.galaxie, carte.gtSysteme.systeme);\n" => 'the watch applying the whole payload, not only the counters, and letting a request in flight finish',
         ] as $motif => $quoi) {
             $this->assertStringContainsString($motif, $module, 'The header counters lost ' . $quoi . '.');
         }
@@ -2202,6 +2203,45 @@ class GalaxyTacticalMapTest extends UnitTestCase
 
         /* Et le module pose bien la classe que la feuille attend, sur le marqueur du mouvement. */
         $this->assertStringContainsString("mouvement._marqueur.classList.toggle('gtArrived', arrivee);", $this->module(), 'The module no longer marks the arrived ship: the stilling rule applies to nothing.');
+    }
+
+    /**
+     * **Les deux glyphes de Keven existent, et le module les nomme.** Le temoin des icones ne lit
+     * que les `.svg` ; ces deux-la sont des PNG (recadres depuis les originaux du bureau, 64 px,
+     * fond transparent). Un glyphe nomme et absent serait un cadre vide sans la moindre erreur.
+     */
+    public function testTheRelationGlyphsExistOnDiskAndTheModuleNamesThem(): void
+    {
+        $module = $this->module();
+
+        foreach (['fleet-ally.png', 'fleet-stranger.png'] as $glyphe) {
+            $this->assertStringContainsString("'" . $glyphe . "'", $module, 'The module no longer names ' . $glyphe . '.');
+            $this->assertFileExists(public_path('img/galaxy-tactical/' . $glyphe), $glyphe . ' is missing from disk: the marker would be an empty frame.');
+
+            $taille = getimagesize(public_path('img/galaxy-tactical/' . $glyphe));
+
+            $this->assertIsArray($taille);
+            $this->assertSame([64, 64], [$taille[0], $taille[1]], $glyphe . ' is not the 64 px square the map expects.');
+        }
+
+        // Le quart de tour : les glyphes pointent en haut, le vaisseau du jeu a droite.
+        $this->assertStringContainsString('var ROTATION_NATIVE_DES_GLYPHES = 90;', $module, 'The glyphs lost their quarter turn: they would point ninety degrees off their heading.');
+
+        /*
+         * **`display: grid` bat `[hidden]`** — la faute d identite trouvee par la relecture du lot :
+         * la feuille doit remettre la regle du navigateur avec la specificite de celle qu elle bat.
+         * Et le SVG des routes n a aucune largeur CSS : ses attributs font foi, comme `.gtFleetLayer`.
+         */
+        $feuille = $this->feuille();
+
+        $this->assertMatchesRegularExpression('/#galaxyTactical \.gtSurveillanceContact \{[^}]*display:\s*grid/', $feuille, 'The contact marker no longer lays out as a grid: the rule this witness guards has no reason to exist.');
+        $this->assertMatchesRegularExpression('/#galaxyTactical \.gtSurveillanceContact\[hidden\] \{[^}]*display:\s*none/', $feuille, 'A hidden contact stays visible: display: grid outweighs the browser\'s [hidden] rule.');
+
+        if (preg_match('/#galaxyTactical \.gtSurveillanceRoutes \{([^}]*)\}/', $feuille, $routes) !== 1) {
+            $this->fail('The routes layer has no rule.');
+        }
+
+        $this->assertDoesNotMatchRegularExpression('/(?:^|[;{\s])width:/', $routes[1], 'The routes SVG is scaled by a CSS width: its lines would drift from the markers.');
     }
 
     public function testTheModuleIsPartOfTheBundle(): void

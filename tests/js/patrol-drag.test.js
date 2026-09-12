@@ -67,8 +67,9 @@ function faireJQuery() {
         demandes.push({
             url,
             donnees,
-            repondre(reponse) { if (rappels.done) { rappels.done(reponse); } },
-            echouer(erreur) { if (rappels.fail) { rappels.fail(erreur); } }
+            /* Le faux porte la regle du vrai : jQuery appelle `always` apres `done` comme apres `fail`. */
+            repondre(reponse) { if (rappels.done) { rappels.done(reponse); } if (rappels.always) { rappels.always(); } },
+            echouer(erreur) { if (rappels.fail) { rappels.fail(erreur); } if (rappels.always) { rappels.always(); } }
         });
 
         return api;
@@ -89,8 +90,9 @@ function faireJQuery() {
         envois.push({
             url,
             donnees,
-            repondre(reponse) { if (rappels.done) { rappels.done(reponse); } },
-            echouer(erreur) { if (rappels.fail) { rappels.fail(erreur); } }
+            /* Le faux porte la regle du vrai : jQuery appelle `always` apres `done` comme apres `fail`. */
+            repondre(reponse) { if (rappels.done) { rappels.done(reponse); } if (rappels.always) { rappels.always(); } },
+            echouer(erreur) { if (rappels.fail) { rappels.fail(erreur); } if (rappels.always) { rappels.always(); } }
         });
 
         return api;
@@ -1344,18 +1346,18 @@ test('a la reponse, le vaisseau pose prend la place du vaisseau arrive, au meme 
         assert.equal(monde.window.document.querySelectorAll('.gtMovement').length, 0, 'le mouvement arrive est encore dessine sous le marqueur pose : deux vaisseaux');
 
         /*
-         * Meme point, deux calculs : le vaisseau en vol est place par `depart + (arrivee − depart) × 1`,
-         * le vaisseau pose par `arrivee` directement. Le bruit flottant de la soustraction suffit a
-         * faire basculer l arrondi au dixieme (333,65 → 333,6 ou 333,7), et la planete de depart orbite
-         * en temps reel : l ecart apparait et disparait au fil des secondes. Un dixieme de pixel n est
-         * pas une position differente ; un pixel entier le serait. La borne vaut **un pas d arrondi,
-         * jamais deux** — et se compare elle-meme en flottant : 333,7 − 333,6 rend 0,10000000000002.
+         * Meme point, deux horloges. La carte tourne en temps reel (huit heures par tour) : le
+         * vaisseau pose suit cette rotation **a chaque image** (`pointSpatial()` lit la phase du
+         * moment), le vaisseau fige ne la suit qu aux pas d orbite ou un corps bouge d un pixel entier
+         * (`tournerLesOrbites` ne reprend ses bouts qu alors). Entre deux pas, quelques dixiemes de
+         * pixel les separent, et l ecart apparait et disparait au fil des secondes. Ce que la releve
+         * promet est qu **aucun saut ne se voit** : la borne est le pixel, et elle se dit.
          */
         const ecartX = Math.abs(parseFloat(marqueur.style.left) - Number(position[1]));
         const ecartY = Math.abs(parseFloat(marqueur.style.top) - Number(position[2]));
 
-        assert.ok(ecartX < 0.15, 'le vaisseau pose n est pas au point ou le vaisseau arrive s etait immobilise (x) : ecart ' + ecartX);
-        assert.ok(ecartY < 0.15, 'le vaisseau pose n est pas au point ou le vaisseau arrive s etait immobilise (y) : ecart ' + ecartY);
+        assert.ok(ecartX < 1, 'le vaisseau pose n est pas au point ou le vaisseau arrive s etait immobilise (x) : ecart ' + ecartX);
+        assert.ok(ecartY < 1, 'le vaisseau pose n est pas au point ou le vaisseau arrive s etait immobilise (y) : ecart ' + ecartY);
         /*
          * Meme regle pour le cap : celui du vol date du dernier pas orbital ou un corps a bouge, celui
          * du vaisseau pose de l instant de la reponse. La planete de depart avance de 0,0125 degre par
