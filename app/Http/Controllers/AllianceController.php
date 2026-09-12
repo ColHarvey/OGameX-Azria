@@ -9,7 +9,10 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
 use Log;
+use OGame\Enums\AllianceClass;
+use OGame\Models\Alliance;
 use OGame\Models\AllianceRank;
+use OGame\Services\AllianceClassService;
 use OGame\Services\AllianceService;
 use OGame\Services\HighscoreService;
 use OGame\Services\PlayerService;
@@ -372,7 +375,7 @@ class AllianceController extends OGameController
      * @param PlayerService $player
      * @return JsonResponse
      */
-    public function ajaxClasses(AllianceService $allianceService, PlayerService $player): JsonResponse
+    public function ajaxClasses(AllianceService $allianceService, AllianceClassService $classes, PlayerService $player): JsonResponse
     {
         $userId = $player->getId();
         $userAllianceId = $player->getUser()->alliance_id;
@@ -393,6 +396,11 @@ class AllianceController extends OGameController
                 'alliance/alliance_classes' => view('ingame.alliance.classes')->with([
                     'alliance' => $alliance,
                     'member' => $member,
+                    // Ce que la page doit savoir pour ne rien promettre qu elle ne puisse tenir.
+                    'allianceClass' => $alliance === null ? null : $classes->classOfAlliance($alliance),
+                    'mayChooseClass' => $alliance !== null && $classes->mayChooseFor($player->getUser(), $alliance),
+                    'darkMatter' => (int)$player->getUser()->dark_matter,
+                    'classPrice' => AllianceClass::PRICE_IN_DARK_MATTER,
                 ])->render(),
             ],
             'files' => [
@@ -959,6 +967,50 @@ class AllianceController extends OGameController
      * @param PlayerService $player
      * @return JsonResponse
      */
+    /**
+     * Choisir la classe de son alliance.
+     *
+     * **Le service dit non, le controleur le transmet.** Le droit (`manage_classes`), la monnaie et
+     * le doublon sont juges par `AllianceClassService` : les recopier ici en ferait deux verites,
+     * et la page finirait par autoriser ce que le service refuse.
+     */
+    public function chooseClassAction(Request $request, AllianceClassService $classes, PlayerService $player): JsonResponse
+    {
+        $validated = $request->validate([
+            'alliance_class_id' => 'required|integer',
+        ]);
+
+        try {
+            $classe = AllianceClass::tryFromValue($validated['alliance_class_id']);
+
+            if ($classe === null) {
+                throw new Exception(__('t_ingame.alliance.class_not_allowed'));
+            }
+
+            $alliance = $player->getUser()->alliance_id === null
+                ? null
+                : Alliance::query()->find((int)$player->getUser()->alliance_id);
+
+            if (!$alliance instanceof Alliance) {
+                throw new Exception(__('t_ingame.alliance.msg_not_in_alliance'));
+            }
+
+            $classes->choose($player->getUser(), $alliance, $classe);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => __('t_ingame.alliance.class_chosen', ['class' => $classe->getName()]),
+                'newAjaxToken' => csrf_token(),
+            ]);
+        } catch (Exception $e) {
+            return response()->json([
+                'status' => 'failure',
+                'message' => $e->getMessage(),
+                'newAjaxToken' => csrf_token(),
+            ], 400);
+        }
+    }
+
     public function kickMemberAction(Request $request, AllianceService $allianceService, PlayerService $player): JsonResponse
     {
         $validated = $request->validate([

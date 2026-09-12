@@ -237,6 +237,8 @@ Route::middleware(['auth', 'banned', 'globalgame', 'locale', 'firstlogin'])->gro
     Route::post('/alliance/action', [AllianceController::class, 'action'])->name('alliance.action');
     Route::post('/alliance/rank/create', [AllianceController::class, 'createRank'])->name('alliance.rank.create');
     Route::post('/alliance/members/kick', [AllianceController::class, 'kickMemberAction'])->name('alliance.members.kick');
+    // La classe d une alliance : le droit, la monnaie et le doublon sont juges par le service.
+    Route::post('/alliance/classes/choose', [AllianceController::class, 'chooseClassAction'])->name('alliance.classes.choose');
     Route::post('/alliance/members/assign-rank', [AllianceController::class, 'assignRankAction'])->name('alliance.members.assign-rank');
     Route::post('/alliance/text/update', [AllianceController::class, 'updateAllianceText'])->name('alliance.text.update');
 

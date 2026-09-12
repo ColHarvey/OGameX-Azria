@@ -9,6 +9,7 @@ enum DarkMatterTransactionType: string
     case EXPEDITION = 'expedition';
     case COMMANDING_STAFF = 'commanding_staff';
     case PLAYER_CLASS = 'player_class';
+    case ALLIANCE_CLASS = 'alliance_class';
     case MERCHANT = 'merchant';
     case PLANET_RELOCATION = 'planet_relocation';
     case SPEEDUP = 'speedup';

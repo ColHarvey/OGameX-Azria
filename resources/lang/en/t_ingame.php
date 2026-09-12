@@ -989,6 +989,14 @@ return [
         'researcher_bonus_2'            => '+10% speed to expedition destination',
         'researcher_bonus_3'            => 'The system phalanx can be used to scan fleet movements in whole systems.',
         'class_not_implemented'         => 'Alliance class system not yet implemented',
+        'class_not_allowed'             => 'You are not allowed to choose your alliance class.',
+        'class_already_selected'        => 'Your alliance already has this class.',
+        'class_not_enough_dark_matter'  => 'Not enough Dark Matter: choosing an alliance class costs :price Dark Matter.',
+        'class_chosen'                  => 'Your alliance is now a :class alliance.',
+        'class_current'                 => 'Current class',
+        'class_change_for'              => 'Change for',
+        'class_none_selected'           => 'No alliance class selected',
+        'class_no_permission_hint'      => 'Only a member allowed to manage classes can choose one.',
 
         // Create alliance form
         'create_tag_label'              => 'Alliance Tag (3-8 characters)',
