@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\DB;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\Patrol;
+use OGame\Patrol\Enums\PatrolState;
 use OGame\Patrol\Enums\SurveillanceFact;
 use OGame\Patrol\Enums\SurveillanceTier;
 
@@ -87,10 +88,20 @@ final class SurveillanceProjection
      */
     public function inSystem(int $userId, int $galaxy, int $system, int $now): array
     {
+        /*
+         * **Une patrouille terminee n'est plus dans l'espace, et rien ne la montre.**
+         *
+         * `PatrolProjection` — celle qui sert les patrouilles du joueur — ecarte deja l'etat
+         * `Finished`. Celle-ci ne le faisait pas : une patrouille rentree restait projetee, sans
+         * position ni segment, mais portant encore sa relation et, au palier de l'identite, le nom
+         * de son proprietaire. La revocation des contacts ferme la porte a l'ecriture ; ce filtre
+         * la ferme a la lecture. Les deux, parce qu'une seule des deux protections a deja manque.
+         */
         $patrouilles = Patrol::query()
             ->where('galaxy', $galaxy)
             ->where('system', $system)
             ->where('user_id', '!=', $userId)
+            ->where('state', '!=', PatrolState::Finished->value)
             ->orderBy('id')
             ->get();
 

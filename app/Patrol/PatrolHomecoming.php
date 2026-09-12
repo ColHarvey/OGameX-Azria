@@ -53,6 +53,8 @@ final class PatrolHomecoming
         // **La fabrique se recoit, elle ne se fabrique pas.** Elle a ses propres dependances, et un
         // service qui les devinerait ici ferait une seconde facon de la construire.
         private readonly PlanetServiceFactory $planets,
+        // La veille des reseaux : une patrouille qui rentre cesse d'etre vue.
+        private readonly SurveillanceWatch $watch,
         private readonly ReturnPlanner $planner = new ReturnPlanner(),
         private readonly ReturnDestinationResolver $destinations = new ReturnDestinationResolver(),
     ) {
@@ -194,6 +196,22 @@ final class PatrolHomecoming
                 'finished_at' => (int)$retour->time_arrival,
                 'finish_reason' => 'came_home',
             ])->save();
+
+            /*
+             * **La patrouille n'existe plus dans l'espace : ce que les reseaux voyaient d'elle
+             * cesse de se voir.** Revoque, jamais efface — la ligne reste lisible.
+             *
+             * `PatrolOrders::comeHome()` le faisait deja pour le chemin qu'il gouverne. Celui-ci,
+             * lui, ne le faisait pas — et depuis `109af44b` c'est **le** chemin du retour, tous les
+             * retours de patrouille passant desormais par ici. Chaque patrouille rentree laissait
+             * donc derriere elle des contacts ouverts pour toujours : des fantomes qu'aucune
+             * revocation ne fermait, qui portaient encore la relation et, au palier de l'identite,
+             * le nom de leur proprietaire, et que chaque lecture de la carte reprojetait.
+             *
+             * L'instant est celui de l'arrivee physique, comme l'etat qu'on vient d'ecrire — pas
+             * l'horloge du travailleur qui traite la mission.
+             */
+            $this->watch->revokeAllFor($patrouille, (int)$retour->time_arrival);
         }
     }
 }
