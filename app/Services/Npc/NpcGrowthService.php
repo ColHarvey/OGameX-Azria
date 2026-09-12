@@ -368,7 +368,30 @@ class NpcGrowthService
         $marge = 40 * $metal;
 
         if ($planet->energy()->get() < $marge) {
-            $candidats[] = $planet->getObjectLevel('fusion_plant') > 0 ? 'fusion_plant' : 'solar_plant';
+            $centrale = $planet->getObjectLevel('fusion_plant') > 0 ? 'fusion_plant' : 'solar_plant';
+            $candidats[] = $centrale;
+
+            /*
+             * **Sous la marge, la base n'achete QUE du courant — elle economise au lieu de creuser.**
+             *
+             * L'appelant descend la liste jusqu'a ce qu'un candidat soit payable. Une centrale hors
+             * de prix le faisait donc tomber sur le candidat suivant : une mine, un entrepot. Or une
+             * mine de plus consomme de l'energie : la base achetait exactement ce qui aggravait son
+             * deficit, et son facteur de production baissait encore. Mesure en production le
+             * 12 septembre 2026 sur une base pirate : solde -592, facteur de production a 56 %, les
+             * trois mines a un peu plus de la moitie de leur rendement. Un joueur, dans cette
+             * situation, met de cote pour sa centrale.
+             *
+             * **Deux sorties, et elles sont necessaires** : une centrale dont les prerequis manquent
+             * ou une planete dont les champs sont pleins ne s'arrangeront pas en attendant — la
+             * regle figerait la base pour toujours. Le plan reprend alors la main, et c'est lui qui
+             * porte le terraformeur.
+             */
+            $champsLibres = $planet->getPlanetFieldMax() - $planet->getBuildingCount();
+
+            if ($champsLibres > 0 && ObjectService::objectRequirementsMet($centrale, $planet)) {
+                return $candidats;
+            }
         }
 
         // Une usine de robots tot rend tout le reste plus rapide.

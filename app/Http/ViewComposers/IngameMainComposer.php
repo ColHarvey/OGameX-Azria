@@ -7,7 +7,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Date;
-use OGame\Facades\AppUtil;
 use OGame\Models\Alliance;
 use OGame\Models\AllianceMember;
 use OGame\Models\User;
@@ -19,6 +18,7 @@ use OGame\Services\HighscoreService;
 use OGame\Services\MessageService;
 use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
+use OGame\ViewModels\ResourceBarViewModel;
 
 /**
  * Class IngameMainComposer
@@ -54,51 +54,14 @@ class IngameMainComposer
      */
     public function compose(View $view): void
     {
-        $current_planet = $this->player->planets->current();
-        $resources = [
-            'metal' => [
-                'amount' => $current_planet->metal()->get(),
-                'amount_formatted' => $current_planet->metal()->getFormattedLong(),
-                'production_hour' => $current_planet->getMetalProductionPerHour(),
-                'production_hour_formatted' => AppUtil::formatNumber($current_planet->getMetalProductionPerHour()),
-                'production_second' => $current_planet->getMetalProductionPerSecond(),
-                'storage' => $current_planet->metalStorage()->get(),
-                'storage_formatted' => $current_planet->metalStorage()->getFormattedLong(),
-                'storage_almost_full' => ($current_planet->metal()->get() >= ($current_planet->metalStorage()->get() * 0.9) && $current_planet->metal()->get() < $current_planet->metalStorage()->get()) ? true : false,
-            ],
-            'crystal' => [
-                'amount' => $current_planet->crystal()->get(),
-                'amount_formatted' => $current_planet->crystal()->getFormattedLong(),
-                'production_hour' => $current_planet->getCrystalProductionPerHour(),
-                'production_hour_formatted' => AppUtil::formatNumber($current_planet->getCrystalProductionPerHour()),
-                'production_second' => $current_planet->getCrystalProductionPerSecond(),
-                'storage' => $current_planet->crystalStorage()->get(),
-                'storage_formatted' => $current_planet->crystalStorage()->getFormattedLong(),
-                'storage_almost_full' => ($current_planet->crystal()->get() >= ($current_planet->crystalStorage()->get() * 0.9) && $current_planet->crystal()->get() < $current_planet->crystalStorage()->get()) ? true : false,
-            ],
-            'deuterium' => [
-                'amount' => $current_planet->deuterium()->get(),
-                'amount_formatted' => $current_planet->deuterium()->getFormattedLong(),
-                'production_hour' => $current_planet->getDeuteriumProductionPerHour(),
-                'production_hour_formatted' => AppUtil::formatNumber($current_planet->getDeuteriumProductionPerHour()),
-                'production_second' => $current_planet->getDeuteriumProductionPerSecond(),
-                'storage' => $current_planet->deuteriumStorage()->get(),
-                'storage_formatted' => $current_planet->deuteriumStorage()->getFormattedLong(),
-                'storage_almost_full' => ($current_planet->deuterium()->get() >= ($current_planet->deuteriumStorage()->get() * 0.9) && $current_planet->deuterium()->get() < $current_planet->deuteriumStorage()->get()) ? true : false,
-            ],
-            'energy' => [
-                'amount' => $current_planet->energy()->get(),
-                'amount_formatted' => $current_planet->energy()->getFormattedLong(),
-                'production' => $current_planet->energyProduction()->get(),
-                'production_formatted' => $current_planet->energyProduction()->getFormattedLong(),
-                'consumption' => $current_planet->energyConsumption()->get(),
-                'consumption_formatted' => $current_planet->energyConsumption()->getFormattedLong(),
-            ],
-            'darkmatter' => [
-                'amount' => $this->player->getDarkMatter(),
-                'amount_formatted' => AppUtil::formatNumber($this->player->getDarkMatter()),
-            ],
-        ];
+        /*
+         * **Le bandeau est compose une seule fois**, par `ResourceBarViewModel` : le HTML du
+         * gabarit, l'objet que `reloadResources()` recoit au chargement et la resynchronisation
+         * en direct (`/ajax/resourcebox`) lisent la meme classe. Deux constructions auraient
+         * diverge, et le joueur aurait vu le bandeau sauter a chaque synchronisation.
+         */
+        $resourceBar = ResourceBarViewModel::of($this->player);
+        $resources = $resourceBar->resources;
 
         // Include body_id, which might have been set in the controller.
         $body_id = $this->request->attributes->get('body_id');
@@ -131,6 +94,7 @@ class IngameMainComposer
             'onlineBuddiesCount' => $this->getOnlineContactsCount(),
             'unreadChatCount' => $this->chatService->getTotalUnreadMessageCount((int) auth()->id()),
             'resources' => $resources,
+            'resourceBarTicker' => $resourceBar->ticker,
             'currentPlayer' => $this->player,
             'currentPlanet' => $this->player->planets->current(),
             'planets' => $this->player->planets,

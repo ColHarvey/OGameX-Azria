@@ -225,7 +225,10 @@
                 </ul>
             </div>
         </div>
-        <div id="resourcesbarcomponent" class="">
+        {{-- L'adresse de la resynchronisation vit **sur le bandeau**, pas dans une variable globale :
+             un bloc de script un jour enveloppe dans une fermeture rendrait `var` locale et le module
+             se tairait sans un mot. Une balise `data-` est lue par le DOM, toujours. --}}
+        <div id="resourcesbarcomponent" class="" data-resourcebox-url="{{ route('resourcebox.ajax') }}">
             <div id="resources">
 
                 <div class="resource_tile metal">
@@ -1421,86 +1424,20 @@ However, the Space Dock's engineers think that some of the remains can be salvag
                     });
                 }
 
-                reloadResources({
-                    "resources": {
-                        // "population": {
-                        //     "amount": 100,
-                        //     "storage": 0,
-                        //     "safeCapacity": 0,
-                        //     "growthRate": 0,
-                        //     "capableToFeed": 0,
-                        //     "needFood": 0,
-                        //     "singleFoodConsumption": 0,
-                        //     "tooltip": "@lang('Population')|<table class=\"resourceTooltip\"><tr><th>{{ __('t_ingame.layout.res_available') }}:<\/th><td><span class=\"overmark\">100<\/span><\/td><\/tr><tr><th>@lang('Living Space')\n<\/th><td><span class=\"overmark\">0<\/span><\/td><\/tr><tr><th>@lang('Satisfied')<\/th><td><span class=\"undermark\">0<\/span><\/td><\/tr><tr><th>@lang('Hungry')<\/th><td><span class=\"overmark\">0<\/span><\/td><\/tr><tr><th>@lang('Growth rate')<\/th><td><span class=\"\">\u00b10<\/span><\/td><\/tr><tr><th>@lang('Bunker Space')\n<\/th><td><span class=\"middlemark\">100<\/span><\/td><\/tr><\/table>",
-                        //     "classesListItem": ""
-                        // },
-                        // "food": {
-                        //     "amount": 0,
-                        //     "storage": 0,
-                        //     "capableToFeed": 0,
-                        //     "production": 0,
-                        //     "consumption": 0,
-                        //     "timeTillFoodRunsOut": 0,
-                        //     "vacationMode": "",
-                        //     "tooltip": "@lang('Food')|<table class=\"resourceTooltip\"><tr><th>{{ __('t_ingame.layout.res_available') }}:<\/th><td><span class=\"overmark\">0<\/span><\/td><\/tr><tr><th>{{ __('t_ingame.layout.res_storage_capacity') }}<\/th><td><span class=\"overmark\">0<\/span><\/td><\/tr><tr><th>@lang('Overproduction')<\/th><td><span class=\"undermark\">0<\/span><\/td><\/tr><tr><th>{{ __('t_ingame.layout.res_consumption') }}<\/th><td><span class=\"overmark\">0<\/span><\/td><\/tr><tr><th>@lang('Consumed in')<\/th><td><span class=\"overmark timeTillFoodRunsOut\">~<\/span><\/td><\/tr><\/table>",
-                        //     "classesListItem": ""
-                        // },
-                        "metal": {
-                            "amount": {!! $resources['metal']['amount'] !!},
-                            "storage": {!! $resources['metal']['storage'] !!},
-                            "baseProduction": 0, // TODO: add base production separately?
-                            "production": {!! $resources['metal']['production_second'] !!},
-                            "tooltip": "{{ __('t_ingame.layout.res_metal') }}|<table class=\"resourceTooltip\"><tr><th>{{ __('t_ingame.layout.res_available') }}:<\/th><td><span class=\"\">{!! $resources['metal']['amount_formatted'] !!}<\/span><\/td><\/tr><tr><th>{{ __('t_ingame.layout.res_storage_capacity') }}<\/th><td><span class=\"\">{!! $resources['metal']['storage_formatted'] !!}<\/span><\/td><\/tr><tr><th>{{ __('t_ingame.layout.res_current_production') }}:<\/th><td><span class=\"@if ($resources['metal']['production_hour'] <= 0) overmark @else undermark @endif\">@if ($resources['metal']['production_hour'] > 0)+@endif{!! $resources['metal']['production_hour_formatted'] !!}<\/span><\/td><\/tr><tr><th>{{ __('t_ingame.layout.res_den_capacity') }}:<\/th><td><span class=\"overermark\">0<\/span><\/td><\/tr><\/table>",
-                            "classesListItem": "",
-                            "shopUrl": "#TODO_category=d8d49c315fa620d9c7f1f19963970dea59a0e3be&item=859d82d316b83848f7365d21949b3e1e63c7841f&page=shop&panel1-1="
-                        },
-                        "crystal": {
-                            "amount": {!! $resources['crystal']['amount'] !!},
-                            "storage": {!! $resources['crystal']['storage'] !!},
-                            "baseProduction": 0, // TODO: add base production separately?
-                            "production": {!! $resources['crystal']['production_second'] !!},
-                            "tooltip": "{{ __('t_ingame.layout.res_crystal') }}|<table class=\"resourceTooltip\"><tr><th>{{ __('t_ingame.layout.res_available') }}:<\/th><td><span class=\"\">{!! $resources['crystal']['amount_formatted'] !!}<\/span><\/td><\/tr><tr><th>{{ __('t_ingame.layout.res_storage_capacity') }}<\/th><td><span class=\"\">{!! $resources['crystal']['storage_formatted'] !!}<\/span><\/td><\/tr><tr><th>{{ __('t_ingame.layout.res_current_production') }}:<\/th><td><span class=\"@if ($resources['crystal']['production_hour'] <= 0) overmark @else undermark @endif\">@if ($resources['crystal']['production_hour'] > 0)+@endif{!! $resources['crystal']['production_hour_formatted'] !!}<\/span><\/td><\/tr><tr><th>{{ __('t_ingame.layout.res_den_capacity') }}:<\/th><td><span class=\"overermark\">0<\/span><\/td><\/tr><\/table>",
-                            "classesListItem": "",
-                            "shopUrl": "#TODO_page=shop#category=d8d49c315fa620d9c7f1f19963970dea59a0e3be&item=bb2f6843226ef598f0b567b92c51b283de90aa48&page=shop&panel1-1="
-                        },
-                        "deuterium": {
-                            "amount": {!! $resources['deuterium']['amount'] !!},
-                            "storage": {!! $resources['deuterium']['storage'] !!},
-                            "baseProduction": 0, // TODO: add base production separately?
-                            "production": {!! $resources['deuterium']['production_second'] !!},
-                            "tooltip": "{{ __('t_ingame.layout.res_deuterium') }}|<table class=\"resourceTooltip\"><tr><th>{{ __('t_ingame.layout.res_available') }}:<\/th><td><span class=\"\">{!! $resources['deuterium']['amount_formatted'] !!}<\/span><\/td><\/tr><tr><th>{{ __('t_ingame.layout.res_storage_capacity') }}<\/th><td><span class=\"\">{!! $resources['deuterium']['storage_formatted'] !!}<\/span><\/td><\/tr><tr><th>{{ __('t_ingame.layout.res_current_production') }}:<\/th><td><span class=\"@if ($resources['deuterium']['production_hour'] <= 0) overmark @else undermark @endif\">@if ($resources['deuterium']['production_hour'] > 0)+@endif{!! $resources['deuterium']['production_hour_formatted'] !!}<\/span><\/td><\/tr><tr><th>{{ __('t_ingame.layout.res_den_capacity') }}:<\/th><td><span class=\"overermark\">0<\/span><\/td><\/tr><\/table>",
-                            "classesListItem": "",
-                            "shopUrl": "#TODO_shop#category=d8d49c315fa620d9c7f1f19963970dea59a0e3be&item=cb72ed207dd871832a850ee29f1c1f83aa3f4f36&page=shop&panel1-1="
-                        },
-                        "energy": {
-                            "amount": {!! $resources['energy']['amount'] !!},
-                            "tooltip": "{{ __('t_ingame.layout.res_energy') }}|<table class=\"resourceTooltip\"><tr><th>{{ __('t_ingame.layout.res_available') }}:<\/th><td><span class=\"\">{!! $resources['energy']['amount_formatted'] !!}<\/span><\/td><\/tr><tr><th>{{ __('t_ingame.layout.res_current_production') }}:<\/th><td><span class=\"{{ $resources['energy']['production'] > 0 ? 'undermark' : 'overmark' }}\">{{ $resources['energy']['production'] > 0 ? '+' : '' }}{!! $resources['energy']['production_formatted'] !!}<\/span><\/td><\/tr><tr><th>{{ __('t_ingame.layout.res_consumption') }}<\/th><td><span class=\"{{ $resources['energy']['consumption'] > 0 ? 'overmark' : '' }}\">{{ $resources['energy']['consumption'] > 0 ? '-' : '' }}{!! $resources['energy']['consumption_formatted'] !!}<\/span><\/td><\/tr><\/table>",
-                            "classesListItem": ""
-                        },
-                        "darkmatter": {
-                            "amount": {!! $resources['darkmatter']['amount'] !!},
-                            "tooltip": "{{ __('t_ingame.layout.res_dark_matter') }}|<table class=\"resourceTooltip\"><tr><th>{{ __('t_ingame.layout.res_available') }}:<\/th><td><span class=\"\">{!! $resources['darkmatter']['amount_formatted'] !!}<\/span><\/td><\/tr><\/table>",
-                            "classesListItem": "",
-                            "classes": "overlay",
-                            "link": "#TODO_page=payment",
-                            "img": "/img/icons/401d1a91ff40dc7c8acfa4377d3d65.gif"
-                        }
-                    },
-                    "techs": {
-                        // TODO: add tech levels as far as they are available
-                    },
-                    "honorScore": 11,
-                });
+                {{-- L'objet du compteur vient de la meme classe que le bandeau HTML et que
+                     `/ajax/resourcebox` (`ResourceBarViewModel`) : la page et la synchronisation
+                     en direct disent la meme chose, sinon le bandeau sauterait a chaque synchro. --}}
+                reloadResources(@json($resourceBarTicker));
 
                 function updateAjaxResourcebox(data) {
                     reloadResources(data);
                 }
 
-                function getAjaxResourcebox(callback) {
-                    $.get("{{ route('overview.index') }}#TODO_page=fetchResources&ajax=1", function (data) {
-                        reloadResources(data, callback);
-                    }, "text");
-                }
+                {{-- `getAjaxResourcebox()` vit dans le bundle (`resource-bar.js`), qui lit l'adresse sur
+                     le bandeau. La redefinir ici l'ecraserait : c'est ce que faisait l'ancienne
+                     version, qui telechargeait la Vue generale entiere pour la lire comme du JSON.
+                     La variable reste publiee pour le code hérité qui la nomme. --}}
+                var ajaxResourceboxURI = "{{ route('resourcebox.ajax') }}";
 
                 var changeSettingsLink = "#TODO_page=changeSettings";
                 var changeSettingsToken = "ea77594feda8933a60595311a0f56512";

@@ -36,6 +36,7 @@ use OGame\Http\Controllers\PlanetAbandonController;
 use OGame\Http\Controllers\PlanetMoveController;
 use OGame\Http\Controllers\PremiumController;
 use OGame\Http\Controllers\ResearchController;
+use OGame\Http\Controllers\ResourceBarController;
 use OGame\Http\Controllers\ResourcesController;
 use OGame\Http\Controllers\RewardsController;
 use OGame\Http\Controllers\RulesController;
@@ -67,6 +68,17 @@ Route::get('/ajax/main/legal', [RulesController::class, 'ajaxLegal'])->name('leg
 Route::get('/ajax/main/privacy-policy', [RulesController::class, 'ajaxPrivacyPolicy'])->name('privacypolicy.ajax');
 Route::get('/ajax/main/terms', [RulesController::class, 'ajaxTerms'])->name('terms.ajax');
 Route::get('/ajax/main/contact', [RulesController::class, 'ajaxContact'])->name('contact.ajax');
+
+// Le bandeau des ressources : une LECTURE, et hors de `globalgame` a dessein.
+//
+// Une veille toutes les trente secondes qui traverserait `globalgame` ferait avancer `users.time`
+// (« en ligne ») et `planets.time_last_update` (l'etoile d'activite de la Galaxie) : tout joueur
+// ayant un onglet ouvert paraitrait actif en permanence, et ses missions seraient traitees dans une
+// requete de fond concurrente de ses propres clics. Le controleur projette la production sans rien
+// ecrire ; les arrivees restent livrees par les chemins qui les livrent deja.
+Route::middleware(['auth', 'banned', 'locale'])->group(function () {
+    Route::get('/ajax/resourcebox', [ResourceBarController::class, 'show'])->name('resourcebox.ajax');
+});
 
 // Group: all logged in pages:
 Route::middleware(['auth', 'banned', 'globalgame', 'locale', 'firstlogin'])->group(function () {

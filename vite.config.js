@@ -28,6 +28,7 @@ const ingameScripts = [
     'resources/js/ingame/galaxy-wormhole.js',
     'resources/js/ingame/galaxy-tactical.js',
     'resources/js/ingame/messages-badge.js',
+    'resources/js/ingame/resource-bar.js',
 ]
 
 const outgameScripts = [
