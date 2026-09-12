@@ -1901,8 +1901,8 @@ class GalaxyTacticalMapTest extends UnitTestCase
 
         $this->assertStringContainsString("'current_planet_id' => \$planet->getPlanetId(),", (string)file_get_contents(app_path('Http/Controllers/GalaxyController.php')), 'The controller no longer hands the active planet to the view.');
 
-        /* La couche lit `patrols` la ou elle lit `movements`. */
-        $this->assertStringContainsString("patrouilles = Array.isArray(reponse.patrols) ? reponse.patrols : [];", $module, 'The patrol layer no longer reads the patrols of the fleet payload.');
+        /* La couche lit `patrols` la ou elle lit `movements` — et adopte les objets deja affiches. */
+        $this->assertStringContainsString("patrouilles = adopter(patrouilles, Array.isArray(reponse.patrols) ? reponse.patrols : []);", $module, 'The patrol layer no longer reads the patrols of the fleet payload.');
 
         /* La geometrie du serveur, en toutes lettres : les memes constantes que `SystemGeometry`. */
         $this->assertStringContainsString('var UNITES_PAR_ORBITE = ' . SystemGeometry::ORBIT_STEP . ';', $module, 'The module and the server disagree on the units of an orbit.');
@@ -1932,7 +1932,8 @@ class GalaxyTacticalMapTest extends UnitTestCase
         $this->assertStringContainsString('charge.order_version = o.devis.order_version;', $module, 'The confirmation no longer carries the version of the quote it confirms.');
 
         /* Le marqueur est un vrai bouton ; la raison grisee est celle du serveur. */
-        $this->assertStringContainsString("element('button', 'patrol-marker gtPatrolMarker gtPatrol--'", $module, 'The patrol marker is not a button: keyboard users cannot open it.');
+        $this->assertStringContainsString("element('button', 'patrol-marker gtPatrolMarker')", $module, 'The patrol marker is not a button: keyboard users cannot open it.');
+        $this->assertStringContainsString("var etat = 'gtPatrol--' + String(p.state || '');", $module, 'The patrol marker no longer carries its state as a class.');
         $this->assertStringContainsString('return inactif(commande.reason || locaFiche(', $module, 'A greyed patrol command no longer shows the reason the server gave.');
         $this->assertStringContainsString("String(modele).replace('/patrol/0/', '/patrol/' + Number(id) + '/')", $module, 'The per-patrol routes are no longer derived from the published templates.');
 
@@ -2065,7 +2066,7 @@ class GalaxyTacticalMapTest extends UnitTestCase
 
         /* Une patrouille que le serveur refuse de deplacer ne se saisit pas, et la fiche dit pourquoi. */
         $this->assertStringContainsString(
-            "var commande = (p.commands && p.commands.move) || {};\n\n                if (!commande.allowed) {\n                    evenement.preventDefault();",
+            "var commande = (p.commands && p.commands.move) || {};\n\n            if (!commande.allowed) {\n                evenement.preventDefault();",
             str_replace("\r\n", "\n", $module),
             'A patrol the server refuses to move can still be dragged: the refusal would come only after the drop.'
         );
@@ -2161,6 +2162,46 @@ class GalaxyTacticalMapTest extends UnitTestCase
             str_replace("\r\n", "\n", $module),
             'The manual composition is gone: without an Admiral nothing could be launched from the map.'
         );
+    }
+
+    /**
+     * **Le vaisseau arrive est immobile, tel qu il sera pose.**
+     *
+     * Keven, 12 septembre 2026 : « quand elle arrive la page a l air de faire un refresh ». Entre
+     * l instant d arrivee et la reponse qui dit la patrouille posee, le vaisseau reste sur la carte
+     * (`figerALArrivee()`, prouve dans `tests/js/patrol-drag.test.js`) — et la feuille lui retire
+     * ce qui le distingue encore du marqueur pose : la pulsation et la lueur de reacteur. Sans
+     * cela, la releve sauterait d une opacite a une autre et eteindrait une lueur d un coup.
+     *
+     * La regle se bat en specificite, pas en ordre : trois classes contre une (la pulsation
+     * commune) et contre deux (la lueur du camp hostile). L essai exige que ces deux regles
+     * existent encore — disparues, celle-ci n aurait plus rien a battre et le constat serait vrai
+     * pour une autre raison.
+     */
+    public function testAnArrivedPatrolShipStandsStillLikeAPosedOne(): void
+    {
+        $feuille = $this->feuille();
+
+        if (preg_match('/#galaxyTactical \.gtFleetMarker\.gtArrived \.gtShip image \{([^}]*)\}/', $feuille, $arrive) !== 1) {
+            $this->fail('No rule stills the arrived patrol ship: the hand-over to the posed marker would jump.');
+        }
+
+        $this->assertMatchesRegularExpression('/animation:\s*none/', $arrive[1], 'The arrived ship keeps pulsing: the hand-over jumps from one opacity to another.');
+        $this->assertMatchesRegularExpression('/filter:\s*none/', $arrive[1], 'The arrived ship keeps its engine glow: the hand-over switches it off in one frame.');
+
+        $this->assertMatchesRegularExpression(
+            '/#galaxyTactical \.gtFleetMarker image \{[^}]*animation:\s*gtMarkerPulse/',
+            $feuille,
+            'The common pulse rule is gone: the stilling rule has nothing left to beat.'
+        );
+        $this->assertMatchesRegularExpression(
+            '/#galaxyTactical \.gtTrajHostile \.gtShip image \{[^}]*filter:\s*drop-shadow/',
+            $feuille,
+            'The hostile glow rule is gone: the stilling rule has nothing left to beat.'
+        );
+
+        /* Et le module pose bien la classe que la feuille attend, sur le marqueur du mouvement. */
+        $this->assertStringContainsString("mouvement._marqueur.classList.toggle('gtArrived', arrivee);", $this->module(), 'The module no longer marks the arrived ship: the stilling rule applies to nothing.');
     }
 
     public function testTheModuleIsPartOfTheBundle(): void

@@ -78483,16 +78483,49 @@ window.playOGameXWormhole = function (canvas) {
         mouvement._saut = saut;
     }
 
+    /*
+     * Les etats dans lesquels le mouvement d une patrouille est un vrai vol : en route vers son
+     * point, de retour vers sa base, ou partie frapper — l aller comme le retour du raid. Posee,
+     * son segment n est plus qu une ligne que le serveur conserve.
+     */
+    var ETATS_QUI_VOLENT = ['en_route', 'returning', 'attacking'];
+
+    /*
+     * Le serveur dit-il encore la patrouille de ce mouvement **en train de voler** ? Vrai dans la
+     * fenetre entre l instant d arrivee et la reponse qui le constate ; faux des qu elle est posee.
+     * Faux aussi pour une patrouille qui n est pas la mienne : elle n est pas dans la liste, et son
+     * mouvement se traite comme avant.
+     */
+    function laPatrouilleVoleEncore(mouvement) {
+        var p = patrouilleParId(mouvement.patrol_id);
+
+        return !!(p && ETATS_QUI_VOLENT.indexOf(String(p.state || '')) !== -1);
+    }
+
+    /* Un trace quitte la couche, et l objet oublie tout ce qui le composait. */
+    function retirerLeTrace(mouvement) {
+        if (mouvement._groupe && mouvement._groupe.parentNode) {
+            mouvement._groupe.parentNode.removeChild(mouvement._groupe);
+        }
+
+        mouvement._groupe = null;
+        mouvement._marqueur = null;
+        mouvement._trajectoire = null;
+        mouvement._cap = null;
+        mouvement._porteImage = null;
+        mouvement._trainee = null;
+        mouvement._saut = null;
+        mouvement._etatPrecedent = undefined;
+    }
+
     function dessinerLesMouvements(carte, galaxie, systeme) {
         var couche = coucheDe(carte);
-
-        while (couche.firstChild) {
-            couche.removeChild(couche.firstChild);
-        }
+        var maintenant = maintenantServeur() / 1000;
+        var retenus = {};
 
         mouvements.forEach(function (mouvement) {
             /*
-             * **Une patrouille arrivee n est plus un mouvement.**
+             * **Une patrouille arrivee n est plus un mouvement — des que le serveur la dit posee.**
              *
              * Le segment d une patrouille posee reste `processed = 0` — c est ce qui lui donne son
              * creneau de flotte, sa presence dans la boite d evenements et son inscription au
@@ -78500,11 +78533,35 @@ window.playOGameXWormhole = function (canvas) {
              * carte dessinait sa trajectoire indefiniment : une ligne bleue figee vers un point ou
              * la flotte etait deja posee. Signale par Keven au controle du 12 septembre 2026.
              *
-             * Le dessin s arrete a l arrivee ; l icone de la patrouille prend le relais, comme elle
-             * le fait pour tout etat pose. **Seules les patrouilles** sont concernees : une flotte
-             * ordinaire disparait d elle-meme des que son arrivee est traitee.
+             * Le dessin s arrete quand le serveur a pris acte de l arrivee : la patrouille n est plus
+             * en vol, et son icone a pris le relais. Tant qu il la dit encore en vol — l instant
+             * d arrivee vient de passer, la reponse qui le constate n est pas encore la —, le
+             * vaisseau reste dessine, immobile a son point (`figerALArrivee()`). Avant, il
+             * disparaissait a la seconde d arrivee pour reparaitre, pose, une seconde et demie plus
+             * tard : c etait le « refresh » que Keven voyait. **Seules les patrouilles** sont
+             * concernees : une flotte ordinaire disparait d elle-meme des que son arrivee est traitee.
              */
-            if (mouvement.patrol_id && Number(mouvement.time_arrival) <= maintenantServeur() / 1000) {
+            if (mouvement.patrol_id && Number(mouvement.time_arrival) <= maintenant && !laPatrouilleVoleEncore(mouvement)) {
+                retirerLeTrace(mouvement);
+
+                return;
+            }
+
+            retenus[String(mouvement.id)] = true;
+
+            /*
+             * **Un trace deja en place y reste.** Depart, arrivee, genre et camp d une mission ne
+             * changent jamais : il n y a rien a redessiner, seulement les bouts a reprendre sur les
+             * corps qui ont orbite. Recreer le groupe faisait repartir la pulsation et le defilement
+             * de chaque trajectoire a chaque reponse. L etat precedent de la fenetre d hyperespace,
+             * lui, repart de zero comme a tout nouveau trace — consigne de Codex : rien ne se joue
+             * sur une transition qu on n a pas observee.
+             */
+            if (mouvement._groupe && mouvement._groupe.parentNode === couche) {
+                mouvement._bouts = extremites(mouvement, galaxie, systeme);
+                mouvement._etatPrecedent = undefined;
+                rafraichirLeTrace(mouvement, mouvement._bouts);
+
                 return;
             }
 
@@ -78606,7 +78663,11 @@ window.playOGameXWormhole = function (canvas) {
 
             mouvement._bouts = bouts;
             mouvement._marqueur = marqueur;
+            mouvement._groupe = groupe;
+            mouvement._etatPrecedent = undefined;
         });
+
+        balayer(couche, '.gtMovement', 'data-mission-id', retenus);
 
         placerLesMarqueurs();
     }
@@ -78636,6 +78697,31 @@ window.playOGameXWormhole = function (canvas) {
             : { avancement: (global - (1 - PART_LOCALE)) / PART_LOCALE, enTransit: false };
     }
 
+    /*
+     * **A l arrivee, la route s efface et le vaisseau reste.**
+     *
+     * Immobile a son point, dans son cap, sans pulsation ni lueur de reacteur — exactement tel
+     * qu il sera une fois pose (`.gtArrived`, dans la feuille). La reponse qui le dit pose le
+     * remplace alors par le marqueur de patrouille sans qu un pixel ne bouge. Ce qui s efface est
+     * tout ce qui disait « en chemin » : la trajectoire, la porte de bord, la trainee et le bouton
+     * de suivi. Chaque ecriture n a lieu que si elle change quelque chose : cette fonction tourne
+     * a chaque image.
+     */
+    function figerALArrivee(mouvement, arrivee) {
+        var route = [mouvement._trajectoire, mouvement._porteImage, mouvement._trainee, mouvement._saut];
+        var affichage = arrivee ? 'none' : '';
+
+        route.forEach(function (n) {
+            if (n && n.style.display !== affichage) {
+                n.style.display = affichage;
+            }
+        });
+
+        if (mouvement._marqueur) {
+            mouvement._marqueur.classList.toggle('gtArrived', arrivee);
+        }
+    }
+
     /* La position d'un marqueur : interpolation lineaire entre les deux instants du serveur. */
     function placerLesMarqueurs() {
         var maintenant = maintenantServeur() / 1000;
@@ -78646,23 +78732,34 @@ window.playOGameXWormhole = function (canvas) {
             }
 
             /*
-             * **Une patrouille qui arrive pendant qu on regarde s efface tout de suite.**
+             * **Une patrouille qui arrive pendant qu on regarde perd sa route tout de suite — et
+             * garde son vaisseau.**
              *
              * Le meme fait que celui du dessin — un segment de patrouille posee reste
              * `processed = 0`, donc le serveur le publie encore — mais vu d ici. Le controle ne
              * vivait qu au **dessin**, qui ne rejoue qu a chaque chargement de donnees : la ligne
              * restait figee jusqu au prochain, et Keven a du recharger la page pour la voir partir.
              *
-             * Cette boucle-ci tourne sur la minuterie, donc elle voit l instant passer. Le groupe
-             * entier est masque — trajectoire, marqueur et porte de bord ensemble : n en cacher
-             * qu une partie laisserait un triangle sans route ou une route sans flotte.
+             * Cette boucle-ci tourne sur la minuterie, donc elle voit l instant passer. Tant que le
+             * serveur dit la patrouille en vol, le vaisseau reste a son point et seule la route
+             * s efface (`figerALArrivee`) : masquer le groupe entier, comme avant, le faisait
+             * disparaitre jusqu a la reponse — le trou que Keven voyait. Quand le serveur ne la dit
+             * plus en vol, ou qu elle n est pas la mienne, le groupe entier s efface comme avant :
+             * n en cacher qu une partie laisserait un triangle sans route ou une route sans flotte.
              */
             if (mouvement.patrol_id) {
-                var arrivee = mouvement._marqueur.parentNode;
+                var arrivee = Number(mouvement.time_arrival) <= maintenant;
+                var voleEncore = laPatrouilleVoleEncore(mouvement);
 
-                if (arrivee) {
-                    arrivee.style.display = Number(mouvement.time_arrival) <= maintenant ? 'none' : '';
+                if (mouvement._groupe) {
+                    var affichage = arrivee && !voleEncore ? 'none' : '';
+
+                    if (mouvement._groupe.style.display !== affichage) {
+                        mouvement._groupe.style.display = affichage;
+                    }
                 }
+
+                figerALArrivee(mouvement, arrivee && voleEncore);
             }
 
             var duree = Math.max(1, mouvement.time_arrival - mouvement.time_departure);
@@ -79429,128 +79526,207 @@ window.playOGameXWormhole = function (canvas) {
         return h + ':' + (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r;
     }
 
+    /*
+     * ## Un marqueur de patrouille se met a jour, il ne se recree pas
+     *
+     * La couche etait videe puis reconstruite a chaque reponse. Un `<img>` neuf, meme avec une
+     * image deja en cache, reste vide quelques images, et le GIF anime du vaisseau repart de sa
+     * premiere : **toutes** les patrouilles clignotaient a chaque arrivee, pas seulement celle qui
+     * arrivait. Keven, 12 septembre 2026 : « elle arrive, tout disparait et apres l icone des
+     * patrouilles revient ».
+     *
+     * Chaque marqueur est donc **habille sur place** — etat, intitule, image, taille, chacun ecrit
+     * seulement s il change — et seul ce que la reponse ne porte plus est retire. Les gestionnaires
+     * d un marqueur lisent la patrouille **au moment du geste**, par son identifiant : ils ne
+     * retiennent pas l objet qui existait a leur creation.
+     */
+    function composerLeMarqueur(carte, id) {
+        var b = element('button', 'patrol-marker gtPatrolMarker');
+        var icone = element('img', '');
+
+        b.type = 'button';
+        b.setAttribute('data-patrol-id', String(id));
+        icone.alt = '';
+        icone.setAttribute('aria-hidden', 'true');
+        b.appendChild(icone);
+
+        b.addEventListener('click', function (evenement) {
+            evenement.preventDefault();
+            evenement.stopPropagation();
+
+            var p = patrouilleParId(id);
+
+            /* En choix de destination, une patrouille n'est pas une cible : le clic ne fait rien. */
+            if (p && !carte.gtChoix) {
+                choisirLaPatrouille(carte, p);
+            }
+        });
+
+        /*
+         * ## Prendre la flotte a la souris et la poser ou on veut l'envoyer
+         *
+         * Le geste demande par Keven : on saisit la patrouille, on la glisse, et en relachant un
+         * panneau montre le trajet, sa duree et son cout ; on confirme, et **elle voyage
+         * vraiment** jusque-la avant d'y stationner. Elle ne se teleporte pas : le relachement
+         * ne fait que designer une destination, et c'est le serveur qui chiffre puis execute.
+         *
+         * Le glisser n'a aucun pouvoir propre : il ouvre exactement l'ordre que le bouton
+         * « Deplacer » ouvre, et il est refuse pour les memes raisons — une patrouille engagee
+         * dans un combat ou dont le segment se pose avant la fin du delai ne se saisit pas, et
+         * la fiche dit pourquoi. Les champs X et Y restent l'alternative au clavier ; le clic
+         * reste celle du tactile, ou le glisser HTML5 n'existe pas.
+         */
+        b.draggable = true;
+
+        b.addEventListener('dragstart', function (evenement) {
+            var p = patrouilleParId(id);
+
+            if (!p) {
+                evenement.preventDefault();
+
+                return;
+            }
+
+            var commande = (p.commands && p.commands.move) || {};
+
+            if (!commande.allowed) {
+                evenement.preventDefault();
+
+                /* Refuse : la fiche s'ouvre quand meme, et le bouton grise porte la raison. */
+                choisirLaPatrouille(carte, p, true);
+
+                return;
+            }
+
+            if (evenement.dataTransfer) {
+                evenement.dataTransfer.effectAllowed = 'move';
+
+                try {
+                    evenement.dataTransfer.setData('text/plain', 'patrol:' + p.id);
+                } catch (e) {
+                    /* Certains navigateurs refusent setData hors interaction : sans effet ici. */
+                }
+            }
+
+            choisirLaPatrouille(carte, p, true);
+            commencerUnDeplacement(carte, fiche(carte), p);
+
+            /*
+             * La fiche vient de s'ouvrir sur le marqueur et recouvre une partie du systeme.
+             * Elle s'efface le temps du geste : la feuille lui retire le pointeur et presque
+             * toute son opacite, donc la destination cachee redevient visible et atteignable.
+             */
+            carte.classList.add('gtDragging');
+        });
+
+        return b;
+    }
+
+    /*
+     * L etat, l intitule, l image et la taille du marqueur, chacun ecrit **seulement s il change**.
+     * Reposer la meme adresse sur un `<img>` fait repartir un GIF anime de sa premiere image.
+     */
+    function habillerLeMarqueur(p) {
+        var b = p._marqueur;
+        var icone = b.querySelector('img');
+        var etat = 'gtPatrol--' + String(p.state || '');
+        var intitule = locaFiche('patrolTitle', 'Patrouille') + ' ' + (p.number || p.id) + ' — ' + (p.state_label || p.state);
+        /*
+         * Un nom nu vient du pack de la carte ; un chemin qui commence par une barre est une
+         * image du jeu et se prend telle quelle. Prefixer les deux donnerait une adresse qui
+         * n existe pas, et le navigateur afficherait un cadre vide **sans la moindre erreur**.
+         */
+        var dessin = ICONES_DE_PATROUILLE[p.state] || 'patrol-patrol.svg';
+        var adresse = dessin.charAt(0) === '/' ? dessin : '/img/galaxy-tactical/' + dessin;
+        /*
+         * **Le vaisseau prend la taille du vaisseau ; un glyphe d etat garde la sienne.**
+         *
+         * Une patrouille immobilisee ou dont les vaisseaux sont partis frapper ne montre pas une
+         * flotte mais un pictogramme, dessine pour 24 px : le retrecir le rendrait illisible. La
+         * distinction se fait donc sur **l image reellement choisie**, jamais sur un nom d etat —
+         * le jour ou un autre etat montrera le vaisseau, il aura la bonne taille sans qu on
+         * revienne ici.
+         *
+         * En style en ligne parce que la feuille pose 24 px sur toutes les icones de ce marqueur :
+         * c est la seule facon de n en exempter qu une sans ajouter un selecteur qui devrait
+         * connaitre les etats. Et un glyphe qui succede au vaisseau **rend** cette taille : le
+         * marqueur survit a la reponse, rien ne le remet a neuf.
+         */
+        var vaisseau = dessin === VAISSEAU_BLANC;
+        var taille = vaisseau ? TAILLE_DU_VAISSEAU + 'px' : '';
+
+        if (b.gtEtat !== etat) {
+            if (b.gtEtat) {
+                b.classList.remove(b.gtEtat);
+            }
+
+            b.classList.add(etat);
+            b.gtEtat = etat;
+        }
+
+        if (b.title !== intitule) {
+            b.title = intitule;
+            b.setAttribute('aria-label', intitule);
+        }
+
+        if (icone.getAttribute('src') !== adresse) {
+            icone.src = adresse;
+        }
+
+        if (icone.style.width !== taille) {
+            icone.style.width = taille;
+            icone.style.height = taille;
+        }
+
+        /* Le vaisseau garde son cap (pose a chaque image, avec sa position) ; un glyphe n en a aucun. */
+        p._vaisseau = vaisseau ? icone : null;
+
+        if (!vaisseau && icone.style.transform !== '') {
+            icone.style.transform = '';
+        }
+    }
+
+    function retirerLeMarqueur(p) {
+        if (p._marqueur && p._marqueur.parentNode) {
+            p._marqueur.parentNode.removeChild(p._marqueur);
+        }
+
+        p._marqueur = null;
+        p._vaisseau = null;
+    }
+
     function dessinerLesPatrouilles(carte, galaxie, systeme) {
         var couche = coucheDesPatrouilles(carte);
         var aRouvrir = carte.gtPatrouilleARestaurer;
+        var retenus = {};
 
         carte.gtPatrouilleARestaurer = null;
-        couche.innerHTML = '';
 
         patrouilles.forEach(function (p) {
+            p._bouts = p.segment ? extremites(p.segment, galaxie, systeme) : null;
+
             /*
              * **En vol, le triangle blanc du mouvement suffit** (decision de Keven, 12 septembre
              * 2026). Dessiner en plus l icone de patrouille posait deux marqueurs au meme endroit
              * pour une seule flotte. C est ce triangle qui porte desormais le clic.
              */
             if (EN_VOL.indexOf(String(p.state || '')) !== -1) {
-                p._marqueur = null;
-                p._bouts = p.segment ? extremites(p.segment, galaxie, systeme) : null;
+                retirerLeMarqueur(p);
 
                 return;
             }
 
-            var b = element('button', 'patrol-marker gtPatrolMarker gtPatrol--' + String(p.state || ''));
-            var icone = element('img', '');
-            var intitule = locaFiche('patrolTitle', 'Patrouille') + ' ' + (p.number || p.id) + ' — ' + (p.state_label || p.state);
+            retenus[String(p.id)] = true;
 
-            b.type = 'button';
-            b.setAttribute('data-patrol-id', String(p.id));
-            b.setAttribute('aria-label', intitule);
-            b.title = intitule;
-            /*
-             * Un nom nu vient du pack de la carte ; un chemin qui commence par une barre est une
-             * image du jeu et se prend telle quelle. Prefixer les deux donnerait une adresse qui
-             * n existe pas, et le navigateur afficherait un cadre vide **sans la moindre erreur**.
-             */
-            var dessin = ICONES_DE_PATROUILLE[p.state] || 'patrol-patrol.svg';
-
-            icone.src = dessin.charAt(0) === '/' ? dessin : '/img/galaxy-tactical/' + dessin;
-
-            /*
-             * **Le vaisseau prend la taille du vaisseau ; un glyphe d etat garde la sienne.**
-             *
-             * Une patrouille immobilisee ou dont les vaisseaux sont partis frapper ne montre pas une
-             * flotte mais un pictogramme, dessine pour 24 px : le retrecir le rendrait illisible. La
-             * distinction se fait donc sur **l image reellement choisie**, jamais sur un nom d etat —
-             * le jour ou un autre etat montrera le vaisseau, il aura la bonne taille sans qu on
-             * revienne ici.
-             *
-             * En style en ligne parce que la feuille pose 24 px sur toutes les icones de ce marqueur :
-             * c est la seule facon de n en exempter qu une sans ajouter un selecteur qui devrait
-             * connaitre les etats.
-             */
-            if (dessin === VAISSEAU_BLANC) {
-                icone.style.width = TAILLE_DU_VAISSEAU + 'px';
-                icone.style.height = TAILLE_DU_VAISSEAU + 'px';
+            if (!p._marqueur || p._marqueur.parentNode !== couche) {
+                p._marqueur = composerLeMarqueur(carte, Number(p.id));
+                couche.appendChild(p._marqueur);
             }
 
-            icone.alt = '';
-            icone.setAttribute('aria-hidden', 'true');
-            b.appendChild(icone);
-
-            b.addEventListener('click', function (evenement) {
-                evenement.preventDefault();
-                evenement.stopPropagation();
-
-                /* En choix de destination, une patrouille n'est pas une cible : le clic ne fait rien. */
-                if (!carte.gtChoix) {
-                    choisirLaPatrouille(carte, p);
-                }
-            });
-
-            /*
-             * ## Prendre la flotte a la souris et la poser ou on veut l'envoyer
-             *
-             * Le geste demande par Keven : on saisit la patrouille, on la glisse, et en relachant un
-             * panneau montre le trajet, sa duree et son cout ; on confirme, et **elle voyage
-             * vraiment** jusque-la avant d'y stationner. Elle ne se teleporte pas : le relachement
-             * ne fait que designer une destination, et c'est le serveur qui chiffre puis execute.
-             *
-             * Le glisser n'a aucun pouvoir propre : il ouvre exactement l'ordre que le bouton
-             * « Deplacer » ouvre, et il est refuse pour les memes raisons — une patrouille engagee
-             * dans un combat ou dont le segment se pose avant la fin du delai ne se saisit pas, et
-             * la fiche dit pourquoi. Les champs X et Y restent l'alternative au clavier ; le clic
-             * reste celle du tactile, ou le glisser HTML5 n'existe pas.
-             */
-            b.draggable = true;
-
-            b.addEventListener('dragstart', function (evenement) {
-                var commande = (p.commands && p.commands.move) || {};
-
-                if (!commande.allowed) {
-                    evenement.preventDefault();
-
-                    /* Refuse : la fiche s'ouvre quand meme, et le bouton grise porte la raison. */
-                    choisirLaPatrouille(carte, p, true);
-
-                    return;
-                }
-
-                if (evenement.dataTransfer) {
-                    evenement.dataTransfer.effectAllowed = 'move';
-
-                    try {
-                        evenement.dataTransfer.setData('text/plain', 'patrol:' + p.id);
-                    } catch (e) {
-                        /* Certains navigateurs refusent setData hors interaction : sans effet ici. */
-                    }
-                }
-
-                choisirLaPatrouille(carte, p, true);
-                commencerUnDeplacement(carte, fiche(carte), p);
-
-                /*
-                 * La fiche vient de s'ouvrir sur le marqueur et recouvre une partie du systeme.
-                 * Elle s'efface le temps du geste : la feuille lui retire le pointeur et presque
-                 * toute son opacite, donc la destination cachee redevient visible et atteignable.
-                 */
-                carte.classList.add('gtDragging');
-            });
-
-            couche.appendChild(b);
-            p._marqueur = b;
-            p._bouts = p.segment ? extremites(p.segment, galaxie, systeme) : null;
+            habillerLeMarqueur(p);
         });
+
+        balayer(couche, '.gtPatrolMarker', 'data-patrol-id', retenus);
 
         placerLesPatrouilles();
 
@@ -79567,10 +79743,11 @@ window.playOGameXWormhole = function (canvas) {
         }
 
         /*
-         * **Un ordre en cours garde sa fiche telle quelle, mais son marqueur est neuf.** La couche
-         * vient d'etre reconstruite : le marqueur que la fiche tenait n'est plus dans le document,
-         * et `placer()` sur un noeud detache l'enverrait en haut a gauche. La fiche se rattache au
-         * marqueur neuf de la meme patrouille, sans etre recomposee — recomposer effacerait l'ordre.
+         * **Un ordre en cours garde sa fiche telle quelle, et se rattache a son marqueur.** La
+         * fiche n est pas recomposee — recomposer effacerait l ordre. Le marqueur est le plus
+         * souvent celui qu elle tenait deja ; mais une patrouille qui vient de se poser en a un
+         * neuf, et une fiche accrochee a un noeud absent du document serait envoyee en haut a
+         * gauche par `placer()`.
          */
         if (f && !f.hidden && f.gtPatrouille && f.gtOrdre) {
             patrouilles.forEach(function (p) {
@@ -79691,8 +79868,26 @@ window.playOGameXWormhole = function (canvas) {
             p._marqueur.style.left = ou.point.x.toFixed(1) + 'px';
             p._marqueur.style.top = ou.point.y.toFixed(1) + 'px';
 
-            /* Le compte a rebours du retour de securite, sur la fiche ouverte, a la seconde. */
-            if (p._compte) {
+            /*
+             * **Le vaisseau pose garde le cap de son arrivee.** Le meme calcul que pour le vaisseau
+             * en vol, sur le meme segment : a l instant ou la reponse remplace l un par l autre, les
+             * deux pointent au meme degre. L image regarde vers la droite, comme sur la trajectoire.
+             * Les bouts sont repris a chaque orbite (`tournerLesOrbites`), d ou la lecture ici, a
+             * chaque image — et l ecriture seulement quand l angle change.
+             */
+            if (p._vaisseau) {
+                var rotation = 'rotate(' + (p._bouts ? capDe(p._bouts) : 0).toFixed(1) + 'deg)';
+
+                if (p._vaisseau.style.transform !== rotation) {
+                    p._vaisseau.style.transform = rotation;
+                }
+            }
+
+            /*
+             * Le compte a rebours du retour de securite, sur la fiche ouverte, a la seconde. L objet
+             * survit aux reponses, la fiche non : un compteur qui n est plus dans le document se tait.
+             */
+            if (p._compte && p._compte.isConnected) {
                 var reste = dureeLisible(Number(p.safety_return_at) - maintenant);
 
                 if (p._compte.textContent !== reste) {
@@ -80900,8 +81095,54 @@ window.playOGameXWormhole = function (canvas) {
     }
 
     /*
+     * ## Adopter une reponse sans rien recreer
+     *
+     * L ensemble est celui du serveur — ce qu il ne rend plus disparait, ce qu il rend de nouveau
+     * apparait, dans son ordre. Mais un mouvement ou une patrouille qu il rendait deja **reste le
+     * meme objet**, ses champs simplement reecrits : c est cet objet que les marqueurs, les traces
+     * et les gestionnaires de la carte tiennent (les proprietes `_`). Un objet neuf a chaque reponse
+     * obligeait a tout reconstruire — et tout reconstruire, c etait le clignotement general que
+     * Keven voyait a chaque arrivee : « tout disparait et apres l icone des patrouilles revient ».
+     */
+    function adopter(anciens, nouveaux) {
+        var parId = {};
+
+        anciens.forEach(function (a) {
+            parId[String(a.id)] = a;
+        });
+
+        return nouveaux.map(function (n) {
+            var a = parId[String(n.id)];
+
+            if (!a) {
+                return n;
+            }
+
+            Object.keys(n).forEach(function (clef) {
+                a[clef] = n[clef];
+            });
+
+            return a;
+        });
+    }
+
+    /*
+     * Retire d une couche ce que la reponse ne porte plus. Le serveur rend la liste complete de ce
+     * que le joueur a le droit de voir ; ce qui n y figure plus n a plus rien a faire a l ecran.
+     */
+    function balayer(couche, selecteur, attribut, retenus) {
+        var noeuds = couche.querySelectorAll(selecteur);
+
+        for (var i = 0; i < noeuds.length; i++) {
+            if (!retenus[String(noeuds[i].getAttribute(attribut))]) {
+                couche.removeChild(noeuds[i]);
+            }
+        }
+    }
+
+    /*
      * La demande, marquee d'un jeton : une reponse tardive de l'ancien systeme n'ecrase jamais le
-     * nouveau. Le serveur seul dit quels mouvements existent ; la reponse remplace tout.
+     * nouveau. Le serveur seul dit quels mouvements existent ; la reponse remplace l ensemble.
      */
     function chargerLesFlottes(carte, galaxie, systeme) {
         if (typeof galaxyFleetsUrl === 'undefined' || !galaxyFleetsUrl || !window.jQuery) {
@@ -80926,14 +81167,18 @@ window.playOGameXWormhole = function (canvas) {
 
                 mettreAJourLesCompteurs(reponse.counters);
                 decalageHorloge = Number(reponse.server_now) * 1000 - Date.now();
-                mouvements = Array.isArray(reponse.movements) ? reponse.movements : [];
-                patrouilles = Array.isArray(reponse.patrols) ? reponse.patrols : [];
                 /*
-                 * **Remplacement, jamais fusion.** Le serveur rend la liste complete de ce que le
-                 * joueur a le droit de voir a cet instant ; une liste vide retire donc ce qui etait
-                 * affiche. Le jeton, plus haut, garantit qu une reponse plus ancienne ne repasse
-                 * jamais par ici — sans quoi elle reintroduirait ce qu une revocation vient d oter.
+                 * **Remplacement de l ensemble, jamais fusion.** Le serveur rend la liste complete
+                 * de ce que le joueur a le droit de voir a cet instant ; une liste vide retire donc
+                 * ce qui etait affiche. Le jeton, plus haut, garantit qu une reponse plus ancienne
+                 * ne repasse jamais par ici — sans quoi elle reintroduirait ce qu une revocation
+                 * vient d oter.
+                 *
+                 * Les **objets**, eux, sont adoptes : un mouvement ou une patrouille deja affiche
+                 * garde son identite et donc tout ce que la carte lui a attache. Voir `adopter()`.
                  */
+                mouvements = adopter(mouvements, Array.isArray(reponse.movements) ? reponse.movements : []);
+                patrouilles = adopter(patrouilles, Array.isArray(reponse.patrols) ? reponse.patrols : []);
                 contactsDeSurveillance = Array.isArray(reponse.surveillance) ? reponse.surveillance : [];
                 dessinerLesMouvements(carte, galaxie, systeme);
                 dessinerLesPatrouilles(carte, galaxie, systeme);

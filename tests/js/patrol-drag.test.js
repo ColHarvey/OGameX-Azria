@@ -174,6 +174,20 @@ function unMonde() {
     ];
     window.renderContentGalaxy = function () {};
 
+    /*
+     * Les ecouteurs du diffuseur sont retenus : `FleetMovementChanged` est le seul declencheur qui
+     * recharge la couche des flottes SANS redessiner la carte. Un redessin effacerait le DOM, et
+     * « ce marqueur est le meme noeud qu avant la reponse » ne pourrait plus etre juge.
+     */
+    const ecouteurs = {};
+
+    window.Echo = {
+        private: (nom) => ({
+            listen: (evenement, rappel) => { ecouteurs[nom + evenement] = rappel; }
+        }),
+        leave: () => {}
+    };
+
     const script = window.document.createElement('script');
     script.textContent = readFileSync(SOURCE, 'utf8');
     window.document.body.appendChild(script);
@@ -216,7 +230,18 @@ function unMonde() {
         }));
     };
 
-    return { window, demandes, envois, prevenus, panneauDEvenements, amorcer, carte, marqueur, fiche, efface, fermer, geste, relacher, cliquer };
+    /* Une annonce de mouvement sur le canal du joueur : la couche est redemandee, la carte reste. */
+    const unMouvementAnnonce = (galaxie, systeme) => {
+        const rappel = ecouteurs['galaxy.player.7.FleetMovementChanged'];
+
+        if (!rappel) {
+            throw new Error('le module ne s est pas abonne aux mouvements du joueur');
+        }
+
+        rappel({ from: { galaxy: galaxie, system: systeme }, to: { galaxy: galaxie, system: systeme } });
+    };
+
+    return { window, demandes, envois, prevenus, panneauDEvenements, amorcer, carte, marqueur, fiche, efface, fermer, geste, relacher, cliquer, unMouvementAnnonce };
 }
 
 /**
@@ -672,7 +697,15 @@ test('un ordre accepte previent le bandeau et la liste, panneau replie compris',
  * Ce temoin attend donc du **temps reel** : le mouvement arrive une seconde apres le dessin, et la
  * ligne doit disparaitre sans que rien ne soit recharge.
  */
-test('une patrouille qui arrive en cours de route perd sa ligne sans rechargement', async () => {
+/**
+ * **A l arrivee, la route s efface — et le vaisseau reste.**
+ *
+ * Premiere version de ce temoin : le groupe entier devait disparaitre. C etait la ligne qu on
+ * voulait voir partir, et le vaisseau partait avec elle : Keven a vu sa flotte s effacer a la
+ * seconde d arrivee et reparaitre, posee, une seconde et demie plus tard. Les deux moities comptent
+ * desormais, et dans les deux sens : la ligne masquee, le vaisseau visible et immobilise.
+ */
+test('une patrouille qui arrive en cours de route perd sa ligne sans rechargement, et garde son vaisseau', async () => {
     const monde = unMonde();
 
     try {
@@ -686,17 +719,27 @@ test('une patrouille qui arrive en cours de route perd sa ligne sans rechargemen
         monde.demandes[0].repondre(reponse(1, 5, [unePatrouille({ etat: 'en_route' })], maintenant, [bientot]));
 
         const groupe = monde.window.document.querySelector('.gtMovement');
+        const ligne = groupe && groupe.querySelector('.gtTrajectory');
+        const vaisseau = groupe && groupe.querySelector('.gtFleetMarker');
 
-        assert.ok(groupe, 'la premisse manque : aucun mouvement dessine');
-        assert.notEqual(groupe.style.display, 'none', 'le mouvement est masque avant meme d etre arrive');
+        assert.ok(groupe && ligne && vaisseau, 'la premisse manque : aucun mouvement dessine avec sa ligne et son vaisseau');
+        assert.notEqual(ligne.style.display, 'none', 'la ligne est masquee avant meme l arrivee');
+        assert.equal(vaisseau.classList.contains('gtArrived'), false, 'le vaisseau est dit arrive avant de l etre');
 
         await new Promise((suite) => setTimeout(suite, 1500));
 
         assert.equal(
-            groupe.style.display,
+            ligne.style.display,
             'none',
             'la ligne survit a l arrivee : il faut recharger la page pour la voir partir'
         );
+        assert.notEqual(
+            groupe.style.display,
+            'none',
+            'le groupe entier est masque : le vaisseau disparait a la seconde d arrivee, jusqu a la reponse'
+        );
+        assert.notEqual(vaisseau.style.display, 'none', 'le vaisseau est masque a l arrivee');
+        assert.ok(vaisseau.classList.contains('gtArrived'), 'le vaisseau arrive ne porte pas la classe qui l immobilise');
     } finally {
         monde.fermer();
     }
@@ -1224,6 +1267,317 @@ test('un glyphe d etat ne prend pas la taille du vaisseau', () => {
             '',
             'le glyphe d etat s est vu imposer la taille du vaisseau : la feuille ne decide plus de rien'
         );
+    } finally {
+        monde.fermer();
+    }
+});
+
+
+/** L angle d une rotation, qu elle soit ecrite en SVG (`rotate(12.3)`) ou en CSS (`rotate(12.3deg)`). */
+function angleDe(rotation) {
+    const m = /rotate\((-?[\d.]+)(?:deg)?\)/.exec(rotation || '');
+
+    return m ? Number(m[1]) : null;
+}
+
+/**
+ * **La releve est sans couture : meme point, meme cap, et pas un instant sans vaisseau.**
+ *
+ * C est le coeur de ce que Keven demandait : « que la flotte garde la position dans laquelle elle
+ * est arrivee, direction, comme en temps reel ». Trois temps :
+ *
+ * 1. en vol, le vaisseau blanc avance sur sa ligne ;
+ * 2. a l arrivee, la ligne s efface, le vaisseau reste a son point, dans son cap (temoin precedent) ;
+ * 3. a la reponse qui dit la patrouille posee, le marqueur de patrouille prend la place — **au meme
+ *    point et au meme degre** — et le mouvement quitte la carte dans le meme geste.
+ *
+ * Les egalites se lisent entre les deux dessins, jamais contre un nombre ecrit ici : le point
+ * vient de `pointSpatial()` des deux cotes, le cap de `capDe()` des deux cotes.
+ */
+test('a la reponse, le vaisseau pose prend la place du vaisseau arrive, au meme point et au meme cap', async () => {
+    const monde = unMonde();
+
+    try {
+        const maintenant = Math.floor(Date.now() / 1000);
+        const vol = unMouvementDePatrouille(3);
+
+        vol.time_departure = maintenant - 60;
+        vol.time_arrival = maintenant + 1;
+
+        /* La veille d arrivee lit le segment de la patrouille : il porte les instants du vol. */
+        const enVol = unePatrouille({ etat: 'en_route' });
+
+        enVol.point = null;
+        enVol.segment = { id: vol.id, from: vol.from, to: vol.to, time_departure: vol.time_departure, time_arrival: vol.time_arrival };
+
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [enVol], maintenant, [vol]));
+
+        await new Promise((suite) => setTimeout(suite, 1500));
+
+        const arrive = monde.window.document.querySelector('.gtFleetMarker');
+        const capArrive = angleDe(arrive && arrive.querySelector('.gtShip').getAttribute('transform'));
+        const position = /translate\((-?[\d.]+),(-?[\d.]+)\)/.exec(arrive ? arrive.getAttribute('transform') : '');
+
+        assert.ok(arrive && position, 'la premisse manque : aucun vaisseau arrive a comparer');
+        assert.ok(capArrive !== null && capArrive !== 0, 'la premisse manque : un cap nul ne distinguerait pas un vaisseau tourne d un vaisseau qui ne l est pas');
+
+        // La reponse : posee, sur le segment qu elle vient de voler.
+        const posee = unePatrouille();
+
+        posee.segment = { id: vol.id, from: vol.from, to: vol.to, time_departure: vol.time_departure, time_arrival: vol.time_arrival };
+        posee.stationed_since = vol.time_arrival;
+
+        /* La demande d apres arrivee part 1,2 s apres l instant observe : on l attend. */
+        await new Promise((suite) => setTimeout(suite, 1300));
+
+        const derniere = monde.demandes[monde.demandes.length - 1];
+
+        assert.ok(monde.demandes.length > 1, 'la premisse manque : l arrivee n a pas redemande les flottes');
+        assert.ok(arrive.classList.contains('gtArrived') && arrive.isConnected, 'la premisse manque : le vaisseau arrive n est plus la au moment de la reponse');
+        derniere.repondre(reponse(1, 5, [posee], maintenant + 3, [vol]));
+
+        const marqueur = monde.marqueur(3);
+        const img = marqueur && marqueur.querySelector('img');
+
+        assert.ok(marqueur && img, 'la patrouille posee n a pas de marqueur apres la reponse');
+        assert.equal(monde.window.document.querySelectorAll('.gtMovement').length, 0, 'le mouvement arrive est encore dessine sous le marqueur pose : deux vaisseaux');
+
+        /*
+         * Meme point, deux calculs : le vaisseau en vol est place par `depart + (arrivee − depart) × 1`,
+         * le vaisseau pose par `arrivee` directement. Le bruit flottant de la soustraction suffit a
+         * faire basculer l arrondi au dixieme (333,65 → 333,6 ou 333,7), et la planete de depart orbite
+         * en temps reel : l ecart apparait et disparait au fil des secondes. Un dixieme de pixel n est
+         * pas une position differente ; un pixel entier le serait. La borne vaut **un pas d arrondi,
+         * jamais deux** — et se compare elle-meme en flottant : 333,7 − 333,6 rend 0,10000000000002.
+         */
+        const ecartX = Math.abs(parseFloat(marqueur.style.left) - Number(position[1]));
+        const ecartY = Math.abs(parseFloat(marqueur.style.top) - Number(position[2]));
+
+        assert.ok(ecartX < 0.15, 'le vaisseau pose n est pas au point ou le vaisseau arrive s etait immobilise (x) : ecart ' + ecartX);
+        assert.ok(ecartY < 0.15, 'le vaisseau pose n est pas au point ou le vaisseau arrive s etait immobilise (y) : ecart ' + ecartY);
+        /*
+         * Meme regle pour le cap : celui du vol date du dernier pas orbital ou un corps a bouge, celui
+         * du vaisseau pose de l instant de la reponse. La planete de depart avance de 0,0125 degre par
+         * seconde : un centieme de degre reel, qui suffit a faire basculer l arrondi au dixieme.
+         */
+        const ecartDeCap = Math.abs(angleDe(img.style.transform) - capArrive);
+
+        assert.ok(ecartDeCap < 0.15, 'le vaisseau pose ne pointe pas dans le cap ou il est arrive : ' + img.style.transform + ' contre ' + capArrive);
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Une reponse ne recree pas les marqueurs des patrouilles deja posees.**
+ *
+ * Un `<img>` neuf reste vide quelques images et un GIF anime repart de zero : reconstruire la
+ * couche a chaque reponse faisait clignoter **toutes** les patrouilles a chaque arrivee. L identite
+ * du noeud est la preuve, et son image n a pas ete reposee.
+ */
+test('une reponse ne recree pas les marqueurs des patrouilles deja posees', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [unePatrouille({ id: 3 }), unePatrouille({ id: 4 })]));
+
+        const avant = monde.marqueur(4);
+        const imageAvant = avant && avant.querySelector('img');
+
+        assert.ok(avant && imageAvant, 'la premisse manque : aucun marqueur pour la patrouille 4');
+
+        /* Reposer la meme adresse sur un `<img>` fait aussi repartir le GIF : l attribut ne doit pas bouger. */
+        const observateur = new monde.window.MutationObserver(() => {});
+
+        observateur.observe(imageAvant, { attributes: true, attributeFilter: ['src'] });
+
+        monde.unMouvementAnnonce(1, 5);
+        monde.demandes[monde.demandes.length - 1].repondre(reponse(1, 5, [unePatrouille({ id: 3 }), unePatrouille({ id: 4 })], 1_700_000_200));
+
+        assert.equal(monde.window.document.querySelectorAll('.gtPatrolMarker').length, 2, 'la couche ne porte pas exactement les deux patrouilles de la reponse');
+        assert.strictEqual(monde.marqueur(4), avant, 'le marqueur de la patrouille 4 a ete recree : il a clignote');
+        assert.strictEqual(monde.marqueur(4).querySelector('img'), imageAvant, 'l image du marqueur a ete recreee : le GIF repart de zero');
+        assert.equal(observateur.takeRecords().length, 0, 'l adresse de l image a ete reposee alors qu elle n a pas change : le GIF repart de zero');
+        observateur.disconnect();
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Et les traces des mouvements en vol non plus.** Recreer le groupe faisait repartir la pulsation
+ * du marqueur et le defilement de la trajectoire a chaque reponse.
+ */
+test('une reponse ne recree pas les traces des mouvements en vol', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [unePatrouille({ id: 9, etat: 'en_route' })], 1_700_000_100, [unMouvementDePatrouille(9)]));
+
+        const avant = monde.window.document.querySelector('.gtMovement[data-mission-id="909"]');
+
+        assert.ok(avant, 'la premisse manque : aucun trace pour le mouvement 909');
+
+        monde.unMouvementAnnonce(1, 5);
+        monde.demandes[monde.demandes.length - 1].repondre(reponse(1, 5, [unePatrouille({ id: 9, etat: 'en_route' })], 1_700_000_200, [unMouvementDePatrouille(9)]));
+
+        assert.equal(monde.window.document.querySelectorAll('.gtMovement').length, 1, 'la couche ne porte pas exactement le mouvement de la reponse');
+        assert.strictEqual(monde.window.document.querySelector('.gtMovement[data-mission-id="909"]'), avant, 'le trace a ete recree : sa pulsation est repartie de zero');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Ce que la reponse ne porte plus quitte la carte.** Le pendant du precedent : garder les
+ * noeuds en place ne doit pas garder ceux dont le serveur ne parle plus. Trois retraits, chacun
+ * par une cause differente — une patrouille disparue, un mouvement disparu, une patrouille
+ * repartie en vol (son icone cede la place au triangle).
+ */
+test('ce que la reponse ne porte plus quitte la carte', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(
+            1, 5,
+            [unePatrouille({ id: 3 }), unePatrouille({ id: 4 }), unePatrouille({ id: 5 })],
+            1_700_000_100,
+            [unMouvementDePatrouille(9), unMouvementDePatrouille(10)]
+        ));
+
+        assert.equal(monde.window.document.querySelectorAll('.gtPatrolMarker').length, 3, 'la premisse manque : trois marqueurs attendus');
+        assert.equal(monde.window.document.querySelectorAll('.gtMovement').length, 2, 'la premisse manque : deux traces attendus');
+
+        const repartie = unePatrouille({ id: 5, etat: 'en_route' });
+
+        monde.unMouvementAnnonce(1, 5);
+        monde.demandes[monde.demandes.length - 1].repondre(reponse(
+            1, 5,
+            [unePatrouille({ id: 3 }), repartie],
+            1_700_000_200,
+            [unMouvementDePatrouille(9), unMouvementDePatrouille(5)]
+        ));
+
+        assert.equal(monde.marqueur(4), null, 'la patrouille 4 a disparu de la reponse et son marqueur est reste');
+        assert.equal(monde.marqueur(5), null, 'la patrouille 5 est repartie en vol et son icone est restee sous le triangle');
+        assert.ok(monde.marqueur(3), 'la patrouille 3, toujours la, a perdu son marqueur');
+        assert.equal(monde.window.document.querySelector('.gtMovement[data-mission-id="910"]'), null, 'le mouvement 910 a disparu de la reponse et son trace est reste');
+        assert.ok(monde.window.document.querySelector('.gtMovement[data-mission-id="905"]'), 'le nouveau mouvement de la patrouille 5 n est pas trace');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Un marqueur reutilise suit son nouvel etat — et rend ce qu il avait pris.**
+ *
+ * Avant, chaque reponse recreait le marqueur : rien n avait a etre defait. Desormais il survit, et
+ * un vaisseau qui devient glyphe doit rendre sa taille en ligne et son cap, sinon le pictogramme
+ * hérite d une rotation et de seize pixels qui ne sont pas les siens. L aller et le retour sont
+ * tous deux temoignes : sans le retour, un marqueur fige dans son premier etat passerait.
+ */
+test('un marqueur reutilise suit son nouvel etat et rend la taille et le cap du vaisseau', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [unePatrouille()]));
+
+        const marqueur = monde.marqueur(3);
+        const img = marqueur && marqueur.querySelector('img');
+
+        assert.ok(marqueur && img, 'la premisse manque : aucun marqueur pose');
+        assert.ok(marqueur.classList.contains('gtPatrol--stationed'), 'la premisse manque : le marqueur ne porte pas son etat');
+        assert.notEqual(img.style.width, '', 'la premisse manque : le vaisseau n a pas sa taille en ligne');
+        assert.notEqual(img.style.transform, '', 'la premisse manque : le vaisseau n a pas son cap');
+
+        monde.unMouvementAnnonce(1, 5);
+        monde.demandes[monde.demandes.length - 1].repondre(reponse(1, 5, [unePatrouille({ etat: 'immobilised' })], 1_700_000_200));
+
+        assert.strictEqual(monde.marqueur(3), marqueur, 'le marqueur a ete recree au changement d etat');
+        assert.ok(marqueur.classList.contains('gtPatrol--immobilised'), 'le marqueur ne porte pas son nouvel etat');
+        assert.equal(marqueur.classList.contains('gtPatrol--stationed'), false, 'le marqueur porte encore son ancien etat');
+        assert.notEqual((img.getAttribute('src') || '').indexOf('patrol-fuel'), -1, 'l image n est pas celle du nouvel etat : ' + img.getAttribute('src'));
+        assert.equal(img.style.width, '', 'le glyphe a garde la taille du vaisseau');
+        assert.equal(img.style.transform, '', 'le glyphe a garde le cap du vaisseau');
+        assert.ok(marqueur.title.indexOf('Stationnee') === -1, 'l intitule du marqueur est reste celui de l ancien etat : ' + marqueur.title);
+
+        monde.unMouvementAnnonce(1, 5);
+        monde.demandes[monde.demandes.length - 1].repondre(reponse(1, 5, [unePatrouille()], 1_700_000_300));
+
+        assert.strictEqual(monde.marqueur(3), marqueur, 'le marqueur a ete recree au retour a l etat pose');
+        assert.ok(marqueur.classList.contains('gtPatrol--stationed'), 'le marqueur n a pas repris son etat pose');
+        assert.notEqual(img.style.width, '', 'le vaisseau revenu n a pas repris sa taille');
+        assert.notEqual(img.style.transform, '', 'le vaisseau revenu n a pas repris son cap');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Le vaisseau pose pointe dans le cap de son segment — le meme cap que le vaisseau en vol.**
+ *
+ * Meme segment, deux dessins : une patrouille posee sur son point et une autre en vol vers ce
+ * point depuis la meme planete. Le temoin exige l egalite des deux angles, jamais un nombre : le
+ * jour ou la geometrie de la carte change, la regle tient sans qu on y revienne. La premisse
+ * refuse un cap nul, ou « tourne » et « pas tourne » coincideraient.
+ */
+test('le vaisseau pose pointe dans le cap ou son segment l a amene', () => {
+    const monde = unMonde();
+
+    try {
+        const vol = unMouvementDePatrouille(9);
+        const posee = unePatrouille();
+
+        posee.segment = { id: 903, from: vol.from, to: vol.to, time_departure: 1_700_000_000, time_arrival: 1_700_000_060 };
+
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [posee, unePatrouille({ id: 9, etat: 'en_route' })], 1_700_000_100, [vol]));
+
+        const img = monde.marqueur(3).querySelector('img');
+        const enVol = monde.window.document.querySelector('.gtShip');
+        const capEnVol = angleDe(enVol && enVol.getAttribute('transform'));
+
+        assert.ok(capEnVol !== null && capEnVol !== 0, 'la premisse manque : le vaisseau en vol n a pas de cap mesurable et non nul');
+        assert.equal(angleDe(img.style.transform), capEnVol, 'le vaisseau pose ne pointe pas dans le cap du vaisseau en vol : ' + img.style.transform + ' contre ' + capEnVol);
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Un marqueur reutilise obeit a la patrouille courante, pas a celle de sa creation.**
+ *
+ * Ses gestionnaires sont poses une fois ; les donnees, elles, changent a chaque reponse. Un
+ * gestionnaire qui retiendrait l objet de sa creation autoriserait un deplacement que le serveur
+ * vient de refuser. Le refus se lit sur le geste : `dragstart` est annule et la fiche s ouvre.
+ */
+test('un marqueur reutilise obeit a la patrouille courante, pas a celle de sa creation', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5, [uneLigne(4)]);
+        monde.demandes[0].repondre(reponse(1, 5, [unePatrouille({ deplacementPermis: true })]));
+
+        const marqueur = monde.marqueur(3);
+
+        assert.ok(marqueur, 'la premisse manque : aucun marqueur');
+
+        monde.unMouvementAnnonce(1, 5);
+        monde.demandes[monde.demandes.length - 1].repondre(reponse(1, 5, [unePatrouille({ deplacementPermis: false })], 1_700_000_200));
+
+        assert.strictEqual(monde.marqueur(3), marqueur, 'la premisse manque : le marqueur a ete recree, le cas ne prouverait rien');
+
+        const geste = new monde.window.Event('dragstart', { bubbles: true, cancelable: true });
+
+        marqueur.dispatchEvent(geste);
+
+        assert.ok(geste.defaultPrevented, 'le glisser d une patrouille dont le deplacement vient d etre refuse a ete accepte');
+        assert.equal(monde.efface(), false, 'la carte s est effacee pour un geste refuse');
     } finally {
         monde.fermer();
     }

@@ -466,6 +466,21 @@
 }
 
 /*
+ * ## Le vaisseau arrive
+ *
+ * Une patrouille qui vient d atteindre son point, avant que le serveur l ait dite posee : la route
+ * s est effacee (en ligne, par `figerALArrivee()`), le vaisseau reste — **immobile, sans pulsation
+ * ni lueur de reacteur**, exactement tel qu il sera une fois pose. La reponse le remplace alors par
+ * le marqueur de patrouille sans qu un pixel ne bouge. Trois classes dans le selecteur pour battre
+ * la pulsation commune (`.gtFleetMarker image`) comme la lueur du camp (`.gtTrajHostile .gtShip
+ * image`, deux classes) : la specificite decide, pas l ordre des regles.
+ */
+#galaxyTactical .gtFleetMarker.gtArrived .gtShip image {
+    animation: none;
+    filter: none;
+}
+
+/*
  * ## Le corps choisi
  *
  * La lune et les debris sont des cibles a part (`data-corps`) : elles prennent le focus et se
