@@ -46,6 +46,13 @@ class AllianceClassSystemScanTest extends FleetDispatchTestCase
 
     protected string $missionName = 'Transport';
 
+    /**
+     * Les copies de mission posees par l essai, retirees au demontage meme quand il echoue.
+     *
+     * @var list<int>
+     */
+    private array $copiesDeMission = [];
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -55,6 +62,11 @@ class AllianceClassSystemScanTest extends FleetDispatchTestCase
 
     protected function tearDown(): void
     {
+        // La base survit entre les essais d un passage : une copie laissee la gene l essai suivant.
+        if ($this->copiesDeMission !== []) {
+            FleetMission::query()->whereIn('id', $this->copiesDeMission)->delete();
+        }
+
         resolve(SettingsService::class)->set('alliance_classes_enabled', '0');
 
         parent::tearDown();
@@ -119,6 +131,12 @@ class AllianceClassSystemScanTest extends FleetDispatchTestCase
         $versLePremier = $this->envoyerUnTransportVers($premier);
         $versLeSecond = $this->envoyerUnTransportVers($second);
 
+        /*
+         * **Trois missions que l analyse de systeme ne doit jamais relever**, dans ce meme systeme.
+         * Prouver la selection par la seule presence des autorisees ne dirait rien des exclusions.
+         */
+        $interdites = $this->troisMissionsInterditesAuReleve($versLePremier, $premier);
+
         $this->switchToMoon();
         $this->laPhalangeSurLaLune();
         $this->uneAllianceDeClasse(AllianceClass::RESEARCHERS);
@@ -151,8 +169,18 @@ class AllianceClassSystemScanTest extends FleetDispatchTestCase
         $this->assertStringContainsString('id="eventRow-' . $versLePremier . '"', $releve, 'L analyse de systeme ne voit pas le transport vers le premier voisin.');
         $this->assertStringContainsString('id="eventRow-' . $versLeSecond . '"', $releve, 'L analyse de systeme ne voit pas le transport vers le second voisin.');
 
+        foreach ($interdites as $raison => $mission) {
+            $this->assertStringNotContainsString(
+                'id="eventRow-' . $mission . '"',
+                $releve,
+                'L analyse de systeme releve ' . $raison . ', que ses exclusions interdisent.'
+            );
+        }
+
         /*
-         * **Et exactement ce que les releves ordinaires verraient, planete par planete.** La base
+         * **Et un compte coherent avec les releves ordinaires, planete par planete.** Ce controle ne
+         * prouve pas la selection — une erreur commune aux deux chemins y passerait (Codex) ; ce sont
+         * les missions interdites ci-dessus qui la prouvent. Il ecarte un double comptage. La base
          * survit entre les essais d un passage : le systeme peut porter les restes d un autre essai.
          * Le compte attendu se construit sur le systeme reel, avec la regle d exclusion redite ici —
          * planetes seulement, habitees, ni au joueur qui analyse, ni a l administration.
@@ -290,6 +318,120 @@ class AllianceClassSystemScanTest extends FleetDispatchTestCase
         $this->assertNotNull($planete, 'La planete du voisin neuf n a pas ete creee.');
 
         return $planete;
+    }
+
+    /**
+     * Trois mouvements interdits au releve de systeme, dans le systeme de la lune.
+     *
+     * **Chacun est d abord vu par un releve ordinaire de son corps**, sous l identifiant que ce releve
+     * lui donne. C est ce qui rend le faux observable : un mouvement qu aucun releve ne verrait
+     * manquerait au releve de systeme sans que la moindre exclusion ait joue — le premier essai du cas
+     * « lune » l a montre, en visant une lune que `scanPlanetFleets()` ecarte deja par son `type_to`.
+     *
+     * @return array<string, int> ce qui est interdit => l identifiant sous lequel un releve le montrerait
+     */
+    private function troisMissionsInterditesAuReleve(int $modele, PlanetService $voisin): array
+    {
+        $systeme = $this->planetService->getPlanetCoordinates();
+        $sienne = $this->planetService->getPlanetId();
+
+        // Une arrivee vers une planete du joueur qui analyse.
+        $versLaSienne = $this->uneCopieDeMission($modele, [
+            'planet_id_to' => $sienne,
+            'type_to' => PlanetType::Planet->value,
+            'position_to' => $systeme->position,
+        ]);
+
+        /*
+         * Un depart depuis la lune d un voisin, vers la planete du joueur — un corps que le releve de
+         * systeme n analyse pas. Un releve de la lune montre son retour prevu, `mission + 999999`.
+         */
+        $lune = resolve(PlanetServiceFactory::class)->createMoonForPlanet($voisin, 2000000, 20);
+        $depuisLaLune = $this->uneCopieDeMission($modele, [
+            'planet_id_from' => $lune->getPlanetId(),
+            'type_from' => PlanetType::Moon->value,
+            'position_from' => $lune->getPlanetCoordinates()->position,
+            'planet_id_to' => $sienne,
+            'type_to' => PlanetType::Planet->value,
+            'position_to' => $systeme->position,
+            'parent_id' => null,
+        ]);
+
+        // Une arrivee vers une planete de l administration, dans le meme systeme.
+        $position = $this->unePositionLibreDansLeSysteme();
+        $planeteAdmin = $this->unePlaneteDUnJoueurNeuf(new Coordinate($systeme->galaxy, $systeme->system, $position));
+        $administrateur = $planeteAdmin->getPlayer();
+        $this->assertNotNull($administrateur);
+        User::query()->findOrFail($administrateur->getId())->assignRole('admin');
+        $versLAdministration = $this->uneCopieDeMission($modele, [
+            'planet_id_to' => $planeteAdmin->getPlanetId(),
+            'type_to' => PlanetType::Planet->value,
+            'position_to' => $position,
+        ]);
+
+        $interdits = [
+            'une mission vers une planete du joueur qui analyse' => [$versLaSienne, $sienne],
+            'le retour prevu d une flotte partie de la lune d un voisin' => [$depuisLaLune + 999999, $lune->getPlanetId()],
+            'une mission vers une planete de l administration' => [$versLAdministration, $planeteAdmin->getPlanetId()],
+        ];
+
+        foreach ($interdits as $raison => [$identifiant, $corps]) {
+            $vus = array_map('intval', array_column(resolve(PhalanxService::class)->scanPlanetFleets($corps, $this->currentUserId), 'mission_id'));
+
+            $this->assertContains(
+                $identifiant,
+                $vus,
+                'La premisse manque : ' . $raison . ' ne serait meme pas vu par un releve ordinaire de son corps.'
+            );
+        }
+
+        return array_map(static fn (array $paire): int => $paire[0], $interdits);
+    }
+
+    /**
+     * Une copie d une mission existante, dont seules les colonnes donnees changent.
+     *
+     * Le releve ne lit que la ligne de mission : une copie fidele suffit a lui presenter un mouvement,
+     * sans passer par les refus du lancement. Elle est retiree dans `tearDown()`.
+     *
+     * @param array<string, int|null> $colonnes
+     */
+    private function uneCopieDeMission(int $modele, array $colonnes): int
+    {
+        $copie = FleetMission::query()->findOrFail($modele)->replicate();
+
+        foreach ($colonnes as $colonne => $valeur) {
+            $copie->{$colonne} = $valeur;
+        }
+
+        $copie->processed = 0;
+        $copie->save();
+
+        $this->copiesDeMission[] = (int)$copie->id;
+
+        return (int)$copie->id;
+    }
+
+    /**
+     * Une position libre dans le systeme du joueur.
+     */
+    private function unePositionLibreDansLeSysteme(): int
+    {
+        $systeme = $this->planetService->getPlanetCoordinates();
+
+        for ($position = 1; $position <= 15; $position++) {
+            $occupee = DB::table('planets')
+                ->where('galaxy', $systeme->galaxy)
+                ->where('system', $systeme->system)
+                ->where('planet', $position)
+                ->exists();
+
+            if (!$occupee) {
+                return $position;
+            }
+        }
+
+        $this->fail('Le systeme du banc n a plus de position libre pour une planete de l administration.');
     }
 
     /**
