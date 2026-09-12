@@ -4,6 +4,7 @@ namespace OGame\Galaxy;
 
 use Illuminate\Support\Facades\Date;
 use OGame\Enums\FleetMissionStatus;
+use OGame\GameMissions\Abstracts\GameMission;
 use OGame\Models\FleetMission;
 use OGame\Services\FleetMissionService;
 use OGame\Services\PlayerService;
@@ -119,6 +120,17 @@ final class FleetMovementProjection
             ],
             'time_departure' => (int)$mission->time_departure,
             'time_arrival' => (int)$mission->time_arrival,
+            /*
+             * **Ou la flotte a fait demi-tour**, quand ce retour vient d un rappel.
+             *
+             * Une fraction de l aller, entre 0 et 1 — le serveur ne dit que ce qu il sait, et la
+             * carte applique sa propre geometrie pour en faire un point. **Absente**, jamais nulle,
+             * quand le retour n est pas un rappel : c est alors le depart d origine qui vaut, et le
+             * rendu est celui d avant.
+             */
+            'recall_progress' => $mission->recall_progress === null
+                ? null
+                : (int)$mission->recall_progress / GameMission::TRAVEL_FULLY_DONE,
         ];
     }
 

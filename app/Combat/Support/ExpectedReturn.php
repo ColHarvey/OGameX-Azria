@@ -135,6 +135,12 @@ final readonly class ExpectedReturn
             // — c est lui qui dit qui etait vise, et le verdict d arrivee le compare. Le laisser sur
             // le retour ferait croire qu une flotte qui rentre garde une cible.
             'target_patrol_owner_id' => null,
+            // **Un retour orchestre n est jamais un rappel.** La part du trajet parcourue au demi-tour
+            // n est ecrite que par `GameMission::cancel()`, quand le joueur rappelle une flotte encore
+            // en vol ; une flotte renvoyee par un combat part de la ou elle est. Imposer nul plutot
+            // que declarer la colonne sans effet fait attraper un `startReturn()` qui la recopierait
+            // un jour par erreur.
+            'recall_progress' => null,
             'x_from' => $aller->x_to === null ? null : (int)$aller->x_to,
             'y_from' => $aller->y_to === null ? null : (int)$aller->y_to,
 

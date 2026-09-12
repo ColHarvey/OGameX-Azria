@@ -241,6 +241,30 @@ function reponse(galaxie, systeme, contacts, maintenant = 1_700_000_000, patroui
     };
 }
 
+/**
+ * Un retour de rappel : meme route, parcourue a l envers, avec la part d aller deja faite.
+ *
+ * Le serveur cree le retour **depuis la cible** — c est son modele — et la duree du retour vaut
+ * exactement le temps que l aller a consomme.
+ */
+function unRetourRappele(fraction, route = uneRoute()) {
+    const dureeAller = route.time_arrival - route.time_departure;
+    const rappel = route.time_departure + Math.round(dureeAller * fraction);
+
+    return {
+        id: 778,
+        mission_type: 3,
+        label: 'Transport',
+        side: 'friendly',
+        is_return: true,
+        patrol_id: null,
+        from: route.to,
+        to: route.from,
+        time_departure: rappel,
+        time_arrival: rappel + Math.round(dureeAller * fraction),
+        recall_progress: fraction
+    };
+}
 /** Une ligne de Galaxie telle que le serveur la rend : une position, un corps, un proprietaire. */
 function uneLigne(position) {
     return { position, playerId: 9, planets: [{ planetType: 1, planetId: 5000 + position, planetName: 'Terra', playerId: 9 }] };
@@ -1393,4 +1417,152 @@ test('la veille de la carte ne repart pas tant qu une demande est en vol', () =>
     } finally {
         monde.fermer();
     }
+});
+
+/**
+ * **Le demi-tour d un rappel**, signale par Keven le 12 septembre 2026 : « tu ne le vois pas
+ * retourner de bord, c est comme s il sortait de l hyperespace alors qu il n y est jamais entre ».
+ *
+ * Le serveur cree le retour depuis la cible ; sans correction, la carte y place le vaisseau d un
+ * coup. Avec `recall_progress`, le depart du trace est ramene la ou la flotte etait.
+ */
+test('le retour d un rappel part de la ou la flotte a fait demi-tour', () => {
+    const monde = unMonde();
+    monde.amorcer(1, 5, [uneLigne(4)]);
+
+    const route = uneRoute();
+
+    // L aller seul : son trace donne les deux bouts de reference.
+    monde.demandes[0].repondre(reponse(1, 5, [], 1_700_000_000, [], [unMouvementSurLaRoute(route)]));
+
+    const aller = monde.window.document.querySelector('.gtMovement[data-mission-id="777"] .gtTrajectory');
+    assert.ok(aller, 'la premisse manque : l aller n est pas trace');
+
+    const A = { x: Number(aller.getAttribute('x1')), y: Number(aller.getAttribute('y1')) };
+    const B = { x: Number(aller.getAttribute('x2')), y: Number(aller.getAttribute('y2')) };
+
+    // Puis le rappel a 40 % du trajet : l aller disparait, le retour le remplace.
+    monde.demandes[0].repondre(reponse(1, 5, [], 1_700_000_000, [], [unRetourRappele(0.4, route)]));
+
+    const retour = monde.window.document.querySelector('.gtMovement[data-mission-id="778"] .gtTrajectory');
+    assert.ok(retour, 'le retour n est pas trace');
+
+    const depart = { x: Number(retour.getAttribute('x1')), y: Number(retour.getAttribute('y1')) };
+    const arrivee = { x: Number(retour.getAttribute('x2')), y: Number(retour.getAttribute('y2')) };
+
+    // Le retour finit ou l aller commencait.
+    assert.ok(Math.abs(arrivee.x - A.x) < 1 && Math.abs(arrivee.y - A.y) < 1, 'le retour ne revient pas au point de depart de l aller');
+
+    // Et il commence au point des 40 % du trajet, pas a la cible.
+    const attendu = { x: A.x + (B.x - A.x) * 0.4, y: A.y + (B.y - A.y) * 0.4 };
+
+    assert.ok(
+        Math.abs(depart.x - attendu.x) < 1 && Math.abs(depart.y - attendu.y) < 1,
+        'le retour part de la cible au lieu du point de demi-tour : depart (' + depart.x + ', ' + depart.y + '), attendu (' + Math.round(attendu.x) + ', ' + Math.round(attendu.y) + ')'
+    );
+
+    assert.ok(
+        Math.abs(depart.x - B.x) > 1 || Math.abs(depart.y - B.y) > 1,
+        'le depart du retour est reste la cible'
+    );
+
+    monde.fermer();
+});
+
+/**
+ * **La vitesse dessinee est conservee**, et c est ce qui distingue la bonne fraction d une autre.
+ *
+ * Un retour dure exactement le temps que l aller a consomme. Placer son depart a la fraction
+ * parcourue fait donc parcourir au vaisseau la meme distance par seconde qu a l aller. Une valeur
+ * fausse rendrait le retour visiblement plus rapide ou plus lent — le faux est observable.
+ */
+test('un retour rappele est dessine a la meme vitesse que son aller', () => {
+    const monde = unMonde();
+    monde.amorcer(1, 5, [uneLigne(4)]);
+
+    const route = uneRoute();
+    const dureeAller = route.time_arrival - route.time_departure;
+
+    monde.demandes[0].repondre(reponse(1, 5, [], 1_700_000_000, [], [unMouvementSurLaRoute(route)]));
+
+    const aller = monde.window.document.querySelector('.gtMovement[data-mission-id="777"] .gtTrajectory');
+    const longueur = (l) => Math.hypot(
+        Number(l.getAttribute('x2')) - Number(l.getAttribute('x1')),
+        Number(l.getAttribute('y2')) - Number(l.getAttribute('y1'))
+    );
+    const vitesseAller = longueur(aller) / dureeAller;
+
+    const fraction = 0.6;
+    monde.demandes[0].repondre(reponse(1, 5, [], 1_700_000_000, [], [unRetourRappele(fraction, route)]));
+
+    const retour = monde.window.document.querySelector('.gtMovement[data-mission-id="778"] .gtTrajectory');
+    const vitesseRetour = longueur(retour) / (dureeAller * fraction);
+
+    assert.ok(
+        Math.abs(vitesseRetour - vitesseAller) / vitesseAller < 0.02,
+        'le retour n est pas dessine a la vitesse de l aller : ' + vitesseRetour.toFixed(4) + ' contre ' + vitesseAller.toFixed(4)
+    );
+
+    monde.fermer();
+});
+
+/**
+ * Un retour ordinaire ne porte pas ce fait : il part de la cible, comme avant. C est l etat de tous
+ * les retours deja en vol au deploiement.
+ */
+test('un retour sans point de demi-tour part de la cible, comme avant', () => {
+    const monde = unMonde();
+    monde.amorcer(1, 5, [uneLigne(4)]);
+
+    const route = uneRoute();
+    monde.demandes[0].repondre(reponse(1, 5, [], 1_700_000_000, [], [unMouvementSurLaRoute(route)]));
+
+    const aller = monde.window.document.querySelector('.gtMovement[data-mission-id="777"] .gtTrajectory');
+    const B = { x: Number(aller.getAttribute('x2')), y: Number(aller.getAttribute('y2')) };
+
+    const ordinaire = unRetourRappele(0.5, route);
+    delete ordinaire.recall_progress;
+
+    monde.demandes[0].repondre(reponse(1, 5, [], 1_700_000_000, [], [ordinaire]));
+
+    const retour = monde.window.document.querySelector('.gtMovement[data-mission-id="778"] .gtTrajectory');
+    const depart = { x: Number(retour.getAttribute('x1')), y: Number(retour.getAttribute('y1')) };
+
+    assert.ok(
+        Math.abs(depart.x - B.x) < 1 && Math.abs(depart.y - B.y) < 1,
+        'un retour sans point de demi-tour ne part plus de la cible : le rendu d avant est casse'
+    );
+
+    monde.fermer();
+});
+
+/**
+ * Une valeur aberrante est refusee, jamais corrigee : le depart d origine vaut.
+ */
+test('une part de trajet hors bornes laisse le depart d origine', () => {
+    const monde = unMonde();
+    monde.amorcer(1, 5, [uneLigne(4)]);
+
+    const route = uneRoute();
+    monde.demandes[0].repondre(reponse(1, 5, [], 1_700_000_000, [], [unMouvementSurLaRoute(route)]));
+
+    const aller = monde.window.document.querySelector('.gtMovement[data-mission-id="777"] .gtTrajectory');
+    const B = { x: Number(aller.getAttribute('x2')), y: Number(aller.getAttribute('y2')) };
+
+    for (const valeur of [0, 1, -0.5, 1.5, NaN, null, 'beaucoup']) {
+        const mouvement = unRetourRappele(0.5, route);
+        mouvement.recall_progress = valeur;
+
+        monde.demandes[0].repondre(reponse(1, 5, [], 1_700_000_000, [], [mouvement]));
+
+        const retour = monde.window.document.querySelector('.gtMovement[data-mission-id="778"] .gtTrajectory');
+        const depart = { x: Number(retour.getAttribute('x1')), y: Number(retour.getAttribute('y1')) };
+
+        assert.ok(
+            Math.abs(depart.x - B.x) < 1 && Math.abs(depart.y - B.y) < 1,
+            'la valeur « ' + String(valeur) + ' » a deplace le depart au lieu d etre refusee'
+        );
+    }
+
+    monde.fermer();
 });

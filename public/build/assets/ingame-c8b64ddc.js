@@ -78443,7 +78443,70 @@ window.playOGameXWormhole = function (canvas) {
         var depart = partIci ? pointDeBout(mouvement.from) : porteVers(mouvement.to);
         var arrivee = arriveIci ? pointDeBout(mouvement.to) : porteVers(mouvement.from);
 
-        return { depart: depart, arrivee: arrivee, partIci: partIci, arriveIci: arriveIci };
+        return {
+            depart: pointDuDemiTour(mouvement, depart, arrivee, partIci, arriveIci),
+            arrivee: arrivee,
+            partIci: partIci,
+            arriveIci: arriveIci
+        };
+    }
+
+    /**
+     * Ou une flotte rappelee a fait demi-tour, sur le segment de son retour.
+     *
+     * ## Le defaut que cela ferme
+     *
+     * Le jeu cree le retour d un rappel **depuis la cible** — c est son modele : un retour part de la
+     * ou l aller allait. La carte le dessinait donc tel quel, et la flotte sautait au bout du trajet
+     * avant de revenir. Keven, 12 septembre 2026 : « c est comme s il sortait de l hyperespace alors
+     * qu il n y est jamais entre, de ou etait sa derniere position sur la map ».
+     *
+     * ## La formule, et pourquoi c est celle-la
+     *
+     * `recall_progress` (f) est la part de l aller parcourue au rappel. Le segment dessine du retour
+     * est le troncon local de l aller, parcouru a l envers ; ses deux extremites correspondent donc a
+     * des fractions d aller connues :
+     *
+     *   - retour entierement local        : depart = 1,            arrivee = 0
+     *   - retour qui ARRIVE ici           : depart = PART_LOCALE,  arrivee = 0
+     *   - retour qui PART d ici (cible)   : depart = 1,            arrivee = 1 - PART_LOCALE
+     *
+     * Le point cherche est celui de la fraction f, soit t = (fD - f) / (fD - fA) le long du segment.
+     *
+     * **Ce choix se verifie a la vitesse dessinee** : un retour dure exactement le temps que l aller
+     * a consomme, donc placer son depart a cette fraction fait parcourir au vaisseau la meme distance
+     * par seconde qu a l aller. Une valeur de t fausse rendrait le retour visiblement plus rapide ou
+     * plus lent que l aller — le faux est observable, et c est ce que le banc mesure.
+     *
+     * ## Absente vaut « depart a la cible »
+     *
+     * Un retour ordinaire, une expedition qui rentre, une flotte renvoyee par un combat, et tous les
+     * retours deja en vol au deploiement ne portent pas ce fait : le depart reste celui d origine,
+     * c est-a-dire le rendu d avant. La valeur est **refusee** plutot que corrigee si elle n est pas
+     * un nombre fini strictement entre 0 et 1 : a 0 la flotte n est pas partie, a 1 elle est arrivee,
+     * et dans les deux cas le depart d origine est deja le bon.
+     */
+    function pointDuDemiTour(mouvement, depart, arrivee, partIci, arriveIci) {
+        var f = Number(mouvement.recall_progress);
+
+        if (!isFinite(f) || f <= 0 || f >= 1) {
+            return depart;
+        }
+
+        var fractionDuDepart = arriveIci && !partIci ? PART_LOCALE : 1;
+        var fractionDeLArrivee = partIci && !arriveIci ? 1 - PART_LOCALE : 0;
+        var etendue = fractionDuDepart - fractionDeLArrivee;
+
+        if (etendue <= 0) {
+            return depart;
+        }
+
+        var t = Math.min(1, Math.max(0, (fractionDuDepart - f) / etendue));
+
+        return {
+            x: depart.x + (arrivee.x - depart.x) * t,
+            y: depart.y + (arrivee.y - depart.y) * t
+        };
     }
 
     function coordonnees(bout) {

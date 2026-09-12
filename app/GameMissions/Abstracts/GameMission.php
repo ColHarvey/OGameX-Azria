@@ -161,6 +161,14 @@ abstract class GameMission
      * @param FleetMission $mission
      * @return void
      */
+    /**
+     * Le trajet entierement parcouru, en dix-milliemes.
+     *
+     * L unite est celle de la colonne `recall_progress` : un entier, parce que la projection fermee
+     * des retours refuse une valeur imposee non entiere et que PDO rend les REAL de SQLite degrades.
+     */
+    public const int TRAVEL_FULLY_DONE = 10000;
+
     public function cancel(FleetMission $mission): void
     {
         // Handle fleet recall from union (remove from union, delete empty union)
@@ -206,7 +214,56 @@ abstract class GameMission
         // The adjustment ensures the return takes the same time as the original outbound trip,
         // not including any elapsed hold time.
         $returnTripAdjustment = $hasArrived ? ($originalArrivalTimeForAdjustment - $currentTime) : 0;
-        $this->startReturn($mission, $this->fleetMissionService->getResources($mission), $this->fleetMissionService->getFleetUnits($mission), $returnTripAdjustment);
+
+        /*
+         * **Ou la flotte a fait demi-tour**, pour que la carte la montre rebrousser chemin au lieu
+         * de sauter au bout du trajet. La fraction n est plus calculable apres coup : `time_arrival`
+         * de l aller vient d etre ecrase par l instant du rappel (plus haut), et l aller quitte la
+         * charge utile des qu il est annule. Elle s ecrit donc ici, ou jamais.
+         *
+         * L arrivee **physique** fait foi : `$originalArrivalTimeForAdjustment` distingue deja la
+         * Defense ACS, dont `time_arrival` inclut les heures de stationnement. Reprendre
+         * `time_arrival` brut ferait repartir un renfort rappele en vol d un point qu il n a jamais
+         * atteint — le defaut qu on corrige, a l envers.
+         */
+        $this->startReturn(
+            $mission,
+            $this->fleetMissionService->getResources($mission),
+            $this->fleetMissionService->getFleetUnits($mission),
+            $returnTripAdjustment,
+            recallProgress: self::travelledPortionOf((int)$mission->time_departure, (int)$originalArrivalTimeForAdjustment, $currentTime)
+        );
+    }
+
+    /**
+     * La part du trajet deja parcourue, en dix-milliemes, bornee a [0, 10000].
+     *
+     * **Aucune division sans garde.** Une arrivee forcee par l administration peut passer sous le
+     * depart, et une mission de banc peut arriver a l instant meme : le denominateur vaut alors zero
+     * ou moins. Un travailleur en retard, ou les trois annulations de `ColonisationMission` — ou la
+     * flotte est physiquement arrivee —, poussent l instant au-dela de l arrivee prevue. Les deux
+     * extremes donnent le **trajet plein**, c est-a-dire un depart du retour a la cible : exactement
+     * ce que le jeu faisait avant, et ce qui est juste quand la flotte est bien allee jusqu au bout.
+     */
+    private static function travelledPortionOf(int $departure, int $physicalArrival, int $now): int
+    {
+        $duree = $physicalArrival - $departure;
+
+        if ($duree <= 0) {
+            return self::TRAVEL_FULLY_DONE;
+        }
+
+        $ecoule = $now - $departure;
+
+        if ($ecoule <= 0) {
+            return 0;
+        }
+
+        if ($ecoule >= $duree) {
+            return self::TRAVEL_FULLY_DONE;
+        }
+
+        return (int)round($ecoule / $duree * self::TRAVEL_FULLY_DONE);
     }
 
     /**
@@ -743,7 +800,7 @@ abstract class GameMission
      * @param bool $leaveToTheWorker Laisser la livraison au travailleur canonique, meme si l'arrivee est deja passee.
      * @return void
      */
-    protected function startReturn(FleetMission $parentMission, Resources $resources, UnitCollection $units, int $additionalReturnTripTime = 0, array|null $wreckFieldData = null, int|null $overrideReturnDuration = null, int|null $departureAt = null, ResolvedReturnDestination|null $destination = null, bool $leaveToTheWorker = false): void
+    protected function startReturn(FleetMission $parentMission, Resources $resources, UnitCollection $units, int $additionalReturnTripTime = 0, array|null $wreckFieldData = null, int|null $overrideReturnDuration = null, int|null $departureAt = null, ResolvedReturnDestination|null $destination = null, bool $leaveToTheWorker = false, int|null $recallProgress = null): void
     {
         if ($units->getAmount() === 0) {
             // No units to return, no need to create a return mission.
@@ -792,6 +849,16 @@ abstract class GameMission
         $mission = new FleetMission();
         $mission->parent_id = $parentMission->id;
         $mission->user_id = $parentMission->user_id;
+
+        /*
+         * **Ou la flotte a fait demi-tour** — nul partout sauf au rappel d une flotte encore en vol.
+         *
+         * Le parametre ne s herite jamais du parent : les onze autres appelants de cette methode —
+         * combat, refus, annulation, expedition, espionnage, destruction de lune — le laissent a nul
+         * par construction, sans avoir ete relus ni touches. Un retour ne porte donc cette valeur
+         * que si le joueur a rappele sa flotte en chemin.
+         */
+        $mission->recall_progress = $recallProgress;
 
         // Set the type_from and type_to to the opposite of the parent mission.
         $mission->type_from = $parentMission->type_to;

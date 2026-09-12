@@ -13,6 +13,7 @@ use Illuminate\Support\Carbon;
  * @property int $id
  * @property int|null $combat_instance_id Le combat durable dans lequel cette flotte est engagee.
  * @property int|null $patrol_id La patrouille dont cette mission est le vol courant.
+ * @property int|null $recall_progress La part du trajet aller deja parcourue au rappel, en dix-milliemes ; nulle hors rappel.
  * @property int|null $target_patrol_id La patrouille visee par une attaque, figee au lancement.
  * @property int|null $x_from
  * @property int|null $y_from
