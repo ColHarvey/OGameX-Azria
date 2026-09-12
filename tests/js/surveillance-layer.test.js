@@ -1754,7 +1754,7 @@ function unEnvoiDeSondes(monde) {
     });
 
     // Le retour du serveur : `displayMiniFleetMessage()` releve le drapeau, et lui seul.
-    const repondre = () => { w.shipsendingDone = 1; };
+    const repondre = (issue = 'success') => { w.sendShipsLastOutcome = issue; w.shipsendingDone = 1; };
 
     return { partis, avertis, annonces, repondre };
 }
@@ -1832,7 +1832,8 @@ test('un retour qui ne vient jamais arrete la file sans figer le bouton', async 
         horloge += 16_000;
         await patienter(250);
 
-        assert.deepEqual(envoi.annonces, [{ message: 'Espionnage lance sur 1 planete(s).', erreur: false }], 'la file ne s est pas arretee');
+        // Le serveur n a jamais repondu : rien n est confirme, et l annonce ne l invente pas.
+        assert.deepEqual(envoi.annonces, [{ message: 'Espionnage lance sur 0 planete(s).', erreur: true }], 'la file ne s est pas arretee');
 
         // Le drapeau revient plus tard : la file arretee ne repart pas d elle-meme…
         envoi.repondre();
@@ -1859,6 +1860,148 @@ test('un systeme sans lien qui envoie le dit, sans rien envoyer', () => {
 
         assert.equal(envoi.partis.length, 0);
         assert.deepEqual(envoi.annonces, [{ message: 'Aucune planete a espionner.', erreur: true }]);
+    } finally {
+        monde.fermer();
+    }
+});
+
+/*
+ * ## Un envoi qui echoue ne bloque plus rien (Codex, relecture de 16bdbb09)
+ *
+ * `sendShips()` ne relevait son drapeau qu au succes : une requete en erreur, ou un succes qui leve,
+ * laissait tout espionnage bloque jusqu au rechargement — et interrompait l espionnage de systeme.
+ *
+ * **C est le vrai `sendShips` qui est eprouve**, extrait du paquet du jeu tel qu il est ecrit : un faux
+ * prouverait seulement que le faux se releve.
+ */
+const PAQUET_DU_JEU = new URL('../../resources/js/ingame/e7c74974620fa35b197315ebdbb8c2.js', import.meta.url);
+
+function unVraiEnvoiDeSondes(monde, { messageLeve = false } = {}) {
+    const w = monde.window;
+    const source = readFileSync(PAQUET_DU_JEU, 'utf8');
+    const debut = source.indexOf('function sendShips(');
+    const fin = source.indexOf('function sendShipsWithPopup(', debut);
+
+    if (debut < 0 || fin < 0) {
+        throw new Error('sendShips est introuvable dans le paquet du jeu : le temoin ne peut pas se poser');
+    }
+
+    const requetes = [];
+    const annonces = [];
+    const messages = [];
+
+    w.shipsendingDone = 1;
+    w.token = 'jeton';
+    w.miniFleetLink = '/ajax/fleet/dispatch/send-mini-fleet';
+    w.updateOverlayToken = () => {};
+    w.getAjaxEventbox = () => {};
+    w.refreshFleetEvents = () => {};
+    w.loca = { LOCA_FLEET_SEND_FAILED: 'Envoi echoue.' };
+    w.fadeBox = (message, erreur) => { annonces.push({ message, erreur }); };
+    w.galaxyTacticalLoca = Object.assign({}, w.galaxyTacticalLoca, {
+        systemEspionageNone: 'Aucune planete a espionner.',
+        systemEspionageSent: 'Espionnage lance sur #count# planete(s).'
+    });
+
+    // `displayMiniFleetMessage()` du jeu : il affiche, puis releve le drapeau. Le faux fait de meme.
+    w.displayMiniFleetMessage = (reponse) => {
+        messages.push(reponse);
+
+        if (messageLeve) {
+            throw new Error('affichage en panne');
+        }
+
+        w.shipsendingDone = 1;
+    };
+
+    // `$.ajax` retient la requete : l essai decide de sa reponse.
+    w.$.ajax = (url, options) => { requetes.push({ url, options }); };
+
+    const script = w.document.createElement('script');
+    script.textContent = source.slice(debut, fin);
+    w.document.body.appendChild(script);
+
+    const succes = (i) => requetes[i].options.success({
+        newAjaxToken: 'jeton' + i,
+        response: { success: true, message: 'Envoye', coordinates: { galaxy: 1, system: 5, position: 4 } }
+    });
+    const echec = (i) => requetes[i].options.error({ status: 500 });
+
+    return { requetes, annonces, messages, succes, echec };
+}
+
+test('sendShips du jeu releve son drapeau quand la requete echoue', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5);
+        const envoi = unVraiEnvoiDeSondes(monde);
+
+        monde.window.sendShips(6, 1, 5, 4, 1, 3);
+        assert.equal(envoi.requetes.length, 1);
+        assert.equal(Number(monde.window.shipsendingDone), 0, 'la premisse manque : l envoi n a pas baisse le drapeau');
+
+        envoi.echec(0);
+
+        assert.equal(Number(monde.window.shipsendingDone), 1, 'une requete en erreur laisse le drapeau baisse : plus aucun envoi ne partira');
+        assert.equal(monde.window.sendShipsLastOutcome, 'error');
+        assert.deepEqual(envoi.annonces, [{ message: 'Envoi echoue.', erreur: true }], 'l echec n est pas dit au joueur');
+
+        // Et un nouvel envoi part, sans rechargement.
+        monde.window.sendShips(6, 1, 5, 7, 1, 3);
+        assert.equal(envoi.requetes.length, 2, 'apres un echec, un nouvel envoi reste bloque');
+    } finally {
+        monde.fermer();
+    }
+});
+
+test('sendShips du jeu releve son drapeau meme quand l affichage du succes leve', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5);
+        const envoi = unVraiEnvoiDeSondes(monde, { messageLeve: true });
+
+        monde.window.sendShips(6, 1, 5, 4, 1, 3);
+        assert.throws(() => envoi.succes(0), /affichage en panne/, 'la premisse manque : l affichage n a pas leve');
+
+        assert.equal(Number(monde.window.shipsendingDone), 1, 'un succes qui leve laisse le drapeau baisse : jQuery 1.12 interrompt les rappels suivants');
+        assert.equal(monde.window.sendShipsLastOutcome, 'success');
+    } finally {
+        monde.fermer();
+    }
+});
+
+test('une erreur au milieu de l espionnage de systeme n arrete pas la file et ne se compte pas', async () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5);
+        desLiensDEspionnage(monde, [4, 7, 9]);
+        const envoi = unVraiEnvoiDeSondes(monde);
+
+        monde.window.spyWholeSystem();
+        assert.equal(envoi.requetes.length, 1);
+
+        envoi.echec(0);
+        await patienter(250);
+        assert.equal(envoi.requetes.length, 2, 'une erreur a interrompu l espionnage de systeme');
+
+        envoi.succes(1);
+        await patienter(250);
+        assert.equal(envoi.requetes.length, 3);
+
+        envoi.succes(2);
+        await patienter(250);
+
+        assert.deepEqual(
+            envoi.requetes.map((r) => r.options.data.position),
+            [4, 7, 9],
+            'toutes les planetes ne sont pas parties'
+        );
+
+        const finale = envoi.annonces[envoi.annonces.length - 1];
+        assert.deepEqual(finale, { message: 'Espionnage lance sur 2 planete(s).', erreur: false }, 'l annonce compte un envoi en erreur comme parti');
     } finally {
         monde.fermer();
     }

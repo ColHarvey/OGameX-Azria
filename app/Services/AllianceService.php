@@ -761,6 +761,21 @@ class AllianceService
 
         DB::beginTransaction();
         try {
+            /*
+             * **L'alliance d'abord, les comptes ensuite** — l'ordre du depot, celui du garde
+             * d'adhesion et du choix de classe. La dissolution ecrivait chaque compte membre puis
+             * supprimait l'alliance : un `UPDATE` pose un verrou exclusif sous InnoDB, et un choix de
+             * classe qui tenait deja l'alliance en attendant le compte du fondateur s'interbloquait
+             * avec elle (Codex, relecture de 16bdbb09). MariaDB aurait annule l'une des deux.
+             *
+             * Une alliance deja dissoute par une requete concurrente ne se dissout pas deux fois.
+             */
+            if (Alliance::query()->whereKey($allianceId)->lockForUpdate()->first() === null) {
+                DB::rollBack();
+
+                return;
+            }
+
             // Update all members' alliance_id to null
             $members = $this->getAllianceMembers($allianceId);
             foreach ($members as $allianceMember) {

@@ -298,7 +298,9 @@ class AllianceClassService
      * **L'alliance, puis le compte**, comme `AllianceMembershipChangeGuard` : la ligne de l'alliance
      * serialise les adhesions, donc l'appartenance relue ne peut plus changer sous nous ; celle du
      * compte serialise le solde. `debit()` reprend ensuite le verrou du compte, deja tenu dans la
-     * meme transaction. Aucun chemin du depot ne prend un compte avant une alliance.
+     * meme transaction. **La dissolution suit le meme ordre** depuis le 12 septembre 2026 : elle
+     * ecrivait les comptes avant de supprimer l'alliance, et s'interbloquait avec un choix de classe
+     * concurrent. Creation, exclusion, depart et transfert n'ecrivent pas les deux lignes.
      *
      * **Sous SQLite, `lockForUpdate()` ne compile a rien** : les essais de ce poste prouvent la
      * relecture et la forme ; la course de deux processus reels appartient au bac MariaDB.

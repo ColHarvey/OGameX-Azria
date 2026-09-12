@@ -21888,17 +21888,36 @@ function sendShips(order, galaxy, system, planet, planettype, shipCount, additio
       });
     }
 
+    // Azria : l issue du dernier envoi, lue par l espionnage d un systeme entier.
+    window.sendShipsLastOutcome = null;
     $.ajax(miniFleetLink, {
       data: params,
       dataType: "json",
       type: "POST",
       success: function (data) {
-        token = data.newAjaxToken;
-        updateOverlayToken('phalanxSystemDialog', data.newAjaxToken);
-        updateOverlayToken('phalanxDialog', data.newAjaxToken);
-        getAjaxEventbox();
-        displayMiniFleetMessage(data.response);
-        refreshFleetEvents(true);
+        try {
+          window.sendShipsLastOutcome = data && data.response && data.response.success ? 'success' : 'error';
+          token = data.newAjaxToken;
+          updateOverlayToken('phalanxSystemDialog', data.newAjaxToken);
+          updateOverlayToken('phalanxDialog', data.newAjaxToken);
+          getAjaxEventbox();
+          displayMiniFleetMessage(data.response);
+          refreshFleetEvents(true);
+        } finally {
+          // Azria : un succes qui leve ne laisse plus le drapeau baisse — jQuery 1.12 interrompt
+          // les rappels suivants, et plus aucun envoi rapide ne partait jusqu au rechargement.
+          shipsendingDone = 1;
+        }
+      },
+      error: function () {
+        // Azria : une requete en erreur ne relevait jamais le drapeau ; un seul echec bloquait tout
+        // espionnage depuis la Galaxie jusqu au rechargement de la page.
+        window.sendShipsLastOutcome = 'error';
+        shipsendingDone = 1;
+
+        if (typeof fadeBox === 'function' && typeof loca !== 'undefined' && loca && loca.LOCA_FLEET_SEND_FAILED) {
+          fadeBox(loca.LOCA_FLEET_SEND_FAILED, true);
+        }
       }
     });
   }

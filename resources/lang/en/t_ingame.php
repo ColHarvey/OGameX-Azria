@@ -429,6 +429,7 @@ return [
         'system_espionage_not_allowed'             => 'Only a Warriors alliance can spy on a whole system.',
         'system_espionage_sent'             => 'System espionage launched on :count planet(s).',
         'system_espionage_none'             => 'No planet to spy on in this system.',
+        'fleet_send_failed'                 => 'The fleet could not be sent. Please try again.',
         'discoveries'                  => 'Discoveries',
         'discoveries_tooltip'          => 'Launch a discovery mission to all possible locations',
 

@@ -12,6 +12,7 @@ use OGame\GameConstants\UniverseConstants;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Alliance;
 use OGame\Models\Enums\PlanetType;
+use OGame\Models\FleetMission;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
 use OGame\Models\User;
@@ -19,6 +20,7 @@ use OGame\Services\AllianceClassService;
 use OGame\Services\AllianceService;
 use OGame\Services\InitialUserDataService;
 use OGame\Services\ObjectService;
+use OGame\Services\PhalanxService;
 use OGame\Services\PlanetService;
 use OGame\Services\SettingsService;
 use stdClass;
@@ -114,8 +116,8 @@ class AllianceClassSystemScanTest extends FleetDispatchTestCase
 
         [$premier, $second] = $this->deuxVoisinsDansLeSysteme();
 
-        $this->envoyerUnTransportVers($premier);
-        $this->envoyerUnTransportVers($second);
+        $versLePremier = $this->envoyerUnTransportVers($premier);
+        $versLeSecond = $this->envoyerUnTransportVers($second);
 
         $this->switchToMoon();
         $this->laPhalangeSurLaLune();
@@ -140,7 +142,55 @@ class AllianceClassSystemScanTest extends FleetDispatchTestCase
         ])->assertStatus(200);
 
         $this->assertNull($systeme->json('is_error'), 'L analyse de systeme est refusee a une alliance de Chercheurs.');
-        $this->assertSame(2, (int)$systeme->json('fleet_count'), 'L analyse de systeme ne voit pas les mouvements des deux voisins.');
+
+        /*
+         * **Les deux voisins, par identifiant.** Compter seulement laisserait passer un relevé qui
+         * verrait deux mouvements etrangers a l essai et aucun des siens.
+         */
+        $releve = (string)$systeme->json('content_html');
+        $this->assertStringContainsString('id="eventRow-' . $versLePremier . '"', $releve, 'L analyse de systeme ne voit pas le transport vers le premier voisin.');
+        $this->assertStringContainsString('id="eventRow-' . $versLeSecond . '"', $releve, 'L analyse de systeme ne voit pas le transport vers le second voisin.');
+
+        /*
+         * **Et exactement ce que les releves ordinaires verraient, planete par planete.** La base
+         * survit entre les essais d un passage : le systeme peut porter les restes d un autre essai.
+         * Le compte attendu se construit sur le systeme reel, avec la regle d exclusion redite ici —
+         * planetes seulement, habitees, ni au joueur qui analyse, ni a l administration.
+         */
+        $administrateurs = DB::table('model_has_roles')
+            ->join('roles', 'roles.id', '=', 'model_has_roles.role_id')
+            ->where('roles.name', 'admin')
+            ->where('model_has_roles.model_type', User::class)
+            ->pluck('model_id')
+            ->map(static fn (mixed $id): int => (int)$id)
+            ->all();
+
+        $analysables = DB::table('planets')
+            ->where('galaxy', $coordonnees->galaxy)
+            ->where('system', $coordonnees->system)
+            ->where('planet_type', PlanetType::Planet->value)
+            ->whereNotNull('user_id')
+            ->where('user_id', '!=', $this->currentUserId)
+            ->pluck('user_id', 'id')
+            ->filter(static fn (mixed $proprietaire): bool => !in_array((int)$proprietaire, $administrateurs, true))
+            ->keys()
+            ->map(static fn (mixed $id): int => (int)$id)
+            ->all();
+
+        $this->assertContains($premier->getPlanetId(), $analysables, 'La premisse manque : le premier voisin n est pas analysable.');
+        $this->assertContains($second->getPlanetId(), $analysables, 'La premisse manque : le second voisin n est pas analysable.');
+
+        $attendus = 0;
+
+        foreach ($analysables as $planete) {
+            $attendus += count(resolve(PhalanxService::class)->scanPlanetFleets($planete, $this->currentUserId));
+        }
+
+        $this->assertSame(
+            $attendus,
+            (int)$systeme->json('fleet_count'),
+            'L analyse de systeme ne rend pas exactement la somme des releves ordinaires des planetes du systeme.'
+        );
 
         $this->moonService->reloadPlanet();
         $this->assertSame(
@@ -162,6 +212,9 @@ class AllianceClassSystemScanTest extends FleetDispatchTestCase
 
         $this->assertStringNotContainsString('onclick="spyWholeSystem();"', $sansAlliance, 'L espionnage de systeme est offert sans alliance.');
         $this->assertStringNotContainsString('onclick="scanSystemWithPhalanx();"', $sansAlliance, 'La Phalange de systeme est offerte sans alliance.');
+
+        // Le libelle qu un envoi rapide en echec affiche : sans lui, l echec resterait muet.
+        $this->assertStringContainsString('"LOCA_FLEET_SEND_FAILED":', $sansAlliance, 'La page ne publie pas le libelle d un envoi en echec.');
 
         $this->uneAllianceDeClasse(AllianceClass::WARRIORS);
         $guerriers = (string)$this->get('/galaxy')->assertStatus(200)->getContent();
@@ -239,12 +292,28 @@ class AllianceClassSystemScanTest extends FleetDispatchTestCase
         return $planete;
     }
 
-    private function envoyerUnTransportVers(PlanetService $cible): void
+    /**
+     * Envoyer un petit transporteur vers cette planete, et rendre l identifiant de la mission creee.
+     */
+    private function envoyerUnTransportVers(PlanetService $cible): int
     {
+        $avant = (int)(FleetMission::query()->max('id') ?? 0);
+
         $flotte = new UnitCollection();
         $flotte->addUnit(ObjectService::getUnitObjectByMachineName('small_cargo'), 1);
 
         $this->dispatchFleet($cible->getPlanetCoordinates(), $flotte, new Resources(0, 0, 0, 0), PlanetType::Planet);
+
+        $mission = FleetMission::query()
+            ->where('id', '>', $avant)
+            ->where('user_id', $this->currentUserId)
+            ->where('planet_id_to', $cible->getPlanetId())
+            ->orderByDesc('id')
+            ->value('id');
+
+        $this->assertNotNull($mission, 'Le transport n a cree aucune mission vers la planete visee.');
+
+        return (int)$mission;
     }
 
     private function uneAllianceDeClasse(AllianceClass $classe): Alliance

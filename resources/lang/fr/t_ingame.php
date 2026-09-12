@@ -319,6 +319,7 @@ return [
         'system_espionage_not_allowed' => 'Seule une alliance de Guerriers peut espionner un système entier.',
         'system_espionage_sent' => 'Espionnage du système lancé sur :count planète(s).',
         'system_espionage_none' => 'Aucune planète à espionner dans ce système.',
+        'fleet_send_failed' => 'L’envoi de la flotte a échoué. Réessayez.',
         'discoveries' => 'Découvertes',
         'discoveries_tooltip' => 'Lancez une mission de découverte dans tous les endroits possibles',
         'probes_short' => 'Esp.Sonde',

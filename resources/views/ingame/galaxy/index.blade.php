@@ -78,6 +78,7 @@
                     'LOCA_UNAVAILABLE_PHALANXSYSTEM'                 => __('t_ingame.galaxy.phalanx_restricted'),
                     'LOCA_PHALANX_SYSTEM_BUTTON'                     => __('t_ingame.galaxy.system_phalanx'),
                     'LOCA_SPY_SYSTEM_BUTTON'                         => __('t_ingame.galaxy.system_espionage'),
+                    'LOCA_FLEET_SEND_FAILED'                         => __('t_ingame.galaxy.fleet_send_failed'),
                     'locaErrorNoRequiredResearch'                    => __('t_ingame.galaxy.astro_required'),
                     'LOCA_GALAXY_ERROR_INACCESSIBLE_DUE_TO_VACATION' => __('t_ingame.galaxy.vacation_error'),
                     'LOCA_FLEET_PLAYER_UMODE'                        => __('t_ingame.fleet.player_vacation'),

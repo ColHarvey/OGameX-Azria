@@ -282,4 +282,30 @@ class SurveillanceBrowserLayerTest extends TestCase
         $this->assertStringContainsString('if (Date.now() - depuis > ESPIONNAGE_ATTENTE_MAX) {', $corps, 'Un retour perdu figerait l espionnage de systeme.');
         $this->assertStringNotContainsString('for (var i = 0; i < liens.length; i++) {' . "\n" . '                    liens[i].click();', $corps);
     }
+
+    /**
+     * **Un envoi rapide ne laisse jamais son drapeau baisse**, dans le bundle servi : ni en erreur, ni
+     * quand l affichage du succes leve. Et l espionnage de systeme ne compte que les envois acceptes.
+     */
+    public function testTheServedBundleNeverLeavesTheSendFlagDown(): void
+    {
+        $bundle = $this->bundleServi();
+        $envoi = $this->corpsDe($bundle, 'sendShips', 'sendShipsWithPopup');
+
+        $this->assertStringContainsString('} finally {', $envoi, 'Un succes qui leve laisse le drapeau baisse dans le bundle servi.');
+        $this->assertStringContainsString('error: function () {', $envoi, 'Une requete en erreur laisse le drapeau baisse dans le bundle servi.');
+        $this->assertStringContainsString("window.sendShipsLastOutcome = 'error';", $envoi);
+        $this->assertGreaterThanOrEqual(2, substr_count($envoi, 'shipsendingDone = 1;'), 'Le drapeau ne se releve pas sur les deux issues.');
+
+        $debut = strpos($bundle, 'window.spyWholeSystem = function () {');
+        $this->assertIsInt($debut);
+        $bout = strpos($bundle, 'envoyer(0);', $debut);
+        $this->assertIsInt($bout);
+
+        $this->assertStringContainsString(
+            "if (window.sendShipsLastOutcome === 'success') {",
+            substr($bundle, $debut, $bout - $debut),
+            'L espionnage de systeme compte un envoi refuse ou en erreur comme parti.'
+        );
+    }
 }

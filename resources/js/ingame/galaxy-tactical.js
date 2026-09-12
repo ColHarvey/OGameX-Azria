@@ -6036,14 +6036,29 @@
                     return;
                 }
 
+                window.sendShipsLastOutcome = null;
                 liens[i].click();
 
                 // `sendShips` a pris l envoi s il a baisse le drapeau ; sinon rien n est parti.
-                if (Number(window.shipsendingDone) !== 1) {
-                    envoyes++;
+                if (Number(window.shipsendingDone) === 1) {
+                    envoyer(i + 1);
+
+                    return;
                 }
 
-                envoyer(i + 1);
+                /*
+                 * **Ne compter que ce que le serveur a accepte.** Un envoi refuse (plus de sondes,
+                 * plus de creneau) ou en erreur reseau releve le drapeau lui aussi, et la file passe a
+                 * la planete suivante : une seule erreur n interrompt plus la serie. Mais l annonce
+                 * finale dit ce qui est vraiment parti, pas ce qui a ete tente.
+                 */
+                attendreLeDrapeau(Date.now(), function () {
+                    if (window.sendShipsLastOutcome === 'success') {
+                        envoyes++;
+                    }
+
+                    envoyer(i + 1);
+                });
             });
         };
 
