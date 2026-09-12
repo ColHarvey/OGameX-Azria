@@ -9,6 +9,7 @@ use OGame\Factories\PlanetServiceFactory;
 use OGame\GameConstants\UniverseConstants;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
+use OGame\Services\AllianceClassService;
 use OGame\Services\PhalanxService;
 use OGame\Services\PlayerService;
 
@@ -161,6 +162,100 @@ class PhalanxController extends OGameController
                 'position' => $target_coordinate->position,
                 'planet_name' => $target_planet->getPlanetName(),
                 'player_name' => $target_player->getUsername(),
+            ],
+            'scan_cost' => $phalanxService->getScanCost(),
+            'fleet_count' => count($fleet_movements),
+            'content_html' => $content_html,
+        ]);
+    }
+
+    /**
+     * Analyser un systeme entier depuis une lune — bonus d'une alliance de Chercheurs.
+     *
+     * **Le droit est verifie ici, pas seulement dans la page.** Un relevé de systeme entier au prix
+     * d'un seul relevé est un avantage economique : un bouton absent ne protege rien, la requete se
+     * rejoue. Les autres conditions sont exactement celles de l'analyse ordinaire — une lune, une
+     * Phalange, la portee, le deuterium —, verifiees dans le meme ordre pour que le joueur lise
+     * toujours le premier refus qui le concerne.
+     *
+     * @throws Exception
+     */
+    public function scanSystem(Request $request, PlayerService $player, PhalanxService $phalanxService, AllianceClassService $allianceClassService): JsonResponse
+    {
+        $request->validate([
+            'galaxy' => 'required|integer|min:1',
+            'system' => 'required|integer|min:1|max:' . UniverseConstants::MAX_SYSTEM_COUNT,
+        ]);
+
+        $galaxy = (int)$request->input('galaxy');
+        $system = (int)$request->input('system');
+
+        $response = [
+            'success' => true,
+            'server_time' => time(),
+            'target' => [
+                'galaxy' => $galaxy,
+                'system' => $system,
+            ],
+        ];
+
+        $refus = static function (string $message) use ($response): JsonResponse {
+            $response['is_error'] = true;
+            $response['error_message'] = $message;
+
+            return response()->json($response);
+        };
+
+        if (!$allianceClassService->mayPhalanxWholeSystems($player->getUser())) {
+            return $refus(__('t_ingame.galaxy.system_phalanx_not_allowed'));
+        }
+
+        $current_planet = $player->planets->current();
+
+        if (!$current_planet->isMoon()) {
+            return $refus(__('t_ingame.galaxy.system_phalanx_needs_moon'));
+        }
+
+        $phalanx_level = $current_planet->getObjectLevel('sensor_phalanx');
+
+        if ($phalanx_level === 0) {
+            return $refus(__('t_ingame.galaxy.system_phalanx_needs_phalanx'));
+        }
+
+        $moon_coordinates = $current_planet->getPlanetCoordinates();
+
+        // **La portee ne depend pas de la position.** Un systeme entier est a une seule distance de
+        // la lune ; la position posee ici ne sert qu'a former une coordonnee complete.
+        $target_coordinate = new Coordinate($galaxy, $system, 1);
+
+        if (!$phalanxService->canScanTarget($moon_coordinates->galaxy, $moon_coordinates->system, $phalanx_level, $target_coordinate, $player->getId())) {
+            return $refus(__('t_ingame.galaxy.system_phalanx_out_of_range', [
+                'level' => $phalanx_level,
+                'range' => $phalanxService->calculatePhalanxRange($phalanx_level, $player->getId()),
+            ]));
+        }
+
+        if (!$phalanxService->hasEnoughDeuterium($current_planet->deuterium()->get())) {
+            return $refus(__('t_ingame.galaxy.system_phalanx_not_enough_deuterium'));
+        }
+
+        $fleet_movements = $phalanxService->scanSystemFleets($galaxy, $system, $player->getId());
+
+        // **Le prix est celui d'un seul relevé** : c'est exactement ce que la classe offre.
+        $current_planet->deductResources(new Resources(0, 0, $phalanxService->getScanCost(), 0));
+
+        $content_html = view('ingame.phalanx.content', [
+            'fleet_movements' => $fleet_movements,
+            'server_time' => time(),
+            'scanner_player_id' => $player->getId(),
+        ])->render();
+
+        return response()->json([
+            'success' => true,
+            'server_time' => time(),
+            'target' => [
+                'galaxy' => $galaxy,
+                'system' => $system,
             ],
             'scan_cost' => $phalanxService->getScanCost(),
             'fleet_count' => count($fleet_movements),

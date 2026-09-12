@@ -12,6 +12,7 @@
     $peutChoisir = $mayChooseClass ?? false;
     $matiereNoire = (int)($darkMatter ?? 0);
     $prix = (int)($classPrice ?? AllianceClass::PRICE_IN_DARK_MATTER);
+    $gratuit = $prix === 0;
 @endphp
 <div id="allianceclassselection">
     <div class="content">
@@ -31,9 +32,15 @@
             @foreach (AllianceClass::cases() as $classe)
                 @php
                     $estActive = $classeActive === $classe;
-                    $abordable = $matiereNoire >= $prix;
+                    // **Un choix offert est toujours abordable** : rien a payer, rien a comparer.
+                    $abordable = $gratuit || $matiereNoire >= $prix;
                     // Trois raisons de ne pas offrir le geste, et chacune a son titre.
                     $offert = $peutChoisir && !$estActive && $abordable;
+                    /*
+                     * Le libelle du bouton se decide ici : un `@if` en ligne imbrique dans le `@if`
+                     * qui choisit le bouton se compile en `else` orphelin.
+                     */
+                    $prixEcrit = number_format($prix, 0, ',', '.') . ' DM';
                     $titre = match (true) {
                         $estActive => __('t_ingame.alliance.class_already_selected'),
                         !$peutChoisir => __('t_ingame.alliance.class_not_allowed'),
@@ -49,13 +56,13 @@
                         @if ($offert)
                             <a class="build-it js_hideTipOnMobile allianceclass-choose" href="#"
                                data-alliance-class-id="{{ $classe->value }}">
-                                <span>{{ __('t_ingame.alliance.class_change_for') }}<br>{{ number_format($prix, 0, ',', '.') }} DM</span>
+                                <span>{{ $gratuit ? __('t_ingame.alliance.class_free_first') : __('t_ingame.alliance.class_change_for') . ' ' . $prixEcrit }}</span>
                             </a>
                         @else
                             <a class="build-it_disabled tooltip js_hideTipOnMobile {{ $abordable ? '' : 'nodarkmatter' }}"
                                rel="{{ route('premium.index') }}"
                                data-tooltip-title="{{ $titre }}">
-                                <span>{{ __('t_ingame.alliance.buy_for') }}<br>{{ number_format($prix, 0, ',', '.') }} DM</span>
+                                <span>{{ $gratuit ? __('t_ingame.alliance.class_free_first') : __('t_ingame.alliance.buy_for') . ' ' . $prixEcrit }}</span>
                             </a>
                         @endif
                     </div>

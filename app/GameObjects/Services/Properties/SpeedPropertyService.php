@@ -7,6 +7,7 @@ use OGame\GameObjects\Models\Enums\GameObjectType;
 use OGame\GameObjects\Models\Fields\GameObjectPropertyDetails;
 use OGame\GameObjects\Models\Fields\GameObjectSpeedUpgrade;
 use OGame\GameObjects\Services\Properties\Abstracts\ObjectPropertyService;
+use OGame\Services\AllianceClassService;
 use OGame\Services\CharacterClassService;
 use OGame\Services\PlayerService;
 
@@ -43,6 +44,29 @@ class SpeedPropertyService extends ObjectPropertyService
             ],
             'totalValue' => $totalValue,
         ];
+
+        /*
+         * **Le bonus de l alliance a sa propre ligne**, comme celui de la classe de personnage, et
+         * les deux s additionnent : un Collecteur dans une alliance de Commercants voit ses
+         * transporteurs gagner les deux. Verser l un dans l autre dirait au joueur que sa classe lui
+         * rapporte ce que son alliance lui rapporte.
+         *
+         * Les deux se calculent **sur la vitesse de base**, sans les bonus de recherche : c est la
+         * regle deja posee ici, et l appliquer differemment ferait deux assiettes.
+         */
+        $allianceBonus = $this->getAllianceClassSpeedBonus($player);
+
+        if ($allianceBonus > 0) {
+            $allianceBonusValue = (($effectiveBase / 100) * $allianceBonus);
+            $totalValue += $allianceBonusValue;
+
+            $breakdown['bonuses'][] = [
+                'type' => 'Alliance class bonus',
+                'value' => $allianceBonusValue,
+                'percentage' => $allianceBonus,
+            ];
+            $breakdown['totalValue'] = $totalValue;
+        }
 
         // Apply character class speed bonuses (based on base speed only, not including research bonuses)
         $classBonus = $this->getCharacterClassSpeedBonus($player);
@@ -146,6 +170,28 @@ class SpeedPropertyService extends ObjectPropertyService
         }
 
         return $bonus_percentage_per_level * $applicable_technology_level;
+    }
+
+    /**
+     * Le bonus de vitesse d une classe d alliance, en pourcentage.
+     *
+     * Seuls les transporteurs en profitent aujourd hui — une alliance de Commercants. Le bonus des
+     * Guerriers, lui, depend de la **destination** (un vol entre membres de l alliance) et ne peut
+     * donc pas se decider ici, ou l on ne connait que le vaisseau : il vit la ou la duree d un vol
+     * est calculee, avec la cible sous la main.
+     */
+    private function getAllianceClassSpeedBonus(PlayerService $player): int
+    {
+        $object = $this->parent_object;
+
+        // Petit et grand transporteur.
+        if ($object->id !== 202 && $object->id !== 203) {
+            return 0;
+        }
+
+        $multiplier = app(AllianceClassService::class)->getTransporterSpeedBonus($player->getUser());
+
+        return $multiplier > 1.0 ? (int)round(($multiplier - 1.0) * 100) : 0;
     }
 
     /**

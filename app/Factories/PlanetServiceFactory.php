@@ -8,6 +8,7 @@ use OGame\GameConstants\UniverseConstants;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\Planet;
 use OGame\Models\Planet\Coordinate;
+use OGame\Services\AllianceClassService;
 use OGame\Services\CharacterClassService;
 use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
@@ -662,6 +663,10 @@ class PlanetServiceFactory
                 $characterClassService = app(CharacterClassService::class);
                 $planetSizeMultiplier = $characterClassService->getPlanetSizeBonus($player->getUser());
             }
+
+            // **Le bonus d'alliance se cumule avec celui de la classe de personnage**, et il ne
+            // depend pas d'elle : un joueur sans classe dans une alliance de Chercheurs le recoit.
+            $planetSizeMultiplier *= app(AllianceClassService::class)->getPlanetSizeBonus($player->getUser());
         }
 
         $planet->field_max = (int)($base_fields * $planetSizeMultiplier);

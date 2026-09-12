@@ -3173,6 +3173,32 @@ class PlanetService
             $storage_sum->add($storage);
         }
 
+        /*
+         * **La classe de l alliance agrandit les entrepots** : +10 % pour les Commercants, sur les
+         * trois ressources. La promesse distingue le stockage planetaire du stockage lunaire — au
+         * meme taux aujourd hui, mais par deux methodes separees, pour que le jour ou ils
+         * divergeraient ce point d application n ait pas a etre retouche.
+         *
+         * **Arrondi vers le bas** : un plafond annonce doit etre tenu, et un demi-metal n existe pas.
+         */
+        $proprietaire = $this->getPlayer();
+
+        if ($proprietaire !== null) {
+            $classes = app(AllianceClassService::class);
+            $multiplicateur = $this->isMoon()
+                ? $classes->getMoonStorageBonus($proprietaire->getUser())
+                : $classes->getPlanetStorageBonus($proprietaire->getUser());
+
+            if ($multiplicateur > 1.0) {
+                $storage_sum = new Resources(
+                    floor($storage_sum->metal->get() * $multiplicateur),
+                    floor($storage_sum->crystal->get() * $multiplicateur),
+                    floor($storage_sum->deuterium->get() * $multiplicateur),
+                    0
+                );
+            }
+        }
+
         // Write values to planet
         $this->planet->metal_max = $storage_sum->metal->get();
         $this->planet->crystal_max = $storage_sum->crystal->get();

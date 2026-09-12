@@ -18,6 +18,7 @@ use OGame\Models\Highscore;
 use OGame\Models\Planet;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\User;
+use OGame\Services\AllianceClassService;
 use OGame\Services\BuddyService;
 use OGame\Services\CharacterClassService;
 use OGame\Services\DebrisFieldService;
@@ -60,7 +61,7 @@ class GalaxyController extends OGameController
      * @param PlanetServiceFactory $planetServiceFactory
      * @return View
      */
-    public function index(Request $request, PlayerService $player, SettingsService $settingsService, PlanetServiceFactory $planetServiceFactory): View
+    public function index(Request $request, PlayerService $player, SettingsService $settingsService, PlanetServiceFactory $planetServiceFactory, AllianceClassService $allianceClassService): View
     {
         $this->playerService = $player;
         $this->planetServiceFactory = $planetServiceFactory;
@@ -83,6 +84,11 @@ class GalaxyController extends OGameController
             'current_galaxy' => $galaxy,
             'current_system' => $system,
             'espionage_probe_count' => $planet->getObjectAmount('espionage_probe'),
+            // **Les deux analyses de systeme entier sont des bonus de classe d'alliance.** La
+            // page n'en decide pas : elle lit le service. Celui de la Phalange est revérifié au
+            // serveur, parce qu'il couvre un systeme pour le prix d'un seul relevé.
+            'may_spy_whole_system' => $allianceClassService->mayScanWholeSystems($player->getUser()),
+            'may_phalanx_whole_system' => $allianceClassService->mayPhalanxWholeSystems($player->getUser()),
             'recycler_count' => $planet->getObjectAmount('recycler'),
             'interplanetary_missiles_count' => $planet->getObjectAmount('interplanetary_missile'),
             'used_slots' => $player->getFleetSlotsInUse(),

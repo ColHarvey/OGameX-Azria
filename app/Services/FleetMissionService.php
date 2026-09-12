@@ -20,6 +20,7 @@ use OGame\GameMessages\AcsDefendArrivalHost;
 use OGame\GameMessages\AcsDefendArrivalSender;
 use OGame\GameMissions\Abstracts\GameMission;
 use OGame\GameMissions\AcsDefendMission;
+use OGame\GameMissions\ExpeditionMission;
 use OGame\GameMissions\PatrolMission;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Enums\PlanetType;
@@ -42,6 +43,24 @@ class FleetMissionService
      * @var FleetMission
      */
     private FleetMission $model;
+
+    /**
+     * A qui appartient le corps pose sur telles coordonnees, pour la duree de la requete.
+     *
+     * La page de flotte calcule une duree par genre de mission, toutes vers la meme cible : sans ce
+     * memo, la meme question partirait autant de fois qu'il y a de genres.
+     *
+     * @var array<string, int|null>
+     */
+    private array $proprietaireParCoordonnees = [];
+
+    /**
+     * Le lecteur des classes d alliance, garde pour la duree de ce service.
+     *
+     * Il porte son propre memo par joueur ; le resoudre a chaque appel rendrait une instance neuve,
+     * donc une requete par duree calculee — et la page de flotte en calcule une par genre de mission.
+     */
+    private AllianceClassService|null $classesDAlliance = null;
 
     /**
      * FleetMissionService constructor.
@@ -68,7 +87,66 @@ class FleetMissionService
             throw new Exception('Planet has no owner.');
         }
 
-        return $this->durationOverDistance($player, $units, $this->calculateFleetMissionDistance($fromPlanet, $to), $mission, $speed_percent);
+        return $this->durationOverDistance(
+            $player,
+            $units,
+            $this->calculateFleetMissionDistance($fromPlanet, $to),
+            $mission,
+            $speed_percent,
+            $this->allianceFlightSpeedBonus($player, $to, $mission)
+        );
+    }
+
+    /**
+     * Le multiplicateur de vitesse qu'une classe d'alliance ajoute a **ce vol-ci**.
+     *
+     * Deux promesses faites au joueur sur la page des classes, et elles ne se rencontrent jamais :
+     * les Chercheurs volent 10 % plus vite vers une expedition, les Guerriers 10 % plus vite vers un
+     * corps qui appartient a un membre de leur propre alliance. Une alliance n'a qu'une classe, et la
+     * case 16 d'un systeme n'appartient a personne : le produit des deux n'a donc jamais deux
+     * facteurs, et l'ecrire en produit evite un branchement qui mentirait le jour ou une classe
+     * gagnerait les deux.
+     *
+     * **Le proprietaire de la cible n'est demande que si la question se pose.** La lecture coute une
+     * requete ; elle ne part que pour un membre d'une alliance de Guerriers, et le reste du serveur
+     * ne paie rien.
+     */
+    private function allianceFlightSpeedBonus(PlayerService $player, Coordinate $to, GameMission|null $mission): float
+    {
+        $classes = $this->classesDAlliance ??= resolve(AllianceClassService::class);
+        $user = $player->getUser();
+
+        $expedition = $mission !== null && $mission::getTypeId() === ExpeditionMission::getTypeId()
+            ? $classes->getExpeditionSpeedBonus($user)
+            : 1.0;
+
+        $allie = $classes->isWarriors($user)
+            ? $classes->getAlliedFlightSpeedBonus($user, $this->ownerOfBodyAt($to))
+            : 1.0;
+
+        return $expedition * $allie;
+    }
+
+    /**
+     * A qui appartient le corps pose sur ces coordonnees, ou rien.
+     *
+     * Un champ de debris, une case vide, un point de l'espace : personne.
+     */
+    private function ownerOfBodyAt(Coordinate $to): int|null
+    {
+        $clef = $to->galaxy . ':' . $to->system . ':' . $to->position;
+
+        if (array_key_exists($clef, $this->proprietaireParCoordonnees)) {
+            return $this->proprietaireParCoordonnees[$clef];
+        }
+
+        $proprietaire = DB::table('planets')
+            ->where('galaxy', $to->galaxy)
+            ->where('system', $to->system)
+            ->where('planet', $to->position)
+            ->value('user_id');
+
+        return $this->proprietaireParCoordonnees[$clef] = $proprietaire === null ? null : (int)$proprietaire;
     }
 
     /**
@@ -87,8 +165,9 @@ class FleetMissionService
      * @param int $distance La distance de jeu, deja mesuree.
      * @param GameMission|null $mission Le genre, qui choisit la vitesse serveur ; sans lui, la vitesse generale.
      * @param float $speed_percent De 1 a 10, ou 10 vaut cent pour cent.
+     * @param float $flightSpeedBonus Multiplicateur de vitesse du vol lui-meme ; 1.0 quand rien ne s'applique.
      */
-    public function durationOverDistance(PlayerService $player, UnitCollection $units, int $distance, GameMission|null $mission = null, float $speed_percent = 10): int
+    public function durationOverDistance(PlayerService $player, UnitCollection $units, int $distance, GameMission|null $mission = null, float $speed_percent = 10, float $flightSpeedBonus = 1.0): int
     {
         $slowest_speed = $units->getSlowestUnitSpeed($player);
 
@@ -104,9 +183,14 @@ class FleetMissionService
             };
         }
 
+        // **Un vol plus rapide est un vol plus court** : le bonus divise la duree entiere, constante
+        // comprise. Un multiplicateur nul ou negatif n'existe pas ; le refuser ici evite qu'une
+        // duree devienne infinie ou negative si un bonus futur se trompait de signe.
+        $bonus = $flightSpeedBonus > 0.0 ? $flightSpeedBonus : 1.0;
+
         return (int) max(
             round(
-                (35000 / $speed_percent * sqrt($distance * 10 / $slowest_speed) + 10) / $fleetSpeed
+                (35000 / $speed_percent * sqrt($distance * 10 / $slowest_speed) + 10) / $fleetSpeed / $bonus
             ),
             1
         );

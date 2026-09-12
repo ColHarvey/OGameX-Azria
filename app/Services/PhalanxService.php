@@ -2,12 +2,15 @@
 
 namespace OGame\Services;
 
+use Illuminate\Support\Facades\DB;
 use OGame\Factories\GameMissionFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet;
 use OGame\Models\Planet\Coordinate;
+use OGame\Models\User;
 use RuntimeException;
 
 /**
@@ -117,6 +120,54 @@ class PhalanxService
     public function getScanCost(): int
     {
         return self::SCAN_COST;
+    }
+
+    /**
+     * Analyser un systeme entier : les mouvements de toutes ses planetes analysables.
+     *
+     * **Bonus d'une alliance de Chercheurs.** L'emprise s'elargit, les protections ne bougent pas :
+     * les corps qu'une analyse ordinaire refuse sont ecartes ici aussi — les lunes, les planetes de
+     * l'administration, les siennes. Le relevé de chaque corps passe par `scanPlanetFleets()`, seul
+     * endroit ou se decide ce qu'une Phalange voit : un second parcours aurait diverge du premier.
+     *
+     * Le relevé est rendu **trie par l'instant affiche**, et non planete par planete : le joueur lit
+     * une chronologie du systeme, ce que trois releves separes ne lui donneraient pas.
+     *
+     * @param int $galaxy La galaxie visee
+     * @param int $system Le systeme vise
+     * @param int $scanner_player_id Le joueur qui analyse
+     * @return array<int, array<string, mixed>>
+     */
+    public function scanSystemFleets(int $galaxy, int $system, int $scanner_player_id): array
+    {
+        $administrateurs = DB::table('model_has_roles')
+            ->join('roles', 'roles.id', '=', 'model_has_roles.role_id')
+            ->where('roles.name', 'admin')
+            ->where('model_has_roles.model_type', User::class)
+            ->pluck('model_id')
+            ->all();
+
+        $corps = Planet::query()
+            ->where('galaxy', $galaxy)
+            ->where('system', $system)
+            ->where('planet_type', PlanetType::Planet->value)
+            ->whereNotNull('user_id')
+            ->where('user_id', '!=', $scanner_player_id)
+            ->whereNotIn('user_id', $administrateurs)
+            ->orderBy('planet')
+            ->pluck('id');
+
+        $releve = [];
+
+        foreach ($corps as $identifiant) {
+            foreach ($this->scanPlanetFleets((int)$identifiant, $scanner_player_id) as $mouvement) {
+                $releve[] = $mouvement;
+            }
+        }
+
+        usort($releve, static fn (array $a, array $b): int => $a['display_time'] <=> $b['display_time']);
+
+        return $releve;
     }
 
     /**

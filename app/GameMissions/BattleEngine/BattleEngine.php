@@ -25,6 +25,7 @@ use OGame\GameMissions\BattleEngine\Services\TacticalRetreatService;
 use OGame\GameObjects\Models\Enums\GameObjectType;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Resources;
+use OGame\Services\AllianceClassService;
 use OGame\Services\CharacterClassService;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
@@ -281,8 +282,22 @@ abstract class BattleEngine
 
         // Apply General class combat research bonus (+2 levels)
         $characterClassService = app(CharacterClassService::class);
-        $attackerCombatBonus = $characterClassService->getAdditionalCombatResearchLevels($attackerPlayer->getUser());
-        $defenderCombatBonus = $photographie !== null ? $photographie->classCombatBonus : $characterClassService->getAdditionalCombatResearchLevels($defenderPlayer->getUser());
+        $allianceClassService = app(AllianceClassService::class);
+
+        /*
+         * **Les deux classes s additionnent** : un General dans une alliance de Guerriers gagne les
+         * deux niveaux de sa classe et le niveau de son alliance.
+         *
+         * Cote defenseur, la photographie fait foi quand elle existe : `classCombatBonus` a ete gele
+         * a l ouverture et porte **deja** la somme des deux — le relire au vol ferait dependre une
+         * bataille figee d une alliance qui a pu changer entre-temps.
+         */
+        $attackerCombatBonus = $characterClassService->getAdditionalCombatResearchLevels($attackerPlayer->getUser())
+            + $allianceClassService->getAdditionalCombatResearchLevels($attackerPlayer->getUser());
+        $defenderCombatBonus = $photographie !== null
+            ? $photographie->classCombatBonus
+            : $characterClassService->getAdditionalCombatResearchLevels($defenderPlayer->getUser())
+                + $allianceClassService->getAdditionalCombatResearchLevels($defenderPlayer->getUser());
 
         $result->attackerWeaponLevel = $attackerWeaponBase + $attackerCombatBonus;
         $result->attackerShieldLevel = $attackerShieldBase + $attackerCombatBonus;

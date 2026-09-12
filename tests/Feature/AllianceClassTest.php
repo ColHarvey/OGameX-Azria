@@ -11,6 +11,7 @@ use OGame\Models\AllianceRank;
 use OGame\Models\User;
 use OGame\Services\AllianceClassService;
 use OGame\Services\AllianceService;
+use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
 
 /**
@@ -32,6 +33,22 @@ use Tests\AccountTestCase;
  */
 class AllianceClassTest extends AccountTestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // **L essai pose l interrupteur qu il suppose.** Les classes d alliance sont fermees par
+        // defaut tant que les douze bonus ne sont pas tous appliques.
+        resolve(SettingsService::class)->set('alliance_classes_enabled', '1');
+    }
+
+    protected function tearDown(): void
+    {
+        resolve(SettingsService::class)->set('alliance_classes_enabled', '0');
+
+        parent::tearDown();
+    }
+
     private function unTag(): string
     {
         return 'CL' . substr(md5(uniqid((string)mt_rand(), true)), 0, 5);
@@ -65,6 +82,138 @@ class AllianceClassTest extends AccountTestCase
     private function donnerDeLaMatiereNoire(int $montant): void
     {
         DB::table('users')->where('id', $this->currentUserId)->update(['dark_matter' => $montant]);
+    }
+
+    /**
+     * **L interrupteur ferme l entree sans emprisonner ce qui existe.**
+     *
+     * Tant que les douze bonus promis par la page ne s appliquent pas tous, ouvrir l achat ferait
+     * payer 400 000 de matiere noire pour ce que le joueur ne recoit pas. Mais une alliance qui a
+     * deja choisi garde sa classe et ses effets : un interrupteur baisse ne confisque rien.
+     */
+    public function testTheSwitchClosesTheDoorWithoutTrappingWhatExists(): void
+    {
+        $alliance = $this->uneAllianceFondee();
+        $this->donnerDeLaMatiereNoire(AllianceClass::PRICE_IN_DARK_MATTER * 2);
+
+        $classes = resolve(AllianceClassService::class);
+        $classes->choose($this->leJoueur(), $alliance, AllianceClass::TRADERS);
+
+        // On ferme.
+        resolve(SettingsService::class)->set('alliance_classes_enabled', '0');
+        $classes = resolve(AllianceClassService::class);
+
+        $this->assertFalse($classes->mayChooseFor($this->leJoueur(), $alliance), 'L achat reste offert alors que les classes sont fermees.');
+
+        try {
+            $classes->choose($this->leJoueur(), $alliance, AllianceClass::WARRIORS);
+            $this->fail('Une classe a ete choisie alors que les classes sont fermees.');
+        } catch (Exception $e) {
+            $this->assertSame(__('t_ingame.alliance.class_not_open'), $e->getMessage());
+        }
+
+        // Et la classe deja prise vaut toujours : ses bonus ne sont pas confisques.
+        $alliance->refresh();
+        $this->assertSame(AllianceClass::TRADERS, $classes->classOfAlliance($alliance), 'Fermer l entree a retire sa classe a une alliance qui avait paye.');
+        $this->assertEqualsWithDelta(1.05, $classes->getMineProductionBonus($this->leJoueur()), 0.0001, 'Fermer l entree a coupe les bonus deja payes.');
+    }
+
+    /**
+     * **La premiere classe est offerte a une alliance de quatorze jours** (decision de Keven).
+     *
+     * Les deux conditions sont eprouvees separement : l age, et le fait que ce soit la premiere.
+     * Sans cela, un code qui n en verifierait qu une passerait.
+     */
+    public function testTheFirstClassIsFreeForAnAllianceOldEnough(): void
+    {
+        $alliance = $this->uneAllianceFondee();
+        $this->vieillirLAlliance($alliance, AllianceClassService::FREE_FIRST_CHOICE_AFTER_DAYS + 1);
+
+        $classes = resolve(AllianceClassService::class);
+        $this->assertSame(0, $classes->priceFor($alliance), 'La premiere classe n est pas offerte a une alliance assez agee.');
+
+        // Sans un gramme de matiere noire, elle choisit quand meme.
+        $this->donnerDeLaMatiereNoire(0);
+        $classes->choose($this->leJoueur(), $alliance, AllianceClass::TRADERS);
+
+        $alliance->refresh();
+        $this->assertSame(AllianceClass::TRADERS, $classes->classOfAlliance($alliance));
+        $this->assertSame(0, (int)DB::table('users')->where('id', $this->currentUserId)->value('dark_matter'), 'Un choix offert a quand meme debite.');
+
+        // Et rien n est ecrit au journal des depenses : gratuit n est pas un achat a zero.
+        $this->assertFalse(
+            DB::table('dark_matter_transactions')
+                ->where('user_id', $this->currentUserId)
+                ->where('type', DarkMatterTransactionType::ALLIANCE_CLASS->value)
+                ->exists(),
+            'Un choix offert a laisse une ligne de depense : le journal ferait croire a un achat.'
+        );
+    }
+
+    /**
+     * Une alliance trop jeune paie : le delai ecarte celle qu on cree le matin pour la classe
+     * gratuite et qu on dissout le soir.
+     */
+    public function testAnAllianceTooYoungPays(): void
+    {
+        $alliance = $this->uneAllianceFondee();
+        $this->vieillirLAlliance($alliance, AllianceClassService::FREE_FIRST_CHOICE_AFTER_DAYS - 1);
+
+        $this->assertSame(
+            AllianceClass::PRICE_IN_DARK_MATTER,
+            resolve(AllianceClassService::class)->priceFor($alliance),
+            'Une alliance de moins de ' . AllianceClassService::FREE_FIRST_CHOICE_AFTER_DAYS . ' jours recoit sa classe gratuitement.'
+        );
+    }
+
+    /**
+     * **La deuxieme se paie**, meme pour une alliance ancienne : c est la PREMIERE qui est offerte.
+     */
+    public function testTheSecondChoiceIsPaidEvenForAnOldAlliance(): void
+    {
+        $alliance = $this->uneAllianceFondee();
+        $this->vieillirLAlliance($alliance, AllianceClassService::FREE_FIRST_CHOICE_AFTER_DAYS * 3);
+
+        $classes = resolve(AllianceClassService::class);
+        $this->donnerDeLaMatiereNoire(AllianceClass::PRICE_IN_DARK_MATTER);
+        $classes->choose($this->leJoueur(), $alliance, AllianceClass::TRADERS);
+
+        $alliance->refresh();
+
+        $this->assertSame(AllianceClass::PRICE_IN_DARK_MATTER, $classes->priceFor($alliance), 'Le second choix reste offert : l alliance changerait de classe a volonte.');
+
+        $restant = (int)DB::table('users')->where('id', $this->currentUserId)->value('dark_matter');
+        $classes->choose($this->leJoueur(), $alliance, AllianceClass::WARRIORS);
+
+        $this->assertSame($restant - AllianceClass::PRICE_IN_DARK_MATTER, (int)DB::table('users')->where('id', $this->currentUserId)->value('dark_matter'), 'Le second choix n a pas ete paye.');
+    }
+
+    /**
+     * La page dit « offert » au lieu d un prix, et offre le geste meme sans matiere noire.
+     */
+    public function testThePageOffersTheFreeFirstChoiceWithoutAnyDarkMatter(): void
+    {
+        $alliance = $this->uneAllianceFondee();
+        $this->vieillirLAlliance($alliance, AllianceClassService::FREE_FIRST_CHOICE_AFTER_DAYS + 1);
+        $this->donnerDeLaMatiereNoire(0);
+
+        $page = (string)$this->getJson(route('alliance.ajax.classes'))->assertStatus(200)->json('content.alliance/alliance_classes');
+
+        $this->assertSame(3, substr_count($page, 'class="build-it js_hideTipOnMobile allianceclass-choose"'), 'La page n offre pas les trois classes alors que le choix est gratuit.');
+        $this->assertStringContainsString(__('t_ingame.alliance.class_free_first'), $page, 'La page ne dit pas au joueur que son premier choix est offert.');
+    }
+
+    /**
+     * Vieillir une alliance : la date de creation est ecrite a la ligne, sans toucher l horloge du
+     * banc — celle-ci est gelee et sert a tout le monde.
+     */
+    private function vieillirLAlliance(Alliance $alliance, int $jours): void
+    {
+        DB::table('alliances')->where('id', (int)$alliance->id)->update([
+            'created_at' => now()->subDays($jours),
+        ]);
+
+        $alliance->refresh();
     }
 
     /**

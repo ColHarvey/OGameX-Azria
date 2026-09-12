@@ -400,7 +400,8 @@ class AllianceController extends OGameController
                     'allianceClass' => $alliance === null ? null : $classes->classOfAlliance($alliance),
                     'mayChooseClass' => $alliance !== null && $classes->mayChooseFor($player->getUser(), $alliance),
                     'darkMatter' => (int)$player->getUser()->dark_matter,
-                    'classPrice' => AllianceClass::PRICE_IN_DARK_MATTER,
+                    // Le prix reel : la premiere classe est offerte a une alliance de quatorze jours.
+                    'classPrice' => $alliance === null ? AllianceClass::PRICE_IN_DARK_MATTER : $classes->priceFor($alliance),
                 ])->render(),
             ],
             'files' => [

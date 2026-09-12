@@ -22,6 +22,7 @@ use OGame\Models\EspionageReport;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
+use OGame\Services\AllianceClassService;
 use OGame\Services\CounterEspionageService;
 use OGame\Services\DebrisFieldService;
 use OGame\Services\Npc\NpcThreatService;
@@ -116,10 +117,14 @@ class EspionageMission extends GameMission
         $counterEspionageService = resolve(CounterEspionageService::class);
         $attackerProbeCount = $mission->espionage_probe;
         // Technocrate : +2 niveaux d'espionnage, pour l'attaquant comme pour le defenseur.
+        // Alliance de Guerriers : +1 de plus, et les deux se cumulent.
+        $allianceClasses = resolve(AllianceClassService::class);
         $attackerEspionageLevel = $originPlayer->getResearchLevel('espionage_technology')
-            + ($originPlayer->hasTechnocrat() ? 2 : 0);
+            + ($originPlayer->hasTechnocrat() ? 2 : 0)
+            + $allianceClasses->getAdditionalEspionageResearchLevels($originPlayer->getUser());
         $defenderEspionageLevel = $targetPlayer->getResearchLevel('espionage_technology')
-            + ($targetPlayer->hasTechnocrat() ? 2 : 0);
+            + ($targetPlayer->hasTechnocrat() ? 2 : 0)
+            + $allianceClasses->getAdditionalEspionageResearchLevels($targetPlayer->getUser());
 
         // TODO: Include ACS Defend fleets in counter-espionage chance calculation
         // Currently only counts planet owner's ships via getDefenderShipCount()
@@ -522,10 +527,14 @@ class EspionageMission extends GameMission
 
         // TODO: Validate this does not cause issues when probing slot 16
         // Technocrate : +2 niveaux d'espionnage, pour l'attaquant comme pour le defenseur.
+        // Alliance de Guerriers : +1 de plus, et les deux se cumulent.
+        $allianceClasses = resolve(AllianceClassService::class);
         $attackerEspionageLevel = $originPlayer->getResearchLevel('espionage_technology')
-            + ($originPlayer->hasTechnocrat() ? 2 : 0);
+            + ($originPlayer->hasTechnocrat() ? 2 : 0)
+            + $allianceClasses->getAdditionalEspionageResearchLevels($originPlayer->getUser());
         $defenderEspionageLevel = $targetPlayer->getResearchLevel('espionage_technology')
-            + ($targetPlayer->hasTechnocrat() ? 2 : 0);
+            + ($targetPlayer->hasTechnocrat() ? 2 : 0)
+            + $allianceClasses->getAdditionalEspionageResearchLevels($targetPlayer->getUser());
         $techDifference = $defenderEspionageLevel - $attackerEspionageLevel;
         $levelDifference = max(0, $techDifference);
         $extraProbesRequired = pow($levelDifference, 2);

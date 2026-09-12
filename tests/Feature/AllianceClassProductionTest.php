@@ -10,6 +10,7 @@ use OGame\Models\User;
 use OGame\Services\AllianceClassService;
 use OGame\Services\AllianceService;
 use OGame\Services\ObjectService;
+use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
 
 /**
@@ -29,6 +30,22 @@ use Tests\AccountTestCase;
  */
 class AllianceClassProductionTest extends AccountTestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // **L essai pose l interrupteur qu il suppose.** Les classes d alliance sont fermees par
+        // defaut tant que les douze bonus ne sont pas tous appliques.
+        resolve(SettingsService::class)->set('alliance_classes_enabled', '1');
+    }
+
+    protected function tearDown(): void
+    {
+        resolve(SettingsService::class)->set('alliance_classes_enabled', '0');
+
+        parent::tearDown();
+    }
+
     private function uneAllianceDeCommercants(): Alliance
     {
         $alliance = resolve(AllianceService::class)->createAlliance(

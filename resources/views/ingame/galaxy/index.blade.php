@@ -405,12 +405,24 @@
                     <span class="galaxy_icons next ipiHintable" onclick="submitOnKey('ArrowRight');" data-ipi-hint="ipiGalaxySwitchGalaxy"></span>
                     <div class="btn_blue" onclick="submitForm();">{{ __('t_ingame.galaxy.go') }}</div>
                     <div class="systembuttons">
-                        <a class="btn_blue tooltip phalanxlink btn_system_action" href="javascript:void(0);" title="{{ __('t_ingame.galaxy.system_phalanx') }}" disabled="disabled">
-                            <img alt="" src="/img/icons/1cae570e41fc188133be9d548d6523.gif" class="icon_allianceBonus" style="filter:grayscale(1);"> {{ __('t_ingame.galaxy.system_phalanx') }}
-                        </a>
-                        <a class="btn_blue tooltip spysystemlink btn_system_action" disabled="disabled" title="{{ __('t_ingame.galaxy.system_espionage') }}">
-                            <img alt="" src="/img/icons/1cae570e41fc188133be9d548d6523.gif" class="icon_allianceBonus" style="filter:grayscale(1);"> {{ __('t_ingame.galaxy.system_espionage') }}
-                        </a>
+                        @if ($may_phalanx_whole_system)
+                            <a class="btn_blue tooltip phalanxlink btn_system_action" href="javascript:void(0);" title="{{ __('t_ingame.galaxy.system_phalanx') }}" onclick="scanSystemWithPhalanx();">
+                                <img alt="" src="/img/icons/1cae570e41fc188133be9d548d6523.gif" class="icon_allianceBonus"> {{ __('t_ingame.galaxy.system_phalanx') }}
+                            </a>
+                        @else
+                            <a class="btn_blue tooltip phalanxlink btn_system_action" href="javascript:void(0);" title="{{ __('t_ingame.galaxy.system_phalanx_not_allowed') }}" disabled="disabled">
+                                <img alt="" src="/img/icons/1cae570e41fc188133be9d548d6523.gif" class="icon_allianceBonus" style="filter:grayscale(1);"> {{ __('t_ingame.galaxy.system_phalanx') }}
+                            </a>
+                        @endif
+                        @if ($may_spy_whole_system)
+                            <a class="btn_blue tooltip spysystemlink btn_system_action" href="javascript:void(0);" title="{{ __('t_ingame.galaxy.system_espionage') }}" onclick="spyWholeSystem();">
+                                <img alt="" src="/img/icons/1cae570e41fc188133be9d548d6523.gif" class="icon_allianceBonus"> {{ __('t_ingame.galaxy.system_espionage') }}
+                            </a>
+                        @else
+                            <a class="btn_blue tooltip spysystemlink btn_system_action" disabled="disabled" title="{{ __('t_ingame.galaxy.system_espionage_not_allowed') }}">
+                                <img alt="" src="/img/icons/1cae570e41fc188133be9d548d6523.gif" class="icon_allianceBonus" style="filter:grayscale(1);"> {{ __('t_ingame.galaxy.system_espionage') }}
+                            </a>
+                        @endif
 
                         <div id="discoverSystemBtn" class="btn_blue tooltip discoverSystemLink btn_system_action" title="{{ __('t_ingame.galaxy.discoveries_tooltip') }}" disabled="disabled">
                             <div class="disabled"></div>&nbsp;{{ __('t_ingame.galaxy.discoveries') }}
@@ -773,7 +785,9 @@
 
             function showPhalanxResults(data) {
                 // Build OGame-style phalanx dialog
-                var coords = data.target.galaxy + ':' + data.target.system + ':' + data.target.position;
+                // **Un relevé de systeme entier n'a pas de position** : le titre nomme alors le
+                // systeme seul, et le lien de rafraichissement vise l'analyse qui l'a produit.
+                var coords = data.target.galaxy + ':' + data.target.system + (data.target.position ? ':' + data.target.position : '');
                 var dialog_title = coords + ' {{ __('t_ingame.galaxy.sensor_report') }}';
 
                 if (data.target.planet_name && data.target.player_name) {
@@ -792,7 +806,10 @@
 
                 // Refresh button inside title
                 modal_html += '<a class="refreshPhalanxLink tooltip js_hideTipOnMobile fleft" ';
-                modal_html += 'href="javascript:void(0)" onclick="refreshPhalanxContent(' + data.target.galaxy + ',' + data.target.system + ',' + data.target.position + ')" ';
+                var lienDeRafraichissement = data.target.position
+                    ? 'refreshPhalanxContent(' + data.target.galaxy + ',' + data.target.system + ',' + data.target.position + ')'
+                    : 'refreshPhalanxSystemContent(' + data.target.galaxy + ',' + data.target.system + ')';
+                modal_html += 'href="javascript:void(0)" onclick="' + lienDeRafraichissement + '" ';
                 modal_html += 'data-tooltip-title=@json(__('t_ingame.galaxy.refresh'))>';
                 modal_html += '<span class="icon icon_reload"></span>';
                 modal_html += '</a>';
@@ -852,6 +869,78 @@
 
             }
 
+
+            // Bonus d'une alliance de Chercheurs : un seul releve couvre le systeme entier.
+            function scanSystemWithPhalanx() {
+                $.ajax({
+                    url: '{{ route('phalanx.scan-system') }}',
+                    type: 'POST',
+                    data: {
+                        _token: '{{ csrf_token() }}',
+                        galaxy: $('#galaxy_input').val(),
+                        system: $('#system_input').val()
+                    },
+                    success: function(response) {
+                        if (response.is_error) {
+                            fadeBox(response.error_message, true);
+                            return;
+                        }
+
+                        updateDeuteriumAfterScan(response.scan_cost);
+                        showPhalanxResults(response);
+                    },
+                    error: function(xhr) {
+                        fadeBox((xhr.responseJSON && xhr.responseJSON.error_message) || @json(__('t_ingame.galaxy.system_phalanx')), true);
+                    }
+                });
+            }
+
+            function refreshPhalanxSystemContent(galaxy, system) {
+                $.ajax({
+                    url: '{{ route('phalanx.scan-system') }}',
+                    type: 'POST',
+                    data: {
+                        _token: '{{ csrf_token() }}',
+                        galaxy: galaxy,
+                        system: system
+                    },
+                    success: function(response) {
+                        if (response.is_error) {
+                            fadeBox(response.error_message, true);
+                            return;
+                        }
+
+                        updateDeuteriumAfterScan(response.scan_cost);
+                        updatePhalanxContent(response);
+                    },
+                    error: function(xhr) {
+                        fadeBox((xhr.responseJSON && xhr.responseJSON.error_message) || @json(__('t_ingame.galaxy.system_phalanx')), true);
+                    }
+                });
+            }
+
+            /*
+             * Bonus d'une alliance de Guerriers : espionner le systeme entier d'un geste.
+             *
+             * **Ce sont les liens de la page qui partent, un par planete.** Chaque envoi emprunte
+             * donc la voie ordinaire — ses sondes, ses creneaux, ses refus — et une planete que le
+             * joueur ne peut pas espionner n'a pas de lien actif, donc ne part pas. Rien n'est
+             * contourne : seul le nombre de gestes change.
+             */
+            function spyWholeSystem() {
+                var liens = document.querySelectorAll('#galaxyContent .galaxyRow .cellAction a.espionage[onclick]');
+
+                if (liens.length === 0) {
+                    fadeBox(@json(__('t_ingame.galaxy.system_espionage_none')), true);
+                    return;
+                }
+
+                for (var i = 0; i < liens.length; i++) {
+                    liens[i].click();
+                }
+
+                fadeBox(@json(__('t_ingame.galaxy.system_espionage_sent', ['count' => '#count#'])).replace('#count#', liens.length), false);
+            }
 
             function formatFleetTime(timestamp) {
                 var date = new Date(timestamp * 1000);

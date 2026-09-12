@@ -16,6 +16,7 @@ use OGame\Hull\DamagedHulls;
 use OGame\Models\CombatInstance;
 use OGame\Models\Planet;
 use OGame\Models\Resources;
+use OGame\Services\AllianceClassService;
 use OGame\Services\CharacterClassService;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
@@ -295,7 +296,10 @@ final class OpeningStateRecorder
             $proprietaire->getResearchLevel('weapon_technology'),
             $proprietaire->getResearchLevel('shielding_technology'),
             $proprietaire->getResearchLevel('armor_technology'),
-            resolve(CharacterClassService::class)->getAdditionalCombatResearchLevels($proprietaire->getUser()),
+            // **La somme des deux classes, gelee ensemble.** Le moteur lit ce nombre tel quel : y
+            // oublier l alliance ferait combattre le defenseur sans le bonus qu il a paye.
+            resolve(CharacterClassService::class)->getAdditionalCombatResearchLevels($proprietaire->getUser())
+                + resolve(AllianceClassService::class)->getAdditionalCombatResearchLevels($proprietaire->getUser()),
             $chantier->getObjectLevel('space_dock'),
         ))->toFrozenFacts();
     }

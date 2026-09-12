@@ -891,6 +891,21 @@ class SettingsService
     }
 
     /**
+     * Les classes d alliance sont-elles ouvertes aux joueurs ?
+     *
+     * **Desarme par defaut**, comme toute mecanique qui change l economie du serveur : c est
+     * l administrateur qui ouvre l achat, le jour ou il le veut, et non un deploiement.
+     *
+     * L interrupteur **ferme l entree sans emprisonner ce qui existe** : une alliance qui a deja paye
+     * sa classe garde ses bonus, seul le choix et le changement sont refuses. Une alliance a paye
+     * 400 000 de matiere noire ; les lui reprendre en fermant une porte serait une confiscation.
+     */
+    public function allianceClassesEnabled(): bool
+    {
+        return $this->get('alliance_classes_enabled', '0') === '1';
+    }
+
+    /**
      * L interrupteur des degats de coque persistants et de la reparation au dock (journal §118).
      *
      * Eteint par defaut. Tant qu il vaut non : aucune coque entamee n est ecrite, aucun devis n est

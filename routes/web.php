@@ -186,6 +186,8 @@ Route::middleware(['auth', 'banned', 'globalgame', 'locale', 'firstlogin'])->gro
 
     // Phalanx
     Route::post('/ajax/phalanx/scan', [PhalanxController::class, 'scan'])->name('phalanx.scan');
+    // Bonus d une alliance de Chercheurs : un seul releve couvre le systeme entier.
+    Route::post('/ajax/phalanx/scan-system', [PhalanxController::class, 'scanSystem'])->name('phalanx.scan-system');
 
     // Jump Gate
     Route::get('/ajax/jumpgate', [JumpGateController::class, 'index'])->name('jumpgate.index');
