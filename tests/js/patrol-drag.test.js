@@ -1021,6 +1021,95 @@ test('la fin du geste rend la fiche, meme sans depot', () => {
     }
 });
 
+/**
+ * **Le gel de la page, signale par Keven le 12 septembre 2026.**
+ *
+ * « Parfois quand j utilise le drag and drop ma page complete gele et je dois refresh. »
+ *
+ * Ce n est pas le navigateur qui gele : c est la carte qui reste en mode geste. Le marqueur saisi
+ * est detache du DOM par un rafraichissement tombe pendant le glisser — la veille bat toutes les
+ * dix secondes, et une annonce de flotte peut arriver a tout instant. Un noeud detache n emet plus
+ * de `dragend` qui remonte jusqu a la carte : `gtDragging` reste pose, la fiche garde
+ * `pointer-events: none`, la carte reste en mode choix, et tous les clics paraissent morts.
+ *
+ * Deux protections, eprouvees separement.
+ */
+test('une reponse arrivee pendant le geste ne detache pas le marqueur saisi', () => {
+    const monde = unMondeAvecPatrouille();
+
+    try {
+        const saisi = monde.marqueur(3);
+        monde.geste(saisi, 'dragstart');
+
+        assert.equal(monde.efface(), true, 'la premisse manque : le geste n a pas commence');
+
+        // Le rafraichissement qui tue : la patrouille passe en vol, donc son marqueur disparait.
+        const avant = monde.demandes.length;
+        monde.unMouvementAnnonce(1, 5);
+
+        assert.ok(monde.demandes.length > avant, 'la premisse manque : l annonce n a declenche aucune demande de flottes');
+
+        monde.demandes[monde.demandes.length - 1].repondre(
+            reponse(1, 5, [unePatrouille({ id: 3, etat: 'en_route' })])
+        );
+
+        assert.ok(
+            saisi.parentNode,
+            'le marqueur tenu par le joueur a ete detache pendant le geste : le navigateur n emettra plus de dragend et la carte restera bloquee'
+        );
+
+        // Et la reponse n est pas perdue : elle s applique a la fin du geste.
+        monde.geste(saisi, 'dragend');
+
+        assert.equal(monde.efface(), false, 'la fin du geste n a pas rendu la carte');
+        assert.equal(
+            monde.carte().querySelectorAll('.gtPatrolMarker').length,
+            0,
+            'la reponse mise de cote n a jamais ete appliquee : la carte reste sur un etat perime'
+        );
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * **Le filet** : un `dragend` qui n arrive jamais ne doit pas condamner la page.
+ *
+ * Le relachement de la souris rend la carte, meme sans `dragend` — c est le seul recours quand le
+ * navigateur en a avale un.
+ */
+test('un relachement de souris rend la carte quand dragend n arrive jamais', () => {
+    const monde = unMondeAvecPatrouille();
+
+    try {
+        monde.geste(monde.marqueur(3), 'dragstart');
+        assert.equal(monde.efface(), true, 'la premisse manque : le geste n a pas commence');
+
+        // Aucun `dragend` : seulement le relachement du bouton, hors de la carte.
+        monde.window.document.dispatchEvent(new monde.window.Event('mouseup', { bubbles: true }));
+
+        assert.equal(monde.efface(), false, 'sans dragend, la carte reste effacee et le joueur doit recharger la page');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/**
+ * Le meme filet, par la perte de focus de la fenetre : un glisser hors du navigateur.
+ */
+test('la perte de focus de la fenetre rend la carte', () => {
+    const monde = unMondeAvecPatrouille();
+
+    try {
+        monde.geste(monde.marqueur(3), 'dragstart');
+
+        monde.window.dispatchEvent(new monde.window.Event('blur'));
+
+        assert.equal(monde.efface(), false, 'un glisser sorti de la fenetre laisse la carte bloquee');
+    } finally {
+        monde.fermer();
+    }
+});
 test('un depot rend la fiche', () => {
     const monde = unMondeAvecPatrouille();
 

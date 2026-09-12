@@ -1598,8 +1598,30 @@
          * perdu avec lui, et la carte resterait effacee.
          */
         carte.addEventListener('dragend', function () {
-            carte.classList.remove('gtDragging');
+            finirLeGeste(carte);
         });
+
+        /*
+         * **Le filet : un `dragend` qui n arrive jamais ne doit pas condamner la page.**
+         *
+         * Il n arrive pas quand le noeud saisi a ete detache du DOM pendant le geste — ce que la
+         * mise de cote ci-dessus rend rare, mais qu un rafraichissement venu d ailleurs peut encore
+         * provoquer. Sans filet, `gtDragging` reste pose : la fiche garde `pointer-events: none`,
+         * la carte reste en mode choix, et le joueur croit sa page gelee au point de la recharger.
+         *
+         * `pointerup` et `mouseup` sont ecoutes sur le **document**, en phase de capture : un
+         * relachement hors de la carte les declenche aussi, et c est precisement le cas qui laissait
+         * la carte bloquee.
+         */
+        var rendreLaCarte = function () {
+            if (carte.classList.contains('gtDragging')) {
+                finirLeGeste(carte);
+            }
+        };
+
+        document.addEventListener('pointerup', rendreLaCarte, true);
+        document.addEventListener('mouseup', rendreLaCarte, true);
+        window.addEventListener('blur', rendreLaCarte);
 
         carte.addEventListener('keydown', function (evenement) {
             if (evenement.key === 'Escape' || evenement.key === 'Esc') {
@@ -4584,6 +4606,31 @@
     }
 
     /* Le point clique, en unites du serveur, arrondi a sa grille. La carte peut etre mise a l'echelle : les pixels sont ramenes a son repere. */
+    /**
+     * La fin d un geste : la carte redevient cliquable, et ce qui attendait s applique.
+     *
+     * Appelee par `dragend` comme par le filet. Elle est **idempotente** : deux fins de geste pour
+     * un seul glisser ne doivent rien casser.
+     */
+    function finirLeGeste(carte) {
+        carte.classList.remove('gtDragging');
+
+        var due = carte.gtReponseDue;
+
+        if (!due) {
+            return;
+        }
+
+        carte.gtReponseDue = null;
+
+        var s = carte.gtSysteme || {};
+
+        // La reponse mise de cote ne vaut que pour le systeme encore affiche.
+        if (Number(s.galaxie) === Number(due.galaxie) && Number(s.systeme) === Number(due.systeme)) {
+            appliquerLesFlottes(carte, due.reponse, due.galaxie, due.systeme);
+        }
+    }
+
     function destinationDuClic(carte, evenement) {
         var s = carte.gtSysteme || {};
         var r = carte.getBoundingClientRect();
@@ -5108,23 +5155,48 @@
                 mettreAJourLesCompteurs(reponse.counters);
                 decalageHorloge = Number(reponse.server_now) * 1000 - Date.now();
                 /*
-                 * **Remplacement de l ensemble, jamais fusion.** Le serveur rend la liste complete
-                 * de ce que le joueur a le droit de voir a cet instant ; une liste vide retire donc
-                 * ce qui etait affiche. Le jeton, plus haut, garantit qu une reponse plus ancienne
-                 * ne repasse jamais par ici — sans quoi elle reintroduirait ce qu une revocation
-                 * vient d oter.
+                 * **Rien ne se redessine pendant un geste.**
                  *
-                 * Les **objets**, eux, sont adoptes : un mouvement ou une patrouille deja affiche
-                 * garde son identite et donc tout ce que la carte lui a attache. Voir `adopter()`.
+                 * `dessinerLesPatrouilles()` retire le marqueur d une patrouille qui passe en vol,
+                 * et `balayer()` supprime ceux que la reponse ne porte plus. Detacher le noeud que
+                 * le joueur tient dans la main prive le navigateur de son `dragend` : la carte
+                 * reste alors en mode choix, la fiche inerte, et tous les clics paraissent morts.
+                 *
+                 * La reponse est donc **mise de cote**, pas jetee : elle s applique des que le
+                 * geste finit, comme la demande due du bandeau des ressources.
                  */
-                mouvements = adopter(mouvements, Array.isArray(reponse.movements) ? reponse.movements : []);
-                patrouilles = adopter(patrouilles, Array.isArray(reponse.patrols) ? reponse.patrols : []);
-                contactsDeSurveillance = adopter(contactsDeSurveillance, Array.isArray(reponse.surveillance) ? reponse.surveillance : [], 'contact_id');
-                dessinerLesMouvements(carte, galaxie, systeme);
-                dessinerLesPatrouilles(carte, galaxie, systeme);
-                dessinerLaSurveillance(carte);
-                animer();
+                if (carte.classList.contains('gtDragging')) {
+                    carte.gtReponseDue = { reponse: reponse, galaxie: galaxie, systeme: systeme };
+
+                    return;
+                }
+
+                appliquerLesFlottes(carte, reponse, galaxie, systeme);
             });
+    }
+
+    /**
+     * Appliquer une reponse de flottes a la carte.
+     *
+     * Sortie de `chargerLesFlottes()` pour qu une reponse mise de cote pendant un glisser puisse
+     * etre appliquee telle quelle a la fin du geste, sans repartir en requete.
+     *
+     * **Remplacement de l ensemble, jamais fusion.** Le serveur rend la liste complete de ce que le
+     * joueur a le droit de voir a cet instant ; une liste vide retire donc ce qui etait affiche. La
+     * generation, verifiee par l appelant, garantit qu une reponse plus ancienne ne repasse jamais
+     * par ici — sans quoi elle reintroduirait ce qu une revocation vient d oter.
+     *
+     * Les **objets**, eux, sont adoptes : un mouvement ou une patrouille deja affiche garde son
+     * identite et donc tout ce que la carte lui a attache. Voir `adopter()`.
+     */
+    function appliquerLesFlottes(carte, reponse, galaxie, systeme) {
+        mouvements = adopter(mouvements, Array.isArray(reponse.movements) ? reponse.movements : []);
+        patrouilles = adopter(patrouilles, Array.isArray(reponse.patrols) ? reponse.patrols : []);
+        contactsDeSurveillance = adopter(contactsDeSurveillance, Array.isArray(reponse.surveillance) ? reponse.surveillance : [], 'contact_id');
+        dessinerLesMouvements(carte, galaxie, systeme);
+        dessinerLesPatrouilles(carte, galaxie, systeme);
+        dessinerLaSurveillance(carte);
+        animer();
     }
 
     function redemanderLeSysteme(galaxie, systeme) {
