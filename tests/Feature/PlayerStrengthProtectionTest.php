@@ -7,9 +7,9 @@ use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Models\Highscore;
 use OGame\Models\User;
 use OGame\Protection\PlayerStrengthGuard;
-use OGame\Services\Npc\NpcBaseService;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
+use Tests\SpawnsNpcBases;
 
 /**
  * **La protection des debutants : un geant ne frappe pas un debutant, ni l inverse.**
@@ -34,6 +34,8 @@ use Tests\AccountTestCase;
  */
 class PlayerStrengthProtectionTest extends AccountTestCase
 {
+    use SpawnsNpcBases;
+
     private const int FAIBLE = 200;
 
     private const int FORT = 500000;
@@ -290,10 +292,14 @@ class PlayerStrengthProtectionTest extends AccountTestCase
             'La premisse manque : cet ecart n est deja pas refuse entre deux joueurs.'
         );
 
-        // Le meme ecart, contre un compte pilote par le serveur.
-        $base = resolve(NpcBaseService::class)->createBase(NpcBaseService::TYPE_PIRATE);
-
-        $this->assertNotNull($base, 'La premisse manque : aucune base pirate n a pu naitre.');
+        /*
+         * Le meme ecart, contre un compte pilote par le serveur. **La base est etablie, pas esperee** :
+         * `createBase()` sans position tire deux cents coordonnees au hasard et exige un humain a bonne
+         * distance dans la meme galaxie — dans un univers de banc dont les humains dependent des essais
+         * voisins, les deux cents tirages echouent parfois tous. La CI l a montre sur `93dde0b3`, sans
+         * qu une ligne de ce chantier y soit pour rien. Le trait balaie une case libre et l impose.
+         */
+        $base = $this->aSpawnedBase();
 
         $proprietaire = $base->getPlayer();
 
