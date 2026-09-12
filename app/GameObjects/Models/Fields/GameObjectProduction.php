@@ -7,6 +7,7 @@ use OGame\Models\{
     ProductionIndex,
 };
 use OGame\Services\{
+    AllianceClassService,
     CharacterClassService,
     PlanetService,
     PlayerService,
@@ -84,6 +85,13 @@ class GameObjectProduction
     public ?CharacterClassService $characterClassService = null;
 
     /**
+     * The alliance class service for bonus calculations
+     *
+     * @var AllianceClassService|null
+     */
+    public ?AllianceClassService $allianceClassService = null;
+
+    /**
      * The Universe speed, set by a server admin.
      *
      * @var int
@@ -125,6 +133,7 @@ class GameObjectProduction
         $this->calculateEngineer($productionIndex);
         $this->calculateGeologist($productionIndex);
         $this->calculateCharacterClass($productionIndex);
+        $this->calculateAllianceClass($productionIndex);
         $this->calculateCrawlerProduction($productionIndex);
         $this->calculateCommandingStaff($productionIndex);
         $this->calculateItems($productionIndex);
@@ -354,6 +363,69 @@ class GameObjectProduction
     }
 
     /**
+     * Calculates alliance class bonus (Traders: +5% mines, +5% energy).
+     *
+     * **Jumeau de `calculateCharacterClass()`, et deliberement separe.** Les deux bonus se cumulent
+     * — un joueur Collecteur dans une alliance de Commercants gagne les deux — et chacun garde sa
+     * ligne dans la page des reglages de production : verser l un dans l autre dirait au joueur que
+     * sa classe lui rapporte ce que son alliance lui rapporte.
+     *
+     * Le bonus porte sur la **production des mines augmentee de la case de planete**, exactement
+     * comme celui de la classe de personnage : la meme assiette, sinon deux bonus annonces au meme
+     * pourcentage rapporteraient des montants differents sans que rien ne l explique.
+     *
+     * @param ProductionIndex $productionIndex
+     * @return void
+     */
+    private function calculateAllianceClass(ProductionIndex $productionIndex): void
+    {
+        if (!$this->allianceClassService) {
+            return;
+        }
+
+        $user = $this->playerService->getUser();
+
+        $mineBonus = $this->allianceClassService->getMineProductionBonus($user);
+
+        if ($mineBonus > 1.0) {
+            if ($productionIndex->mine->metal->get() > 0) {
+                $productionIndex->alliance_class->metal->set(
+                    floor(
+                        ($productionIndex->mine->metal->get() + $productionIndex->planet_slot->metal->get())
+                        * ($mineBonus - 1.0)
+                    )
+                );
+            }
+
+            if ($productionIndex->mine->crystal->get() > 0) {
+                $productionIndex->alliance_class->crystal->set(
+                    floor(
+                        ($productionIndex->mine->crystal->get() + $productionIndex->planet_slot->crystal->get())
+                        * ($mineBonus - 1.0)
+                    )
+                );
+            }
+
+            if ($productionIndex->mine->deuterium->get() > 0) {
+                $productionIndex->alliance_class->deuterium->set(
+                    floor(
+                        ($productionIndex->mine->deuterium->get() + $productionIndex->planet_slot->deuterium->get())
+                        * ($mineBonus - 1.0)
+                    )
+                );
+            }
+        }
+
+        $energyBonus = $this->allianceClassService->getEnergyProductionBonus($user);
+
+        if ($energyBonus > 1.0 && $productionIndex->mine->energy->get() > 0) {
+            $productionIndex->alliance_class->energy->set(
+                floor($productionIndex->mine->energy->get() * ($energyBonus - 1.0))
+            );
+        }
+    }
+
+    /**
      * Calculates Crawler production bonus (resources only, not energy consumption)
      * Crawlers provide production bonus based on:
      * - Number of crawlers on planet
@@ -560,6 +632,7 @@ class GameObjectProduction
         $productionIndex->total->add($productionIndex->engineer);
         $productionIndex->total->add($productionIndex->geologist);
         $productionIndex->total->add($productionIndex->character_class);
+        $productionIndex->total->add($productionIndex->alliance_class);
         $productionIndex->total->add($productionIndex->crawler);
         $productionIndex->total->add($productionIndex->commanding_staff);
         $productionIndex->total->add($productionIndex->items);

@@ -2905,6 +2905,7 @@ class PlanetService
         $object->production->planetService = $this;
         $object->production->playerService = $this->player;
         $object->production->characterClassService = app(CharacterClassService::class);
+        $object->production->allianceClassService = app(AllianceClassService::class);
         $object->production->universe_speed = $this->settingsService->economySpeed();
 
         return $object->production->calculate($object_level, $resource_production_factor * $building_percentage);
@@ -2960,6 +2961,7 @@ class PlanetService
         $metalMine->production->planetService = $this;
         $metalMine->production->playerService = $this->player;
         $metalMine->production->characterClassService = app(CharacterClassService::class);
+        $metalMine->production->allianceClassService = app(AllianceClassService::class);
         $metalMine->production->universe_speed = $this->settingsService->economySpeed();
 
         return $metalMine->production->getCrawlerEnergyConsumption();

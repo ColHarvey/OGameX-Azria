@@ -13,6 +13,7 @@ use OGame\Models\{
     ProductionIndex,
     Resources,
 };
+use OGame\Services\AllianceClassService;
 use OGame\Services\BuildingQueueService;
 use OGame\Services\CharacterClassService;
 use OGame\Services\ObjectService;
@@ -173,6 +174,7 @@ class ResourcesController extends AbstractBuildingsController
         $metalMine->production->planetService = $this->planet;
         $metalMine->production->playerService = $player;
         $metalMine->production->characterClassService = app(CharacterClassService::class);
+        $metalMine->production->allianceClassService = app(AllianceClassService::class);
         $metalMine->production->universe_speed = $settingsService->economySpeed();
         $crawlerEnergy = $metalMine->production->getCrawlerEnergyConsumption();
         $productionindex_total->crawler->energy->set($crawlerEnergy);

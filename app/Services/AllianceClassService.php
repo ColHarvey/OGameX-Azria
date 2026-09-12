@@ -91,6 +91,26 @@ class AllianceClassService
     }
 
     /**
+     * Le multiplicateur de production miniere : 1,05 pour une alliance de Commercants.
+     *
+     * **La forme est celle des classes de personnage** : un multiplicateur, pas un pourcentage, et
+     * `1.0` quand il n'y a rien a donner. Le point d'application soustrait `1.0` pour obtenir la
+     * part supplementaire ; un bonus nul y devient donc zero sans cas particulier.
+     */
+    public function getMineProductionBonus(User $user): float
+    {
+        return $this->isTraders($user) ? 1.05 : 1.0;
+    }
+
+    /**
+     * Le multiplicateur de production d'energie : 1,05 pour une alliance de Commercants.
+     */
+    public function getEnergyProductionBonus(User $user): float
+    {
+        return $this->isTraders($user) ? 1.05 : 1.0;
+    }
+
+    /**
      * La classe que porte cette alliance, ou rien.
      */
     public function classOfAlliance(Alliance $alliance): AllianceClass|null

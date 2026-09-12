@@ -77,6 +77,18 @@ class ProductionIndex
     public Resources $character_class;
 
     /**
+     * Alliance class bonus amount
+     * - Traders: +5% mines, +5% energy
+     *
+     * **Sa propre ligne, et ce n est pas cosmetique** : la page des reglages de production montre
+     * d ou vient chaque unite. Verser le bonus d alliance dans celui de la classe de personnage
+     * dirait au joueur que sa classe lui rapporte ce que son alliance lui rapporte.
+     *
+     * @var Resources
+     */
+    public Resources $alliance_class;
+
+    /**
      * Crawler bonus amount (Collector only)
      *
      * @var Resources
@@ -95,6 +107,7 @@ class ProductionIndex
         $this->commanding_staff = new Resources();
         $this->items = new Resources();
         $this->character_class = new Resources();
+        $this->alliance_class = new Resources();
         $this->crawler = new Resources();
     }
 
@@ -116,6 +129,7 @@ class ProductionIndex
         $this->commanding_staff->add($productionIndex->commanding_staff);
         $this->items->add($productionIndex->items);
         $this->character_class->add($productionIndex->character_class);
+        $this->alliance_class->add($productionIndex->alliance_class);
         $this->crawler->add($productionIndex->crawler);
     }
 }
