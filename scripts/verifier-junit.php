@@ -15,7 +15,11 @@
  *
  * ## Usage
  *
- *     php scripts/verifier-junit.php <fichier.xml> --minimum=30 --sans-ignores
+ *     php scripts/verifier-junit.php <fichier.xml> --minimum=30 --sans-ignores --exige=testUnNom
+ *
+ * `--exige=` se repete. **Un plancher ne dit pas lesquels ont tourne** : trois essais neufs qui ne
+ * s executeraient pas le laisseraient tenu. L essai exige doit figurer dans le rapport, sans echec,
+ * sans erreur et sans etre ignore.
  *
  * Il ecrit un resume lisible, puis sort en erreur si une exigence n'est pas tenue.
  */
@@ -23,10 +27,17 @@
 $fichier = $argv[1] ?? '';
 $minimum = 0;
 $sansIgnores = false;
+$exiges = [];
 
 foreach (array_slice($argv, 2) as $argument) {
     if ($argument === '--sans-ignores') {
         $sansIgnores = true;
+
+        continue;
+    }
+
+    if (str_starts_with($argument, '--exige=')) {
+        $exiges[] = substr($argument, strlen('--exige='));
 
         continue;
     }
@@ -59,10 +70,12 @@ $essais = 0;
 $echecs = 0;
 $erreurs = 0;
 $ignores = 0;
+// Par nom d essai : son issue, pour les essais que la ligne de commande exige.
+$issues = [];
 
 // **Les suites s'imbriquent, et seules les feuilles portent des cas.** Additionner tous les
 // attributs `tests` compterait chaque essai autant de fois qu'il a d'ancetres.
-$parcourir = static function (SimpleXMLElement $noeud) use (&$parcourir, &$essais, &$echecs, &$erreurs, &$ignores): void {
+$parcourir = static function (SimpleXMLElement $noeud) use (&$parcourir, &$essais, &$echecs, &$erreurs, &$ignores, &$issues): void {
     foreach ($noeud->children() as $nom => $enfant) {
         if ($nom === 'testsuite') {
             $parcourir($enfant);
@@ -75,22 +88,28 @@ $parcourir = static function (SimpleXMLElement $noeud) use (&$parcourir, &$essai
         }
 
         $essais++;
+        $issue = 'passe';
 
         foreach ($enfant->children() as $genre => $detail) {
             unset($detail);
 
             if ($genre === 'failure') {
                 $echecs++;
+                $issue = 'echec';
             }
 
             if ($genre === 'error') {
                 $erreurs++;
+                $issue = 'erreur';
             }
 
             if ($genre === 'skipped') {
                 $ignores++;
+                $issue = 'ignore';
             }
         }
+
+        $issues[(string)($enfant['name'] ?? '')] = $issue;
     }
 };
 
@@ -110,6 +129,24 @@ if ($minimum > 0 && $essais < $minimum) {
 
 if ($sansIgnores && $ignores > 0) {
     $refus[] = $ignores . ' essai(s) ignore(s) : la bibliotheque n a pas ete chargee, et une suite entierement sautee sort verte';
+}
+
+foreach ($exiges as $nom) {
+    $vue = $issues[$nom] ?? null;
+
+    if ($vue === null) {
+        $refus[] = 'l essai exige ' . $nom . ' ne figure pas dans le rapport : il n a pas tourne';
+
+        continue;
+    }
+
+    if ($vue !== 'passe') {
+        $refus[] = 'l essai exige ' . $nom . ' est ' . $vue;
+
+        continue;
+    }
+
+    echo 'exige et passe : ' . $nom . "\n";
 }
 
 if ($refus !== []) {

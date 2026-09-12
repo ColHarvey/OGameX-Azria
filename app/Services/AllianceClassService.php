@@ -127,8 +127,10 @@ class AllianceClassService
     /**
      * Le multiplicateur de vitesse d une expedition : 1,10 pour une alliance de Chercheurs.
      *
-     * **Jusqu a la destination**, dit la promesse faite au joueur : c est le vol aller qui est plus
-     * rapide, pas le sejour ni le retour.
+     * **L aller comme le retour** (decision de Keven, 12 septembre 2026). Le bonus s applique au vol
+     * aller ; le retour se derive des heures de l aller (`GameMission::startReturn()`) et herite donc de
+     * la meme acceleration. La duree est **fixee au depart** : quitter l alliance en vol ne change ni
+     * l aller ni le retour. Le libelle de la page le dit : « aller et retour ».
      */
     public function getExpeditionSpeedBonus(User $user): float
     {

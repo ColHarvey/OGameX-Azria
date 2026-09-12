@@ -814,7 +814,7 @@ return [
         'trader_bonus_4' => '+10% de capacité de stockage planétaire',
         'trader_bonus_5' => '+10% de capacité de stockage lunaire',
         'researcher_bonus_1' => '+5 % de planètes plus grandes en colonisation',
-        'researcher_bonus_2' => '+10 % de vitesse jusqu\'à la destination de l\'expédition',
+        'researcher_bonus_2' => '+10 % de vitesse pour les expéditions, aller et retour',
         'researcher_bonus_3' => 'Le système Phalanx peut être utilisé pour analyser les mouvements de flotte dans des systèmes entiers.',
         'class_not_implemented' => 'Le système de classe Alliance n\'est pas encore implémenté',
         'class_not_allowed' => 'Vous n\'avez pas le droit de choisir la classe de votre alliance.',

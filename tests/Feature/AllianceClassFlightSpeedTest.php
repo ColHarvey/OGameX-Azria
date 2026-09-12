@@ -47,6 +47,13 @@ class AllianceClassFlightSpeedTest extends FleetDispatchTestCase
 
     protected string $missionName = 'Expedition';
 
+    /**
+     * Les poids d issue d expedition avant que l essai ne les neutralise, rendus au demontage.
+     *
+     * @var array<string, string>
+     */
+    private array $poidsDExpedition = [];
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -57,6 +64,11 @@ class AllianceClassFlightSpeedTest extends FleetDispatchTestCase
 
     protected function tearDown(): void
     {
+        // Les poids d issue d expedition sont des reglages partages : ils reprennent leur valeur.
+        foreach ($this->poidsDExpedition as $clef => $valeur) {
+            resolve(SettingsService::class)->set($clef, $valeur);
+        }
+
         resolve(SettingsService::class)->set('alliance_classes_enabled', '0');
 
         parent::tearDown();
@@ -451,5 +463,74 @@ class AllianceClassFlightSpeedTest extends FleetDispatchTestCase
             'Le transport lance vers un membre ne part pas plus vite : le type de cible ne voyage pas jusqu au lancement.'
         );
         $this->assertEqualsWithDelta($naturelle / 1.10, $avecBonus, 1.0);
+    }
+
+    /**
+     * **Le retour d une expedition garde l acceleration fixee au depart, meme si l alliance disparait
+     * pendant le vol** (decision de Keven : aller et retour).
+     *
+     * Le retour se derive des heures de l aller. Relire l alliance a l arrivee referait dependre une
+     * flotte deja partie d une decision prise apres son depart. L issue de l expedition est rendue
+     * neutre : un retard ou une acceleration tires au sort changeraient la duree du retour pour une
+     * raison etrangere a ce qu on juge.
+     */
+    public function testAnExpeditionReturnKeepsTheSpeedFixedAtDepartureEvenIfTheAllianceDisappears(): void
+    {
+        $this->basicSetup();
+        $this->uneIssueDExpeditionNeutre();
+
+        $this->envoyerUneExpedition();
+        $naturelle = $this->dureeDeLaDerniereMission();
+
+        $alliance = $this->uneAllianceDeClasse(AllianceClass::RESEARCHERS);
+
+        $this->envoyerUneExpedition();
+        $aller = FleetMission::query()->orderByDesc('id')->firstOrFail();
+        $accelere = (int)$aller->time_arrival - (int)$aller->time_departure;
+        $this->assertLessThan($naturelle, $accelere, 'La premisse manque : l aller n est pas accelere.');
+
+        // L alliance disparait pendant le vol.
+        resolve(AllianceService::class)->disbandAlliance((int)$alliance->id, $this->currentUserId);
+        $this->assertNull(User::query()->findOrFail($this->currentUserId)->alliance_id, 'La premisse manque : le joueur est toujours dans une alliance.');
+
+        // L expedition arrive, sejourne, et repart.
+        $this->travelTo(now()->copy()->addHours(12));
+        $this->get('/overview')->assertStatus(200);
+
+        $retour = FleetMission::query()->where('parent_id', (int)$aller->id)->first();
+        $this->assertNotNull($retour, 'L expedition n a cree aucun retour.');
+
+        $this->assertSame(
+            $accelere,
+            (int)$retour->time_arrival - (int)$retour->time_departure,
+            'Le retour ne garde pas l acceleration fixee au depart : il a ete recalcule apres la disparition de l alliance.'
+        );
+    }
+
+    /**
+     * Toutes les issues d expedition a zero, sauf « rien » : aucun retard ni acceleration du retour.
+     */
+    private function uneIssueDExpeditionNeutre(): void
+    {
+        $reglages = resolve(SettingsService::class);
+        $parDefaut = [
+            'ships' => '17',
+            'resources' => '35',
+            'delay' => '7.5',
+            'speedup' => '2.75',
+            'nothing' => '25',
+            'black_hole' => '0.2',
+            'pirates' => '3.0',
+            'aliens' => '1.5',
+            'dark_matter' => '7.5',
+            'merchant' => '0.4',
+            'items' => '0',
+        ];
+
+        foreach ($parDefaut as $issue => $valeur) {
+            $clef = 'expedition_weight_' . $issue;
+            $this->poidsDExpedition[$clef] = (string)$reglages->get($clef, $valeur);
+            $reglages->set($clef, $issue === 'nothing' ? '100' : '0');
+        }
     }
 }

@@ -998,7 +998,7 @@ return [
         'trader_bonus_4'                => '+10% planet storage capacity',
         'trader_bonus_5'                => '+10% moon storage capacity',
         'researcher_bonus_1'            => '+5% larger planets on colonisation',
-        'researcher_bonus_2'            => '+10% speed to expedition destination',
+        'researcher_bonus_2'            => '+10% expedition speed, outbound and return',
         'researcher_bonus_3'            => 'The system phalanx can be used to scan fleet movements in whole systems.',
         'class_not_implemented'         => 'Alliance class system not yet implemented',
         'class_not_allowed'             => 'You are not allowed to choose your alliance class.',
