@@ -173,10 +173,18 @@ final class PatrolHomecoming
             : Patrol::query()->whereKey((int)$retour->patrol_id)->first();
 
         // La patrouille existe encore mais ne tenait plus de point — immobilisee ailleurs, deja
-        // terminee. Son vol courant vient de se poser : elle n en a plus.
+        // terminee. Son vol courant vient de se poser : elle n en a plus. Le vol courant est ce
+        // retour, ou **le segment dont ce retour est ne** : un rappel generique laissait la
+        // patrouille pointer sur son segment annule pendant que la flotte rentrait.
+        $volsQuiSePosent = [(int)$retour->id];
+
+        if ($retour->parent_id !== null) {
+            $volsQuiSePosent[] = (int)$retour->parent_id;
+        }
+
         if ($patrouille instanceof Patrol
             && (int)$patrouille->user_id === (int)$retour->user_id
-            && (int)$patrouille->current_mission_id === (int)$retour->id
+            && in_array((int)$patrouille->current_mission_id, $volsQuiSePosent, true)
         ) {
             $patrouille->forceFill([
                 'state' => PatrolState::Finished,

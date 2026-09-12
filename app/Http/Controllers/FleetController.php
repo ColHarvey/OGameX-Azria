@@ -17,6 +17,7 @@ use OGame\Galaxy\GalaxyHeaderCounters;
 use OGame\GameConstants\UniverseConstants;
 use OGame\GameMessages\FleetUnionInvite as FleetUnionInviteMessage;
 use OGame\GameMissions\BattleEngine\Services\TacticalRetreatService;
+use OGame\GameMissions\PatrolMission;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
@@ -272,8 +273,9 @@ class FleetController extends OGameController
             $eventRowViewModel->friendly_status = $mission::getFriendlyStatus()->value;
             // Missile attacks (mission type 10) cannot be recalled.
             // Planet relocation ship transfers (deployment to self) cannot be recalled.
+            // Un segment de patrouille se rappelle depuis la carte, jamais d ici.
             $isRelocationTransfer = ($row->mission_type === 4 && $row->planet_id_from === $row->planet_id_to);
-            $eventRowViewModel->is_recallable = ($row->mission_type !== 10 && !$isRelocationTransfer);
+            $eventRowViewModel->is_recallable = ($row->mission_type !== 10 && !$isRelocationTransfer && !PatrolMission::isASegment($row));
 
             if (isset($engagees[(int)$row->id])) {
                 $eventRowViewModel->engaged_combat_id = $row->combat_instance_id === null ? 0 : (int)$row->combat_instance_id;
@@ -977,6 +979,17 @@ class FleetController extends OGameController
                 'newAjaxToken' => csrf_token(),
                 'success' => false,
                 'error' => __('t_ingame.fleet.recall_refused_engaged'),
+            ], 409);
+        }
+
+        // **Un segment de patrouille se rappelle depuis la carte, et le serveur le dit.** Le service
+        // garde son filet ; repondre « fait » a un appel qui n'a rien fait serait un mensonge.
+        if (PatrolMission::isASegment($fleetMission)) {
+            return response()->json([
+                'components' => [],
+                'newAjaxToken' => csrf_token(),
+                'success' => false,
+                'error' => __('t_ingame.fleet.recall_refused_patrol'),
             ], 409);
         }
 

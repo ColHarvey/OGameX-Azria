@@ -13,6 +13,7 @@ use OGame\Models\FleetMission;
 use OGame\Models\Patrol;
 use OGame\Models\Planet\Coordinate;
 use OGame\Patrol\Enums\PatrolState;
+use OGame\Patrol\PatrolHomecoming;
 use OGame\Patrol\PatrolOrders;
 use OGame\Services\PlanetService;
 use RuntimeException;
@@ -154,10 +155,37 @@ class PatrolMission extends GameMission
     }
 
     /**
+     * Le genre de mission d un segment de patrouille, tel que la colonne `mission_type` le porte.
+     */
+    public const int TYPE = 11;
+
+    /**
+     * Un segment de patrouille — l aller, le deplacement, le retour de securite — jamais un raid
+     * parti d une patrouille (genre attaque, `patrol_id` pose).
+     */
+    public static function isASegment(FleetMission $mission): bool
+    {
+        return (int)$mission->mission_type === self::TYPE;
+    }
+
+    /**
      * @inheritdoc
+     *
+     * **Un retour de segment se livre, il ne se refuse pas.** Cette methode levait une exception :
+     * « regle par le service des mouvements de patrouille, jamais par le traitement generique ». Le
+     * rappel generique de la boite d evenements a pourtant cree un tel retour en production
+     * (11 septembre 2026, mission 830), et comme le jeu traite les missions du joueur a chaque
+     * requete, **chaque page lui rendait 500, la connexion comprise**. Une garde qui dit « cela ne
+     * doit pas arriver » ne doit jamais fermer le jeu au joueur quand cela arrive.
+     *
+     * La livraison est celle de tout retour d une flotte partie d une patrouille : sur son point si
+     * la patrouille l attend encore, sur le corps d arrivee sinon — unites, coques et ressources
+     * rendues, patrouille terminee. Le rappel generique refuse desormais un segment (voir
+     * `FleetMissionService::recallIfNothingHoldsIt()`), donc ce chemin ne sert plus qu a ce qui
+     * existe deja en base, et a tout ce qu on n a pas prevu.
      */
     protected function processReturn(FleetMission $mission): void
     {
-        throw new RuntimeException('Le retour d un segment de patrouille est regle par le service des mouvements de patrouille, jamais par le traitement generique (mission ' . $mission->id . ').');
+        resolve(PatrolHomecoming::class)->receive($mission);
     }
 }

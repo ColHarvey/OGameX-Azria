@@ -11,6 +11,7 @@ use OGame\Combat\Services\CombatsInvolvingPlayer;
 use OGame\Combat\Services\EngagedFleetCheck;
 use OGame\Enums\FleetMissionStatus;
 use OGame\Factories\PlanetServiceFactory;
+use OGame\GameMissions\PatrolMission;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\FleetUnion;
@@ -302,8 +303,9 @@ class FleetEventsController extends OGameController
             if ($friendlyStatus === FleetMissionStatus::Friendly) {
                 // Missile attacks (mission type 10) cannot be recalled.
                 // Planet relocation ship transfers (deployment to self) cannot be recalled.
+                // Un segment de patrouille se rappelle depuis la carte, jamais d ici.
                 $isRelocationTransfer = ($row->mission_type === 4 && $row->planet_id_from === $row->planet_id_to);
-                if ($row->mission_type !== 10 && !$isRelocationTransfer) {
+                if ($row->mission_type !== 10 && !$isRelocationTransfer && !PatrolMission::isASegment($row)) {
                     $eventRowViewModel->is_recallable = true;
                 }
             }

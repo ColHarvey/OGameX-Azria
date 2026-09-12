@@ -20,6 +20,7 @@ use OGame\GameMessages\AcsDefendArrivalHost;
 use OGame\GameMessages\AcsDefendArrivalSender;
 use OGame\GameMissions\Abstracts\GameMission;
 use OGame\GameMissions\AcsDefendMission;
+use OGame\GameMissions\PatrolMission;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
@@ -993,6 +994,16 @@ class FleetMissionService
         // avec elle, et un rappel la ferait a la fois combattre et rentrer. Le filet est ici, dans
         // le chemin que tout rappel emprunte — l'interface n'est jamais la protection.
         if (resolve(EngagedFleetCheck::class)->isEngaged($mission)) {
+            return;
+        }
+
+        // **Un segment de patrouille ne se rappelle que depuis la carte.** Son rappel est un ordre
+        // de patrouille — devis, version, reserve, retour vers la base qui existe encore —, pas un
+        // demi-tour de flotte. Le demi-tour generique creait un retour de genre « patrouille » que
+        // rien ne savait livrer : en production, le joueur 6 a perdu toutes ses pages sur la
+        // mission 830 (11 septembre 2026). Le filet est ici, comme pour la flotte engagee ; le
+        // controleur repond 409 avec la raison, et les lignes n offrent plus le bouton.
+        if (PatrolMission::isASegment($mission)) {
             return;
         }
 

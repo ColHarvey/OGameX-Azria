@@ -261,6 +261,7 @@ return [
         'recall' => 'Rappel',
         'engaged_in_combat' => 'Combat en cours',
         'recall_refused_engaged' => 'Cette flotte est engagée dans un combat : elle ne peut plus être rappelée avant la fin de la bataille.',
+        'recall_refused_patrol' => 'Une patrouille se rappelle depuis la carte de la Galaxie, pas d’ici.',
         'start_time' => 'Heure de début',
         'time_of_arrival' => 'Heure d\'arrivée',
         'deep_space' => 'Espace profond',

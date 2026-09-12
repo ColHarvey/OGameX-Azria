@@ -355,6 +355,7 @@ return [
         'recall'                   => 'Recall',
         'engaged_in_combat'        => 'Combat in progress',
         'recall_refused_engaged'   => 'This fleet is engaged in a combat: it can no longer be recalled before the battle ends.',
+        'recall_refused_patrol'    => 'A patrol is recalled from the Galaxy map, not from here.',
         'start_time'               => 'Start time',
         'time_of_arrival'          => 'Time of arrival',
         'deep_space'               => 'Deep space',
