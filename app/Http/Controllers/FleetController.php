@@ -485,7 +485,8 @@ class FleetController extends OGameController
                     $targetCoordinates,
                     $units,
                     GameMissionFactory::getMissionById(1, []),
-                    10 // 100% speed — fastest possible
+                    10, // 100% speed — fastest possible
+                    $planetType
                 );
                 $wouldArriveAt = time() + $flightDuration;
                 $maxArrival = $union->time_arrival + $fleetUnionService->getMaxDelayTime($union);
@@ -680,7 +681,8 @@ class FleetController extends OGameController
                     $target_coordinate,
                     $units,
                     GameMissionFactory::getMissionById(1, []),
-                    $speed_percent
+                    $speed_percent,
+                    $planetType
                 );
                 $wouldArriveAt = time() + $flightDuration;
                 $maxArrival = $union->time_arrival + $fleetUnionService->getMaxDelayTime($union);

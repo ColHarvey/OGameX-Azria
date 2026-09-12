@@ -285,10 +285,26 @@ class AllianceClassService
     /**
      * Choisir la classe d'une alliance, ou echouer en disant pourquoi.
      *
+     * ## Tout se decide sous verrou, sur la ligne relue
+     *
+     * Les droits, la classe actuelle et le prix se lisaient autrefois **avant** la transaction, sur
+     * le modele passe par l'appelant. Deux demandes simultanees lisaient alors toutes les deux une
+     * alliance sans classe : **toutes deux obtenaient le premier choix offert**, ou deux achats
+     * identiques etaient factures l'un apres l'autre sans que le second voie le premier (Codex, revue
+     * du commit 9a03c95e). Le modele recu ne sert plus qu'a nommer l'alliance.
+     *
+     * ## L'ordre des verrous est celui du depot
+     *
+     * **L'alliance, puis le compte**, comme `AllianceMembershipChangeGuard` : la ligne de l'alliance
+     * serialise les adhesions, donc l'appartenance relue ne peut plus changer sous nous ; celle du
+     * compte serialise le solde. `debit()` reprend ensuite le verrou du compte, deja tenu dans la
+     * meme transaction. Aucun chemin du depot ne prend un compte avant une alliance.
+     *
+     * **Sous SQLite, `lockForUpdate()` ne compile a rien** : les essais de ce poste prouvent la
+     * relecture et la forme ; la course de deux processus reels appartient au bac MariaDB.
+     *
      * **Le paiement et l'ecriture vivent dans la meme transaction.** Un debit qui reussirait sans
-     * que la classe soit posee volerait 400 000 de matiere noire a un joueur ; l'inverse la lui
-     * donnerait. `debit()` ouvre deja sa propre transaction et verrouille la ligne du compte :
-     * imbriquee dans celle-ci, elle ne relache rien avant la validation la plus exterieure.
+     * que la classe soit posee volerait de la matiere noire ; l'inverse la donnerait.
      *
      * @throws Exception quand le droit manque, la monnaie manque, ou la classe est deja celle-la
      */
@@ -298,28 +314,36 @@ class AllianceClassService
             throw new Exception(__('t_ingame.alliance.class_not_open'));
         }
 
-        if (!$this->mayChooseFor($user, $alliance)) {
-            throw new Exception(__('t_ingame.alliance.class_not_allowed'));
-        }
+        DB::transaction(function () use ($user, $alliance, $classe): void {
+            $verrouillee = Alliance::query()->whereKey((int)$alliance->id)->lockForUpdate()->first();
 
-        if ($this->classOfAlliance($alliance) === $classe) {
-            throw new Exception(__('t_ingame.alliance.class_already_selected'));
-        }
+            if (!$verrouillee instanceof Alliance) {
+                throw new Exception(__('t_ingame.alliance.class_not_allowed'));
+            }
 
-        $prix = $this->priceFor($alliance);
+            $compte = User::query()->whereKey((int)$user->id)->lockForUpdate()->first();
 
-        if ($prix > 0 && !$this->darkMatterService->canAfford($user, $prix)) {
-            throw new Exception(__('t_ingame.alliance.class_not_enough_dark_matter', [
-                'price' => number_format($prix, 0, ',', '.'),
-            ]));
-        }
+            if (!$compte instanceof User || !$this->mayChooseFor($compte, $verrouillee)) {
+                throw new Exception(__('t_ingame.alliance.class_not_allowed'));
+            }
 
-        DB::transaction(function () use ($user, $alliance, $classe, $prix): void {
+            if ($this->classOfAlliance($verrouillee) === $classe) {
+                throw new Exception(__('t_ingame.alliance.class_already_selected'));
+            }
+
+            $prix = $this->priceFor($verrouillee);
+
+            if ($prix > 0 && !$this->darkMatterService->canAfford($compte, $prix)) {
+                throw new Exception(__('t_ingame.alliance.class_not_enough_dark_matter', [
+                    'price' => number_format($prix, 0, ',', '.'),
+                ]));
+            }
+
             // **Gratuit veut dire aucune ecriture**, pas un debit de zero : une ligne de depense a
             // zero dans le journal de matiere noire ferait croire a un achat.
             if ($prix > 0) {
                 $this->darkMatterService->debit(
-                    $user,
+                    $compte,
                     $prix,
                     DarkMatterTransactionType::ALLIANCE_CLASS->value,
                     'Alliance class set to ' . $classe->getName()
@@ -327,11 +351,11 @@ class AllianceClassService
             }
 
             /*
-             * **Ecrit par la requete, pas par le modele.** Le modele de l'alliance a pu etre charge
-             * avant le debit ; le sauver ecraserait ce qu'une autre requete aurait ecrit entre-temps
-             * sur les autres colonnes. Seules les deux colonnes de la classe sont touchees.
+             * **Ecrit par la requete, pas par le modele.** Seules les deux colonnes de la classe sont
+             * touchees : sauver un modele ecraserait ce qu'une autre requete aurait ecrit sur les
+             * autres colonnes.
              */
-            DB::table('alliances')->where('id', (int)$alliance->id)->update([
+            DB::table('alliances')->where('id', (int)$verrouillee->id)->update([
                 'alliance_class' => $classe->name,
                 'alliance_class_selected_at' => (int)Date::now()->timestamp,
                 'updated_at' => Date::now(),

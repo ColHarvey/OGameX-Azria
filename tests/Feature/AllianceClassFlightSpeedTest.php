@@ -10,6 +10,7 @@ use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Alliance;
+use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
@@ -292,12 +293,12 @@ class AllianceClassFlightSpeedTest extends FleetDispatchTestCase
 
     private function dureeDUnTransportVers(Coordinate $to): int
     {
-        return $this->dureeVers($to, 3);
+        return $this->dureeVers($to, 3, PlanetType::Planet);
     }
 
     private function dureeDUneExpeditionVers(Coordinate $to): int
     {
-        return $this->dureeVers($to, 15);
+        return $this->dureeVers($to, 15, PlanetType::Planet);
     }
 
     /**
@@ -307,7 +308,7 @@ class AllianceClassFlightSpeedTest extends FleetDispatchTestCase
      * l appartenance a l alliance se lit : une planete gardee d avant la fondation repondrait « sans
      * alliance » a jamais.
      */
-    private function dureeVers(Coordinate $to, int $genre): int
+    private function dureeVers(Coordinate $to, int $genre, PlanetType|null $type): int
     {
         $planete = resolve(PlanetServiceFactory::class)->make($this->planetService->getPlanetId(), true);
 
@@ -321,7 +322,134 @@ class AllianceClassFlightSpeedTest extends FleetDispatchTestCase
             $to,
             $flotte,
             GameMissionFactory::getMissionById($genre, []),
-            10
+            10,
+            $type
         );
+    }
+
+    /**
+     * **Un recycleur qui va au champ de debris d'un membre ne vole pas vers ce membre.**
+     *
+     * Le champ est pose sur les coordonnees de sa planete, mais il n'appartient a personne. Chercher
+     * le proprietaire par les seules coordonnees trouvait la planete et donnait le bonus (Codex,
+     * revue du commit 9a03c95e). Meme joueur, meme alliance, memes coordonnees : seul le type change.
+     */
+    public function testARecyclerFlyingToTheDebrisOverAFellowMembersPlanetGetsNoBonus(): void
+    {
+        $this->basicSetup();
+
+        $etrangere = $this->unePlaneteDUnJoueurNeuf();
+        $proprietaire = $etrangere->getPlayer();
+        $this->assertNotNull($proprietaire);
+
+        $cible = $etrangere->getPlanetCoordinates();
+        $debrisNaturel = $this->dureeVers($cible, 8, PlanetType::DebrisField);
+        $planeteNaturelle = $this->dureeVers($cible, 3, PlanetType::Planet);
+
+        $alliance = $this->uneAllianceDeClasse(AllianceClass::WARRIORS);
+        $this->faireEntrerDansLAlliance($proprietaire->getId(), $alliance);
+
+        $this->assertLessThan(
+            $planeteNaturelle,
+            $this->dureeVers($cible, 3, PlanetType::Planet),
+            'La premisse manque : le vol vers la planete du membre n est meme pas accelere.'
+        );
+        $this->assertSame(
+            $debrisNaturel,
+            $this->dureeVers($cible, 8, PlanetType::DebrisField),
+            'Le vol vers un champ de debris a recu le bonus destine aux vols vers un membre.'
+        );
+    }
+
+    /**
+     * **La lune d'un membre est un corps de ce membre** : le vol qui y va est accelere.
+     *
+     * Sans ce temoin, un code qui n'accepterait que les planetes passerait le precedent.
+     */
+    public function testAFlightToAFellowMembersMoonGetsTheBonus(): void
+    {
+        $this->basicSetup();
+
+        $etrangere = $this->unePlaneteDUnJoueurNeuf();
+        $proprietaire = $etrangere->getPlayer();
+        $this->assertNotNull($proprietaire);
+
+        $lune = resolve(PlanetServiceFactory::class)->createMoonForPlanet($etrangere, 2000000, 20);
+        $cible = $lune->getPlanetCoordinates();
+        $naturelle = $this->dureeVers($cible, 3, PlanetType::Moon);
+
+        $alliance = $this->uneAllianceDeClasse(AllianceClass::WARRIORS);
+        $this->faireEntrerDansLAlliance($proprietaire->getId(), $alliance);
+
+        $avecBonus = $this->dureeVers($cible, 3, PlanetType::Moon);
+
+        $this->assertLessThan($naturelle, $avecBonus, 'Le vol vers la lune d un membre n est pas accelere.');
+        $this->assertEqualsWithDelta($naturelle / 1.10, $avecBonus, 1.0);
+    }
+
+    /**
+     * **Un type de destination inconnu ne donne rien.**
+     *
+     * Les durees de retour qu'un combat gele a sa cloture n'ont pas de type : deviner la planete a
+     * leur place referait exactement la confusion corrigee ici.
+     */
+    public function testAFlightWhoseDestinationTypeIsUnknownGetsNoBonus(): void
+    {
+        $this->basicSetup();
+
+        $etrangere = $this->unePlaneteDUnJoueurNeuf();
+        $proprietaire = $etrangere->getPlayer();
+        $this->assertNotNull($proprietaire);
+
+        $cible = $etrangere->getPlanetCoordinates();
+        $naturelle = $this->dureeVers($cible, 3, null);
+
+        $alliance = $this->uneAllianceDeClasse(AllianceClass::WARRIORS);
+        $this->faireEntrerDansLAlliance($proprietaire->getId(), $alliance);
+
+        $this->assertSame(
+            $naturelle,
+            $this->dureeVers($cible, 3, null),
+            'Un vol sans type de destination a recu le bonus : le type a ete devine.'
+        );
+    }
+
+    /**
+     * **Le bonus arrive sur la ligne de mission**, la ou le joueur le lit.
+     *
+     * Les essais precedents appellent le calcul de duree directement ; ils ne disent rien du chemin
+     * du lancement. Or le bonus depend desormais du **type** de la cible, et c'est `start()` qui doit
+     * le transmettre : sans lui, le calcul ne sait plus qu'il vole vers une planete, et le bonus
+     * disparait en silence. Deux transports identiques vers la meme planete, avant et apres l'entree
+     * de son proprietaire dans l'alliance.
+     */
+    public function testATransportDispatchedToAFellowMemberLeavesFaster(): void
+    {
+        $this->missionType = 3;
+        $this->basicSetup();
+
+        $etrangere = $this->unePlaneteDUnJoueurNeuf();
+        $proprietaire = $etrangere->getPlayer();
+        $this->assertNotNull($proprietaire);
+
+        $cible = $etrangere->getPlanetCoordinates();
+        $flotte = new UnitCollection();
+        $flotte->addUnit(ObjectService::getUnitObjectByMachineName('large_cargo'), 1);
+
+        $this->dispatchFleet($cible, $flotte, new Resources(0, 0, 0, 0), PlanetType::Planet);
+        $naturelle = $this->dureeDeLaDerniereMission();
+
+        $alliance = $this->uneAllianceDeClasse(AllianceClass::WARRIORS);
+        $this->faireEntrerDansLAlliance($proprietaire->getId(), $alliance);
+
+        $this->dispatchFleet($cible, $flotte, new Resources(0, 0, 0, 0), PlanetType::Planet);
+        $avecBonus = $this->dureeDeLaDerniereMission();
+
+        $this->assertLessThan(
+            $naturelle,
+            $avecBonus,
+            'Le transport lance vers un membre ne part pas plus vite : le type de cible ne voyage pas jusqu au lancement.'
+        );
+        $this->assertEqualsWithDelta($naturelle / 1.10, $avecBonus, 1.0);
     }
 }

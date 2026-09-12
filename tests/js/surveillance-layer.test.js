@@ -1566,3 +1566,300 @@ test('une part de trajet hors bornes laisse le depart d origine', () => {
 
     monde.fermer();
 });
+
+/*
+ * ## Deux reponses perimees que la surveillance appliquait quand meme (Codex, 12 septembre 2026)
+ *
+ * Les quatre-vingts essais precedents passaient, et aucun ne suivait ces deux enchainements : une
+ * reponse **mise de cote pendant un glisser**, puis une coupure ; une **ancienne demande qui echoue**
+ * apres une reponse recente. Codex les a reproduits sur ce module ; ces temoins les rejouent.
+ */
+test('une coupure pendant un glisser perime aussi la reponse mise de cote', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5);
+        monde.demandes[0].repondre(reponse(1, 5, [unContact(11, 640, 480)], 1_700_000_000, [unePatrouille()]));
+        assert.equal(monde.contacts().length, 1, 'le point de depart n est pas celui du scenario');
+
+        const document = monde.window.document;
+        const marqueur = document.querySelector('.gtPatrolMarker[data-patrol-id="3"]');
+        assert.ok(marqueur, 'la patrouille n est pas dessinee : aucun glisser ne peut commencer');
+
+        marqueur.dispatchEvent(new monde.window.Event('dragstart', { bubbles: true, cancelable: true }));
+        assert.ok(document.getElementById('galaxyTactical').classList.contains('gtDragging'), 'le glisser n a pas commence : la premisse manque');
+
+        // Une reponse arrive pendant le geste : elle est mise de cote, rien ne bouge a l ecran.
+        monde.unMouvementAnnonce(1, 5);
+        monde.demandes[monde.demandes.length - 1].repondre(
+            reponse(1, 5, [unContact(11, 640, 480)], 1_700_000_000, [unePatrouille()])
+        );
+
+        const avantLaCoupure = monde.demandes.length;
+        monde.diffuseur.declencher('disconnected');
+        assert.equal(monde.demandes.length, avantLaCoupure, 'la coupure a lance une demande : le temoin ne prouverait plus rien');
+        assert.equal(monde.contacts().length, 0, 'la coupure n a pas masque la surveillance');
+
+        marqueur.dispatchEvent(new monde.window.Event('dragend', { bubbles: true, cancelable: true }));
+
+        assert.equal(
+            monde.contacts().length,
+            0,
+            'la fin du geste a reaffiche un contact que la coupure venait d oter, sans aucune reponse du serveur'
+        );
+    } finally {
+        monde.fermer();
+    }
+});
+
+/*
+ * **La generation suffit, et c est elle qui est eprouvee ici.** Aucune coupure : une nouvelle demande
+ * part pendant le geste. La reponse mise de cote est alors plus ancienne qu une demande en vol, et la
+ * regle de toute reponse — la generation courante seule s applique — vaut pour elle aussi.
+ */
+test('une demande partie pendant le glisser perime la reponse mise de cote', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5);
+        monde.demandes[0].repondre(reponse(1, 5, [unContact(11, 640, 480)], 1_700_000_000, [unePatrouille()]));
+
+        const document = monde.window.document;
+        const marqueur = document.querySelector('.gtPatrolMarker[data-patrol-id="3"]');
+        assert.ok(marqueur, 'la patrouille n est pas dessinee : aucun glisser ne peut commencer');
+        marqueur.dispatchEvent(new monde.window.Event('dragstart', { bubbles: true, cancelable: true }));
+
+        monde.unMouvementAnnonce(1, 5);
+        monde.demandes[monde.demandes.length - 1].repondre(
+            reponse(1, 5, [unContact(22, 100, 200)], 1_700_000_000, [unePatrouille()])
+        );
+
+        // Une seconde demande part avant la fin du geste, et ne repond pas encore.
+        monde.unMouvementAnnonce(1, 5);
+        const enVol = monde.demandes[monde.demandes.length - 1];
+
+        marqueur.dispatchEvent(new monde.window.Event('dragend', { bubbles: true, cancelable: true }));
+
+        const vus = monde.contacts().map((n) => n.getAttribute('data-contact-id'));
+        assert.deepEqual(vus, ['11'], 'la fin du geste a applique une reponse plus ancienne qu une demande en vol');
+
+        enVol.repondre(reponse(1, 5, [unContact(33, 300, 300)], 1_700_000_000, [unePatrouille()]));
+        assert.deepEqual(
+            monde.contacts().map((n) => n.getAttribute('data-contact-id')),
+            ['33'],
+            'la reponse courante ne s est pas appliquee apres le geste'
+        );
+    } finally {
+        monde.fermer();
+    }
+});
+
+test('l echec d une demande perimee n efface pas les contacts d une reponse plus recente', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5);
+        monde.demandes[0].repondre(reponse(1, 5, [unContact(11, 640, 480)]));
+
+        monde.unMouvementAnnonce(1, 5);
+        const ancienne = monde.demandes[monde.demandes.length - 1];
+
+        monde.unMouvementAnnonce(1, 5);
+        const recente = monde.demandes[monde.demandes.length - 1];
+        assert.notEqual(recente, ancienne, 'aucune seconde demande n est partie : le scenario ne tient pas');
+
+        recente.repondre(reponse(1, 5, [unContact(22, 100, 200)]));
+        assert.equal(monde.contacts().length, 1, 'la reponse recente ne s est pas affichee');
+
+        ancienne.echouer({ status: 500 });
+
+        const vus = monde.contacts();
+        assert.equal(vus.length, 1, 'l echec d une demande perimee a vide la surveillance');
+        assert.equal(vus[0].getAttribute('data-contact-id'), '22');
+    } finally {
+        monde.fermer();
+    }
+});
+
+/*
+ * ## L espionnage d un systeme entier (audit du 12 septembre 2026)
+ *
+ * La premiere version cliquait chaque lien dans une boucle synchrone. `sendShips()` n accepte qu un
+ * envoi a la fois : **un seul partait**, et la page annoncait N planetes. Le temoin d origine ne
+ * regardait que la presence de l appel sur le bouton — une forme, pas un effet.
+ *
+ * **Le faux porte la regle du vrai** : `sendShips` baisse le drapeau et refuse tant qu il est bas,
+ * exactement comme le paquet du jeu ; seul le retour du serveur le releve. Un faux qui accepterait
+ * tout rendrait la boucle synchrone verte.
+ */
+function desLiensDEspionnage(monde, positions, { avertissement = [], vide = [] } = {}) {
+    const document = monde.window.document;
+    let contenu = document.getElementById('galaxyContent');
+
+    if (!contenu) {
+        contenu = document.createElement('div');
+        contenu.id = 'galaxyContent';
+        document.body.appendChild(contenu);
+    }
+
+    positions.forEach((position) => {
+        const ligne = document.createElement('div');
+        ligne.className = 'galaxyRow';
+        const cellule = document.createElement('div');
+        cellule.className = 'cellAction';
+        const lien = document.createElement('a');
+        lien.className = 'tooltip js_hideTipOnMobile espionage ipiHintable';
+        lien.setAttribute('href', 'javascript: void(0);');
+
+        // La forme exacte que `getEspionageMission()` ecrit dans le paquet du jeu.
+        let appel = 'sendShips(6, 1, 5, ' + position + ', 1, 3);return false;';
+
+        if (avertissement.includes(position)) {
+            appel = 'outlawWarning(6, 1, 5, ' + position + ', 1, 3);return false;';
+        }
+
+        if (vide.includes(position)) {
+            appel = '';
+        }
+
+        lien.setAttribute('onclick', appel);
+        cellule.appendChild(lien);
+        ligne.appendChild(cellule);
+        contenu.appendChild(ligne);
+    });
+}
+
+function unEnvoiDeSondes(monde) {
+    const w = monde.window;
+    const partis = [];
+    const avertis = [];
+    const annonces = [];
+
+    w.shipsendingDone = 1;
+    w.sendShips = function (ordre, galaxie, systeme, position, type, nombre) {
+        if (w.shipsendingDone == 1) {
+            w.shipsendingDone = 0;
+            partis.push({ ordre, galaxie, systeme, position, type, nombre });
+        }
+    };
+    w.outlawWarning = function (ordre, galaxie, systeme, position) {
+        avertis.push(position);
+    };
+    w.fadeBox = function (message, erreur) {
+        annonces.push({ message, erreur });
+    };
+    w.galaxyTacticalLoca = Object.assign({}, w.galaxyTacticalLoca, {
+        systemEspionageNone: 'Aucune planete a espionner.',
+        systemEspionageSent: 'Espionnage lance sur #count# planete(s).'
+    });
+
+    // Le retour du serveur : `displayMiniFleetMessage()` releve le drapeau, et lui seul.
+    const repondre = () => { w.shipsendingDone = 1; };
+
+    return { partis, avertis, annonces, repondre };
+}
+
+const patienter = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
+
+test('l espionnage de systeme envoie une sonde par planete, chacune apres le retour de la precedente', async () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5);
+        desLiensDEspionnage(monde, [4, 7, 9]);
+        const envoi = unEnvoiDeSondes(monde);
+
+        monde.window.spyWholeSystem();
+
+        assert.deepEqual(envoi.partis.map((p) => p.position), [4], 'le premier envoi n est pas parti');
+        assert.equal(envoi.annonces.length, 0, 'la page annonce le resultat avant que les envois soient partis');
+
+        await patienter(250);
+        envoi.repondre();
+        await patienter(250);
+        envoi.repondre();
+        await patienter(250);
+        envoi.repondre();
+        await patienter(250);
+
+        assert.deepEqual(
+            envoi.partis.map((p) => p.position),
+            [4, 7, 9],
+            'toutes les planetes du systeme ne sont pas parties : le bouton donne moins que la main'
+        );
+        assert.deepEqual(envoi.annonces, [{ message: 'Espionnage lance sur 3 planete(s).', erreur: false }]);
+    } finally {
+        monde.fermer();
+    }
+});
+
+test('l espionnage de systeme ne confirme aucun avertissement et ne compte pas un lien vide', async () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5);
+        desLiensDEspionnage(monde, [4, 6, 8], { avertissement: [6], vide: [8] });
+        const envoi = unEnvoiDeSondes(monde);
+
+        monde.window.spyWholeSystem();
+        await patienter(250);
+        envoi.repondre();
+        await patienter(250);
+
+        assert.deepEqual(envoi.partis.map((p) => p.position), [4]);
+        assert.deepEqual(envoi.avertis, [], 'le bouton a ouvert un avertissement de hors-la-loi a la place du joueur');
+        assert.deepEqual(envoi.annonces, [{ message: 'Espionnage lance sur 1 planete(s).', erreur: false }]);
+    } finally {
+        monde.fermer();
+    }
+});
+
+test('un retour qui ne vient jamais arrete la file sans figer le bouton', async () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5);
+        desLiensDEspionnage(monde, [4, 7]);
+        const envoi = unEnvoiDeSondes(monde);
+
+        let horloge = 1_000_000;
+        monde.window.Date.now = () => horloge;
+
+        monde.window.spyWholeSystem();
+        assert.equal(envoi.partis.length, 1);
+
+        // Le serveur ne repond jamais : passe le delai, la file s arrete.
+        horloge += 16_000;
+        await patienter(250);
+
+        assert.deepEqual(envoi.annonces, [{ message: 'Espionnage lance sur 1 planete(s).', erreur: false }], 'la file ne s est pas arretee');
+
+        // Le drapeau revient plus tard : la file arretee ne repart pas d elle-meme…
+        envoi.repondre();
+        await patienter(250);
+        assert.equal(envoi.partis.length, 1, 'une file arretee a repris sans que le joueur le demande');
+
+        // …mais le bouton n est pas fige : un nouveau clic repart.
+        monde.window.spyWholeSystem();
+        assert.equal(envoi.partis.length, 2, 'le bouton est reste bloque apres un retour perdu');
+    } finally {
+        monde.fermer();
+    }
+});
+
+test('un systeme sans lien qui envoie le dit, sans rien envoyer', () => {
+    const monde = unMonde();
+
+    try {
+        monde.amorcer(1, 5);
+        desLiensDEspionnage(monde, [6], { avertissement: [6] });
+        const envoi = unEnvoiDeSondes(monde);
+
+        monde.window.spyWholeSystem();
+
+        assert.equal(envoi.partis.length, 0);
+        assert.deepEqual(envoi.annonces, [{ message: 'Aucune planete a espionner.', erreur: true }]);
+    } finally {
+        monde.fermer();
+    }
+});

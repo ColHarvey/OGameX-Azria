@@ -78,9 +78,11 @@ class FleetMissionService
      * @param UnitCollection $units
      * @param GameMission|null $mission
      * @param float $speed_percent
+     * @param PlanetType|null $targetType Le genre du corps vise. Sans lui, aucun bonus qui depend du
+     *        proprietaire de la destination ne s applique : un type inconnu ne se devine pas.
      * @return int
      */
-    public function calculateFleetMissionDuration(PlanetService $fromPlanet, Coordinate $to, UnitCollection $units, GameMission|null $mission = null, float $speed_percent = 10): int
+    public function calculateFleetMissionDuration(PlanetService $fromPlanet, Coordinate $to, UnitCollection $units, GameMission|null $mission = null, float $speed_percent = 10, PlanetType|null $targetType = null): int
     {
         $player = $fromPlanet->getPlayer();
         if ($player === null) {
@@ -93,7 +95,7 @@ class FleetMissionService
             $this->calculateFleetMissionDistance($fromPlanet, $to),
             $mission,
             $speed_percent,
-            $this->allianceFlightSpeedBonus($player, $to, $mission)
+            $this->allianceFlightSpeedBonus($player, $to, $mission, $targetType)
         );
     }
 
@@ -111,7 +113,7 @@ class FleetMissionService
      * requete ; elle ne part que pour un membre d'une alliance de Guerriers, et le reste du serveur
      * ne paie rien.
      */
-    private function allianceFlightSpeedBonus(PlayerService $player, Coordinate $to, GameMission|null $mission): float
+    private function allianceFlightSpeedBonus(PlayerService $player, Coordinate $to, GameMission|null $mission, PlanetType|null $targetType): float
     {
         $classes = $this->classesDAlliance ??= resolve(AllianceClassService::class);
         $user = $player->getUser();
@@ -120,8 +122,15 @@ class FleetMissionService
             ? $classes->getExpeditionSpeedBonus($user)
             : 1.0;
 
-        $allie = $classes->isWarriors($user)
-            ? $classes->getAlliedFlightSpeedBonus($user, $this->ownerOfBodyAt($to))
+        /*
+         * **Un vol vers un corps, pas vers des coordonnees.** Un champ de debris ou un point de
+         * l'espace pose au-dessus de la planete d'un membre n'appartient a personne : le recycleur
+         * qui y va ne vole pas vers ce membre. Seules une planete et une lune ont un proprietaire, et
+         * c'est le corps de **ce** type qu'on interroge. Sans type connu — les durees de retour
+         * qu'un combat gele a sa cloture —, le bonus ne s'applique pas : absent plutot que devine.
+         */
+        $allie = $classes->isWarriors($user) && ($targetType === PlanetType::Planet || $targetType === PlanetType::Moon)
+            ? $classes->getAlliedFlightSpeedBonus($user, $this->ownerOfBodyAt($to, $targetType))
             : 1.0;
 
         return $expedition * $allie;
@@ -132,9 +141,9 @@ class FleetMissionService
      *
      * Un champ de debris, une case vide, un point de l'espace : personne.
      */
-    private function ownerOfBodyAt(Coordinate $to): int|null
+    private function ownerOfBodyAt(Coordinate $to, PlanetType $type): int|null
     {
-        $clef = $to->galaxy . ':' . $to->system . ':' . $to->position;
+        $clef = $to->galaxy . ':' . $to->system . ':' . $to->position . ':' . $type->value;
 
         if (array_key_exists($clef, $this->proprietaireParCoordonnees)) {
             return $this->proprietaireParCoordonnees[$clef];
@@ -144,6 +153,7 @@ class FleetMissionService
             ->where('galaxy', $to->galaxy)
             ->where('system', $to->system)
             ->where('planet', $to->position)
+            ->where('planet_type', $type->value)
             ->value('user_id');
 
         return $this->proprietaireParCoordonnees[$clef] = $proprietaire === null ? null : (int)$proprietaire;

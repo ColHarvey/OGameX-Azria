@@ -314,6 +314,8 @@ return [
         'system_phalanx_needs_phalanx' => 'Aucune Phalange de capteurs sur cette lune.',
         'system_phalanx_out_of_range' => 'Système hors de portée. Votre Phalange (niveau :level) atteint :range systèmes.',
         'system_phalanx_not_enough_deuterium' => 'Deutérium insuffisant pour l’analyse.',
+        'system_phalanx_nothing_to_scan' => 'Aucune planète à analyser dans ce système.',
+        'phalanx_no_movement' => 'Aucun mouvement de flotte détecté à cet endroit.',
         'system_espionage_not_allowed' => 'Seule une alliance de Guerriers peut espionner un système entier.',
         'system_espionage_sent' => 'Espionnage du système lancé sur :count planète(s).',
         'system_espionage_none' => 'Aucune planète à espionner dans ce système.',

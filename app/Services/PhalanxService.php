@@ -123,6 +123,40 @@ class PhalanxService
     }
 
     /**
+     * Les planetes qu'une analyse de systeme releverait, dans l'ordre de leurs positions.
+     *
+     * **Les exclusions de l'analyse ordinaire, et elles seules** : ni lune, ni planete de
+     * l'administration, ni planete du joueur qui analyse. Le controleur la demande **avant** de faire
+     * payer — un systeme ou elle ne rend rien se refuse gratuitement, comme une case vide pour
+     * l'analyse d'une seule planete.
+     *
+     * @return list<int>
+     */
+    public function scannableBodiesInSystem(int $galaxy, int $system, int $scanner_player_id): array
+    {
+        $administrateurs = DB::table('model_has_roles')
+            ->join('roles', 'roles.id', '=', 'model_has_roles.role_id')
+            ->where('roles.name', 'admin')
+            ->where('model_has_roles.model_type', User::class)
+            ->pluck('model_id')
+            ->all();
+
+        $identifiants = Planet::query()
+            ->where('galaxy', $galaxy)
+            ->where('system', $system)
+            ->where('planet_type', PlanetType::Planet->value)
+            ->whereNotNull('user_id')
+            ->where('user_id', '!=', $scanner_player_id)
+            ->whereNotIn('user_id', $administrateurs)
+            ->orderBy('planet')
+            ->pluck('id')
+            ->map(static fn (mixed $id): int => (int)$id)
+            ->all();
+
+        return array_values($identifiants);
+    }
+
+    /**
      * Analyser un systeme entier : les mouvements de toutes ses planetes analysables.
      *
      * **Bonus d'une alliance de Chercheurs.** L'emprise s'elargit, les protections ne bougent pas :
@@ -140,22 +174,7 @@ class PhalanxService
      */
     public function scanSystemFleets(int $galaxy, int $system, int $scanner_player_id): array
     {
-        $administrateurs = DB::table('model_has_roles')
-            ->join('roles', 'roles.id', '=', 'model_has_roles.role_id')
-            ->where('roles.name', 'admin')
-            ->where('model_has_roles.model_type', User::class)
-            ->pluck('model_id')
-            ->all();
-
-        $corps = Planet::query()
-            ->where('galaxy', $galaxy)
-            ->where('system', $system)
-            ->where('planet_type', PlanetType::Planet->value)
-            ->whereNotNull('user_id')
-            ->where('user_id', '!=', $scanner_player_id)
-            ->whereNotIn('user_id', $administrateurs)
-            ->orderBy('planet')
-            ->pluck('id');
+        $corps = $this->scannableBodiesInSystem($galaxy, $system, $scanner_player_id);
 
         $releve = [];
 

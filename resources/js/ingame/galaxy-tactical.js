@@ -3481,6 +3481,18 @@
          */
         generationDuContexte++;
         contactsDeSurveillance = [];
+
+        /*
+         * **Et la reponse mise de cote pendant un glisser.** Elle attendait la fin du geste pour
+         * s appliquer ; une coupure survenue entre-temps masquait l ecran sans la toucher, et la fin
+         * du geste reaffichait ce que la coupure venait d oter. Mesure de Codex, 12 septembre 2026 :
+         * 0 contact apres la coupure, 1 a la fin du geste, sans aucune reponse du serveur.
+         *
+         * `finirLeGeste()` compare aussi la generation, et c est elle qui suffit : cette ligne ne
+         * change rien d observable. Elle rend la memoire de ce qu une invalidation a perime, et laisse
+         * l etat lisible — la reponse n existe plus au lieu d exister perimee.
+         */
+        carte.gtReponseDue = null;
         dessinerLaSurveillance(carte);
     }
 
@@ -4688,7 +4700,17 @@
 
         var s = carte.gtSysteme || {};
 
-        // La reponse mise de cote ne vaut que pour le systeme encore affiche.
+        /*
+         * **Elle ne vaut que pour la generation qui l a vue naitre.** Une demande partie pendant le
+         * geste, ou une invalidation, l a perimee : l appliquer reafficherait ce que la carte vient
+         * d oter — la regle est celle de toute reponse, verifiee au `done`, et une reponse differee
+         * n y echappe pas.
+         */
+        if (Number(due.generation) !== generationDuContexte) {
+            return;
+        }
+
+        // Et pour le systeme encore affiche.
         if (Number(s.galaxie) === Number(due.galaxie) && Number(s.systeme) === Number(due.systeme)) {
             appliquerLesFlottes(carte, due.reponse, due.galaxie, due.systeme);
         }
@@ -5208,6 +5230,17 @@
              * a l echec, plus au depart. Relecture du lot.
              */
             .fail(function () {
+                /*
+                 * **Un echec perime ne masque rien.** Les reponses verifiaient leur generation, les
+                 * echecs non : une demande ancienne qui echouait apres une reponse recente valide
+                 * vidait quand meme la surveillance. Mesure de Codex, 12 septembre 2026 : 1 contact
+                 * actuel, 0 apres l echec de l ancienne demande — des disparitions sans cause visible.
+                 * L echec de la demande **courante** masque toujours.
+                 */
+                if (generation !== generationDuContexte) {
+                    return;
+                }
+
                 invaliderLaSurveillance(carte);
             })
             .done(function (reponse) {
@@ -5229,7 +5262,7 @@
                  * geste finit, comme la demande due du bandeau des ressources.
                  */
                 if (carte.classList.contains('gtDragging')) {
-                    carte.gtReponseDue = { reponse: reponse, galaxie: galaxie, systeme: systeme };
+                    carte.gtReponseDue = { reponse: reponse, galaxie: galaxie, systeme: systeme, generation: generation };
 
                     return;
                 }
@@ -5901,6 +5934,121 @@
         enveloppe.gtEnveloppee = true;
         window.renderContentGalaxy = enveloppe;
     }
+
+    /*
+     * Bonus d une alliance de Guerriers : espionner le systeme entier d un geste.
+     *
+     * **Ce sont les liens de la page qui partent**, ceux que le joueur peut cliquer un par un :
+     * chaque envoi emprunte la voie ordinaire — sondes, creneaux, refus du serveur. Le bouton ne
+     * donne rien de plus que la main ; il epargne des gestes. C est pourquoi aucun droit n est
+     * verifie au serveur : il n y a pas de privilege a proteger, seulement un raccourci.
+     *
+     * **Un par un, chacun apres le retour du precedent.** `sendShips()` n accepte qu un envoi a la
+     * fois : il pose `shipsendingDone = 0`, et seul `displayMiniFleetMessage()` le remet a 1, au
+     * retour du serveur. La premiere version cliquait tout dans une boucle synchrone : un seul envoi
+     * partait, et la page annoncait N planetes (audit du 12 septembre 2026, mesure en jsdom).
+     *
+     * **Seuls les liens qui envoient.** Un lien qui ouvre l avertissement de hors-la-loi demande une
+     * confirmation par cible, et le bouton ne la donne pas a la place du joueur. Un `onclick` vide
+     * (compte systeme) n envoie rien et ne se compte pas.
+     *
+     * **Un retour qui ne vient jamais arrete la file.** Une requete echouee ne remet pas le drapeau
+     * (`sendShips` n a aucun gestionnaire d erreur, defaut plus ancien que ce bouton) : attendre
+     * indefiniment figerait le bouton. Passe le delai, la file s arrete, et le compte annonce dit ce
+     * qui est vraiment parti.
+     */
+    var ESPIONNAGE_ATTENTE_MAX = 15000;
+    var ESPIONNAGE_PAS = 100;
+    var espionnageDeSystemeEnCours = false;
+
+    function liensDEspionnageQuiEnvoient() {
+        var liens = document.querySelectorAll('#galaxyContent .galaxyRow .cellAction a.espionage[onclick]');
+        var retenus = [];
+
+        for (var i = 0; i < liens.length; i++) {
+            if (/^\s*sendShips\(/.test(liens[i].getAttribute('onclick') || '')) {
+                retenus.push(liens[i]);
+            }
+        }
+
+        return retenus;
+    }
+
+    function annoncerLEspionnageDeSysteme(message, erreur) {
+        if (message && typeof window.fadeBox === 'function') {
+            window.fadeBox(message, erreur);
+        }
+    }
+
+    window.spyWholeSystem = function () {
+        if (espionnageDeSystemeEnCours) {
+            return;
+        }
+
+        var loca = window.galaxyTacticalLoca || {};
+        var liens = liensDEspionnageQuiEnvoient();
+
+        if (liens.length === 0) {
+            annoncerLEspionnageDeSysteme(loca.systemEspionageNone, true);
+
+            return;
+        }
+
+        espionnageDeSystemeEnCours = true;
+
+        var envoyes = 0;
+
+        var terminer = function () {
+            espionnageDeSystemeEnCours = false;
+            annoncerLEspionnageDeSysteme(String(loca.systemEspionageSent || '').replace('#count#', String(envoyes)), envoyes === 0);
+        };
+
+        var attendreLeDrapeau = function (depuis, ensuite) {
+            if (Number(window.shipsendingDone) === 1) {
+                ensuite();
+
+                return;
+            }
+
+            if (Date.now() - depuis > ESPIONNAGE_ATTENTE_MAX) {
+                terminer();
+
+                return;
+            }
+
+            window.setTimeout(function () {
+                attendreLeDrapeau(depuis, ensuite);
+            }, ESPIONNAGE_PAS);
+        };
+
+        var envoyer = function (i) {
+            if (i >= liens.length) {
+                terminer();
+
+                return;
+            }
+
+            attendreLeDrapeau(Date.now(), function () {
+                // Le lien a pu disparaitre : un changement de systeme redessine le tableau.
+                if (!liens[i].isConnected) {
+                    envoyer(i + 1);
+
+                    return;
+                }
+
+                liens[i].click();
+
+                // `sendShips` a pris l envoi s il a baisse le drapeau ; sinon rien n est parti.
+                if (Number(window.shipsendingDone) !== 1) {
+                    envoyes++;
+                }
+
+                envoyer(i + 1);
+            });
+        };
+
+        envoyer(0);
+    };
 
     /*
      * **Envelopper des maintenant, pas a `DOMContentLoaded`.** Le premier chargement du systeme

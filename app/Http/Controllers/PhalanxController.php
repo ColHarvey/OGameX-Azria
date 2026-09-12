@@ -239,10 +239,28 @@ class PhalanxController extends OGameController
             return $refus(__('t_ingame.galaxy.system_phalanx_not_enough_deuterium'));
         }
 
-        $fleet_movements = $phalanxService->scanSystemFleets($galaxy, $system, $player->getId());
+        /*
+         * **Un systeme sans rien a analyser ne se paie pas.** L'analyse d'une seule planete refuse
+         * gratuitement une case vide ; celle du systeme faisait payer un relevé vide.
+         */
+        if ($phalanxService->scannableBodiesInSystem($galaxy, $system, $player->getId()) === []) {
+            return $refus(__('t_ingame.galaxy.system_phalanx_nothing_to_scan'));
+        }
 
-        // **Le prix est celui d'un seul relevé** : c'est exactement ce que la classe offre.
-        $current_planet->deductResources(new Resources(0, 0, $phalanxService->getScanCost(), 0));
+        /*
+         * **Payer d'abord, relever ensuite — et le prix est celui d'un seul relevé.**
+         *
+         * Le controle du solde ci-dessus lit la valeur chargee au debut de la requete : un envoi de
+         * flotte depuis la meme lune peut la faire tomber entre-temps. Le debit est un `UPDATE`
+         * conditionnel, qui ne passe jamais sous zero, et **son refus devient le refus lisible du
+         * joueur** — au lieu de l'exception qui rendait une erreur 500 apres un relevé deja calcule.
+         * Rien n'est releve pour qui n'a pas paye.
+         */
+        if (!$current_planet->deductResourcesAtomic(new Resources(0, 0, $phalanxService->getScanCost(), 0))) {
+            return $refus(__('t_ingame.galaxy.system_phalanx_not_enough_deuterium'));
+        }
+
+        $fleet_movements = $phalanxService->scanSystemFleets($galaxy, $system, $player->getId());
 
         $content_html = view('ingame.phalanx.content', [
             'fleet_movements' => $fleet_movements,

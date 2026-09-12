@@ -241,7 +241,7 @@ class PhalanxTest extends FleetDispatchTestCase
         $this->assertEquals(0, $response->json('fleet_count'));
 
         // Assert content_html contains "No fleet movements"
-        $this->assertStringContainsString('No fleet movements detected', $response->json('content_html'));
+        $this->assertStringContainsString(__('t_ingame.galaxy.phalanx_no_movement'), $response->json('content_html'));
 
         // Verify deuterium was deducted in database
         $this->moonService->reloadPlanet();

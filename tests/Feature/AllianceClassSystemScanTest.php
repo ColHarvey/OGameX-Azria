@@ -2,11 +2,13 @@
 
 namespace Tests\Feature;
 
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use OGame\Enums\AllianceClass;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
+use OGame\GameConstants\UniverseConstants;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Alliance;
 use OGame\Models\Enums\PlanetType;
@@ -19,6 +21,7 @@ use OGame\Services\InitialUserDataService;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
 use OGame\Services\SettingsService;
+use stdClass;
 use Tests\FleetDispatchTestCase;
 
 /**
@@ -165,6 +168,10 @@ class AllianceClassSystemScanTest extends FleetDispatchTestCase
 
         $this->assertStringContainsString('onclick="spyWholeSystem();"', $guerriers, 'Une alliance de Guerriers n a pas l espionnage de systeme.');
         $this->assertStringNotContainsString('onclick="scanSystemWithPhalanx();"', $guerriers, 'Une alliance de Guerriers a la Phalange de systeme, que sa classe ne promet pas.');
+
+        // **La page ne redefinit pas la fonction du module.** Une declaration dans un script en ligne
+        // cree une globale qui ecrase celle du module, ou l inverse, selon l ordre de chargement.
+        $this->assertStringNotContainsString('function spyWholeSystem(', $guerriers, 'Le gabarit redefinit l espionnage de systeme par-dessus le module.');
     }
 
     /**
@@ -260,5 +267,129 @@ class AllianceClassSystemScanTest extends FleetDispatchTestCase
         );
 
         return $alliance;
+    }
+
+    /**
+     * **Un systeme sans planete a analyser se refuse gratuitement.**
+     *
+     * L'analyse d'une seule planete refuse une case vide sans rien prendre ; celle du systeme
+     * faisait payer 5 000 de deuterium pour un relevé vide (audit du 12 septembre 2026).
+     */
+    public function testAnEmptySystemIsRefusedWithoutCharging(): void
+    {
+        $this->switchToMoon();
+        $this->laPhalangeSurLaLune();
+
+        // Niveau 5 : vingt-quatre systemes de portee, de quoi trouver un systeme sans aucun corps.
+        $this->moonService->setObjectLevel(ObjectService::getObjectByMachineName('sensor_phalanx')->id, 5);
+        $this->moonService->reloadPlanet();
+        $this->uneAllianceDeClasse(AllianceClass::RESEARCHERS);
+
+        $lune = $this->moonService->getPlanetCoordinates();
+        $vide = null;
+
+        for ($ecart = 1; $ecart <= 24 && $vide === null; $ecart++) {
+            foreach ([$lune->system + $ecart, $lune->system - $ecart] as $systeme) {
+                if ($systeme < 1 || $systeme > UniverseConstants::MAX_SYSTEM_COUNT) {
+                    continue;
+                }
+
+                if (!DB::table('planets')->where('galaxy', $lune->galaxy)->where('system', $systeme)->exists()) {
+                    $vide = $systeme;
+
+                    break;
+                }
+            }
+        }
+
+        $this->assertNotNull($vide, 'Aucun systeme vide a portee : le temoin ne peut pas se poser.');
+
+        $avant = (int)DB::table('planets')->where('id', $this->moonService->getPlanetId())->value('deuterium');
+
+        $reponse = $this->postJson(route('phalanx.scan-system'), [
+            'galaxy' => $lune->galaxy,
+            'system' => $vide,
+        ])->assertStatus(200);
+
+        $this->assertTrue((bool)$reponse->json('is_error'), 'Un systeme vide a ete analyse.');
+        $this->assertSame(__('t_ingame.galaxy.system_phalanx_nothing_to_scan'), $reponse->json('error_message'));
+        $this->assertSame(
+            $avant,
+            (int)DB::table('planets')->where('id', $this->moonService->getPlanetId())->value('deuterium'),
+            'Un systeme sans rien a analyser a ete facture.'
+        );
+    }
+
+    /**
+     * **Un debit perdu devant une ecriture concurrente est un refus lisible, et ne revele rien.**
+     *
+     * Le controle du solde lit la valeur chargee au debut de la requete ; une ecriture concurrente
+     * — un envoi de flotte depuis la meme lune — la fait tomber avant le debit. Autrefois : relevé
+     * calcule, puis exception au debit, et une erreur 500. L'ecriture concurrente est injectee au
+     * moment exact ou le controleur liste les corps a analyser, apres le controle et avant le debit.
+     */
+    public function testADebitLostToAConcurrentWriteIsRefusedCleanlyAndRevealsNothing(): void
+    {
+        $this->switchToFirstPlanet();
+        $this->basicSetup();
+
+        [$premier] = $this->deuxVoisinsDansLeSysteme();
+        $this->envoyerUnTransportVers($premier);
+
+        $this->switchToMoon();
+        $this->laPhalangeSurLaLune();
+        $this->uneAllianceDeClasse(AllianceClass::RESEARCHERS);
+
+        $luneId = $this->moonService->getPlanetId();
+
+        // Un objet et non un booleen capture : PHPStan tiendrait le booleen pour constant.
+        $concurrente = new stdClass();
+        $concurrente->ecrite = false;
+
+        DB::listen(function (QueryExecuted $requete) use ($concurrente, $luneId): void {
+            if ($concurrente->ecrite) {
+                return;
+            }
+
+            $sql = str_replace('`', '"', $requete->sql);
+
+            if (str_contains($sql, 'from "planets"') && str_contains($sql, '"user_id" is not null')) {
+                $concurrente->ecrite = true;
+                DB::table('planets')->where('id', $luneId)->update(['deuterium' => 0]);
+            }
+        });
+
+        $coordonnees = $this->moonService->getPlanetCoordinates();
+
+        $reponse = $this->postJson(route('phalanx.scan-system'), [
+            'galaxy' => $coordonnees->galaxy,
+            'system' => $coordonnees->system,
+        ]);
+
+        $this->assertTrue($concurrente->ecrite, 'La premisse manque : l ecriture concurrente n a pas eu lieu.');
+        $reponse->assertStatus(200);
+        $this->assertTrue((bool)$reponse->json('is_error'), 'Le relevé a ete rendu alors que le debit a echoue.');
+        $this->assertSame(__('t_ingame.galaxy.system_phalanx_not_enough_deuterium'), $reponse->json('error_message'));
+        $this->assertNull($reponse->json('content_html'), 'Des mouvements ont ete reveles a un joueur qui n a rien paye.');
+        $this->assertSame(0, (int)DB::table('planets')->where('id', $luneId)->value('deuterium'));
+    }
+
+    /**
+     * **Le relevé sans mouvement se dit dans la langue du joueur.**
+     *
+     * La phrase etait ecrite en anglais dans la vue ; l'analyse de systeme la rendait plus souvent.
+     * Temoin de forme sur la vue, et de fond sur la clef : elle existe en francais.
+     */
+    public function testThePhalanxReportSaysNoMovementInThePlayersLanguage(): void
+    {
+        $vue = (string)file_get_contents(base_path('resources/views/ingame/phalanx/content.blade.php'));
+
+        $this->assertStringNotContainsString('>No fleet movements detected at this location.<', $vue);
+        $this->assertStringContainsString("{{ __('t_ingame.galaxy.phalanx_no_movement') }}", $vue);
+        $this->assertNotSame(
+            't_ingame.galaxy.phalanx_no_movement',
+            trans('t_ingame.galaxy.phalanx_no_movement', [], 'fr'),
+            'La clef n existe pas en francais : le joueur lirait son nom.'
+        );
     }
 }

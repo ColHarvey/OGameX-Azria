@@ -567,4 +567,121 @@ class AllianceClassTest extends AccountTestCase
 
         $this->postJson(route('alliance.classes.choose'), ['alliance_class_id' => AllianceClass::WARRIORS->value])->assertStatus(400);
     }
+
+    /**
+     * **Le premier choix offert ne se prend pas deux fois.**
+     *
+     * La requete gagnante a deja pose une classe ; celle-ci arrive avec un modele charge avant, qui
+     * croit l'alliance sans classe. Decider sur ce modele offrait un second choix gratuit. Le prix
+     * doit se relire sur la ligne : 400 000, que ce joueur n'a pas.
+     */
+    public function testAStaleAllianceCannotGetTheFreeChoiceTwice(): void
+    {
+        $alliance = $this->uneAllianceFondee();
+        $this->vieillirLAlliance($alliance, AllianceClassService::FREE_FIRST_CHOICE_AFTER_DAYS + 1);
+
+        $perimee = Alliance::query()->findOrFail((int)$alliance->id);
+        $this->assertNull($perimee->alliance_class_selected_at, 'La premisse manque : le modele perime connait deja un choix.');
+
+        // La requete concurrente a gagne entre le chargement du modele et l'achat.
+        DB::table('alliances')->where('id', (int)$alliance->id)->update([
+            'alliance_class' => AllianceClass::TRADERS->name,
+            'alliance_class_selected_at' => (int)now()->timestamp,
+        ]);
+
+        $this->donnerDeLaMatiereNoire(0);
+
+        try {
+            resolve(AllianceClassService::class)->choose($this->leJoueur(), $perimee, AllianceClass::WARRIORS);
+            $this->fail('Un modele perime a obtenu un second choix gratuit.');
+        } catch (Exception $e) {
+            $this->assertSame(
+                __('t_ingame.alliance.class_not_enough_dark_matter', ['price' => number_format(AllianceClass::PRICE_IN_DARK_MATTER, 0, ',', '.')]),
+                $e->getMessage()
+            );
+        }
+
+        $this->assertSame(
+            AllianceClass::TRADERS->name,
+            DB::table('alliances')->where('id', (int)$alliance->id)->value('alliance_class'),
+            'La classe de la requete gagnante a ete remplacee sans paiement.'
+        );
+    }
+
+    /**
+     * **Une classe deja choisie ne se facture pas une seconde fois.**
+     *
+     * Le modele perime croit l'alliance sans classe ; la ligne porte deja celle que ce joueur
+     * demande. Decider sur le modele debitait une seconde fois pour ne rien changer.
+     */
+    public function testAStaleAllianceIsNotChargedAgainForTheClassAlreadySelected(): void
+    {
+        $alliance = $this->uneAllianceFondee();
+        $perimee = Alliance::query()->findOrFail((int)$alliance->id);
+
+        DB::table('alliances')->where('id', (int)$alliance->id)->update([
+            'alliance_class' => AllianceClass::TRADERS->name,
+            'alliance_class_selected_at' => (int)now()->timestamp,
+        ]);
+
+        $solde = AllianceClass::PRICE_IN_DARK_MATTER * 2;
+        $this->donnerDeLaMatiereNoire($solde);
+
+        try {
+            resolve(AllianceClassService::class)->choose($this->leJoueur(), $perimee, AllianceClass::TRADERS);
+            $this->fail('Un modele perime a rachete la classe deja choisie.');
+        } catch (Exception $e) {
+            $this->assertSame(__('t_ingame.alliance.class_already_selected'), $e->getMessage());
+        }
+
+        $this->assertSame(
+            $solde,
+            (int)DB::table('users')->where('id', $this->currentUserId)->value('dark_matter'),
+            'La classe deja choisie a ete facturee une seconde fois.'
+        );
+    }
+
+    /**
+     * **L'alliance, puis le compte, puis la decision, puis le debit — le tout dans la transaction.**
+     *
+     * Temoin de forme, et il le dit : sous SQLite `lockForUpdate()` ne compile a rien, aucune requete
+     * observee ne porterait `for update`. La course de deux processus reels appartient au bac MariaDB.
+     * Les motifs sont des formes de code — appels et parentheses —, pas des mots d'un commentaire.
+     */
+    public function testTheChoiceLocksTheAllianceThenTheAccountBeforeDecidingAndDebiting(): void
+    {
+        $source = (string)file_get_contents(base_path('app/Services/AllianceClassService.php'));
+        $debut = strpos($source, 'public function choose(');
+        $this->assertNotFalse($debut);
+
+        $fin = strpos($source, '$alliance->refresh();', $debut);
+        $this->assertNotFalse($fin);
+
+        $corps = substr($source, $debut, $fin - $debut);
+
+        $reperes = [
+            'transaction' => strpos($corps, 'DB::transaction('),
+            'verrou de l alliance' => strpos($corps, 'Alliance::query()->whereKey((int)$alliance->id)->lockForUpdate()'),
+            'verrou du compte' => strpos($corps, 'User::query()->whereKey((int)$user->id)->lockForUpdate()'),
+            'droit relu' => strpos($corps, '$this->mayChooseFor($compte, $verrouillee)'),
+            'classe relue' => strpos($corps, '$this->classOfAlliance($verrouillee)'),
+            'prix relu' => strpos($corps, '$this->priceFor($verrouillee)'),
+            'debit' => strpos($corps, '->debit('),
+        ];
+
+        foreach ($reperes as $nom => $position) {
+            $this->assertNotFalse($position, 'Repere absent de choose() : ' . $nom . '.');
+        }
+
+        $ordre = array_keys($reperes);
+        $positions = array_values($reperes);
+
+        for ($i = 1, $n = count($positions); $i < $n; $i++) {
+            $this->assertGreaterThan(
+                $positions[$i - 1],
+                $positions[$i],
+                'Dans choose(), « ' . $ordre[$i] . ' » devrait suivre « ' . $ordre[$i - 1] . ' ».'
+            );
+        }
+    }
 }

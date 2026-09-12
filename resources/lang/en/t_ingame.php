@@ -424,6 +424,8 @@ return [
         'system_phalanx_needs_phalanx'             => 'No Sensor Phalanx built on this moon.',
         'system_phalanx_out_of_range'             => 'System out of range. Your Sensor Phalanx (level :level) reaches :range systems.',
         'system_phalanx_not_enough_deuterium'             => 'Not enough Deuterium for the scan.',
+        'system_phalanx_nothing_to_scan'             => 'No planet to scan in this system.',
+        'phalanx_no_movement'             => 'No fleet movement detected here.',
         'system_espionage_not_allowed'             => 'Only a Warriors alliance can spy on a whole system.',
         'system_espionage_sent'             => 'System espionage launched on :count planet(s).',
         'system_espionage_none'             => 'No planet to spy on in this system.',

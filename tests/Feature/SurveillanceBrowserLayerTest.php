@@ -221,4 +221,65 @@ class SurveillanceBrowserLayerTest extends TestCase
         $this->assertIsInt($appel, 'La couche n est pas dessinee dans la reponse acceptee.');
         $this->assertGreaterThan($affectation, $appel, 'La couche est dessinee avant d avoir recu la liste neuve.');
     }
+
+    /**
+     * **Aucune issue perimee ne s applique** : ni un echec, ni une reponse mise de cote pendant un
+     * glisser (Codex, 12 septembre 2026).
+     *
+     * Les reponses comparaient leur generation ; les echecs non, et la reponse differee non plus. Les
+     * deux gardes sont cherchees dans le corps de la fonction qui les porte, et avant le geste
+     * qu elles protegent.
+     */
+    public function testTheServedBundleIgnoresEveryStaleOutcome(): void
+    {
+        $bundle = $this->bundleServi();
+
+        // L echec : la garde de generation, avant le masquage.
+        $chargement = $this->corpsDe($bundle, 'chargerLesFlottes', 'redemanderLeSysteme');
+        $echec = strpos($chargement, '.fail(function () {');
+        $garde = strpos($chargement, 'if (generation !== generationDuContexte) {');
+        $masquage = strpos($chargement, 'invaliderLaSurveillance(carte);');
+
+        $this->assertIsInt($echec);
+        $this->assertIsInt($garde, 'Le bundle servi laisse un echec perime vider la surveillance.');
+        $this->assertIsInt($masquage);
+        $this->assertGreaterThan($echec, $garde, 'La garde de generation n est pas dans le gestionnaire d echec.');
+        $this->assertLessThan($masquage, $garde, 'L echec masque avant de verifier sa generation.');
+
+        // La reponse differee : elle emporte sa generation…
+        $this->assertStringContainsString(
+            'carte.gtReponseDue = { reponse: reponse, galaxie: galaxie, systeme: systeme, generation: generation };',
+            $bundle,
+            'La reponse mise de cote pendant un glisser n emporte pas sa generation.'
+        );
+
+        // …et la fin du geste la verifie avant d appliquer.
+        $fin = $this->corpsDe($bundle, 'finirLeGeste', 'destinationDuClic');
+        $verification = strpos($fin, 'if (Number(due.generation) !== generationDuContexte) {');
+        $application = strpos($fin, 'appliquerLesFlottes(carte, due.reponse, due.galaxie, due.systeme);');
+
+        $this->assertIsInt($verification, 'Le bundle servi applique une reponse differee sans verifier sa generation.');
+        $this->assertIsInt($application);
+        $this->assertLessThan($application, $verification, 'La reponse differee est appliquee avant que sa generation soit verifiee.');
+    }
+
+    /**
+     * **L espionnage de systeme attend le retour de chaque envoi**, dans le bundle servi.
+     */
+    public function testTheServedBundleSendsTheSystemEspionageOneProbeAtATime(): void
+    {
+        $bundle = $this->bundleServi();
+
+        $debut = strpos($bundle, 'window.spyWholeSystem = function () {');
+        $this->assertIsInt($debut, 'Le bundle servi ne definit pas l espionnage de systeme : le bouton ne ferait rien.');
+
+        $bout = strpos($bundle, 'envoyer(0);', $debut);
+        $this->assertIsInt($bout);
+
+        $corps = substr($bundle, $debut, $bout - $debut);
+
+        $this->assertStringContainsString('if (Number(window.shipsendingDone) === 1) {', $corps, 'L espionnage de systeme n attend pas le retour de l envoi precedent.');
+        $this->assertStringContainsString('if (Date.now() - depuis > ESPIONNAGE_ATTENTE_MAX) {', $corps, 'Un retour perdu figerait l espionnage de systeme.');
+        $this->assertStringNotContainsString('for (var i = 0; i < liens.length; i++) {' . "\n" . '                    liens[i].click();', $corps);
+    }
 }

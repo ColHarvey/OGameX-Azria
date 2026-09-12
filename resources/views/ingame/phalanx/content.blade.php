@@ -6,7 +6,7 @@
 
 <div id="phalanxEventContent">
     @if (empty($fleet_movements))
-        <div style="padding: 20px; text-align: center;">No fleet movements detected at this location.</div>
+        <div style="padding: 20px; text-align: center;">{{ __('t_ingame.galaxy.phalanx_no_movement') }}</div>
     @else
         @foreach ($fleet_movements as $movement)
             {{-- Hidden tooltip content for this fleet movement --}}

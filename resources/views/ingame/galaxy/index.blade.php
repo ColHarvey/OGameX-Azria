@@ -166,6 +166,9 @@
                     'deepSpace' => __('t_ingame.galaxy.tactical_deep_space'),
                     'freeSlot' => __('t_ingame.galaxy.tactical_free_slot'),
                     'emptySlot' => __('t_ingame.galaxy.tactical_empty_slot'),
+                    // L espionnage d un systeme entier vit dans le module : ses deux phrases aussi.
+                    'systemEspionageNone' => __('t_ingame.galaxy.system_espionage_none'),
+                    'systemEspionageSent' => __('t_ingame.galaxy.system_espionage_sent', ['count' => '#count#']),
                     'emptyServer' => __('t_ingame.galaxy.tactical_empty_server'),
                     'expeditionFleet' => __('t_ingame.galaxy.expedition_fleet'),
                     'expeditionNote' => __('t_ingame.galaxy.tactical_expedition_note'),
@@ -919,28 +922,6 @@
                 });
             }
 
-            /*
-             * Bonus d'une alliance de Guerriers : espionner le systeme entier d'un geste.
-             *
-             * **Ce sont les liens de la page qui partent, un par planete.** Chaque envoi emprunte
-             * donc la voie ordinaire — ses sondes, ses creneaux, ses refus — et une planete que le
-             * joueur ne peut pas espionner n'a pas de lien actif, donc ne part pas. Rien n'est
-             * contourne : seul le nombre de gestes change.
-             */
-            function spyWholeSystem() {
-                var liens = document.querySelectorAll('#galaxyContent .galaxyRow .cellAction a.espionage[onclick]');
-
-                if (liens.length === 0) {
-                    fadeBox(@json(__('t_ingame.galaxy.system_espionage_none')), true);
-                    return;
-                }
-
-                for (var i = 0; i < liens.length; i++) {
-                    liens[i].click();
-                }
-
-                fadeBox(@json(__('t_ingame.galaxy.system_espionage_sent', ['count' => '#count#'])).replace('#count#', liens.length), false);
-            }
 
             function formatFleetTime(timestamp) {
                 var date = new Date(timestamp * 1000);
