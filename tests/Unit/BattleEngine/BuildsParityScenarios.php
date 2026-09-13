@@ -4,6 +4,7 @@ namespace Tests\Unit\BattleEngine;
 
 use Closure;
 use OGame\Combat\Allocation\FrozenLootAllocation;
+use OGame\Combat\Enums\HamillManoeuvreRule;
 use OGame\Combat\Enums\NoLootReason;
 use OGame\Combat\Support\CombatantFrozenAtEntry;
 use OGame\Combat\Support\FrozenCombatCharacteristics;
@@ -49,7 +50,8 @@ trait BuildsParityScenarios
     /**
      * Monte une bataille : une cible, ses defenseurs, ses attaquantes, chacun avec son proprietaire.
      *
-     * @param array<string, int> $planete
+     * @param array<string, int|array<string, array<int, int>>> $planete Les colonnes du corps ; `damaged_hulls`
+     *        y porte une carte de paliers, comme la colonne du meme nom.
      * @param array<int, array<string, mixed>> $attaquantes
      * @param array<int, array<string, mixed>> $renforts
      * @return array{attaquantes: array<int, AttackerFleet>, defenseurs: array<int, DefenderFleet>, cible: PlanetService, contexte: \OGame\Combat\Support\LootContext}
@@ -93,8 +95,9 @@ trait BuildsParityScenarios
     /**
      * @param class-string<BattleEngine> $classe
      * @param array<string, mixed> $bataille
+     * @param HamillManoeuvreRule|null $regle La regle de la manoeuvre, ou celle du jour si rien n est demande.
      */
-    private function fight(string $classe, array $bataille): BattleResult
+    private function fight(string $classe, array $bataille, HamillManoeuvreRule|null $regle = null): BattleResult
     {
         $moteur = new $classe(
             $bataille['attaquantes'],
@@ -104,7 +107,15 @@ trait BuildsParityScenarios
             $bataille['contexte']
         );
 
-        return $moteur->withDraws(new SeededDraws(self::GRAINE))->simulateBattle();
+        $moteur->withDraws(new SeededDraws(self::GRAINE));
+
+        // **Ne rien imposer par defaut** : un banc qui figerait la regle ne verrait pas le jour ou la regle
+        // courante change, et c est precisement ce qu il doit voir.
+        if ($regle !== null) {
+            $moteur->withHamillManoeuvreRule($regle);
+        }
+
+        return $moteur->simulateBattle();
     }
 
     /**
@@ -131,7 +142,7 @@ trait BuildsParityScenarios
     /**
      * Le corps attaque, possede par ce joueur-la.
      *
-     * @param array<string, int> $attributs
+     * @param array<string, int|array<string, array<int, int>>> $attributs
      */
     private function aBodyOwnedBy(PlayerService $proprietaire, array $attributs): PlanetService
     {
@@ -382,14 +393,16 @@ trait BuildsParityScenarios
      * et ce que la victoire aurait du rapporter lisible.
      *
      * @param array<string, int> $garnison
+     * @param array<string, int> $attaquante Ce que le General emmene ; des chasseurs legers, sinon la manoeuvre
+     *        ne se joue pas du tout.
      * @return array{attaquantes: array<int, AttackerFleet>, defenseurs: array<int, DefenderFleet>, cible: PlanetService, contexte: \OGame\Combat\Support\LootContext}
      */
-    private function aGeneralAttackingAStockedBody(array $garnison): array
+    private function aGeneralAttackingAStockedBody(array $garnison, array $attaquante = ['light_fighter' => 300, 'small_cargo' => 40]): array
     {
         return $this->aBattle(
             planete: ['metal' => 400_000, 'crystal' => 200_000, 'deuterium' => 100_000] + $garnison,
             attaquantes: [
-                ['units' => ['light_fighter' => 300, 'small_cargo' => 40], 'tech' => ['weapon_technology' => 6, 'shielding_technology' => 5, 'armor_technology' => 6], 'classe' => CharacterClass::GENERAL],
+                ['units' => $attaquante, 'tech' => ['weapon_technology' => 6, 'shielding_technology' => 5, 'armor_technology' => 6], 'classe' => CharacterClass::GENERAL],
             ],
         );
     }

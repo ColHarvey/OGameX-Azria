@@ -2,38 +2,38 @@
 
 namespace Tests\Unit\BattleEngine;
 
+use OGame\Combat\Enums\HamillManoeuvreRule;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleetResult;
 use OGame\GameMissions\BattleEngine\PhpBattleEngine;
 use Tests\UnitTestCase;
 
 /**
- * **Ce que la manoeuvre de Hamill change reellement a une bataille.**
+ * **Ce que la manoeuvre de Hamill change reellement a une bataille, regle par regle.**
  *
- * ## Pourquoi un essai de plus, alors que le drapeau etait deja epingle
+ * ## Pourquoi ces essais existent
  *
  * Un essai qui lit `hamillManoeuvreTriggered` etablit qu un tirage a eu lieu, rien d autre. Le moteur Rust a
- * porte une manoeuvre qui levait ce drapeau, consommait son tirage et **ne detruisait rien** — l Etoile
- * continuait de tirer —, et aucune suite ne rougissait. La couleur d un banc ne dit pas qu une regle
- * s applique : il faut mesurer ce qu elle empeche.
+ * porte une manoeuvre qui levait ce drapeau, consommait son tirage et **ne detruisait rien**, sans qu aucune
+ * suite ne rougisse. La couleur d un banc ne dit pas qu une regle s applique : il faut mesurer ce qu elle
+ * empeche.
  *
  * ## Comment « elle ne tire pas » est rendu observable sans hasard
  *
  * La meme bataille est jouee deux fois, avec pour seule difference la chance de la manoeuvre : une fois sur
  * une, puis une fois sur un million. Le temoin des tirs est le montage ou l Etoile est **le dernier
  * defenseur** : sans manoeuvre elle tire au premier round et son premier coup detruit une unite ; avec, la
- * defense est vide et aucun round ne se joue. **Comparer des nombres de coups** dans une bataille ou une Etoile
- * survit ne prouverait rien : son tir rapide rend ce nombre geometrique, et une graine suffit a inverser
- * l ordre — la CI de `95740b99` l a montre sur le moteur Rust.
+ * defense est vide et aucun round ne se joue. **Comparer des nombres de coups** dans une bataille ou une
+ * Etoile survit ne prouverait rien : son tir rapide rend ce nombre geometrique, et une graine suffit a
+ * inverser l ordre — la CI de `95740b99` l a montre sur le moteur Rust.
  *
- * ## Une incoherence anterieure, epinglee et non corrigee
+ * ## Les trois regles, et ce que chacune doit rendre
  *
- * Le decompte global des survivants (`defenderUnitsResult`) porte encore l Etoile detruite : il part de
- * `defenderUnitsStart` et ne baisse que sur une mort en round, or la manoeuvre ne tue personne en round. La
- * perte est inscrite a part. Le resultat **par flotte** — celui que le reglement applique au corps — dit,
- * lui, la verite. Cet ecart precede ce travail et vaut pour les deux moteurs ; le corriger change l issue de
- * batailles, donc c est une livraison a part, versionnee, sur decision : il est epingle ici pour etre
- * visible, pas corrige en passant.
+ * - `v1`, telle que livree : hors sujet ici, le moteur PHP ne la distingue pas de `v2`.
+ * - `v2`, effective : l Etoile quitte la bataille mais **reste comptee survivante** — le jeu refuse alors la
+ *   victoire, donc le butin. Les essais de protection l epinglent : un combat ouvert sous elle doit encore
+ *   se regler ainsi.
+ * - `v3`, hors des survivants : l Etoile quitte aussi le decompte, et sa perte est comptee **une seule fois**.
  */
 final class HamillManoeuvreEffectTest extends UnitTestCase
 {
@@ -129,66 +129,92 @@ final class HamillManoeuvreEffectTest extends UnitTestCase
     }
 
     /**
-     * **L incoherence du decompte global, epinglee.** Elle precede ce travail et n est pas corrigee ici : la
-     * corriger changerait l issue de batailles.
+     * **L Etoile detruite quitte le decompte des survivants, et sa perte est comptee exactement une fois.**
+     *
+     * Les deux vont ensemble : retirer l Etoile des survivants sans retirer l inscription separee de sa perte
+     * la compterait deux fois ; retirer l inscription sans retirer l Etoile ne la compterait pas du tout.
      */
-    public function testTheOverallSurvivorCountStillShowsTheDestroyedDeathstar(): void
+    public function testTheDestroyedDeathstarLeavesTheSurvivorCountAndIsLostExactlyOnce(): void
     {
-        $avec = $this->laBataille(1);
+        $deuxEtoiles = $this->laBataille(1);
 
-        $this->assertSame(2, $avec->defenderUnitsStart->getAmountByMachineName('deathstar'), 'Le depart annonce doit porter les deux Etoiles.');
+        $this->assertSame(2, $deuxEtoiles->defenderUnitsStart->getAmountByMachineName('deathstar'), 'Le depart annonce doit porter les deux Etoiles : c est lui qui ne bouge pas.');
+        $this->assertSame(1, $deuxEtoiles->defenderUnitsResult->getAmountByMachineName('deathstar'), 'L Etoile detruite figure encore parmi les survivants.');
+        $this->assertSame(1, $deuxEtoiles->defenderUnitsLost->getAmountByMachineName('deathstar'), 'La perte de l Etoile n est pas comptee exactement une fois.');
 
-        // **Defaut connu, remonte, non corrige.** Le decompte global part du depart et ne baisse que sur une
-        // mort en round : l Etoile prise par la manoeuvre y reste, alors que la meme bataille la compte
-        // perdue et que le corps la perd. Si cet essai rougit un jour, c est que le comportement a change —
-        // et ce changement est une decision de jeu, a prendre explicitement.
-        $this->assertSame(2, $avec->defenderUnitsResult->getAmountByMachineName('deathstar'), 'Le decompte global des survivants a change : c est une decision de jeu, pas un detail.');
+        // Chaque round dit la meme chose que le total : elle n est plus la, des le premier.
+        $this->assertNotSame([], $deuxEtoiles->rounds, 'Aucun round : le decompte par round ne serait pas eprouve.');
+        $this->assertSame(1, $deuxEtoiles->rounds[0]->defenderShips->getAmountByMachineName('deathstar'), 'Le premier round montre encore les deux Etoiles.');
+
+        // Et le cas sans round, ou aucun decompte de round ne peut la retirer.
+        $dernierDefenseur = $this->laBatailleDuDernierDefenseur(1);
+
+        $this->assertSame([], $dernierDefenseur->rounds, 'Un round s est joue : le chemin sans round n est pas eprouve.');
+        $this->assertSame(1, $dernierDefenseur->defenderUnitsStart->getAmountByMachineName('deathstar'), 'Le depart annonce a perdu son Etoile.');
+        $this->assertSame(0, $dernierDefenseur->defenderUnitsResult->getAmount(), 'Le decompte des survivants porte encore l Etoile detruite.');
+        $this->assertSame(1, $dernierDefenseur->defenderUnitsLost->getAmountByMachineName('deathstar'), 'La perte de l Etoile n est pas comptee exactement une fois.');
     }
 
     /**
-     * **Ce que le decompte fantome coute a l attaquante, mesure contre un temoin.**
+     * **La victoire et le butin reviennent a l attaquante** quand la manoeuvre prend le dernier defenseur.
      *
-     * Meme corps, meme stock, meme flotte, et aucun round dans les deux cas : une garnison vide rend un butin, une
-     * garnison dont la manoeuvre a pris la seule Etoile n en rend aucun. Le jeu decide la victoire sur
-     * `defenderUnitsResult` — le pillage ici, et ailleurs la destruction de lune
-     * (`MoonDestructionMission::didAttackerWinBattle()`, `CombatEngagementService`) et la chute d une base pirate
-     * (`NpcDestructionService::isDefeatedInBattle()`) —, et ce decompte-la porte encore l Etoile detruite.
-     *
-     * **Defaut anterieur, commun aux deux moteurs, non corrige** : le corriger changerait l issue de batailles,
-     * donc c est une livraison versionnee, sur decision. Cet essai rougira ce jour-la, et c est voulu.
+     * Le temoin de controle est une garnison vide sur le meme corps : meme stock, meme flotte, aucun round.
+     * Sans lui, un butin nul pourrait venir d ailleurs que du decompte.
      */
-    public function testAManoeuvreThatTakesTheLastDefenderStillDeniesTheAttackerItsLoot(): void
+    public function testTheAttackerWinsAndLootsWhenTheManoeuvreTakesTheLastDefender(): void
     {
-        $this->settingsService->set('hamill_manoeuvre_chance', 1);
-
         $vide = $this->fight(PhpBattleEngine::class, $this->aGeneralAttackingAStockedBody([]));
         $prise = $this->laBatailleDuDernierDefenseur(1);
 
-        // Les premisses : sans elles, un butin nul pourrait venir d ailleurs que du decompte.
+        // Les premisses.
         $this->assertSame([], $vide->rounds, 'La garnison vide a combattu : les deux batailles ne sont plus comparables.');
         $this->assertGreaterThan(0.0, $vide->loot->sum(), 'Une garnison vide ne rend aucun butin : le temoin ne mesure rien.');
         $this->assertTrue($prise->hamillManoeuvreTriggered, 'La manoeuvre ne s est pas jouee : le reste ne prouverait rien.');
-        $this->assertSame([], $prise->rounds, 'Un round s est joue : l Etoile n a pas ete prise avant la bataille.');
-        $this->assertSame(0, $prise->attackerUnitsLost->getAmount(), 'L attaquante a perdu des unites : ce n est plus une victoire sans combat.');
-        $this->assertTrue($this->laFlotteDefensive($prise, 0)->completelyDestroyed, 'La garnison n est pas detruite : le butin nul aurait une autre cause.');
+        $this->assertTrue($this->laFlotteDefensive($prise, 0)->completelyDestroyed, 'La garnison n est pas detruite : le butin aurait une autre cause.');
 
-        // Le defaut, epingle.
-        $this->assertSame(1, $prise->defenderUnitsResult->getAmount(), 'Le decompte global ne porte plus l Etoile detruite : c est une decision de jeu, pas un detail.');
-        $this->assertSame(0.0, $prise->loot->sum(), 'L attaquante pille apres une manoeuvre qui a pris le dernier defenseur : le comportement a change, c est une decision de jeu.');
+        // La regle retablie : plus rien ne survit, donc l attaquante gagne et pille.
+        $this->assertSame(0, $prise->defenderUnitsResult->getAmount(), 'Le decompte des survivants n est pas vide : la victoire restera refusee.');
+        $this->assertSame(
+            [(int)$vide->loot->metal->get(), (int)$vide->loot->crystal->get(), (int)$vide->loot->deuterium->get()],
+            [(int)$prise->loot->metal->get(), (int)$prise->loot->crystal->get(), (int)$prise->loot->deuterium->get()],
+            'Le butin d une manoeuvre qui prend le dernier defenseur ne vaut pas celui d une garnison vide.'
+        );
     }
 
-    private function laBataille(int $chance): BattleResult
+    /**
+     * **La protection des batailles deja ouvertes** : sous la regle d hier, l Etoile detruite reste comptee
+     * survivante et l attaquante ne pille pas.
+     *
+     * C est le comportement exact d un combat ouvert avant la correction. Si cet essai rougit, c est qu une
+     * bataille deja engagee a change de regles en cours de route.
+     */
+    public function testACombatOpenedUnderTheEarlierRuleKeepsTheStarAmongTheSurvivors(): void
+    {
+        $deuxEtoiles = $this->laBataille(1, HamillManoeuvreRule::Effective);
+
+        $this->assertSame(2, $deuxEtoiles->defenderUnitsStart->getAmountByMachineName('deathstar'), 'Le depart annonce doit porter les deux Etoiles.');
+        $this->assertSame(2, $deuxEtoiles->defenderUnitsResult->getAmountByMachineName('deathstar'), 'Sous la regle d hier, l Etoile detruite restait parmi les survivants.');
+        $this->assertSame(1, $deuxEtoiles->defenderUnitsLost->getAmountByMachineName('deathstar'), 'Sous la regle d hier, la perte etait inscrite a part, une seule fois.');
+
+        $dernierDefenseur = $this->laBatailleDuDernierDefenseur(1, HamillManoeuvreRule::Effective);
+
+        $this->assertSame(1, $dernierDefenseur->defenderUnitsResult->getAmount(), 'Sous la regle d hier, l Etoile detruite comptait encore comme survivante.');
+        $this->assertSame(0.0, $dernierDefenseur->loot->sum(), 'Sous la regle d hier, l attaquante ne pillait pas : la protection ne tient plus.');
+        $this->assertSame(1, $dernierDefenseur->defenderUnitsLost->getAmountByMachineName('deathstar'), 'Sous la regle d hier aussi, la perte se compte une seule fois.');
+    }
+
+    private function laBataille(int $chance, HamillManoeuvreRule|null $regle = null): BattleResult
     {
         $this->settingsService->set('hamill_manoeuvre_chance', $chance);
 
-        return $this->fight(PhpBattleEngine::class, $this->aGeneralWhoseHamillManoeuvreSucceeds());
+        return $this->fight(PhpBattleEngine::class, $this->aGeneralWhoseHamillManoeuvreSucceeds(), $regle);
     }
 
-    private function laBatailleDuDernierDefenseur(int $chance): BattleResult
+    private function laBatailleDuDernierDefenseur(int $chance, HamillManoeuvreRule|null $regle = null): BattleResult
     {
         $this->settingsService->set('hamill_manoeuvre_chance', $chance);
 
-        return $this->fight(PhpBattleEngine::class, $this->aGeneralWhoseHamillManoeuvreTakesTheLastDefender());
+        return $this->fight(PhpBattleEngine::class, $this->aGeneralWhoseHamillManoeuvreTakesTheLastDefender(), $regle);
     }
 
     private function laFlotteDefensive(BattleResult $resultat, int $fleetMissionId): DefenderFleetResult

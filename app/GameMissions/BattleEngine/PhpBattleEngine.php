@@ -14,6 +14,7 @@ use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\GameObjects\Models\Units\UnitEntry;
 use OGame\Hull\DamagedHulls;
 use OGame\Services\CharacterClassService;
+use OGame\Services\ObjectService;
 use OGame\Services\SettingsService;
 
 /**
@@ -161,6 +162,14 @@ class PhpBattleEngine extends BattleEngine
 
         $attackerRemainingShips = clone $result->attackerUnitsStart;
         $defenderRemainingShips = clone $result->defenderUnitsStart;
+
+        // **Ce que la manoeuvre a pris ne figure pas parmi les survivants d un round**, quand la regle le
+        // demande : ce decompte part du depart annonce et ne baisse que sur une mort en round, or la
+        // manoeuvre ne tue personne en round. Sous les regles precedentes, l Etoile y restait affichee
+        // jusqu au dernier round, alors meme qu elle etait comptee perdue.
+        if ($result->hamillManoeuvreTriggered && !$this->hamillRule->theDestroyedDeathstarStillCountsAsASurvivor()) {
+            $defenderRemainingShips->removeUnit(ObjectService::getShipObjectByMachineName('deathstar'), 1);
+        }
 
         // Initialize per-fleet tracking for multi-attacker battles
         $attackerLossesPerFleet = [];

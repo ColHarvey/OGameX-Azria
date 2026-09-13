@@ -25,6 +25,7 @@ use OGame\Combat\Enums\SnapshotContribution;
 use OGame\Combat\Exceptions\ClosureMustWaitForAnotherWorker;
 use OGame\Combat\Exceptions\ContradictorySnapshotInclusion;
 use OGame\Combat\Exceptions\UnknownAdmissionHistory;
+use OGame\Combat\Exceptions\UnknownHamillManoeuvreRule;
 use OGame\Combat\Projection\SnapshotProjectionRegistry;
 use OGame\Combat\Support\ActorKindResolver;
 use OGame\Combat\Support\CombatEventIdentity;
@@ -124,6 +125,23 @@ final class RallyClosureService
             ]);
 
             return RallyClosureOutcome::suspended($anomalie->getMessage());
+        } catch (UnknownHamillManoeuvreRule $regle) {
+            /*
+             * **Une regle de manoeuvre inconnue suspend la fermeture**, exactement comme un historique
+             * d admission inconnu. Elle ne peut venir que d une base plus recente que ce code — un retour
+             * en arriere livre pendant qu un combat porte deja la version suivante. L exception a fait
+             * revenir la transaction en arriere : aucune bataille, aucun credit partiel.
+             *
+             * **Sans cette prise, le refus ne serait pas propre** : l ouverture appelle cette fermeture dans
+             * la requete du joueur, et l exception fermerait toutes ses pages. Le refus reste entier — aucune
+             * regle par defaut n est choisie —, il est seulement rendu au lieu d etre lance.
+             */
+            Log::critical('Fermeture suspendue : regle de manoeuvre de Hamill inconnue.', [
+                'combat' => $combatInstanceId,
+                'raison' => $regle->getMessage(),
+            ]);
+
+            return RallyClosureOutcome::suspended($regle->getMessage());
         } catch (ClosureMustWaitForAnotherWorker $tenue) {
             /*
              * **Le retrait est une issue, pas une erreur.** Un autre travailleur tenait une arrivee

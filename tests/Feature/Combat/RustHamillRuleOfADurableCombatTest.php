@@ -28,10 +28,11 @@ use Tests\RecordsClassHistory;
  *
  * ## Ce qu ils etablissent
  *
- * - un combat ouvert aujourd hui porte `v2` et **detruit** l Etoile : la manoeuvre fait ce que le jeu annonce ;
- * - le meme montage, ramene a `v1` comme un combat ouvert avant la correction, garde le comportement livre :
- *   l Etoile disparait du depart annonce et continue de tirer. **C est la protection des combats deja
- *   ouverts**, prouvee plutot qu affirmee.
+ * - un combat ouvert aujourd hui porte la regle courante et **detruit** l Etoile : elle quitte la bataille et
+ *   le decompte des survivants, et sa perte est comptee une seule fois ;
+ * - le meme montage ramene a `v2` garde l Etoile detruite parmi les survivants ; ramene a `v1`, il garde le
+ *   comportement livre, ou l Etoile disparait du depart annonce et continue de tirer. **C est la protection
+ *   des combats deja ouverts**, prouvee plutot qu affirmee.
  */
 final class RustHamillRuleOfADurableCombatTest extends FleetDispatchTestCase
 {
@@ -87,7 +88,7 @@ final class RustHamillRuleOfADurableCombatTest extends FleetDispatchTestCase
     {
         $combat = $this->unRalliementDUnGeneralContreUneEtoile();
 
-        $this->assertSame(HamillManoeuvreRule::Effective->value, $combat->hamill_rule_version, 'Un combat neuf ne porte pas la regle effective.');
+        $this->assertSame(HamillManoeuvreRule::current()->value, $combat->hamill_rule_version, 'Un combat neuf ne porte pas la regle courante.');
 
         $resultat = BattleResultCodec::fromStorage($combat->battle_result);
 
@@ -101,6 +102,27 @@ final class RustHamillRuleOfADurableCombatTest extends FleetDispatchTestCase
         $garnison = $this->laGarnison($resultat);
         $this->assertSame(0, $garnison->unitsResult->getAmountByMachineName('deathstar'), 'L Etoile figure encore parmi les survivants du corps : la manoeuvre n a rien detruit.');
         $this->assertSame(1, $garnison->unitsLost->getAmountByMachineName('deathstar'), 'L Etoile n est pas comptee perdue dans la flotte qui la portait.');
+
+        // Et le decompte global la laisse partir, lui aussi : c est lui dont le jeu tire la victoire.
+        $this->assertSame(0, $resultat->defenderUnitsResult->getAmountByMachineName('deathstar'), 'Le decompte global porte encore l Etoile detruite.');
+    }
+
+    /**
+     * **Un combat ouvert sous la regle precedente garde son decompte**, Etoile detruite comprise.
+     */
+    public function testACombatOpenedUnderTheEffectiveRuleKeepsTheStarAmongTheSurvivors(): void
+    {
+        $combat = $this->unRalliementDUnGeneralContreUneEtoile(HamillManoeuvreRule::Effective);
+
+        $this->assertSame(HamillManoeuvreRule::Effective->value, $combat->hamill_rule_version);
+
+        $resultat = BattleResultCodec::fromStorage($combat->battle_result);
+
+        $this->assertTrue($resultat->hamillManoeuvreTriggered, 'La manoeuvre ne s est pas jouee : le reste ne prouverait rien.');
+        $this->assertSame(1, $resultat->defenderUnitsStart->getAmountByMachineName('deathstar'), 'Le depart annonce ne porte plus l Etoile.');
+        $this->assertSame(1, $resultat->defenderUnitsResult->getAmountByMachineName('deathstar'), 'Sous la regle precedente, l Etoile detruite restait parmi les survivants.');
+        $this->assertSame(1, $resultat->defenderUnitsLost->getAmountByMachineName('deathstar'), 'La perte de l Etoile n est pas comptee exactement une fois.');
+        $this->assertSame(0, $this->laGarnison($resultat)->unitsResult->getAmountByMachineName('deathstar'), 'Le corps garde son Etoile alors que la manoeuvre l a prise.');
     }
 
     /**

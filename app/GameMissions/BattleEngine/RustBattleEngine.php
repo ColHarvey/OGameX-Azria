@@ -3,7 +3,6 @@
 namespace OGame\GameMissions\BattleEngine;
 
 use FFI;
-use OGame\Combat\Enums\HamillManoeuvreRule;
 use OGame\Combat\Exceptions\RustEngineContractMismatch;
 use OGame\Combat\Support\LootContext;
 use OGame\GameMissions\BattleEngine\Draws\SeededDraws;
@@ -555,7 +554,7 @@ class RustBattleEngine extends BattleEngine
             // Hamill Manoeuvre triggered! Destroy one Deathstar
             $result->hamillManoeuvreTriggered = true;
 
-            if ($this->hamillRule === HamillManoeuvreRule::Effective) {
+            if ($this->hamillRule->theManoeuvreLeavesTheBattle()) {
                 // **L Etoile quitte l entree envoyee a la bibliotheque, pas le decompte de depart.**
                 // La retirer du seul `defenderUnitsStart` — ou des flottes, qui ne composent plus
                 // l entree defensive — la laissait tirer, et la faisait disparaitre des pertes : la
@@ -625,8 +624,13 @@ class RustBattleEngine extends BattleEngine
 
         $etoile = ObjectService::getShipObjectByMachineName('deathstar');
 
-        foreach ($rounds as $round) {
-            $round->defenderShips->addUnit($etoile, 1);
+        // **Les survivants affiches par round** : l Etoile y figure sous les regles qui la comptent
+        // survivante, et le moteur PHP fait de meme. Sous la regle qui l en retire, aucun des deux ne
+        // l ajoute — la bibliotheque ne l a jamais vue.
+        if ($this->hamillRule->theDestroyedDeathstarStillCountsAsASurvivor()) {
+            foreach ($rounds as $round) {
+                $round->defenderShips->addUnit($etoile, 1);
+            }
         }
 
         foreach ($result->defenderFleetResults as $fleetResult) {

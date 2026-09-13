@@ -20,9 +20,10 @@ use OGame\Combat\Admission\AdmissionVerdict;
  * **« Trop tot » non plus.** L'echeance a ete calculee a l'ouverture ; fermer avant elle exclurait
  * des flottes qu'on avait promis d'attendre. Le declencheur represente donc simplement.
  *
- * **« Suspendue », en revanche, est une anomalie.** Ce que les flottes apportaient a leurs tirs a leur
- * admission ne s etablit pas : l historique des classes ne sait pas repondre. Rien n a ete ecrit, le
- * ralliement reste ouvert, et l avanceur compte l echec — apres cinq, le combat est mis de cote.
+ * **« Suspendue », en revanche, est une anomalie.** Deux la produisent : ce que les flottes apportaient a
+ * leurs tirs a leur admission ne s etablit pas — l historique des classes ne sait pas repondre —, ou la
+ * regle de manoeuvre ecrite a l ouverture n est pas connue de ce code. Dans les deux cas rien n a ete
+ * ecrit, le ralliement reste ouvert, et l avanceur compte l echec : apres cinq, le combat est mis de cote.
  */
 final readonly class RallyClosureOutcome
 {

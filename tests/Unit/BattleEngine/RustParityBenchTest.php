@@ -179,12 +179,10 @@ class RustParityBenchTest extends UnitTestCase
                 $this->assertTrue($resultat->hamillManoeuvreTriggered, $moteur . ' : la manoeuvre ne s est pas jouee.');
                 $this->assertSame(2, $resultat->defenderUnitsStart->getAmountByMachineName('deathstar'), $moteur . ' : le depart annonce ne porte pas les deux Etoiles.');
                 $this->assertSame(1, $resultat->defenderUnitsLost->getAmountByMachineName('deathstar'), $moteur . ' : la manoeuvre n a detruit aucune Etoile.');
-                // **Le decompte global porte encore l Etoile detruite**, et c est mesure sur le moteur PHP : il
-                // part du depart annonce et ne baisse que sur une mort en round, or la manoeuvre ne tue personne en
-                // round. Defaut anterieur, commun aux deux moteurs, epingle par `HamillManoeuvreEffectTest`. Une
-                // premiere version attendait 1 ici : la CI de `95740b99` l a refutee, sur PHP, apres que les deux
-                // projections entieres se furent accordees.
-                $this->assertSame(2, $resultat->defenderUnitsResult->getAmountByMachineName('deathstar'), $moteur . ' : le decompte global des survivants a change.');
+                // **Le decompte global ne porte plus l Etoile detruite** depuis la regle courante : elle quitte
+                // la bataille **et** les survivants, et sa perte est comptee une seule fois. Les deux regles
+                // precedentes la laissaient parmi les survivants ; `HamillManoeuvreEffectTest` en garde le temoin.
+                $this->assertSame(1, $resultat->defenderUnitsResult->getAmountByMachineName('deathstar'), $moteur . ' : le decompte global des survivants porte encore l Etoile detruite.');
 
                 // **Ce qui distingue les deux Etoiles se lit par flotte** : la garnison perd la sienne, le renfort
                 // garde la sienne. C est ce resultat-la que le reglement applique.

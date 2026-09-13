@@ -8,7 +8,7 @@ use OGame\Models\CombatInstance;
 /**
  * Ce que la manoeuvre de Hamill fait a l Etoile de la mort qu elle vise.
  *
- * ## Les deux regles
+ * ## Les trois regles
  *
  * - **Telle que livree** (`v1`) : le moteur PHP retire l Etoile de la bataille — elle ne tire pas, et elle
  *   est comptee perdue — tandis que le moteur Rust ne la retire que du **decompte de depart** : elle tire
@@ -16,7 +16,11 @@ use OGame\Models\CombatInstance;
  *   ouvert sous cette regle la garde : la corriger sous lui changerait une bataille deja engagee.
  * - **Effective** (`v2`) : dans les deux moteurs, la manoeuvre retire l Etoile **des unites qui se battent**
  *   et la laisse au depart, donc comptee perdue. C est la regle que le jeu annonce depuis toujours, et celle
- *   que le moteur PHP appliquait deja.
+ *   que le moteur PHP appliquait deja. Elle laisse pourtant l Etoile detruite **dans le decompte global des
+ *   survivants**, dont le jeu tire la victoire : sous elle, un attaquant qui prend le dernier defenseur ne
+ *   pille rien, ne tente pas de detruire une lune et ne fait pas tomber une base pirate.
+ * - **Hors des survivants** (`v3`) : la meme chose, plus le retrait du decompte global. L Etoile detruite ne
+ *   compte plus comme survivante, et sa perte est comptee **exactement une fois**. C est la regle courante.
  *
  * ## Ou la regle est choisie
  *
@@ -36,12 +40,48 @@ enum HamillManoeuvreRule: string
 
     case Effective = 'v2';
 
+    case OutOfTheSurvivors = 'v3';
+
     /**
-     * La regle la plus recente.
+     * La regle la plus recente : celle qu un combat neuf recoit.
      */
     public static function current(): self
     {
-        return self::Effective;
+        return self::OutOfTheSurvivors;
+    }
+
+    /**
+     * L Etoile prise par la manoeuvre quitte-t-elle les unites qui se battent ?
+     *
+     * Non sous la regle telle que livree : le moteur Rust l y laissait tirer.
+     */
+    public function theManoeuvreLeavesTheBattle(): bool
+    {
+        return match ($this) {
+            self::AsDelivered => false,
+            self::Effective, self::OutOfTheSurvivors => true,
+        };
+    }
+
+    /**
+     * L Etoile detruite figure-t-elle encore parmi les survivants ?
+     *
+     * **Le jeu tire la victoire de ce decompte** : le butin, la tentative de destruction de lune et la chute
+     * d une base pirate en dependent. Repondre « oui » est le comportement des deux premieres regles, et le
+     * defaut que la troisieme corrige.
+     *
+     * ## Pourquoi un `match` sans repli
+     *
+     * Une version ajoutee sans etre traitee ici doit **arreter** le calcul, jamais retomber en silence sur
+     * l ancien. Un `if` sur une seule regle faisait exactement cela, et une version de plus serait passee
+     * inapercue.
+     */
+    public function theDestroyedDeathstarStillCountsAsASurvivor(): bool
+    {
+        return match ($this) {
+            self::AsDelivered, self::Effective => true,
+            self::OutOfTheSurvivors => false,
+        };
     }
 
     /**

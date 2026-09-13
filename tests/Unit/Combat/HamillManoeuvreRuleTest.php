@@ -19,15 +19,52 @@ use Tests\UnitTestCase;
  */
 final class HamillManoeuvreRuleTest extends UnitTestCase
 {
-    public function testTheCurrentRuleIsTheEffectiveOne(): void
+    public function testTheCurrentRuleTakesTheDestroyedStarOutOfTheSurvivors(): void
     {
-        $this->assertSame(HamillManoeuvreRule::Effective, HamillManoeuvreRule::current(), 'Un combat neuf s ouvrirait sous la regle inerte.');
+        $this->assertSame(HamillManoeuvreRule::OutOfTheSurvivors, HamillManoeuvreRule::current(), 'Un combat neuf s ouvrirait sous une regle depassee.');
+    }
+
+    /**
+     * **Aucune regle ne reste sans reponse.**
+     *
+     * Les deux questions que les moteurs posent a la regle sont resolues par un `match` sans repli : une
+     * version ajoutee sans etre traitee **arrete** le calcul au lieu de retomber en silence sur l ancien.
+     * Cet essai parcourt les regles declarees, et la table ci-dessous doit etre tenue a jour avec elles —
+     * c est la comparaison des clefs qui l impose.
+     */
+    public function testEveryRuleAnswersBothQuestionsInsteadOfFallingBackSilently(): void
+    {
+        $attendu = [
+            'v1' => ['quitte la bataille' => false, 'compte comme survivante' => true],
+            'v2' => ['quitte la bataille' => true, 'compte comme survivante' => true],
+            'v3' => ['quitte la bataille' => true, 'compte comme survivante' => false],
+        ];
+
+        $this->assertSame(
+            array_keys($attendu),
+            array_map(static fn (HamillManoeuvreRule $regle): string => $regle->value, HamillManoeuvreRule::cases()),
+            'Une regle a ete ajoutee ou retiree sans que cette table le dise.'
+        );
+
+        foreach (HamillManoeuvreRule::cases() as $regle) {
+            $this->assertSame(
+                $attendu[$regle->value]['quitte la bataille'],
+                $regle->theManoeuvreLeavesTheBattle(),
+                'La regle ' . $regle->value . ' ne dit pas si l Etoile quitte la bataille.'
+            );
+            $this->assertSame(
+                $attendu[$regle->value]['compte comme survivante'],
+                $regle->theDestroyedDeathstarStillCountsAsASurvivor(),
+                'La regle ' . $regle->value . ' ne dit pas si l Etoile detruite compte encore parmi les survivants.'
+            );
+        }
     }
 
     public function testACombatCarriesTheRuleItsOpeningWrote(): void
     {
         $this->assertSame(HamillManoeuvreRule::AsDelivered, HamillManoeuvreRule::fromInstance($this->unCombatPortant('v1')));
         $this->assertSame(HamillManoeuvreRule::Effective, HamillManoeuvreRule::fromInstance($this->unCombatPortant('v2')));
+        $this->assertSame(HamillManoeuvreRule::OutOfTheSurvivors, HamillManoeuvreRule::fromInstance($this->unCombatPortant('v3')));
     }
 
     public function testAnAbsentRuleIsRefusedRatherThanAssumed(): void

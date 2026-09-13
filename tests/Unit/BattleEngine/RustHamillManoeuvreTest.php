@@ -60,7 +60,50 @@ final class RustHamillManoeuvreTest extends UnitTestCase
     }
 
     /**
-     * **Regle effective : l Etoile quitte la bataille et compte dans les pertes**, comme sous le moteur PHP.
+     * **Regle courante : l Etoile quitte la bataille et les survivants**, comme sous le moteur PHP.
+     */
+    public function testTheCurrentRuleTakesTheDeathstarOutOfTheSurvivors(): void
+    {
+        $resultat = $this->laBatailleSous(HamillManoeuvreRule::OutOfTheSurvivors);
+
+        $this->assertTrue($resultat->hamillManoeuvreTriggered, 'La manoeuvre ne s est pas jouee : le reste ne prouverait rien.');
+        $this->assertSame(2, $resultat->defenderUnitsStart->getAmountByMachineName('deathstar'), 'Le depart annonce ne porte plus les deux Etoiles.');
+        $this->assertSame(1, $resultat->defenderUnitsResult->getAmountByMachineName('deathstar'), 'Le decompte global porte encore l Etoile detruite.');
+        $this->assertSame(1, $resultat->defenderUnitsLost->getAmountByMachineName('deathstar'), 'La perte de l Etoile n est pas comptee exactement une fois.');
+
+        $garnison = $this->laFlotteDefensive($resultat, 0);
+        $this->assertSame(0, $garnison->unitsResult->getAmountByMachineName('deathstar'), 'La garnison garde son Etoile.');
+        $this->assertSame(1, $garnison->unitsLost->getAmountByMachineName('deathstar'), 'L Etoile n est pas comptee perdue dans la flotte qui la portait.');
+
+        $renfort = $this->laFlotteDefensive($resultat, 2_000);
+        $this->assertSame(1, $renfort->unitsResult->getAmountByMachineName('deathstar'), 'La manoeuvre a pris l Etoile du renfort.');
+    }
+
+    /**
+     * **La victoire et le butin reviennent a l attaquante** quand la manoeuvre prend le dernier defenseur.
+     *
+     * Le temoin de controle est la meme attaque sur le meme corps, garnison vide : sans lui, un butin egal
+     * pourrait venir d ailleurs que du decompte.
+     */
+    public function testUnderTheCurrentRuleTheAttackerWinsAndLootsWhenTheManoeuvreTakesTheLastDefender(): void
+    {
+        $vide = $this->fight(RustBattleEngine::class, $this->aGeneralAttackingAStockedBody([]));
+        $prise = $this->laBatailleDuDernierDefenseur(1, HamillManoeuvreRule::OutOfTheSurvivors);
+
+        $this->assertSame([], $vide->rounds, 'La garnison vide a combattu : les deux batailles ne sont plus comparables.');
+        $this->assertGreaterThan(0.0, $vide->loot->sum(), 'Une garnison vide ne rend aucun butin : le temoin ne mesure rien.');
+        $this->assertTrue($prise->hamillManoeuvreTriggered, 'La manoeuvre ne s est pas jouee.');
+        $this->assertSame(0, $prise->defenderUnitsResult->getAmount(), 'Le decompte des survivants n est pas vide : la victoire restera refusee.');
+        $this->assertSame(1, $prise->defenderUnitsLost->getAmountByMachineName('deathstar'), 'La perte de l Etoile n est pas comptee exactement une fois.');
+        $this->assertSame(
+            [(int)$vide->loot->metal->get(), (int)$vide->loot->crystal->get(), (int)$vide->loot->deuterium->get()],
+            [(int)$prise->loot->metal->get(), (int)$prise->loot->crystal->get(), (int)$prise->loot->deuterium->get()],
+            'Le butin ne vaut pas celui d une garnison vide.'
+        );
+    }
+
+    /**
+     * **Protection : sous la regle precedente, l Etoile detruite reste comptee survivante**, comme sous PHP.
      *
      * Les chiffres sont ceux du moteur PHP sur ce scenario. Le decompte global des survivants en porte deux : il
      * part du depart annonce et ne baisse que sur une mort en round, or la manoeuvre ne tue personne en round.
@@ -74,7 +117,7 @@ final class RustHamillManoeuvreTest extends UnitTestCase
         $this->assertTrue($resultat->hamillManoeuvreTriggered, 'La manoeuvre ne s est pas jouee : le reste ne prouverait rien.');
         $this->assertSame(2, $resultat->defenderUnitsStart->getAmountByMachineName('deathstar'), 'Le depart annonce ne porte plus les deux Etoiles.');
         $this->assertSame(1, $resultat->defenderUnitsLost->getAmountByMachineName('deathstar'), 'La manoeuvre n a detruit aucune Etoile.');
-        $this->assertSame(2, $resultat->defenderUnitsResult->getAmountByMachineName('deathstar'), 'Le decompte global des survivants ne dit plus la meme chose que le moteur PHP.');
+        $this->assertSame(2, $resultat->defenderUnitsResult->getAmountByMachineName('deathstar'), 'Sous la regle precedente, l Etoile detruite restait parmi les survivants : la protection ne tient plus.');
 
         // **Le seul chiffre qui change le monde** : c est ce resultat par flotte que le reglement applique au
         // corps. Sans lui, une Etoile « perdue » au rapport resterait posee sur la planete.
@@ -136,18 +179,20 @@ final class RustHamillManoeuvreTest extends UnitTestCase
      */
     public function testTheManoeuvreThatTakesTheLastDefenderCrossesTheSeamIdentically(): void
     {
-        $bataille = $this->aGeneralWhoseHamillManoeuvreTakesTheLastDefender();
+        foreach ([HamillManoeuvreRule::OutOfTheSurvivors, HamillManoeuvreRule::Effective] as $regle) {
+            $bataille = $this->aGeneralWhoseHamillManoeuvreTakesTheLastDefender();
 
-        $php = $this->fight(PhpBattleEngine::class, $bataille);
-        $rust = $this->fight(RustBattleEngine::class, $bataille);
+            $php = $this->fight(PhpBattleEngine::class, $bataille, $regle);
+            $rust = $this->fight(RustBattleEngine::class, $bataille, $regle);
 
-        $this->assertTrue($php->hamillManoeuvreTriggered, 'PHP : la manoeuvre ne s est pas jouee.');
-        $this->assertTrue($rust->hamillManoeuvreTriggered, 'Rust : la manoeuvre ne s est pas jouee.');
-        $this->assertSame([], $php->rounds, 'PHP : un round s est joue, le chemin sans round n est pas eprouve.');
+            $this->assertTrue($php->hamillManoeuvreTriggered, 'PHP : la manoeuvre ne s est pas jouee sous ' . $regle->value . '.');
+            $this->assertTrue($rust->hamillManoeuvreTriggered, 'Rust : la manoeuvre ne s est pas jouee sous ' . $regle->value . '.');
+            $this->assertSame([], $php->rounds, 'PHP : un round s est joue sous ' . $regle->value . ', le chemin sans round n est pas eprouve.');
 
-        $divergence = CanonicalProjection::firstDivergence(CanonicalProjection::of($php), CanonicalProjection::of($rust));
+            $divergence = CanonicalProjection::firstDivergence(CanonicalProjection::of($php), CanonicalProjection::of($rust));
 
-        $this->assertNull($divergence, 'Les deux moteurs divergent quand la manoeuvre prend le dernier defenseur : ' . $divergence);
+            $this->assertNull($divergence, 'Les deux moteurs divergent sous ' . $regle->value . ' quand la manoeuvre prend le dernier defenseur : ' . $divergence);
+        }
     }
 
     /**
@@ -176,11 +221,11 @@ final class RustHamillManoeuvreTest extends UnitTestCase
         return $this->surLaBibliotheque($this->aGeneralWhoseHamillManoeuvreSucceeds(), $regle);
     }
 
-    private function laBatailleDuDernierDefenseur(int $chance): BattleResult
+    private function laBatailleDuDernierDefenseur(int $chance, HamillManoeuvreRule $regle = HamillManoeuvreRule::Effective): BattleResult
     {
         $this->settingsService->set('hamill_manoeuvre_chance', $chance);
 
-        return $this->surLaBibliotheque($this->aGeneralWhoseHamillManoeuvreTakesTheLastDefender(), HamillManoeuvreRule::Effective);
+        return $this->surLaBibliotheque($this->aGeneralWhoseHamillManoeuvreTakesTheLastDefender(), $regle);
     }
 
     /**

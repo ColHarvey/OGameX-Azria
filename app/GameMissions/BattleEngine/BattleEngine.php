@@ -126,6 +126,10 @@ abstract class BattleEngine
         // flottes d'un autre.
         $this->lootContext->ensureItBindsTo($this->attackers, CombatParticipantKey::forBody($this->defenderPlanet));
 
+        // **La regle courante, jamais une version ecrite en dur.** Une bataille durable la remplacera par
+        // celle que son ouverture a inscrite ; un defaut fige aurait cesse de suivre a la version suivante.
+        $this->hamillRule = HamillManoeuvreRule::current();
+
         $this->resourceDiagnostics = ResourceNormalizationDiagnostics::none();
         $this->lootRateInBasisPoints = $this->lootContext->rateInBasisPoints;
         $this->lootPercentage = intdiv($this->lootRateInBasisPoints, 100);
@@ -216,7 +220,7 @@ abstract class BattleEngine
      * d intervalle a proteger. La cloture d un combat durable, elle, impose celle que son ouverture a
      * ecrite — sans quoi une correction changerait une bataille deja engagee.
      */
-    protected HamillManoeuvreRule $hamillRule = HamillManoeuvreRule::Effective;
+    protected HamillManoeuvreRule $hamillRule;
 
     public function withHamillManoeuvreRule(HamillManoeuvreRule $rule): self
     {
@@ -402,7 +406,13 @@ abstract class BattleEngine
             } else {
                 // If no rounds were fought, the result is the same as the start.
                 $result->attackerUnitsResult = $result->attackerUnitsStart;
-                $result->defenderUnitsResult = $result->defenderUnitsStart;
+
+                // **Sauf ce que la manoeuvre a pris**, quand la regle ne le compte plus survivant : aucun
+                // round n a eu lieu, donc aucun decompte de round ne l a retire. Le depart annonce, lui, ne
+                // bouge jamais — d ou la copie.
+                $result->defenderUnitsResult = $result->hamillManoeuvreTriggered && !$this->hamillRule->theDestroyedDeathstarStillCountsAsASurvivor()
+                    ? self::withoutOneDeathstar($result->defenderUnitsStart)
+                    : $result->defenderUnitsStart;
             }
         }
 
@@ -425,8 +435,10 @@ abstract class BattleEngine
             }
         }
 
-        // Add Hamill Manoeuvre Deathstar loss if it was triggered
-        if ($result->hamillManoeuvreTriggered) {
+        // **La perte de l Etoile est comptee exactement une fois.** Sous les regles qui la laissent parmi les
+        // survivants, « depart moins survivants » ne la voit pas : elle s inscrit ici. Sous la regle qui l en
+        // retire, cette soustraction vient de la compter, et l ajouter la compterait deux fois.
+        if ($result->hamillManoeuvreTriggered && $this->hamillRule->theDestroyedDeathstarStillCountsAsASurvivor()) {
             $deathstarObject = ObjectService::getShipObjectByMachineName('deathstar');
             $result->defenderUnitsLost->addUnit($deathstarObject, 1);
         }
@@ -1154,6 +1166,21 @@ abstract class BattleEngine
         }
 
         return $rounds;
+    }
+
+    /**
+     * La meme collection, moins une Etoile de la mort — sans toucher a l originale.
+     *
+     * Le depart annonce et les survivants sont **le meme objet** quand aucun round n a ete joue : retirer
+     * l unite sans copier effacerait aussi le depart, et la perte deviendrait invisible. La copie d une
+     * collection est profonde, ses entrees comprises.
+     */
+    private static function withoutOneDeathstar(UnitCollection $unites): UnitCollection
+    {
+        $restant = clone $unites;
+        $restant->removeUnit(ObjectService::getShipObjectByMachineName('deathstar'), 1);
+
+        return $restant;
     }
 
     /**
