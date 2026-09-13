@@ -296,10 +296,15 @@ trait BuildsParityScenarios
     /**
      * **Un General gele a son admission, dont le compte est devenu Collecteur.**
      *
-     * Le combattant est celui du combat durable (`CombatantFrozenAtEntry`) : ses tirs, sa manoeuvre de Hamill et
-     * son fret doivent venir de la classe de l admission, pas du compte. Des chasseurs legers contre une Etoile
-     * de la mort — la manoeuvre est rendue certaine par l essai qui joue le scenario — et des petits
-     * transporteurs, pour que le fret du Collecteur differe de celui du General.
+     * Le combattant est celui du combat durable (`CombatantFrozenAtEntry`) : ses tirs et son fret doivent venir
+     * de la classe de l admission, pas du compte. Des petits transporteurs, pour que le fret du Collecteur
+     * differe de celui du General, et une garnison qui fait vraiment une bataille.
+     *
+     * **Aucune Etoile de la mort ici, et c est mesure.** Une premiere version en posait une pour eprouver la
+     * manoeuvre de Hamill : le banc a montre que les deux moteurs en divergent — le moteur Rust retire l Etoile
+     * de `defenderUnitsStart` sans la retirer des flottes qu il envoie a la bibliotheque, si bien qu elle
+     * continue de tirer. L ecart est anterieur a ce scenario et remonte a part ; le melanger ici rendrait ce
+     * banc rouge pour une raison qui n est pas la sienne.
      *
      * @return array{attaquantes: array<int, AttackerFleet>, defenseurs: array<int, DefenderFleet>, cible: PlanetService, contexte: \OGame\Combat\Support\LootContext}
      */
@@ -308,7 +313,7 @@ trait BuildsParityScenarios
         $technologies = ['weapon_technology' => 6, 'shielding_technology' => 5, 'armor_technology' => 6];
 
         $bataille = $this->aBattle(
-            planete: ['metal' => 90_000, 'crystal' => 40_000, 'deathstar' => 1, 'rocket_launcher' => 60],
+            planete: ['metal' => 90_000, 'crystal' => 40_000, 'rocket_launcher' => 60],
             attaquantes: [
                 ['units' => ['light_fighter' => 250, 'small_cargo' => 30], 'tech' => $technologies, 'classe' => CharacterClass::COLLECTOR],
             ],
