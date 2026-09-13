@@ -482,6 +482,10 @@ class PatrolDisarmedTest extends AccountTestCase
         $flotte = new UnitCollection();
         $flotte->addUnit(ObjectService::getUnitObjectByMachineName('battle_ship'), 60);
 
+        // **L arrivee suit la naissance des deux comptes**, l attaquant et le proprietaire que l essai vient de
+        // creer : datee d avant eux, le gel a l admission refuserait de dire quelle classe ils avaient.
+        $this->travelTo(now()->addHour());
+
         $attaque = resolve(SpatialAttackOrder::class)->launch(
             $this->planetService,
             $flotte,

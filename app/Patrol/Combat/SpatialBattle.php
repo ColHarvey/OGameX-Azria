@@ -4,6 +4,13 @@ namespace OGame\Patrol\Combat;
 
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Allocation\FrozenLootAllocation;
+use OGame\Combat\Causality\CausalEventOrder;
+use OGame\Combat\Causality\CausalEventOrderRegistry;
+use OGame\Combat\Enums\UnitCharacteristicsRule;
+use OGame\Combat\Exceptions\UnknownAdmissionHistory;
+use OGame\Combat\Services\CombatEntryCharacteristicsRegistry;
+use OGame\Combat\Support\CombatantFrozenAtEntry;
+use OGame\Combat\Support\FrozenCombatVersionSet;
 use OGame\Combat\Support\LootContext;
 use OGame\Combat\Support\LootContextForMission;
 use OGame\Factories\PlayerServiceFactory;
@@ -13,6 +20,7 @@ use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
 use OGame\GameMissions\BattleEngine\PhpBattleEngine;
 use OGame\GameObjects\Models\Enums\GameObjectType;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\History\ClassHistoryReader;
 use OGame\Hull\DamagedHulls;
 use OGame\Models\FleetMission;
 use OGame\Models\Patrol;
@@ -49,18 +57,30 @@ use OGame\Services\SettingsService;
  * quand le generateur sera tranche.
  *
  * ------------------------------------------------------------------------------------
- * LE PROPRIETAIRE DE LA PATROUILLE EST GELE, PAS RELU
+ * LES DEUX CAMPS TIRENT AVEC CE QU ILS AVAIENT A L ADMISSION
  *
- * Les deux camps entrent avec des `FrozenCombatant` : leurs technologies et leur classe sont lues
- * **une fois**, au montage, et le moteur ne voit plus jamais le monde vivant. C est la meme
- * discipline que la photographie d ouverture d un combat durable, appliquee a une bataille qui dure
- * quelques millisecondes — parce que le jour ou elle durera, rien ne changera.
+ * Cet en-tete affirmait que les deux camps entraient avec des `FrozenCombatant`. **Le code leur passait
+ * des comptes vivants**, lus au traitement : une classe prise, une alliance quittee ou une recherche
+ * achevee entre l arrivee et le passage d un travailleur changeait des tirs deja decides.
+ *
+ * Ils entrent desormais avec `CombatantFrozenAtEntry` — le combattant du combat durable, pas un second —,
+ * composes par la derivation de `CombatEntryCharacteristicsRegistry` a l **arrivee physique** de
+ * l attaquante : elle comme un evenement d arrivee, la patrouille, deja la, a la barriere de cet instant.
+ * Seuls les trois niveaux et le bonus des classes sont geles ; le reste du compte (fret, manoeuvre de
+ * Hamill) est lu vivant, exactement comme dans le combat durable.
+ *
+ * Avant la ligne de base des historiques, la premiere regle garde l ancien geste : le compte vivant. Un
+ * historique inconnu leve `UnknownAdmissionHistory`, que l arrivee attrape pour suspendre sans rien
+ * decider.
  */
 final class SpatialBattle
 {
     public function __construct(
         private readonly PlayerServiceFactory $players,
         private readonly SettingsService $settings,
+        private CombatEntryCharacteristicsRegistry|null $entries = null,
+        private ClassHistoryReader|null $history = null,
+        private CausalEventOrderRegistry|null $orders = null,
     ) {
     }
 
@@ -73,11 +93,24 @@ final class SpatialBattle
      * @param FleetMission $attaquante La mission arrivee sur le point.
      * @param FleetMission $segment Le vol courant de la patrouille visee — c est lui qui porte les
      *                              unites et la cargaison.
+     *
+     * @throws UnknownAdmissionHistory quand l historique des classes ne sait pas ce qu un camp avait a
+     *                                  l admission : la bataille ne se compose pas sur une supposition.
      */
     public function fight(FleetMission $attaquante, Patrol $cible, FleetMission $segment): BattleResult
     {
-        $attaquant = $this->attackingFleet($attaquante);
-        $site = $this->siteOf($cible, $segment);
+        // **L admission est l arrivee physique de l attaquante**, jamais l horloge du travailleur qui tient
+        // la patrouille. La regle se choisit a cet instant, comme a l ouverture d un combat durable.
+        $admission = (int)$attaquante->time_arrival;
+        $regle = UnitCharacteristicsRule::forOpeningAt($admission, $this->history()->baselineInstant());
+
+        // **L ordre causal se choisit une fois, a l entree de l operation**, par la frontiere nommee des
+        // operations instantanees : la bataille commence maintenant et ne le relit plus. Aucune version
+        // courante n est lue ici — la garde architecturale le verifie.
+        $ordre = $this->orders()->forVersion(FrozenCombatVersionSet::atOperationStart($this->orders())->causalOrder);
+
+        $attaquant = $this->attackingFleet($attaquante, $regle, $ordre);
+        $site = $this->siteOf($cible, $segment, $regle, $ordre, $admission);
         $defenseurs = $this->defendingFleets($site, $segment);
 
         $lootContext = $this->lootContext($attaquant, $site, $attaquante);
@@ -96,9 +129,15 @@ final class SpatialBattle
     /**
      * La flotte attaquante, avec ses caracteristiques et ses coques gelees.
      */
-    private function attackingFleet(FleetMission $mission): AttackerFleet
+    private function attackingFleet(FleetMission $mission, UnitCharacteristicsRule $regle, CausalEventOrder $ordre): AttackerFleet
     {
-        $joueur = $this->players->make((int)$mission->user_id, true);
+        $joueur = match ($regle) {
+            UnitCharacteristicsRule::FrozenAtEntry => new CombatantFrozenAtEntry(
+                (int)$mission->user_id,
+                $this->entries()->atArrival((int)$mission->user_id, (int)$mission->id, (int)$mission->time_arrival, $ordre)
+            ),
+            UnitCharacteristicsRule::FirstRule => $this->players->make((int)$mission->user_id, true),
+        };
 
         $flotte = new AttackerFleet();
         $flotte->units = $this->unitsOf($mission);
@@ -124,12 +163,21 @@ final class SpatialBattle
     /**
      * Le lieu : un point de l espace, qui ne porte ni garnison, ni stock, ni chantier.
      */
-    private function siteOf(Patrol $cible, FleetMission $segment): SpatialCombatSite
+    private function siteOf(Patrol $cible, FleetMission $segment, UnitCharacteristicsRule $regle, CausalEventOrder $ordre, int $admission): SpatialCombatSite
     {
+        // **La patrouille est deja la** quand l attaquante arrive : elle entre a la barriere de cet instant.
+        $proprietaire = match ($regle) {
+            UnitCharacteristicsRule::FrozenAtEntry => new CombatantFrozenAtEntry(
+                (int)$cible->user_id,
+                $this->entries()->atBarrier((int)$cible->user_id, $admission, $ordre, 'La patrouille ' . $cible->id)
+            ),
+            UnitCharacteristicsRule::FirstRule => $this->players->make((int)$cible->user_id, true),
+        };
+
         return new SpatialCombatSite(
             $this->players,
             $this->settings,
-            $this->players->make((int)$cible->user_id, true),
+            $proprietaire,
             new SpatialPoint((int)$segment->x_to, (int)$segment->y_to),
             (int)$cible->galaxy,
             (int)$cible->system,
@@ -179,6 +227,21 @@ final class SpatialBattle
             // se ferait au milieu du calcul sans que personne ne s en apercoive.
             FrozenLootAllocation::atOperationStart(),
         );
+    }
+
+    private function entries(): CombatEntryCharacteristicsRegistry
+    {
+        return $this->entries ??= resolve(CombatEntryCharacteristicsRegistry::class);
+    }
+
+    private function history(): ClassHistoryReader
+    {
+        return $this->history ??= resolve(ClassHistoryReader::class);
+    }
+
+    private function orders(): CausalEventOrderRegistry
+    {
+        return $this->orders ??= CausalEventOrderRegistry::default();
     }
 
     /**

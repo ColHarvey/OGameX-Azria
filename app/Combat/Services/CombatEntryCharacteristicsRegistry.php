@@ -41,6 +41,13 @@ use OGame\Services\ObjectService;
  * - `recordAtOpening()` : un renfort deja pose quand le combat s ouvre. L admission est la **barriere
  *   d ouverture**.
  *
+ * ## Une derivation, deux usages
+ *
+ * `atArrival()`, `atBarrier()` et `characterClassAt()` rendent les memes faits **sans rien inscrire**. Le
+ * combat en espace libre se resout a l arrivee, sans instance a laquelle rattacher une ligne : il demande
+ * ces faits ici au lieu d en recalculer une copie — memes files de recherche, memes historiques de
+ * classe, meme ordre de la seconde. Une seconde derivation finirait par diverger de celle-ci.
+ *
  * ## La garnison n a pas de ligne, et pourquoi
  *
  * Le corps vise n arrive nulle part : ce qu il apporte est la **photographie d ouverture**, dont les
@@ -119,6 +126,53 @@ final class CombatEntryCharacteristicsRegistry
     }
 
     /**
+     * Ce qu une flotte **arrivee** a cet instant apporte a ses tirs, sans rien inscrire.
+     *
+     * La cle d admission est un evenement d arrivee : une recherche achevee a la meme seconde la precede,
+     * une decision prise a la meme seconde la suit.
+     *
+     * @throws UnknownAdmissionHistory
+     */
+    public function atArrival(int $playerId, int $fleetMissionId, int $arrivalAt, CausalEventOrder $ordre): FrozenCombatCharacteristics
+    {
+        return $this->characteristicsAt(
+            $playerId,
+            EffectOrderKey::forEvent($arrivalAt, CombatEventType::FleetArrival, $fleetMissionId, $ordre),
+            $ordre,
+            $arrivalAt,
+            'La flotte ' . $fleetMissionId
+        );
+    }
+
+    /**
+     * Ce qu un participant **deja la** apporte a ses tirs a la barriere de cet instant, sans rien inscrire.
+     *
+     * Une barriere precede tout evenement de sa seconde : une recherche achevee a cet instant n y compte pas.
+     *
+     * @throws UnknownAdmissionHistory
+     */
+    public function atBarrier(int $playerId, int $instant, CausalEventOrder $ordre, string $quoi): FrozenCombatCharacteristics
+    {
+        return $this->characteristicsAt($playerId, EffectOrderKey::barrierAt($instant, $ordre), $ordre, $instant, $quoi);
+    }
+
+    /**
+     * La classe de personnage du joueur **a cet instant** — son identite, pas son bonus.
+     *
+     * Une photographie qui gele la classe elle-meme (manoeuvre de Hamill, fret des transporteurs) la prend
+     * ici, au meme instant et par le meme historique que le bonus : sinon elle porterait le bonus d une classe
+     * et l identite d une autre.
+     *
+     * @throws UnknownAdmissionHistory
+     */
+    public function characterClassAt(int $playerId, int $instant, string $quoi): int|null
+    {
+        $classe = $this->known($this->history()->personalClassAt($playerId, $instant), $quoi);
+
+        return is_int($classe) ? $classe : null;
+    }
+
+    /**
      * Ce que cette flotte apporte a ses tirs, ou un refus.
      */
     public function of(CombatInstance $combat, int $fleetMissionId): FrozenCombatCharacteristics
@@ -175,18 +229,8 @@ final class CombatEntryCharacteristicsRegistry
 
         // **L ordre du combat, relu depuis sa version persistee** : jamais l ordre courant pris au vol.
         $ordre = $this->orders()->forVersion((string)$combat->causal_order_version);
-        $cleDAdmission = $admission($ordre);
 
-        // Le compte relu a neuf porte les niveaux **appliques** ; l historique des files les ramene a
-        // l instant d admission.
-        $compte = $this->players()->make($playerId, true);
-
-        $faits = new FrozenCombatCharacteristics(
-            $this->researchLevelAt($compte->getResearchLevel('weapon_technology'), $playerId, 'weapon_technology', $cleDAdmission, $ordre),
-            $this->researchLevelAt($compte->getResearchLevel('shielding_technology'), $playerId, 'shielding_technology', $cleDAdmission, $ordre),
-            $this->researchLevelAt($compte->getResearchLevel('armor_technology'), $playerId, 'armor_technology', $cleDAdmission, $ordre),
-            $this->classBonusAt('La flotte ' . $fleetMissionId . ' du combat ' . $combat->id, $playerId, $instant),
-        );
+        $faits = $this->characteristicsAt($playerId, $admission($ordre), $ordre, $instant, 'La flotte ' . $fleetMissionId . ' du combat ' . $combat->id);
 
         CombatEntryCharacteristic::query()->create([
             'combat_instance_id' => $combat->id,
@@ -196,6 +240,26 @@ final class CombatEntryCharacteristicsRegistry
             ...$faits->toStorage(),
             'entered_at' => $instant,
         ]);
+    }
+
+    /**
+     * **La derivation unique** : trois niveaux ramenes a la cle d admission, et le bonus des classes a son
+     * instant.
+     *
+     * @throws UnknownAdmissionHistory
+     */
+    private function characteristicsAt(int $playerId, EffectOrderKey $cleDAdmission, CausalEventOrder $ordre, int $instant, string $quoi): FrozenCombatCharacteristics
+    {
+        // Le compte relu a neuf porte les niveaux **appliques** ; l historique des files les ramene a
+        // l instant d admission.
+        $compte = $this->players()->make($playerId, true);
+
+        return new FrozenCombatCharacteristics(
+            $this->researchLevelAt($compte->getResearchLevel('weapon_technology'), $playerId, 'weapon_technology', $cleDAdmission, $ordre),
+            $this->researchLevelAt($compte->getResearchLevel('shielding_technology'), $playerId, 'shielding_technology', $cleDAdmission, $ordre),
+            $this->researchLevelAt($compte->getResearchLevel('armor_technology'), $playerId, 'armor_technology', $cleDAdmission, $ordre),
+            $this->classBonusAt($quoi, $playerId, $instant),
+        );
     }
 
     /**

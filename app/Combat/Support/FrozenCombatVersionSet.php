@@ -104,6 +104,34 @@ final readonly class FrozenCombatVersionSet
     }
 
     /**
+     * Les versions courantes d une **operation instantanee**, choisies une fois, a son entree.
+     *
+     * Le pendant de `FrozenLootAllocation::atOperationStart()` pour les cinq mecanismes. Une bataille qui se
+     * resout a l arrivee — le combat en espace libre — n a pas d instance ou persister ses versions, mais elle
+     * ne doit pas les relire au milieu de son calcul : elle les prend ici, et la garde architecturale verifie
+     * qu aucun autre fichier ne choisit une version courante.
+     *
+     * **Distincte de `chosenAtOpening()`** : l ouverture durable persiste ses versions avec le combat, ce que
+     * l operation instantanee ne fait pas. Les deux gestes lisent les memes registres ; ils ne disent pas la
+     * meme chose de ce qui suit.
+     */
+    public static function atOperationStart(
+        CausalEventOrderRegistry|null $causal = null,
+        LootAllocatorRegistry|null $allocators = null,
+        LootPolicyRegistry|null $policies = null,
+        MoonDestructionRuleRegistry|null $moons = null,
+        SnapshotProjectionRegistry|null $projections = null,
+    ): self {
+        return self::of(
+            ($causal ?? CausalEventOrderRegistry::default())->currentVersion(),
+            ($allocators ?? LootAllocatorRegistry::default())->currentVersion(),
+            ($policies ?? LootPolicyRegistry::default())->currentVersion(),
+            ($moons ?? MoonDestructionRuleRegistry::default())->currentVersion(),
+            ($projections ?? SnapshotProjectionRegistry::default())->currentVersion(),
+        );
+    }
+
+    /**
      * L'ensemble tel qu'il a ete persiste avec le combat.
      *
      * **Il refuse plutot que de completer.** Une clef absente devenait une chaine vide, qui ne

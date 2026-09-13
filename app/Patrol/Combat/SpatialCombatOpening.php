@@ -7,12 +7,14 @@ use Illuminate\Support\Facades\DB;
 use OGame\Combat\Allocation\LootAllocatorRegistry;
 use OGame\Combat\Causality\CausalEventOrderRegistry;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Enums\UnitCharacteristicsRule;
 use OGame\Combat\MoonDestruction\MoonDestructionRuleRegistry;
 use OGame\Combat\Policies\LootPolicyRegistry;
 use OGame\Combat\Projection\SnapshotProjectionRegistry;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\FrozenCombatVersionSet;
 use OGame\Combat\Support\SnapshotFingerprint;
+use OGame\History\ClassHistoryReader;
 use OGame\Models\CombatInstance;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
@@ -237,6 +239,10 @@ final class SpatialCombatOpening
             'moon_destruction_rule_version' => $versions->moonDestruction,
             'fingerprint_schema_version' => (string)SnapshotFingerprint::SCHEMA,
             'projection_version' => $versions->projection,
+            // **La regle qui composera les caracteristiques**, ecrite avec le combat comme pour un corps. Elle
+            // manquait : un combat spatial n avait aucune regle declaree, et sa photographie ne pouvait pas
+            // savoir si elle devait geler a l admission.
+            'unit_characteristics_version' => UnitCharacteristicsRule::forOpeningAt($openedAt, resolve(ClassHistoryReader::class)->baselineInstant())->value,
             'opener_identity' => $faits['opener_identity'],
             'founding_creator_id' => $faits['founding_creator_id'],
             'governing_alliance_id' => $faits['governing_alliance_id'],

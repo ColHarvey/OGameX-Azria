@@ -4,11 +4,13 @@ namespace OGame\GameMissions;
 
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use OGame\Alliance\AllianceOffensiveGuard;
 use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Application\LiveCombatApplicationContext;
 use OGame\Combat\Enums\CombatCancellationCause;
 use OGame\Combat\Enums\CombatMissionKind;
+use OGame\Combat\Exceptions\UnknownAdmissionHistory;
 use OGame\Combat\Services\CombatCancellationOutcome;
 use OGame\Combat\Services\CombatCancellationService;
 use OGame\Combat\Services\CombatResolutionService;
@@ -231,6 +233,28 @@ class AttackMission extends GameMission
             (int)$mission->y_to,
         );
 
+        // **Un historique inconnu suspend l arrivee, il ne la decide pas** (decision de Keven, 13 septembre
+        // 2026). La transaction est revenue en arriere : ni bataille, ni perte, ni butin, ni retour, et la
+        // mission reste non traitee — le jeton du passage est rendu par `updateMission()`, et le passage
+        // suivant la rejoue. Lever ici fermerait toutes les pages du joueur.
+        try {
+            $this->fightUnderThePatrolLock($mission, $gelee);
+        } catch (UnknownAdmissionHistory $anomalie) {
+            Log::critical('Bataille spatiale suspendue : historique de classe inconnu a l admission.', [
+                'fleet_mission_id' => $mission->id,
+                'target_patrol_id' => $mission->target_patrol_id,
+                'raison' => $anomalie->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * La bataille et son reglement, sous le verrou de la patrouille, dans une seule transaction.
+     *
+     * @throws UnknownAdmissionHistory
+     */
+    private function fightUnderThePatrolLock(FleetMission $mission, FrozenPatrolTarget $gelee): void
+    {
         DB::transaction(function () use ($mission, $gelee): void {
             /** @var Patrol|null $vivante */
             $vivante = Patrol::where('id', $gelee->patrolId)->lockForUpdate()->first();

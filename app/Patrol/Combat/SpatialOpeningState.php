@@ -2,14 +2,20 @@
 
 namespace OGame\Patrol\Combat;
 
+use OGame\Combat\Causality\CausalEventOrderRegistry;
+use OGame\Combat\Enums\UnitCharacteristicsRule;
+use OGame\Combat\Exceptions\UnknownAdmissionHistory;
+use OGame\Combat\Services\CombatEntryCharacteristicsRegistry;
 use OGame\Combat\Services\PhotographedDefender;
 use OGame\Combat\Services\PhotographedUniverse;
+use OGame\Combat\Support\FrozenCombatCharacteristics;
 use OGame\Combat\Support\FrozenFact;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\Models\CombatInstance;
 use OGame\Models\FleetMission;
 use OGame\Models\Patrol;
 use OGame\Services\FleetMissionService;
+use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
 
 /**
@@ -53,6 +59,7 @@ final class SpatialOpeningState
         private FleetMissionService|null $fleetMissions = null,
         private PlayerServiceFactory|null $players = null,
         private SettingsService|null $settings = null,
+        private CombatEntryCharacteristicsRegistry|null $entries = null,
     ) {
     }
 
@@ -63,7 +70,7 @@ final class SpatialOpeningState
      */
     public function capture(CombatInstance $combat, Patrol $patrol, FleetMission $defendingFleet, int $openedAt): void
     {
-        $defense = $this->photograph($patrol, $defendingFleet);
+        $defense = $this->photograph($combat, $patrol, $defendingFleet, $openedAt);
 
         $etat = [
             'version' => self::VERSION,
@@ -130,9 +137,14 @@ final class SpatialOpeningState
     /**
      * Ce que le monde vivant dit de cette patrouille, a cet instant.
      */
-    private function photograph(Patrol $patrol, FleetMission $defendingFleet): FrozenSpatialDefence
+    private function photograph(CombatInstance $combat, Patrol $patrol, FleetMission $defendingFleet, int $openedAt): FrozenSpatialDefence
     {
         $proprietaire = $this->players()->make((int)$patrol->user_id, true);
+
+        // **Les nombres de l ouverture, pas ceux du passage qui photographie.** La capture tourne quand un
+        // travailleur traite l ouverture ; une classe, une alliance ou une recherche changee entre les deux
+        // y entrait.
+        [$caracteristiques, $classe] = $this->atOpening($combat, $proprietaire, (int)$patrol->user_id, (int)$patrol->id, $openedAt);
 
         return new FrozenSpatialDefence(
             (int)$patrol->id,
@@ -149,9 +161,9 @@ final class SpatialOpeningState
             // photographie est ce qui paie reellement un retour, donc des unites entieres.
             (int)floor((float)$patrol->fuel_reserve),
             new PhotographedDefender(
-                $proprietaire->getResearchLevel('weapon_technology'),
-                $proprietaire->getResearchLevel('shielding_technology'),
-                $proprietaire->getResearchLevel('armor_technology'),
+                $caracteristiques->weaponLevel,
+                $caracteristiques->shieldLevel,
+                $caracteristiques->armorLevel,
                 // **Le bonus derive, pas la classe.** C est la valeur que le moteur applique aux
                 // tirs ; photographier la classe laisserait un changement de classe pendant la
                 // bataille changer des tirs deja joues.
@@ -159,7 +171,7 @@ final class SpatialOpeningState
                 // **Les deux classes, et non celle du personnage seule.** Cette ligne n interrogeait
                 // que `CharacterClassService` : un defenseur d une alliance de Guerriers perdait son
                 // niveau en espace libre, alors que la photographie d un corps le portait deja.
-                $proprietaire->getCombatResearchBonusLevels(),
+                $caracteristiques->classCombatBonus,
                 // **Aucun chantier spatial en espace libre.** La part d epaves retombe sur le
                 // plancher du jeu, que le moteur applique par `max(1, …)`.
                 0,
@@ -167,7 +179,7 @@ final class SpatialOpeningState
             // **La classe, et pas seulement son bonus.** Le moteur demande a la classe si le
             // joueur est General — pour la manoeuvre de Hamill — et quel fret ses transporteurs
             // portent. Sans elle, un defenseur recharge perdrait ces capacites en silence.
-            $proprietaire->getUser()->character_class,
+            $classe,
         );
     }
 
@@ -177,6 +189,46 @@ final class SpatialOpeningState
     private static function fingerprintOf(array $etat): string
     {
         return hash('sha256', json_encode($etat, JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * Ce que le proprietaire apporte a ses tirs **a l instant d ouverture**, et sa classe a ce meme instant.
+     *
+     * Sous le gel a l admission, par la derivation du registre : la patrouille est deja la quand le combat
+     * s ouvre, elle entre a la barriere. Sous la premiere regle, le compte tel qu il est lu — l ancien geste,
+     * garde explicitement.
+     *
+     * @return array{0: FrozenCombatCharacteristics, 1: int|null}
+     *
+     * @throws UnknownAdmissionHistory
+     */
+    private function atOpening(CombatInstance $combat, PlayerService $proprietaire, int $ownerId, int $patrolId, int $openedAt): array
+    {
+        if (UnitCharacteristicsRule::fromInstance($combat) === UnitCharacteristicsRule::FirstRule) {
+            return [
+                new FrozenCombatCharacteristics(
+                    $proprietaire->getResearchLevel('weapon_technology'),
+                    $proprietaire->getResearchLevel('shielding_technology'),
+                    $proprietaire->getResearchLevel('armor_technology'),
+                    $proprietaire->getCombatResearchBonusLevels(),
+                ),
+                $proprietaire->getUser()->character_class,
+            ];
+        }
+
+        // L ordre du combat, relu depuis sa version persistee.
+        $ordre = CausalEventOrderRegistry::default()->forVersion((string)$combat->causal_order_version);
+        $quoi = 'La patrouille ' . $patrolId . ' du combat ' . $combat->id;
+
+        return [
+            $this->entries()->atBarrier($ownerId, $openedAt, $ordre, $quoi),
+            $this->entries()->characterClassAt($ownerId, $openedAt, $quoi),
+        ];
+    }
+
+    private function entries(): CombatEntryCharacteristicsRegistry
+    {
+        return $this->entries ??= resolve(CombatEntryCharacteristicsRegistry::class);
     }
 
     private function fleetMissions(): FleetMissionService

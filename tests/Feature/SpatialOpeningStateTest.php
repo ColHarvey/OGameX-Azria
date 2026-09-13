@@ -2,7 +2,9 @@
 
 namespace Tests\Feature;
 
+use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use OGame\Combat\Causality\CausalEventOrderRegistry;
 use OGame\Combat\Enums\CombatState;
 use OGame\Enums\AllianceClass;
 use OGame\Enums\CharacterClass;
@@ -22,6 +24,7 @@ use OGame\Services\AllianceService;
 use OGame\Services\CharacterClassService;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
+use Tests\RecordsClassHistory;
 
 /**
  * La photographie d une patrouille qui defend : ce qui est vrai a l ouverture, et qui ne bouge plus.
@@ -38,6 +41,8 @@ use Tests\AccountTestCase;
  */
 class SpatialOpeningStateTest extends AccountTestCase
 {
+    use RecordsClassHistory;
+
     private function patrouille(float $reserve = 4200.75): Patrol
     {
         $patrouille = new Patrol();
@@ -91,6 +96,18 @@ class SpatialOpeningStateTest extends AccountTestCase
         return $mission;
     }
 
+    /**
+     * Une ouverture **apres** tout ce que l essai a pose, et un travailleur qui la photographie cinq secondes
+     * plus tard : le compte existe, ses classes ont leur ligne, et la capture ne lit rien d anterieur a lui.
+     */
+    private function uneOuvertureTraiteeEnRetard(): int
+    {
+        $ouverture = (int)Date::now()->timestamp + 60;
+        $this->travelTo(Date::createFromTimestamp($ouverture + 5));
+
+        return $ouverture;
+    }
+
     private function combat(): CombatInstance
     {
         $combat = new CombatInstance();
@@ -103,6 +120,10 @@ class SpatialOpeningStateTest extends AccountTestCase
             'galaxy' => 2,
             'system' => 55,
             'position' => 0,
+            // **La regle et l ordre que l ouverture spatiale ecrit.** Sans eux, la capture refuse de deviner
+            // si elle doit geler a l admission : une regle absente n est jamais interpretee.
+            'unit_characteristics_version' => 'v2',
+            'causal_order_version' => CausalEventOrderRegistry::default()->currentVersion(),
         ]);
 
         $combat->save();
@@ -123,7 +144,7 @@ class SpatialOpeningStateTest extends AccountTestCase
         $this->playerSetResearchLevel('shielding_technology', 4);
         $this->playerSetResearchLevel('armor_technology', 3);
 
-        new SpatialOpeningState()->capture($combat, $patrouille, $flotte, 1_700_000_000);
+        new SpatialOpeningState()->capture($combat, $patrouille, $flotte, $this->uneOuvertureTraiteeEnRetard());
 
         $gele = new SpatialOpeningState()->protectedDefenceOf($combat);
 
@@ -159,7 +180,7 @@ class SpatialOpeningStateTest extends AccountTestCase
 
         $this->playerSetResearchLevel('weapon_technology', 2);
 
-        new SpatialOpeningState()->capture($combat, $patrouille, $flotte, 1_700_000_000);
+        new SpatialOpeningState()->capture($combat, $patrouille, $flotte, $this->uneOuvertureTraiteeEnRetard());
 
         $avant = new SpatialOpeningState()->rawStateOf($combat);
         $this->assertNotSame([], $avant, 'Nothing was written: the witness would compare two absences.');
@@ -216,16 +237,20 @@ class SpatialOpeningStateTest extends AccountTestCase
         $flotte = $this->flotte();
         $combat = $this->combat();
 
-        $utilisateur = $this->planetService->getPlayer()?->getUser();
-        $this->assertNotNull($utilisateur);
-        $utilisateur->character_class = CharacterClass::GENERAL->value;
-        $utilisateur->save();
+        // General **avant** l ouverture : c est sa classe d entree, et son bonus.
+        $this->recordCharacterClass($this->currentUserId, CharacterClass::GENERAL);
+        $ouverture = (int)Date::now()->timestamp + 60;
 
-        new SpatialOpeningState()->capture($combat, $patrouille, $flotte, 1_700_000_000);
+        // --- Entre l ouverture et le passage du travailleur qui photographie, il devient Collecteur ---
+        // C est la fenetre ou vivait le defaut : la capture lisait le compte au passage, pas a l ouverture.
+        $this->travelTo(Date::createFromTimestamp($ouverture + 5));
+        $this->recordCharacterClass($this->currentUserId, CharacterClass::COLLECTOR);
 
-        // --- Le joueur change de classe apres le gel ---
-        $utilisateur->character_class = CharacterClass::COLLECTOR->value;
-        $utilisateur->save();
+        new SpatialOpeningState()->capture($combat, $patrouille, $flotte, $ouverture);
+
+        // --- Et il en change encore apres le gel ---
+        $this->travelTo(Date::createFromTimestamp($ouverture + 10));
+        $this->recordCharacterClass($this->currentUserId, CharacterClass::DISCOVERER);
 
         $vivant = resolve(PlayerServiceFactory::class)->make($this->currentUserId, true);
         $classes = resolve(CharacterClassService::class);
@@ -244,6 +269,7 @@ class SpatialOpeningStateTest extends AccountTestCase
             $gele->characterClass,
             'The frozen defence followed the living class: a battle already engaged would change its capabilities.'
         );
+        $this->assertSame(2, $gele->defender->classCombatBonus, 'The frozen defence took the class bonus of the worker instant, not of the opening.');
 
         // Et les capacites suivent la photographie, pas le monde : c est le fait qui compte.
         $combattant = new FrozenCombatant(
@@ -274,7 +300,7 @@ class SpatialOpeningStateTest extends AccountTestCase
         $reglages->set('alliance_classes_enabled', '1');
 
         try {
-            DB::table('users')->where('id', $this->currentUserId)->update(['character_class' => null]);
+            $this->recordCharacterClass($this->currentUserId, null);
 
             $alliance = resolve(AllianceService::class)->createAlliance(
                 $this->currentUserId,
@@ -291,7 +317,7 @@ class SpatialOpeningStateTest extends AccountTestCase
             $flotte = $this->flotte();
             $combat = $this->combat();
 
-            new SpatialOpeningState()->capture($combat, $patrouille, $flotte, 1_700_000_000);
+            new SpatialOpeningState()->capture($combat, $patrouille, $flotte, $this->uneOuvertureTraiteeEnRetard());
 
             $gele = new SpatialOpeningState()->protectedDefenceOf(CombatInstance::query()->findOrFail($combat->id));
 

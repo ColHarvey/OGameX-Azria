@@ -40,6 +40,11 @@ class SpatialBattleTest extends AccountTestCase
     {
         parent::setUp();
 
+        // **Les arrivees suivent la naissance des comptes.** Le compte attaquant nait a l horloge du banc, et
+        // une attaque datee de cette seconde — ou d avant — arriverait avant que son proprietaire existe : le
+        // gel a l admission refuse alors, a juste titre, de dire quelle classe il avait.
+        $this->travelTo(now()->addHour());
+
         resolve(SettingsService::class)->set('patrols_enabled', '1');
         resolve(SettingsService::class)->set('hull_damage_enabled', '1');
     }
