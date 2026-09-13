@@ -356,6 +356,45 @@ trait BuildsParityScenarios
     }
 
     /**
+     * **Une manoeuvre de Hamill qui prend le dernier defenseur** : une Etoile de la mort, seule en garnison.
+     *
+     * La manoeuvre vide alors la defense avant le premier round, et aucune bataille ne se joue. C est le seul
+     * montage ou « l Etoile ne tire pas » se mesure sans hasard : sans manoeuvre, elle tire au premier round et
+     * son premier coup detruit une unite ; avec, personne ne tire. Comparer des nombres de coups dans une
+     * bataille ou une Etoile survit ne prouverait rien — son tir rapide rend ce nombre geometrique, et une
+     * graine suffit a inverser l ordre. C est ce qu a montre la CI de `95740b99`.
+     *
+     * Il eprouve aussi le chemin sans round de chaque moteur, que le scenario a deux Etoiles n atteint pas, et
+     * il porte un stock et une capacite de fret : ce que la victoire aurait du rapporter se lit donc aussi.
+     *
+     * @return array{attaquantes: array<int, AttackerFleet>, defenseurs: array<int, DefenderFleet>, cible: PlanetService, contexte: \OGame\Combat\Support\LootContext}
+     */
+    private function aGeneralWhoseHamillManoeuvreTakesTheLastDefender(): array
+    {
+        return $this->aGeneralAttackingAStockedBody(['deathstar' => 1]);
+    }
+
+    /**
+     * Un General et ses chasseurs legers contre un corps riche, avec la garnison qu on lui donne — aucune
+     * comprise.
+     *
+     * Le stock et la flotte ne changent pas d un appel a l autre : c est ce qui rend deux garnisons comparables,
+     * et ce que la victoire aurait du rapporter lisible.
+     *
+     * @param array<string, int> $garnison
+     * @return array{attaquantes: array<int, AttackerFleet>, defenseurs: array<int, DefenderFleet>, cible: PlanetService, contexte: \OGame\Combat\Support\LootContext}
+     */
+    private function aGeneralAttackingAStockedBody(array $garnison): array
+    {
+        return $this->aBattle(
+            planete: ['metal' => 400_000, 'crystal' => 200_000, 'deuterium' => 100_000] + $garnison,
+            attaquantes: [
+                ['units' => ['light_fighter' => 300, 'small_cargo' => 40], 'tech' => ['weapon_technology' => 6, 'shielding_technology' => 5, 'armor_technology' => 6], 'classe' => CharacterClass::GENERAL],
+            ],
+        );
+    }
+
+    /**
      * Le combattant du combat durable, monte sans base sur le compte fictif d un joueur du banc.
      *
      * Le compte garde son identite, sa classe et ses technologies ; seul le porteur que le combattant rend dit la

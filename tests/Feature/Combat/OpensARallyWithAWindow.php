@@ -30,6 +30,8 @@ use OGame\Services\SettingsService;
  */
 trait OpensARallyWithAWindow
 {
+    use FindsItsOwnCombat;
+
     protected const int RALLY_STOCK_METAL = 100_000;
 
     protected const int RALLY_WINDOW_SECONDS = 18;
@@ -136,15 +138,9 @@ trait OpensARallyWithAWindow
         $this->travelTo(Date::createFromTimestamp($instant));
         $this->get('/overview')->assertStatus(200);
 
-        // **Le combat de cet essai, et pas celui d un voisin.** Chercher par la seule mission ramene la ligne
-        // la plus ancienne qui porte cet identifiant : un banc de schema ecrit les siennes avec
-        // `mission_id = 1`, en ralliement et sans barriere, et ne les efface pas. Le corps vise et le plus
-        // recent ferment cette confusion.
-        $combat = CombatInstance::query()
-            ->where('mission_id', $ouvreuse->id)
-            ->where('target_planet_id', $ouvreuse->planet_id_to)
-            ->orderByDesc('id')
-            ->first();
+        // **Le combat de cet essai, et pas celui d un voisin** : la regle et l entrelacement qu elle ferme
+        // sont decrits une seule fois, sur `FindsItsOwnCombat`.
+        $combat = $this->theCombatOf((int)$ouvreuse->id, $ouvreuse->planet_id_to === null ? null : (int)$ouvreuse->planet_id_to);
         $this->assertNotNull($combat, 'The arrival did not open a combat.');
         $this->assertSame(CombatState::Rallying, $combat->status, 'The rally closed at once: the second wave did not hold the window open.');
 

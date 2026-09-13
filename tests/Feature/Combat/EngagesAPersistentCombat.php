@@ -28,6 +28,8 @@ use OGame\Services\SettingsService;
  */
 trait EngagesAPersistentCombat
 {
+    use FindsItsOwnCombat;
+
     protected function basicSetup(): void
     {
         $this->planetAddUnit('small_cargo', 60);
@@ -137,17 +139,9 @@ trait EngagesAPersistentCombat
         $this->travelTo(Date::createFromTimestamp((int)$mission->time_arrival));
         $this->get('/overview')->assertStatus(200);
 
-        // **Le combat de cet essai, et pas celui d un voisin.** Chercher par la seule mission ramene la ligne
-        // la plus ancienne qui porte cet identifiant : un banc de schema ecrit les siennes avec
-        // `mission_id = 1`, en ralliement et sans barriere, et ne les efface pas. Quand la mission de cet
-        // essai recoit l identifiant 1 dans la base de son processus, la recherche ramenait cette ligne-la —
-        // un ralliement qui ne se fermera jamais, faute de barriere. Le corps vise et le plus recent
-        // ferment cette confusion.
-        $combat = CombatInstance::query()
-            ->where('mission_id', $mission->id)
-            ->where('target_planet_id', $cible->getPlanetId())
-            ->orderByDesc('id')
-            ->first();
+        // **Le combat de cet essai, et pas celui d un voisin** : la regle et l entrelacement qu elle ferme
+        // sont decrits une seule fois, sur `FindsItsOwnCombat`.
+        $combat = $this->theCombatOf((int)$mission->id, $cible->getPlanetId());
         $this->assertNotNull($combat, 'The arrival did not open a combat.');
         // **Le diagnostic ne se calcule que si l essai tombe.** Passe en argument d une assertion, il
         // s executait a **chaque** montage : une requete inutile dans tous les essais qui montent un combat

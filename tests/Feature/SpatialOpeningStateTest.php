@@ -43,6 +43,16 @@ class SpatialOpeningStateTest extends AccountTestCase
 {
     use RecordsClassHistory;
 
+    /**
+     * L identifiant de mission que porte le combat de cet essai : **aucune flotte ne peut le recevoir.**
+     *
+     * Ce combat n a pas de flotte — l essai eprouve une photographie, pas une arrivee. Il portait `1` en dur, et
+     * sa ligne survit a l essai (`AccountTestCase` n annule rien) : quand la premiere mission d un essai voisin
+     * recevait l identifiant 1 dans la base du meme processus, ce voisin prenait ce combat pour le sien. C est
+     * l intermittent « The rally did not close on arrival », etabli et rejoue par `ANeighbourRallyIsNeverMineTest`.
+     */
+    private const int MISSION_SANS_FLOTTE = 900_000_001;
+
     private function patrouille(float $reserve = 4200.75): Patrol
     {
         $patrouille = new Patrol();
@@ -114,7 +124,7 @@ class SpatialOpeningStateTest extends AccountTestCase
 
         $combat->forceFill([
             'status' => CombatState::Rallying,
-            'mission_id' => 1,
+            'mission_id' => self::MISSION_SANS_FLOTTE,
             'target_planet_id' => null,
             'target_type' => PlanetType::SpatialPoint->value,
             'galaxy' => 2,

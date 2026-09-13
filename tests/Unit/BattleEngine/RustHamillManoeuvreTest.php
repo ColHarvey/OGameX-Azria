@@ -6,6 +6,8 @@ use OGame\Combat\Enums\HamillManoeuvreRule;
 use OGame\GameMissions\BattleEngine\Draws\SeededDraws;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleetResult;
+use OGame\GameMissions\BattleEngine\Parity\CanonicalProjection;
+use OGame\GameMissions\BattleEngine\PhpBattleEngine;
 use OGame\GameMissions\BattleEngine\RustBattleEngine;
 use Tests\UnitTestCase;
 
@@ -15,8 +17,8 @@ use Tests\UnitTestCase;
  * ## Le defaut que la version protege
  *
  * Le moteur Rust retirait l Etoile de la mort de `defenderUnitsStart` — un decompte de rapport — alors que
- * l entree envoyee a la bibliotheque se compose **des flottes** : l Etoile continuait de tirer, et ne pouvait
- * plus etre comptee perdue. Le moteur par defaut etant `rust`, la manoeuvre ne detruisait rien.
+ * l entree envoyee a la bibliotheque se compose **des resultats par flotte** : l Etoile continuait de tirer, et
+ * ne pouvait plus etre comptee perdue. Le moteur par defaut etant `rust`, la manoeuvre ne detruisait rien.
  *
  * ## Pourquoi ces essais vivent du cote de la bibliotheque
  *
@@ -27,10 +29,9 @@ use Tests\UnitTestCase;
  * ## Ce qu ils mesurent, et pourquoi le drapeau ne suffisait pas
  *
  * `hamillManoeuvreTriggered` dit qu un tirage a eu lieu, rien d autre : c est exactement ce que le moteur
- * fautif levait. Les chiffres compares ici sont ceux que le moteur PHP produit — mesures, non supposes — et
- * l un des essais rejoue la meme bataille **sans** manoeuvre pour que « l Etoile ne tire plus » soit une
- * difference observable, pas une affirmation. Le banc de parite tient ensuite l egalite des deux moteurs sur
- * l ensemble de la projection.
+ * fautif levait. Les chiffres attendus ici sont ceux que le moteur PHP produit — mesures, non supposes.
+ * « L Etoile ne tire plus » se prouve sur le seul montage ou cela ne depend d aucun tirage : la manoeuvre y
+ * prend le dernier defenseur, et aucun round ne se joue.
  */
 final class RustHamillManoeuvreTest extends UnitTestCase
 {
@@ -61,10 +62,10 @@ final class RustHamillManoeuvreTest extends UnitTestCase
     /**
      * **Regle effective : l Etoile quitte la bataille et compte dans les pertes**, comme sous le moteur PHP.
      *
-     * Les quatre chiffres sont ceux du moteur PHP sur ce scenario. Le decompte global des survivants en porte
-     * deux : il part du depart annonce et ne baisse que sur une mort en round, or la manoeuvre ne tue
-     * personne en round. **C est un defaut d affichage anterieur**, commun aux deux moteurs, epingle par
-     * `HamillManoeuvreEffectTest` et non corrige ici — le corriger changerait ce que les joueurs lisent.
+     * Les chiffres sont ceux du moteur PHP sur ce scenario. Le decompte global des survivants en porte deux : il
+     * part du depart annonce et ne baisse que sur une mort en round, or la manoeuvre ne tue personne en round.
+     * **C est un defaut anterieur**, commun aux deux moteurs, epingle par `HamillManoeuvreEffectTest` et non
+     * corrige ici — le corriger changerait l issue de batailles.
      */
     public function testTheEffectiveRuleTakesTheDeathstarOutOfTheBattle(): void
     {
@@ -90,40 +91,63 @@ final class RustHamillManoeuvreTest extends UnitTestCase
     }
 
     /**
-     * **L Etoile prise ne tire plus**, et cela se mesure : la meme bataille, sur la meme graine, jouee une
-     * fois avec la manoeuvre et une fois sans.
+     * **L Etoile prise ne tire plus**, mesure sans hasard : la manoeuvre prend le dernier defenseur.
      *
-     * Le premier round est le temoin : sans l Etoile la bataille dure plus longtemps, donc un total de coups
-     * melangerait « qui tire » et « combien de rounds ». Au premier round, l effectif defensif est exactement
-     * celui du depart.
+     * Sans manoeuvre, l Etoile tire au premier round et son premier coup detruit une unite. Avec, la defense est
+     * vide avant le premier round : aucun round, aucun coup, aucune perte attaquante.
+     *
+     * **Une premiere version comparait les coups du premier round** dans la bataille a deux Etoiles, dont l une
+     * survit. La CI de `95740b99` l a refutee : le tir rapide d une Etoile rend ce nombre geometrique, et la
+     * graine de cet essai inversait l ordre (379 coups avec la manoeuvre, 277 sans). Un temoin qui ne tient que
+     * par la graine ne prouve rien.
      */
-    public function testUnderTheEffectiveRuleTheDeathstarStopsFiring(): void
+    public function testUnderTheEffectiveRuleTheDeathstarNeverFires(): void
     {
-        $avec = $this->laBatailleSous(HamillManoeuvreRule::Effective);
-
-        $this->settingsService->set('hamill_manoeuvre_chance', 1_000_000);
-        $sans = $this->laBatailleSous(HamillManoeuvreRule::Effective);
+        $avec = $this->laBatailleDuDernierDefenseur(1);
+        $sans = $this->laBatailleDuDernierDefenseur(1_000_000);
 
         $this->assertTrue($avec->hamillManoeuvreTriggered, 'La manoeuvre ne s est pas jouee : la comparaison ne prouverait rien.');
         $this->assertFalse($sans->hamillManoeuvreTriggered, 'La manoeuvre s est jouee dans le passage temoin : les deux passages seraient identiques.');
 
-        $this->assertLessThan(
-            $sans->rounds[0]->hitsDefender,
-            $avec->rounds[0]->hitsDefender,
-            'La defense a porte autant de coups au premier round : l Etoile detruite tire encore.'
-        );
+        // Le temoin : sans manoeuvre, l Etoile tire et tue.
+        $this->assertNotSame([], $sans->rounds, 'Sans manoeuvre, aucun round ne s est joue : le temoin ne mesure rien.');
+        $this->assertGreaterThan(0, $sans->rounds[0]->hitsDefender, 'Sans manoeuvre, l Etoile n a pas tire : le temoin ne mesure rien.');
+        $this->assertGreaterThan(0, $sans->attackerUnitsLost->getAmount(), 'Sans manoeuvre, l attaquante n a rien perdu : le temoin ne mesure rien.');
 
-        $this->assertLessThan(
-            $sans->rounds[0]->attackerLossesInRound->getAmount(),
-            $avec->rounds[0]->attackerLossesInRound->getAmount(),
-            'L attaquante a perdu autant d unites au premier round : l Etoile detruite tire encore.'
-        );
+        // Avec : personne ne tire.
+        $this->assertSame([], $avec->rounds, 'Un round s est joue alors que la manoeuvre avait pris le dernier defenseur : l Etoile a combattu.');
+        $this->assertSame(0, $avec->attackerUnitsLost->getAmount(), 'L attaquante a perdu des unites : l Etoile detruite a tire.');
 
-        $this->assertGreaterThan(
-            (int)$sans->debris->metal->get(),
-            (int)$avec->debris->metal->get(),
-            'Le champ de debris est identique : la coque de l Etoile detruite n y tombe pas.'
-        );
+        $garnison = $this->laFlotteDefensive($avec, 0);
+        $this->assertSame(0, $garnison->unitsResult->getAmount(), 'La garnison garde une unite apres que la manoeuvre l a videe.');
+        $this->assertSame(1, $garnison->unitsLost->getAmountByMachineName('deathstar'), 'L Etoile n est pas comptee perdue dans la garnison.');
+        $this->assertTrue($garnison->completelyDestroyed, 'Une garnison videe par la manoeuvre n est pas dite detruite.');
+    }
+
+    /**
+     * **Le chemin sans round traverse la couture a l identique.**
+     *
+     * Le banc de parite exige au moins un round ; ce cas-ci n en a aucun par construction, et c est celui ou le
+     * moteur Rust passe par sa branche « aucune bataille », que la correction a du toucher. La projection entiere
+     * est comparee : survivants et pertes par flotte, decomptes globaux, butin, debris, chance de lune.
+     *
+     * La bande de tirages ne l est pas : sans round, aucun tirage de round n est consomme, et comparer deux
+     * journaux vides ne prouverait rien.
+     */
+    public function testTheManoeuvreThatTakesTheLastDefenderCrossesTheSeamIdentically(): void
+    {
+        $bataille = $this->aGeneralWhoseHamillManoeuvreTakesTheLastDefender();
+
+        $php = $this->fight(PhpBattleEngine::class, $bataille);
+        $rust = $this->fight(RustBattleEngine::class, $bataille);
+
+        $this->assertTrue($php->hamillManoeuvreTriggered, 'PHP : la manoeuvre ne s est pas jouee.');
+        $this->assertTrue($rust->hamillManoeuvreTriggered, 'Rust : la manoeuvre ne s est pas jouee.');
+        $this->assertSame([], $php->rounds, 'PHP : un round s est joue, le chemin sans round n est pas eprouve.');
+
+        $divergence = CanonicalProjection::firstDivergence(CanonicalProjection::of($php), CanonicalProjection::of($rust));
+
+        $this->assertNull($divergence, 'Les deux moteurs divergent quand la manoeuvre prend le dernier defenseur : ' . $divergence);
     }
 
     /**
@@ -149,8 +173,21 @@ final class RustHamillManoeuvreTest extends UnitTestCase
 
     private function laBatailleSous(HamillManoeuvreRule $regle): BattleResult
     {
-        $bataille = $this->aGeneralWhoseHamillManoeuvreSucceeds();
+        return $this->surLaBibliotheque($this->aGeneralWhoseHamillManoeuvreSucceeds(), $regle);
+    }
 
+    private function laBatailleDuDernierDefenseur(int $chance): BattleResult
+    {
+        $this->settingsService->set('hamill_manoeuvre_chance', $chance);
+
+        return $this->surLaBibliotheque($this->aGeneralWhoseHamillManoeuvreTakesTheLastDefender(), HamillManoeuvreRule::Effective);
+    }
+
+    /**
+     * @param array{attaquantes: array<int, \OGame\GameMissions\BattleEngine\Models\AttackerFleet>, defenseurs: array<int, \OGame\GameMissions\BattleEngine\Models\DefenderFleet>, cible: \OGame\Services\PlanetService, contexte: \OGame\Combat\Support\LootContext} $bataille
+     */
+    private function surLaBibliotheque(array $bataille, HamillManoeuvreRule $regle): BattleResult
+    {
         $moteur = new RustBattleEngine(
             $bataille['attaquantes'],
             $bataille['cible'],
