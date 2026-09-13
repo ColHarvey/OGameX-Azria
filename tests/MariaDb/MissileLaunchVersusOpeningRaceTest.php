@@ -161,6 +161,9 @@ final class MissileLaunchVersusOpeningRaceTest extends FleetDispatchTestCase
 
         // Le combat s'en va : plus de barriere, la cible est libre.
         DB::table('celestial_body_combat_barriers')->where('target_body_id', $cible)->delete();
+        // L ouvreuse a inscrit ses caracteristiques a son entree : elles pointent vers ce combat, et
+        // MariaDB refuse de l effacer avant elles.
+        DB::table('combat_entry_characteristics')->where('combat_instance_id', $combat->id)->delete();
         CombatInstance::query()->whereKey($combat->id)->delete();
         resolve(SettingsService::class)->set('persistent_combat_enabled', '0');
 
