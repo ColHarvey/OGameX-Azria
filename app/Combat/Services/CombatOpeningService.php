@@ -17,6 +17,7 @@ use OGame\Combat\Allocation\LootAllocatorRegistry;
 use OGame\Combat\Causality\CausalEventOrderRegistry;
 use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Enums\HamillManoeuvreRule;
 use OGame\Combat\Enums\UnitCharacteristicsRule;
 use OGame\Combat\Exceptions\UnknownAdmissionHistory;
 use OGame\Combat\MoonDestruction\MoonDestructionRuleRegistry;
@@ -214,6 +215,8 @@ final class CombatOpeningService
             // apres la ligne de base des historiques de classe gele chaque flotte a son admission ; un
             // combat ouvert a cet instant ou avant garde la premiere regle, sans historique invente.
             'unit_characteristics_version' => UnitCharacteristicsRule::forOpeningAt($openedAt, resolve(ClassHistoryReader::class)->baselineInstant())->value,
+            // La regle de la manoeuvre de Hamill est fixee ici, et ce combat la gardera jusqu a sa cloture.
+            'hamill_rule_version' => HamillManoeuvreRule::current()->value,
             'frozen_alliance_membership' => $appartenances->toStorage(),
             ...$this->frozenColumns($faits),
             // L'empreinte porte les versions **et** les faits : deux combats sous deux regles

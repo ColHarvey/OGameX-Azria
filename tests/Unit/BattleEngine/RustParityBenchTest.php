@@ -147,14 +147,43 @@ class RustParityBenchTest extends UnitTestCase
      * ferait diverger les tirs, les capacites et le butin. `ParityScenarioFixturesTest` etablit, sans
      * bibliotheque, que le montage porte bien cet ecart.
      *
-     * **La manoeuvre de Hamill n est pas dans ce scenario**, et c est dit : les deux moteurs en divergent
-     * aujourd hui (le moteur Rust retire l Etoile de la mort du seul decompte de depart, sans la retirer de la
-     * bataille qu il envoie). Cet ecart-la est remonte a part ; l inclure ici rendrait ce banc rouge pour une
-     * raison qui n est pas la sienne.
+     * **La manoeuvre de Hamill n est pas dans ce scenario**, et c est voulu : elle a son propre banc,
+     * `testASuccessfulHamillManoeuvreCrossesTheSeamIdentically`, ou elle **aboutit**. Melanger les deux
+     * rendrait chacun moins lisible — celui-ci porte la classe gelee, l autre la manoeuvre.
      */
     public function testAClassFrozenAtAdmissionCrossesTheSeamIdentically(): void
     {
         $this->assertBothEnginesAgree('classe-gelee', $this->aGeneralFrozenAtAdmissionWhoseAccountBecameACollector());
+    }
+
+    /**
+     * **Une manoeuvre de Hamill qui reussit traverse la couture a l identique.**
+     *
+     * C est le temoin que la revue de Codex demandait : la manoeuvre **aboutit**, et les deux moteurs sont
+     * compares sur les unites restantes, les tirs de chaque round, les pertes par participant — que la
+     * projection canonique porte — puis sur ce que la projection ne porte pas et que le rapport montre : le
+     * drapeau de la manoeuvre, le depart annonce du defenseur et l Etoile comptee perdue.
+     *
+     * Avant la correction, ce banc etait rouge et disait pourquoi : `completely_destroyed` valait `false` sous
+     * PHP et `true` sous Rust, l Etoile continuant d y tirer.
+     */
+    public function testASuccessfulHamillManoeuvreCrossesTheSeamIdentically(): void
+    {
+        $chance = $this->settingsService->hamillManoeuvreChance();
+        $this->settingsService->set('hamill_manoeuvre_chance', 1);
+
+        try {
+            [$php, $rust] = $this->assertBothEnginesAgree('hamill', $this->aGeneralWhoseHamillManoeuvreSucceeds());
+
+            foreach (['PHP' => $php, 'Rust' => $rust] as $moteur => $resultat) {
+                $this->assertTrue($resultat->hamillManoeuvreTriggered, $moteur . ' : la manoeuvre ne s est pas jouee.');
+                $this->assertSame(2, $resultat->defenderUnitsStart->getAmountByMachineName('deathstar'), $moteur . ' : le depart annonce ne porte pas les deux Etoiles.');
+                $this->assertSame(1, $resultat->defenderUnitsLost->getAmountByMachineName('deathstar'), $moteur . ' : la manoeuvre n a detruit aucune Etoile.');
+                $this->assertSame(1, $resultat->defenderUnitsResult->getAmountByMachineName('deathstar'), $moteur . ' : la seconde Etoile n a pas survecu.');
+            }
+        } finally {
+            $this->settingsService->set('hamill_manoeuvre_chance', $chance);
+        }
     }
 
     /**

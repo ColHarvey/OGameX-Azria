@@ -10,6 +10,7 @@ use OGame\Combat\Application\CombatApplicationContext;
 use OGame\Combat\Application\FrozenCombatApplicationContext;
 use OGame\Combat\Application\LiveCombatApplicationContext;
 use OGame\Combat\Enums\CombatMissionKind;
+use OGame\Combat\Enums\HamillManoeuvreRule;
 use OGame\Combat\Exceptions\MissingOpeningState;
 use OGame\Combat\MoonDestruction\FrozenMoonDestructionPlan;
 use OGame\Combat\MoonDestruction\FrozenMoonIdentity;
@@ -163,6 +164,10 @@ final class CombatEngagementService
         $moteur->setRetreatAfterDefenderRetreat((bool)$effectif->initiator->retreat_after_defender_retreat);
         $moteur->withPhotographedDefender($this->defenderAsItFires($effectif, $photographedDefender));
         $moteur->withPhotographedUniverse($photographedUniverse);
+
+        // **La manoeuvre de Hamill suit la regle ecrite a l ouverture**, jamais la regle courante : un
+        // combat ouvert avant la correction joue la bataille qu il avait promise.
+        $moteur->withHamillManoeuvreRule(HamillManoeuvreRule::fromInstance($combat));
 
         $resultat = $moteur->simulateBattle();
         $resultat->attackerPlanetId = (int)$effectif->initiator->planet_id_from;

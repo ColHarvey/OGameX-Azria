@@ -149,7 +149,13 @@ trait EngagesAPersistentCombat
             ->orderByDesc('id')
             ->first();
         $this->assertNotNull($combat, 'The arrival did not open a combat.');
-        $this->assertSame(CombatState::Active, $combat->status, 'The rally did not close on arrival: a single fleet closes its window at once. ' . $this->whyTheRallyIsStillOpen($combat));
+        // **Le diagnostic ne se calcule que si l essai tombe.** Passe en argument d une assertion, il
+        // s executait a **chaque** montage : une requete inutile dans tous les essais qui montent un combat
+        // durable — et, le jour ou elle nomme une colonne de travers, une erreur partout au lieu d un
+        // diagnostic nulle part.
+        if ($combat->status !== CombatState::Active) {
+            $this->fail('The rally did not close on arrival: a single fleet closes its window at once. ' . $this->whyTheRallyIsStillOpen($combat));
+        }
         $this->assertNotNull($combat->battle_result);
 
         return $combat;
@@ -167,7 +173,7 @@ trait EngagesAPersistentCombat
     {
         $barriere = DB::table('celestial_body_combat_barriers')
             ->where('combat_instance_id', $combat->id)
-            ->first(['owned_through_effect_at', 'celestial_body_id']);
+            ->first(['target_body_id', 'opened_at', 'owned_through_effect_at']);
 
         $entrantes = DB::table('fleet_missions')
             ->where('planet_id_to', $combat->target_planet_id)
@@ -177,6 +183,9 @@ trait EngagesAPersistentCombat
             ->orderBy('id')
             ->get(['id', 'user_id', 'mission_type', 'time_arrival', 'processed', 'canceled', 'processing_claimed_at', 'combat_instance_id']);
 
+        // **Les noms de colonnes se prouvent sur MariaDB, jamais sur SQLite** : celui-ci citait
+        // `celestial_body_id`, qui n existe pas — SQLite l a pris pour une chaine litterale et s est taise,
+        // le bac a refuse la requete. La colonne du corps s appelle `target_body_id`.
         return '[diagnostic] combat=' . $combat->id
             . ' corps=' . $combat->target_planet_id
             . ' ouverture=' . (int)$combat->started_at

@@ -6,6 +6,7 @@ use InvalidArgumentException;
 use OGame\Combat\Allocation\ExactLootAllocationV1;
 use OGame\Combat\Allocation\LootAllocator;
 use OGame\Combat\Allocation\LootAllocatorRegistry;
+use OGame\Combat\Enums\HamillManoeuvreRule;
 use OGame\Combat\Exceptions\IncoherentRoundAttribution;
 use OGame\Combat\Policies\CargoWeightedV1;
 use OGame\Combat\Services\PhotographedDefender;
@@ -204,6 +205,22 @@ abstract class BattleEngine
     public function withPhotographedUniverse(PhotographedUniverse $universe): self
     {
         $this->photographedUniverse = $universe;
+
+        return $this;
+    }
+
+    /**
+     * La regle de la manoeuvre de Hamill pour **cette** bataille.
+     *
+     * Par defaut la regle courante : une bataille instantanee se decide a son arrivee, et n a pas
+     * d intervalle a proteger. La cloture d un combat durable, elle, impose celle que son ouverture a
+     * ecrite — sans quoi une correction changerait une bataille deja engagee.
+     */
+    protected HamillManoeuvreRule $hamillRule = HamillManoeuvreRule::Effective;
+
+    public function withHamillManoeuvreRule(HamillManoeuvreRule $rule): self
+    {
+        $this->hamillRule = $rule;
 
         return $this;
     }

@@ -3,6 +3,7 @@
 namespace OGame\GameMissions\BattleEngine;
 
 use FFI;
+use OGame\Combat\Enums\HamillManoeuvreRule;
 use OGame\Combat\Exceptions\RustEngineContractMismatch;
 use OGame\Combat\Support\LootContext;
 use OGame\GameMissions\BattleEngine\Draws\SeededDraws;
@@ -512,15 +513,48 @@ class RustBattleEngine extends BattleEngine
 
             // Remove the Deathstar from defender units so it doesn't participate in battle
             $deathstarObject = ObjectService::getShipObjectByMachineName('deathstar');
-            $result->defenderUnitsStart->removeUnit($deathstarObject, 1);
 
+            if ($this->hamillRule === HamillManoeuvreRule::Effective) {
+                // **L Etoile quitte la bataille, pas le decompte de depart.** L entree envoyee a la
+                // bibliotheque se compose **des flottes** : la retirer du seul `defenderUnitsStart`
+                // la laissait tirer, et la faisait disparaitre des pertes — la manoeuvre ne detruisait
+                // rien. Elle est donc retiree de la flotte qui la porte, la premiere dans l ordre
+                // canonique, exactement comme le moteur PHP retire la premiere de ses unites etendues.
+                $this->removeOneDeathstarFromTheDefendingFleets();
+            } else {
+                // **La regle telle qu elle a ete livree**, gardee pour les combats ouverts avant la
+                // correction : l Etoile disparait du depart annonce et continue de tirer. Aucun combat
+                // neuf ne l emploie.
+                $result->defenderUnitsStart->removeUnit($deathstarObject, 1);
+            }
             // NOTE: The loss will be properly calculated after battle rounds complete
             // by comparing the modified defenderUnitsStart with defenderUnitsResult.
         }
     }
 
     /**
-     * Les coques avec lesquelles chaque unite d un type entre dans la bataille.
+     * Retire une Etoile de la mort **des flottes qui se battent**, la premiere dans l ordre canonique.
+     *
+     * L ordre compte : les deux moteurs doivent detruire **la meme** Etoile, sinon ce sont deux batailles
+     * differentes — les flottes n ont ni les memes technologies ni les memes coques. L ordre canonique est
+     * celui des identifiants de mission, la garnison portant l identifiant zero.
+     */
+    private function removeOneDeathstarFromTheDefendingFleets(): void
+    {
+        $etoile = ObjectService::getShipObjectByMachineName('deathstar');
+        $flottes = $this->defenders;
+        usort($flottes, static fn (DefenderFleet $a, DefenderFleet $b): int => $a->fleetMissionId <=> $b->fleetMissionId);
+
+        foreach ($flottes as $flotte) {
+            if ($flotte->units->getAmountByMachineName('deathstar') > 0) {
+                $flotte->units->removeUnit($etoile, 1);
+
+                return;
+            }
+        }
+    }
+
+    /**     * Les coques avec lesquelles chaque unite d un type entre dans la bataille.
      *
      * **La formule vit d un seul cote de la frontiere.** Rust pourrait deriver ces valeurs d un
      * rapport de degats, mais ce serait une seconde implementation d une regle d arrondi — et deux

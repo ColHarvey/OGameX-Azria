@@ -168,6 +168,45 @@ class ParityScenarioFixturesTest extends UnitTestCase
     }
 
     /**
+     * **Le scenario de la manoeuvre porte bien ses deux Etoiles et son General**, et le moteur PHP en detruit
+     * une — sans bibliotheque, c est ici que le montage se verifie.
+     */
+    public function testTheSuccessfulHamillScenarioCarriesTwoDeathstarsAndAGeneral(): void
+    {
+        $chance = $this->settingsService->hamillManoeuvreChance();
+        $this->settingsService->set('hamill_manoeuvre_chance', 1);
+
+        try {
+            $bataille = $this->aGeneralWhoseHamillManoeuvreSucceeds();
+            $flotte = $bataille['attaquantes'][0];
+
+            $this->assertSame(CharacterClass::GENERAL->value, $flotte->player->getUser()->character_class, 'L attaquante n est pas Generale : la manoeuvre ne se jouerait jamais.');
+            $this->assertGreaterThan(0, $flotte->units->getAmountByMachineName('light_fighter'), 'Sans chasseur leger, la manoeuvre ne se joue pas.');
+
+            $etoiles = 0;
+            $boucliers = [];
+
+            foreach ($bataille['defenseurs'] as $defenseur) {
+                $etoiles += $defenseur->units->getAmountByMachineName('deathstar');
+
+                if ($defenseur->units->getAmountByMachineName('deathstar') > 0) {
+                    $boucliers[] = $defenseur->player->getResearchLevel('shielding_technology');
+                }
+            }
+
+            $this->assertSame(2, $etoiles, 'Le scenario ne porte pas deux Etoiles : « laquelle est detruite » ne se verrait pas.');
+            $this->assertCount(2, array_unique($boucliers), 'Les deux Etoiles partagent leurs technologies : retirer l une ou l autre donnerait la meme bataille.');
+
+            $resultat = $this->fight(PhpBattleEngine::class, $bataille);
+
+            $this->assertTrue($resultat->hamillManoeuvreTriggered, 'La manoeuvre ne s est pas jouee.');
+            $this->assertSame(1, $resultat->defenderUnitsLost->getAmountByMachineName('deathstar'), 'Le moteur PHP n a detruit aucune Etoile.');
+        } finally {
+            $this->settingsService->set('hamill_manoeuvre_chance', $chance);
+        }
+    }
+
+    /**
      * Le pillage interdit l'est par la politique, pas par un stock vide.
      */
     public function testTheForbiddenLootIsForbiddenByThePolicyAndNotByAnEmptyStock(): void

@@ -44,6 +44,10 @@ class PersistedRehydrationGuardTest extends TestCase
             'tests/Unit/Combat/UnitCharacteristicsRuleTest.php',
             'testARuleThatIsNotAStringIsRefused',
         ],
+        'Combat/Enums/HamillManoeuvreRule::fromInstance' => [
+            'tests/Unit/Combat/HamillManoeuvreRuleTest.php',
+            'testARuleThatIsNotAStringIsRefused',
+        ],
         'Combat/Support/FrozenCombatCharacteristics::fromStorage' => [
             'tests/Unit/Combat/FrozenCombatCharacteristicsTest.php',
             'testANumericStringOrAFloatLevelIsRefused',

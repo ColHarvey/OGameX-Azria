@@ -330,6 +330,32 @@ trait BuildsParityScenarios
     }
 
     /**
+     * **Une manoeuvre de Hamill qui reussit reellement**, avec deux Etoiles de la mort pour que « laquelle »
+     * compte.
+     *
+     * Un General et ses chasseurs legers ; une Etoile dans la garnison, une autre dans un renfort **aux
+     * technologies tres differentes**. Si un moteur retirait l autre Etoile, ce ne serait pas la meme
+     * bataille, et la projection le dirait. La chance de manoeuvre est posee a 1 par l essai qui joue le
+     * scenario : sans cela, la manoeuvre se tirerait au sort et le banc mesurerait le hasard.
+     *
+     * @return array{attaquantes: array<int, AttackerFleet>, defenseurs: array<int, DefenderFleet>, cible: PlanetService, contexte: \OGame\Combat\Support\LootContext}
+     */
+    private function aGeneralWhoseHamillManoeuvreSucceeds(): array
+    {
+        $technologies = ['weapon_technology' => 6, 'shielding_technology' => 5, 'armor_technology' => 6];
+
+        return $this->aBattle(
+            planete: ['metal' => 40_000, 'crystal' => 20_000, 'deathstar' => 1, 'rocket_launcher' => 40],
+            attaquantes: [
+                ['units' => ['light_fighter' => 300, 'cruiser' => 30], 'tech' => $technologies, 'classe' => CharacterClass::GENERAL],
+            ],
+            renforts: [
+                ['units' => ['deathstar' => 1], 'tech' => ['weapon_technology' => 12, 'shielding_technology' => 12, 'armor_technology' => 12]],
+            ],
+        );
+    }
+
+    /**
      * Le combattant du combat durable, monte sans base sur le compte fictif d un joueur du banc.
      *
      * Le compte garde son identite, sa classe et ses technologies ; seul le porteur que le combattant rend dit la
