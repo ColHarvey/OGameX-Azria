@@ -5,6 +5,7 @@ namespace OGame\Console\Commands\Admin;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use OGame\Factories\PlanetServiceFactory;
@@ -86,7 +87,8 @@ class InitializeLegorAccount extends Command
         $user->password = Hash::make(Str::random(32));
         $user->lang = 'en';
         $user->time = (string) now()->timestamp;
-        $user->save();
+        // L insertion et l etat initial de ses historiques de classe, ensemble.
+        DB::transaction(static fn (): bool => $user->save());
 
         // Create UserTech record
         UserTech::create(['user_id' => $user->id]);

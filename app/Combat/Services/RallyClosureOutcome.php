@@ -19,6 +19,10 @@ use OGame\Combat\Admission\AdmissionVerdict;
  *
  * **« Trop tot » non plus.** L'echeance a ete calculee a l'ouverture ; fermer avant elle exclurait
  * des flottes qu'on avait promis d'attendre. Le declencheur represente donc simplement.
+ *
+ * **« Suspendue », en revanche, est une anomalie.** Ce que les flottes apportaient a leurs tirs a leur
+ * admission ne s etablit pas : l historique des classes ne sait pas repondre. Rien n a ete ecrit, le
+ * ralliement reste ouvert, et l avanceur compte l echec — apres cinq, le combat est mis de cote.
  */
 final readonly class RallyClosureOutcome
 {
@@ -27,12 +31,14 @@ final readonly class RallyClosureOutcome
      * @param string $reason Pourquoi, en un mot lisible dans un journal.
      * @param AdmissionVerdict|null $attackers Le verdict du camp attaquant, quand il a ete rendu.
      * @param AdmissionVerdict|null $defenders Le verdict du camp defenseur.
+     * @param bool $suspended Si une anomalie a suspendu la fermeture, qui doit compter comme un echec.
      */
     private function __construct(
         public bool $closed,
         public string $reason,
         public AdmissionVerdict|null $attackers = null,
         public AdmissionVerdict|null $defenders = null,
+        public bool $suspended = false,
     ) {
     }
 
@@ -78,6 +84,18 @@ final readonly class RallyClosureOutcome
     public static function heldByAnotherWorker(): self
     {
         return new self(false, 'arrivee tenue ailleurs');
+    }
+
+    /**
+     * Une anomalie a suspendu la fermeture : l historique des classes ne sait pas ce qu une flotte
+     * apportait a ses tirs a son admission (decision de Keven, 13 septembre 2026).
+     *
+     * La transaction est revenue en arriere. Contrairement a « arrivee tenue ailleurs », ce n est pas une
+     * course ordinaire : l avanceur l inscrit comme un echec, et l exploitation est alertee.
+     */
+    public static function suspended(string $reason): self
+    {
+        return new self(false, 'suspendue : ' . $reason, null, null, true);
     }
 
     /**

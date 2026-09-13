@@ -24,6 +24,7 @@ use OGame\Combat\Enums\FleetDispositionKind;
 use OGame\Combat\Enums\SnapshotContribution;
 use OGame\Combat\Exceptions\ClosureMustWaitForAnotherWorker;
 use OGame\Combat\Exceptions\ContradictorySnapshotInclusion;
+use OGame\Combat\Exceptions\UnknownAdmissionHistory;
 use OGame\Combat\Projection\SnapshotProjectionRegistry;
 use OGame\Combat\Support\ActorKindResolver;
 use OGame\Combat\Support\CombatEventIdentity;
@@ -109,6 +110,20 @@ final class RallyClosureService
     {
         try {
             return $this->closeInATransaction($combatInstanceId, $now);
+        } catch (UnknownAdmissionHistory $anomalie) {
+            /*
+             * **Une anomalie d historique suspend la fermeture** (decision de Keven, 13 septembre 2026).
+             * L exception a fait revenir la transaction en arriere : aucun participant, aucune bataille,
+             * aucune perte ni aucun credit partiel. L instance reste en ralliement, l avanceur compte
+             * l echec et met le combat de cote apres cinq. L alerte est critique : un historique qui ne
+             * sait pas repondre signale un changement ecrit sans sa ligne.
+             */
+            Log::critical('Fermeture suspendue : historique de classe inconnu a l admission.', [
+                'combat' => $combatInstanceId,
+                'raison' => $anomalie->getMessage(),
+            ]);
+
+            return RallyClosureOutcome::suspended($anomalie->getMessage());
         } catch (ClosureMustWaitForAnotherWorker $tenue) {
             /*
              * **Le retrait est une issue, pas une erreur.** Un autre travailleur tenait une arrivee
@@ -200,8 +215,8 @@ final class RallyClosureService
 
         $cotesAttaquants = array_merge($groupesFondateurs, $attaquants->admitted());
 
-        $this->registerParticipants($combat, $cotesAttaquants, CombatParticipant::SIDE_ATTACKER);
-        $this->registerParticipants($combat, $defenseurs->admitted(), CombatParticipant::SIDE_DEFENDER);
+        $this->registerParticipants($combat, $cotesAttaquants, CombatParticipant::SIDE_ATTACKER, $openedAt);
+        $this->registerParticipants($combat, $defenseurs->admitted(), CombatParticipant::SIDE_DEFENDER, $openedAt);
         $this->registerTheGarrison($combat, $corps);
 
         // **Les retenues que l'admission n'a pas gardees sont liberees.** Elles ont ete tenues le
@@ -325,7 +340,7 @@ final class RallyClosureService
      *
      * @param array<int, AttackCandidateGroup> $groups
      */
-    private function registerParticipants(CombatInstance $combat, array $groups, string $side): void
+    private function registerParticipants(CombatInstance $combat, array $groups, string $side, int $openedAt): void
     {
         foreach ($groups as $groupe) {
             foreach ($groupe->missions as $mission) {
@@ -344,9 +359,17 @@ final class RallyClosureService
 
                 // **Toute flotte admise a ses caracteristiques gelees avant la bataille.** Une vague
                 // arrivee avant l echeance peut etre inscrite ici sans que son travailleur soit passe :
-                // la cloture l observe, mais l instant d admission reste **son arrivee** — celle que le
-                // selecteur a jugee. Une flotte deja vue a sa porte garde ce qu elle y a inscrit.
-                resolve(CombatEntryCharacteristicsRegistry::class)->recordAtEntry($combat, $mission->missionId, $mission->userId, $mission->scheduledArrivalAt);
+                // la cloture l observe, mais l instant d admission reste celui que les regles fixent : **son
+                // arrivee**, ou **la barriere d ouverture** pour un renfort deja pose avant elle. Une flotte deja
+                // vue a sa porte garde ce qu elle y a inscrit. Une anomalie d historique leve ici : la
+                // transaction revient en arriere et la fermeture se suspend.
+                $registre = resolve(CombatEntryCharacteristicsRegistry::class);
+
+                if ($mission->scheduledArrivalAt < $openedAt) {
+                    $registre->recordAtOpening($combat, $mission->missionId, $mission->userId, $openedAt);
+                } else {
+                    $registre->recordAtArrival($combat, $mission->missionId, $mission->userId, $mission->scheduledArrivalAt);
+                }
             }
         }
     }

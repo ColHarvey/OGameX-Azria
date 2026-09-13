@@ -27,6 +27,7 @@ use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
 use OGame\Services\WreckFieldService;
 use Tests\FleetDispatchTestCase;
+use Tests\RecordsClassHistory;
 
 /**
  * Ce qu'un joueur devient pendant la bataille ne change pas l'issue de la bataille.
@@ -45,6 +46,8 @@ use Tests\FleetDispatchTestCase;
  */
 class FrozenApplicationContextTest extends FleetDispatchTestCase
 {
+    use RecordsClassHistory;
+
     protected int $missionType = 1;
 
     protected string $missionName = 'Attaquer';
@@ -99,7 +102,7 @@ class FrozenApplicationContextTest extends FleetDispatchTestCase
         [$combat, $attaquant] = $this->anEngagedCombatWhoseAttackerIs(CharacterClass::COLLECTOR);
 
         // Entre la cloture et l'echeance, l'attaquant devient General.
-        DB::table('users')->where('id', $attaquant->id)->update(['character_class' => CharacterClass::GENERAL->value]);
+        $this->recordCharacterClass((int)$attaquant->id, CharacterClass::GENERAL);
 
         $this->settle($combat);
 
@@ -344,7 +347,7 @@ class FrozenApplicationContextTest extends FleetDispatchTestCase
         $this->basicSetup();
 
         $attaquant = User::query()->findOrFail($this->currentUserId);
-        DB::table('users')->where('id', $attaquant->id)->update(['character_class' => $classe->value]);
+        $this->recordCharacterClass((int)$attaquant->id, $classe);
 
         $units = new UnitCollection();
         $units->addUnit(ObjectService::getUnitObjectByMachineName('small_cargo'), 50);

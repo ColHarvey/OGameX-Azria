@@ -3,8 +3,10 @@
 namespace OGame\Services;
 
 use Exception;
+use Illuminate\Support\Facades\DB;
 use OGame\Enums\CharacterClass;
 use OGame\Enums\DarkMatterTransactionType;
+use OGame\History\ClassHistoryRecorder;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet;
 use OGame\Models\User;
@@ -158,21 +160,26 @@ class CharacterClassService
             throw new Exception('Cannot change character class while fleet missions are active. Please wait for all fleets to return.');
         }
 
-        // Deduct Dark Matter if not free
-        if ($cost > 0) {
-            $this->darkMatterService->debit(
-                $user,
-                $cost,
-                DarkMatterTransactionType::PLAYER_CLASS->value,
-                'Changed character class to ' . $newClass->getName()
-            );
-        }
+        // **Le paiement, le changement et sa ligne d historique : ensemble, ou pas du tout.** Le gel
+        // d une flotte a son admission relit la classe dans l historique ; un changement valide sans sa
+        // ligne ferait mentir tout combat qui l interroge ensuite.
+        DB::transaction(function () use ($user, $newClass, $cost): void {
+            if ($cost > 0) {
+                $this->darkMatterService->debit(
+                    $user,
+                    $cost,
+                    DarkMatterTransactionType::PLAYER_CLASS->value,
+                    'Changed character class to ' . $newClass->getName()
+                );
+            }
 
-        // Update user's character class
-        $user->character_class = $newClass->value;
-        $user->character_class_free_used = true;
-        $user->character_class_changed_at = now();
-        $user->save();
+            $user->character_class = $newClass->value;
+            $user->character_class_free_used = true;
+            $user->character_class_changed_at = now();
+            $user->save();
+
+            resolve(ClassHistoryRecorder::class)->personalClass((int)$user->id, $newClass->value, ClassHistoryRecorder::CAUSE_SELECTION);
+        });
 
         // Reset crawler overload if switching away from Collector
         // Non-Collector classes can only use up to 100% (value 10)
@@ -199,9 +206,13 @@ class CharacterClassService
             throw new Exception('Cannot deactivate character class while fleet missions are active. Please wait for all fleets to return.');
         }
 
-        $user->character_class = null;
-        $user->character_class_changed_at = now();
-        $user->save();
+        DB::transaction(static function () use ($user): void {
+            $user->character_class = null;
+            $user->character_class_changed_at = now();
+            $user->save();
+
+            resolve(ClassHistoryRecorder::class)->personalClass((int)$user->id, null, ClassHistoryRecorder::CAUSE_DESELECTION);
+        });
 
         // Reset crawler overload when deactivating class
         $this->resetCrawlerOverload($user);
@@ -409,11 +420,18 @@ class CharacterClassService
      */
     public function getAdditionalCombatResearchLevels(User $user): int
     {
-        if ($this->isGeneral($user)) {
-            return 2;
-        }
+        return $this->combatResearchLevelsOfClass(CharacterClass::tryFrom((int)($user->character_class ?? 0)));
+    }
 
-        return 0;
+    /**
+     * Les niveaux de combat qu une classe personnelle donne, sans lire aucun compte.
+     *
+     * **La source unique du nombre** : le joueur vivant la lit par sa classe actuelle, le gel a l admission
+     * par la classe que l historique donne a cet instant.
+     */
+    public function combatResearchLevelsOfClass(CharacterClass|null $classe): int
+    {
+        return $classe === CharacterClass::GENERAL ? 2 : 0;
     }
 
     /**

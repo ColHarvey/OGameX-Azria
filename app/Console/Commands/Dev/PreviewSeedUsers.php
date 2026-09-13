@@ -6,6 +6,7 @@ use Exception;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use OGame\Enums\CharacterClass;
 use OGame\Factories\PlanetServiceFactory;
@@ -243,7 +244,8 @@ class PreviewSeedUsers extends Command
         $inactiveDays = $config['inactive_days'] ?? 0;
         $user->time = (string) now()->subDays($inactiveDays)->timestamp;
 
-        $user->save();
+        // L insertion et l etat initial de ses historiques de classe, ensemble.
+        DB::transaction(static fn (): bool => $user->save());
 
         // Assign role
         if ($config['role'] === 'admin') {

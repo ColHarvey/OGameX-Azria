@@ -10,6 +10,7 @@ use Log;
 use OGame\Alliance\AllianceMembershipChangeGuard;
 use OGame\GameMessages\AllianceApplicationReceived;
 use OGame\GameMessages\AllianceBroadcast;
+use OGame\History\ClassHistoryRecorder;
 use OGame\Models\Alliance;
 use OGame\Models\AllianceApplication;
 use OGame\Models\AllianceMember;
@@ -99,6 +100,12 @@ class AllianceService
             $user->alliance_left_at = null;
             $user->alliance_cooldown_until = null;
             $user->save();
+
+            // **Les historiques dans la transaction du changement** : l alliance nait sans classe, et son
+            // fondateur y entre.
+            $historique = resolve(ClassHistoryRecorder::class);
+            $historique->allianceClass((int)$alliance->id, null, ClassHistoryRecorder::CAUSE_ALLIANCE_CREATION);
+            $historique->membership($userId, (int)$alliance->id, ClassHistoryRecorder::CAUSE_JOIN);
 
             DB::commit();
 
@@ -291,6 +298,8 @@ class AllianceService
             $applicant->alliance_cooldown_until = null;
             $applicant->save();
 
+            resolve(ClassHistoryRecorder::class)->membership((int)$application->user_id, (int)$application->alliance_id, ClassHistoryRecorder::CAUSE_JOIN);
+
             DB::commit();
         } catch (Exception $e) {
             DB::rollBack();
@@ -363,6 +372,8 @@ class AllianceService
             $user->alliance_cooldown_until = $this->cooldownDeadline();
             $user->save();
 
+            resolve(ClassHistoryRecorder::class)->membership($memberUserId, null, ClassHistoryRecorder::CAUSE_KICK);
+
             DB::commit();
         } catch (Exception $e) {
             DB::rollBack();
@@ -405,6 +416,8 @@ class AllianceService
             $user->alliance_left_at = now();
             $user->alliance_cooldown_until = $this->cooldownDeadline();
             $user->save();
+
+            resolve(ClassHistoryRecorder::class)->membership($userId, null, ClassHistoryRecorder::CAUSE_LEAVE);
 
             DB::commit();
         } catch (Exception $e) {
@@ -786,6 +799,8 @@ class AllianceService
                     $user->alliance_left_at = now();
                     $user->alliance_cooldown_until = $this->cooldownDeadline();
                     $user->save();
+
+                    resolve(ClassHistoryRecorder::class)->membership((int)$user->id, null, ClassHistoryRecorder::CAUSE_DISBAND);
                 }
             }
 

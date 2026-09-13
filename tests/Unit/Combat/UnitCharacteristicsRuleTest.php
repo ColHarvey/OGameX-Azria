@@ -82,4 +82,27 @@ class UnitCharacteristicsRuleTest extends TestCase
             }
         }
     }
+
+    /**
+     * **Un combat ouvert a la ligne de base des historiques de classe, ou avant, garde la premiere regle.**
+     *
+     * Avant elle, personne ne sait ce qu un compte etait : le gel a l admission lirait un historique qui
+     * n existe pas. L egalite compte pour « avant » — la ligne de base dit l etat **a** cet instant, et
+     * rien de ce qui le precede.
+     */
+    public function testACombatOpenedAtOrBeforeTheHistoryBaselineKeepsTheFirstRule(): void
+    {
+        $this->assertSame(UnitCharacteristicsRule::FirstRule, UnitCharacteristicsRule::forOpeningAt(999, 1_000));
+        $this->assertSame(UnitCharacteristicsRule::FirstRule, UnitCharacteristicsRule::forOpeningAt(1_000, 1_000));
+        $this->assertSame(UnitCharacteristicsRule::FrozenAtEntry, UnitCharacteristicsRule::forOpeningAt(1_001, 1_000));
+    }
+
+    /**
+     * **Sans ligne de base, tout combat gele a l admission** : la migration n a trouve aucun compte, donc
+     * chacun est ne apres elle, avec sa ligne de creation.
+     */
+    public function testWithoutAnyBaselineEveryCombatFreezesAtEntry(): void
+    {
+        $this->assertSame(UnitCharacteristicsRule::FrozenAtEntry, UnitCharacteristicsRule::forOpeningAt(1, null));
+    }
 }

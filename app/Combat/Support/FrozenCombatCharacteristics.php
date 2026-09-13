@@ -2,9 +2,6 @@
 
 namespace OGame\Combat\Support;
 
-use OGame\Combat\Services\PhotographedDefender;
-use OGame\Services\PlayerService;
-
 /**
  * Ce qu un participant apporte a ses tirs : trois niveaux de recherche et le bonus de ses classes.
  *
@@ -15,10 +12,13 @@ use OGame\Services\PlayerService;
  * reste de ce que le moteur lit sur un joueur — capacite de fret, classe pour la manoeuvre de Hamill,
  * duree de retour — a sa propre photographie a la cloture, et n appartient pas a cette decision.
  *
- * ## Le bonus est porte tel qu il vaut
+ * ## Aucune lecture du compte vivant ici
  *
- * La somme des deux classes, prise a l entree. La relire a la cloture ferait dependre des tirs d une
- * classe achetee ou d une alliance quittee apres l arrivee de la flotte.
+ * Une premiere version offrait « ce que le compte porte maintenant ». Elle n est plus : les niveaux et le
+ * bonus d un participant — une flotte, ou la garnison du corps vise — sont ceux de **son instant
+ * d admission**, que seul le registre sait etablir, par l historique des files de recherche et celui des
+ * classes. Un raccourci vers le compte vivant, ou vers la photographie du defenseur prise au traitement
+ * de l ouverture, reintroduirait precisement ce que le gel ferme.
  */
 final readonly class FrozenCombatCharacteristics
 {
@@ -28,28 +28,6 @@ final readonly class FrozenCombatCharacteristics
         public int $armorLevel,
         public int $classCombatBonus,
     ) {
-    }
-
-    /**
-     * Ce que le compte porte **maintenant**. Le registre le ramene ensuite a l instant d admission : le
-     * compte peut deja porter une recherche achevee apres lui.
-     */
-    public static function ofLivePlayer(PlayerService $player): self
-    {
-        return new self(
-            $player->getResearchLevel('weapon_technology'),
-            $player->getResearchLevel('shielding_technology'),
-            $player->getResearchLevel('armor_technology'),
-            $player->getCombatResearchBonusLevels(),
-        );
-    }
-
-    /**
-     * Ce que la garnison apporte : la photographie d ouverture, relevee par les seuls effets admissibles.
-     */
-    public static function ofPhotographedDefender(PhotographedDefender $defender): self
-    {
-        return new self($defender->weaponLevel, $defender->shieldLevel, $defender->armorLevel, $defender->classCombatBonus);
     }
 
     /**

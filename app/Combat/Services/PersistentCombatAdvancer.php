@@ -4,6 +4,7 @@ namespace OGame\Combat\Services;
 
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Exceptions\UnknownAdmissionHistory;
 use OGame\GameMissions\AttackMission;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
@@ -68,9 +69,15 @@ final class PersistentCombatAdvancer
 
         foreach ($this->ralliesDue($now) as $id) {
             try {
-                if ($this->closure->close($id, $now)->closed) {
+                $issue = $this->closure->close($id, $now);
+
+                if ($issue->closed) {
                     $fermes++;
                     $this->recordRecovery($id);
+                } elseif ($issue->suspended) {
+                    // **Une fermeture suspendue est un echec compte**, pas une course : sans cela, une
+                    // anomalie d historique repasserait chaque minute sans jamais etre mise de cote.
+                    $echecs[$id] = $this->recordFailure($id, new UnknownAdmissionHistory($issue->reason));
                 }
             } catch (Throwable $panne) {
                 $echecs[$id] = $this->recordFailure($id, $panne);

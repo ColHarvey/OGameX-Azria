@@ -10,11 +10,47 @@ use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
+use OGame\History\ClassHistoryBaseline;
 use OGame\Models\Planet\Coordinate;
 use OGame\Services\SettingsService;
 
 abstract class TestCase extends BaseTestCase
 {
+    /**
+     * L instant ou le banc tient que les historiques de classe ont recu leur ligne de base.
+     *
+     * Le 1er janvier 2000 : avant l horloge du banc, et avant tout instant qu un essai emploie.
+     */
+    protected const int CLASS_HISTORY_BASELINE_OF_THE_BENCH = 946_684_800;
+
+    /**
+     * **La ligne de base des historiques de classe est datee avant le monde du banc, pour chaque essai.**
+     *
+     * La migration des historiques inscrit l etat present de chaque compte existant, date de l instant ou
+     * elle tourne. La base des essais en porte un — Legor, insere par `add_roles` — et la migration tourne
+     * a l heure reelle, bien apres les instants que les essais emploient. Laissee la, elle placerait tout
+     * combat du banc **avant** la ligne de base, donc sous la premiere regle
+     * (`UnitCharacteristicsRule::forOpeningAt()`), et les essais du gel a l admission mesureraient autre
+     * chose que ce qu ils croient.
+     *
+     * **Ici, et pas dans `AccountTestCase` seul.** La base d un processus survit a chaque classe : posee
+     * plus haut, la correction ne s appliquait qu apres le premier essai qui descend de cette classe-la, et
+     * la regle d un combat dependait alors de l ordre des classes dans le processus. Elle est refaite a
+     * chaque montage : un essai qui repousse la ligne de base pour eprouver la premiere regle ne la laisse
+     * pas derriere lui.
+     */
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        foreach (['character_class_history', 'alliance_membership_history', 'alliance_class_history'] as $table) {
+            DB::table($table)
+                ->where('cause', ClassHistoryBaseline::CAUSE)
+                ->where('changed_at', '>', self::CLASS_HISTORY_BASELINE_OF_THE_BENCH)
+                ->update(['changed_at' => self::CLASS_HISTORY_BASELINE_OF_THE_BENCH]);
+        }
+    }
+
     /**
      * Creates the application.
      *

@@ -50,6 +50,7 @@ use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
 use Tests\FleetDispatchTestCase;
+use Tests\RecordsClassHistory;
 
 /**
  * Une Defense ACS ne stationne jamais hors photographie, et une engagee ne part pas avant le combat.
@@ -67,6 +68,8 @@ use Tests\FleetDispatchTestCase;
  */
 class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
 {
+    use RecordsClassHistory;
+
     protected int $missionType = 1;
 
     protected string $missionName = 'Attaquer';
@@ -567,7 +570,7 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
         }
 
         // Le proprietaire combat sans classe : la proportion gelee ne doit rien a un bonus.
-        DB::table('users')->where('id', $renfort->user_id)->update(['character_class' => null]);
+        $this->recordCharacterClass((int)$renfort->user_id, null);
 
         // **Des transporteurs fragiles et des cuirasses intacts** : les chasseurs percent les
         // premiers et rebondissent sur les seconds, et c'est ce qui rend la classe decisive.
@@ -616,7 +619,7 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
         $this->assertSame($capaciteRestanteALaCloture, $issue->survivingCargoCapacity, 'The closure did not freeze the surviving capacity it fought with.');
 
         // **Le geste du joueur**, apres la bataille et avant l'echeance.
-        DB::table('users')->where('id', $renfort->user_id)->update(['character_class' => CharacterClass::COLLECTOR->value]);
+        $this->recordCharacterClass((int)$renfort->user_id, CharacterClass::COLLECTOR);
 
         $collecteur = resolve(PlayerServiceFactory::class)->make((int)$renfort->user_id, true);
         $partRelue = $issue->unitsResult->getTotalCargoCapacity($collecteur) / $issue->unitsStart->getTotalCargoCapacity($collecteur);

@@ -3,6 +3,7 @@
 namespace Tests\Support;
 
 use Illuminate\Support\Facades\DB;
+use OGame\History\ClassHistoryRecorder;
 
 /**
  * Detache des joueurs de toute alliance heritee d un voisin, avant d en fonder une.
@@ -48,10 +49,21 @@ trait DetachesFromAnyAlliance
 
         // L echeance de depart aussi : elle dure desormais sept jours, et un joueur qu une voisine
         // a fait sortir d une alliance serait retenu par elle.
-        DB::table('users')->whereIn('id', $joueurs)->update([
-            'alliance_id' => null,
-            'alliance_left_at' => null,
-            'alliance_cooldown_until' => null,
-        ]);
+        // **Le depart et sa ligne d historique, ensemble**, comme le jeu les ecrit. Un compte detache sans
+        // sa ligne ferait suspendre le prochain combat durable ou il entre : `ClassHistoryReader` verrait
+        // un historique qui finit sur une alliance que la colonne ne porte plus.
+        DB::transaction(static function () use ($joueurs): void {
+            $partants = DB::table('users')->whereIn('id', $joueurs)->whereNotNull('alliance_id')->pluck('id');
+
+            DB::table('users')->whereIn('id', $joueurs)->update([
+                'alliance_id' => null,
+                'alliance_left_at' => null,
+                'alliance_cooldown_until' => null,
+            ]);
+
+            foreach ($partants as $partant) {
+                resolve(ClassHistoryRecorder::class)->membership((int)$partant, null, ClassHistoryRecorder::CAUSE_LEAVE);
+            }
+        });
     }
 }

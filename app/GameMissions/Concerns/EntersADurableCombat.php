@@ -5,10 +5,12 @@ namespace OGame\GameMissions\Concerns;
 use Closure;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use OGame\Alliance\AllianceOffensiveGuard;
 use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Exceptions\UnknownAdmissionHistory;
 use OGame\Combat\Services\CombatEntryCharacteristicsRegistry;
 use OGame\Combat\Services\CombatOpeningService;
 use OGame\Combat\Services\RefusedFleetHomecoming;
@@ -77,7 +79,18 @@ trait EntersADurableCombat
             // 12 septembre 2026) : une recherche achevee ou une classe achetee pendant le ralliement ne
             // change plus la bataille. Deja inscrite — un rejeu, une vague deja vue —, rien ne se
             // reecrit.
-            resolve(CombatEntryCharacteristicsRegistry::class)->recordAtEntry($combat, (int)$mission->id, (int)$mission->user_id, (int)$mission->time_arrival);
+            //
+            // **Une anomalie d historique ne ferme pas les pages du joueur.** Elle est journalisee et rien
+            // ne s ecrit : la cloture refera la lecture, trouvera la meme anomalie et se suspendra.
+            try {
+                resolve(CombatEntryCharacteristicsRegistry::class)->recordAtArrival($combat, (int)$mission->id, (int)$mission->user_id, (int)$mission->time_arrival);
+            } catch (UnknownAdmissionHistory $anomalie) {
+                Log::critical('Gel a l admission impossible : historique de classe inconnu.', [
+                    'combat' => $combat->id,
+                    'fleet_mission_id' => $mission->id,
+                    'raison' => $anomalie->getMessage(),
+                ]);
+            }
 
             return;
         }

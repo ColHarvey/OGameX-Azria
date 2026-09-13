@@ -3,6 +3,7 @@
 namespace OGame\Actions\Fortify;
 
 use Exception;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -174,12 +175,14 @@ class CreateNewUser implements CreatesNewUsers
         // Le try/catch ne couvre plus que la course entre la validation et l'insertion.
         try {
             /** @var User $user */
-            $user = User::create([
+            // **L insertion et l etat initial de ses historiques de classe, dans une meme transaction** :
+            // l observateur du modele les ecrit au moment de l insertion.
+            $user = DB::transaction(static fn (): User => User::create([
                 'lang' => config('app.locale', 'en'),
                 'username' => $input['username'],
                 'email' => $input['email'],
                 'password' => Hash::make($input['password']),
-            ]);
+            ]));
         } catch (Exception $e) {
             if ($e->getCode() === 23000) {
                 throw ValidationException::withMessages([

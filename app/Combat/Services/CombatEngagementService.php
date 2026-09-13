@@ -19,6 +19,7 @@ use OGame\Combat\MoonDestruction\MoonDestructionRuleRegistry;
 use OGame\Combat\Presentation\CombatPresentationTimelineWriter;
 use OGame\Combat\Replay\BattleResultCodec;
 use OGame\Combat\Replay\CombatResultIdentity;
+use OGame\Combat\Support\CombatantFrozenAtEntry;
 use OGame\Combat\Support\FrozenCombatVersionSet;
 use OGame\Combat\Support\LootContextForMission;
 use OGame\Factories\GameMissionFactory;
@@ -122,7 +123,8 @@ final class CombatEngagementService
 
         // **L effectif tel que la bataille le compose** : chaque joueur avec ce que la regle du combat
         // lui donne pour tirer — gele a son entree, ou sous la premiere regle pour un combat ouvert
-        // avant elle. La garnison tire enfin avec sa photographie, et plus avec le compte vivant.
+        // avant elle. La garnison tire avec sa photographie, et son bonus de classe est celui que
+        // l historique donne a l instant d ouverture — plus rien ne vient du compte vivant.
         $effectif = $this->roster->forTheBattle($combat, $photographedGarrison, $photographedDefender);
 
         // **Aucune attaquante sans mission dans un combat durable.** Son effectif est fait
@@ -159,7 +161,7 @@ final class CombatEngagementService
             $lootContext
         );
         $moteur->setRetreatAfterDefenderRetreat((bool)$effectif->initiator->retreat_after_defender_retreat);
-        $moteur->withPhotographedDefender($photographedDefender);
+        $moteur->withPhotographedDefender($this->defenderAsItFires($effectif, $photographedDefender));
         $moteur->withPhotographedUniverse($photographedUniverse);
 
         $resultat = $moteur->simulateBattle();
@@ -229,6 +231,28 @@ final class CombatEngagementService
         SettlePersistentCombat::dispatch($combat->id)->delay(Date::createFromTimestamp($combat->ends_at));
 
         return new CombatEngagement($estimation->seconds, $startsAt + $estimation->seconds, $estimation->implausible, count($estimation->rounds));
+    }
+
+    /**
+     * Le defenseur tel que le rapport doit l annoncer : **exactement ce que ses tirs emploient**.
+     *
+     * Sous le gel a l admission, la garnison tire avec ce que le registre a inscrit a la barriere
+     * d ouverture. Le moteur, lui, compose le rapport du camp defenseur depuis la photographie du
+     * defenseur : la lui donner telle quelle ferait annoncer « armes 7 » sur des tirs d armes 5 des
+     * qu une classe ou une recherche aurait bouge entre l arrivee de l attaquante et son traitement.
+     *
+     * Le niveau du chantier spatial, lui, reste celui de la photographie : il decide la part d epaves,
+     * pas un tir, et n appartient pas a cette decision. Sous la premiere regle, rien ne change.
+     */
+    private function defenderAsItFires(CombatRoster $effectif, PhotographedDefender $photographie): PhotographedDefender
+    {
+        foreach ($effectif->defenders as $flotte) {
+            if ($flotte->fleetMissionId === 0 && $flotte->player instanceof CombatantFrozenAtEntry) {
+                return $photographie->withCombatCharacteristics($flotte->player->characteristics());
+            }
+        }
+
+        return $photographie;
     }
 
     /**

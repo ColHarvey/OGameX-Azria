@@ -48,6 +48,14 @@ final class CombatantFrozenAtEntry extends PlayerService
     }
 
     /**
+     * Ce que ce combattant apporte a ses tirs — pour que le rapport annonce exactement cela.
+     */
+    public function characteristics(): FrozenCombatCharacteristics
+    {
+        return $this->characteristics;
+    }
+
+    /**
      * Une bataille ne modifie pas le compte qu elle lit.
      */
     public function setResearchLevel(string $machine_name, int $level, bool $save_to_db = true): void

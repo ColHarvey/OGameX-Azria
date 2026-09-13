@@ -2,6 +2,7 @@
 
 namespace Tests\MariaDb;
 
+use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Services\CombatOpeningService;
 use OGame\Models\CelestialBodyCombatBarrier;
@@ -63,8 +64,11 @@ final class DoubleOpeningRaceTest extends TestCase
     public function testTwoArrivalsOnTheSameBodyAtTheSameSecondOpenExactlyOneCombat(): void
     {
         $corps = $this->aBodyOf(User::factory()->create());
-        $premiere = $this->anAttackTowards($corps, 1_700_000_600);
-        $seconde = $this->anAttackTowards($corps, 1_700_000_600);
+        // **L arrivee suit la naissance des comptes**, qui vivent a l heure reelle sur le bac : ouverte
+        // avant eux, la fenetre nulle se fermerait sur un historique de classe qui ne les connait pas.
+        $arrivee = (int)Date::now()->timestamp + 600;
+        $premiere = $this->anAttackTowards($corps, $arrivee);
+        $seconde = $this->anAttackTowards($corps, $arrivee);
         $this->assertSame(0, CelestialBodyCombatBarrier::query()->where('target_body_id', $corps->id)->count(), 'The body already holds a barrier: the scenario would prove nothing.');
 
         $issues = $this->inParallel(2, static function (int $rang) use ($premiere, $seconde, $corps): string {

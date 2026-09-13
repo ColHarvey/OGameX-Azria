@@ -160,7 +160,9 @@ final class CombatRosterReader
      *
      * - **Gel a l entree** : chaque flotte porte un `CombatantFrozenAtEntry` construit depuis ce que le
      *   registre a inscrit a son entree ; la garnison, depuis la photographie d ouverture relevee par les
-     *   seuls effets admissibles. Une ligne manquante est un refus, jamais un repli sur le compte.
+     *   seuls effets admissibles — **sauf son bonus de classe**, qui n en a aucun et se lit dans
+     *   l historique a l instant d ouverture. Une ligne manquante est un refus, jamais un repli sur le
+     *   compte.
      * - **Premiere regle** : chaque joueur, garnison comprise, est un `CombatantUnderTheFirstRule` — les
      *   niveaux vivants, aucun bonus dans les tirs, le bonus au rapport. C est ce que le jeu faisait.
      *
@@ -183,7 +185,7 @@ final class CombatRosterReader
         foreach ($effectif->defenders as $flotte) {
             // La garnison n a pas de mission : c est la flotte d identifiant zero.
             $flotte->player = $flotte->fleetMissionId === 0
-                ? $this->garrisonCombatant($regle, $flotte->ownerId, $photographedDefender)
+                ? $this->garrisonCombatant($combat, $regle, $flotte->ownerId, $photographedDefender)
                 : $this->fleetCombatant($combat, $regle, $flotte->ownerId, $flotte->fleetMissionId);
         }
 
@@ -198,10 +200,24 @@ final class CombatRosterReader
         };
     }
 
-    private function garrisonCombatant(UnitCharacteristicsRule $regle, int $ownerId, PhotographedDefender $photographedDefender): PlayerService
+    /**
+     * La garnison : les niveaux de sa photographie, et le bonus de classe de l instant d ouverture.
+     *
+     * **Les deux sources ne se remplacent pas.** Une recherche du defenseur engagee avant l ouverture et
+     * achevee avant la fermeture appartient au combat et releve la photographie (`ClosureReconciliation`) :
+     * la geler a la barriere lui retirerait ce relevement. Un changement de classe, lui, n est pas un effet
+     * admissible mais une decision, et la photographie le prend a l instant ou un travailleur traite
+     * l ouverture — une classe d alliance choisie entre l arrivee de l attaquante et ce passage y entrerait.
+     */
+    private function garrisonCombatant(CombatInstance $combat, UnitCharacteristicsRule $regle, int $ownerId, PhotographedDefender $photographedDefender): PlayerService
     {
         return match ($regle) {
-            UnitCharacteristicsRule::FrozenAtEntry => new CombatantFrozenAtEntry($ownerId, FrozenCombatCharacteristics::ofPhotographedDefender($photographedDefender)),
+            UnitCharacteristicsRule::FrozenAtEntry => new CombatantFrozenAtEntry($ownerId, new FrozenCombatCharacteristics(
+                $photographedDefender->weaponLevel,
+                $photographedDefender->shieldLevel,
+                $photographedDefender->armorLevel,
+                $this->entries()->garrisonClassBonusAt($combat, $ownerId, (int)$combat->started_at),
+            )),
             UnitCharacteristicsRule::FirstRule => new CombatantUnderTheFirstRule($ownerId),
         };
     }

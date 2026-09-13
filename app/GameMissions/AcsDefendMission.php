@@ -2,8 +2,10 @@
 
 namespace OGame\GameMissions;
 
+use Illuminate\Support\Facades\Log;
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Exceptions\UnknownAdmissionHistory;
 use OGame\Combat\Services\CombatEntryCharacteristicsRegistry;
 use OGame\Combat\Services\EngagedFleetCheck;
 use OGame\Combat\Services\FleetMovementGate;
@@ -206,7 +208,16 @@ class AcsDefendMission extends GameMission
 
         // **Retenue a son arrivee, elle y gele ce qu elle apporte a ses tirs** : le meme instant que
         // le lien, et la meme porte.
-        resolve(CombatEntryCharacteristicsRegistry::class)->recordAtEntry($combat, (int)$mission->id, (int)$mission->user_id, ReturnOrder::physicalArrivalOf($mission));
+        // Une anomalie d historique est journalisee sans lever : la cloture la retrouvera et se suspendra.
+        try {
+            resolve(CombatEntryCharacteristicsRegistry::class)->recordAtArrival($combat, (int)$mission->id, (int)$mission->user_id, ReturnOrder::physicalArrivalOf($mission));
+        } catch (UnknownAdmissionHistory $anomalie) {
+            Log::critical('Gel a l admission impossible : historique de classe inconnu.', [
+                'combat' => $combat->id,
+                'fleet_mission_id' => $mission->id,
+                'raison' => $anomalie->getMessage(),
+            ]);
+        }
     }
 
     /**

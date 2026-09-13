@@ -10,18 +10,24 @@ use OGame\Models\CombatInstance;
  *
  * ## Les deux regles
  *
- * - **Premiere regle** (`v1`) : les combats ouverts avant la decision de Keven du 12 septembre 2026. Les
- *   tirs lisent les niveaux de recherche **vivants** a la cloture, et le bonus de classe ne porte que sur
- *   le niveau rapporte. C est exactement ce que le jeu faisait ; un combat engage sous elle la garde.
- * - **Gel a l entree** (`v2`) : chaque flotte tire avec les niveaux et le bonus de classe **qu elle
- *   avait en entrant** dans le combat ; la garnison, avec ceux de la photographie d ouverture. Le bonus
- *   arme les tirs.
+ * - **Premiere regle** (`v1`) : les tirs lisent les niveaux de recherche **vivants** a la cloture, et le bonus
+ *   de classe ne porte que sur le niveau rapporte. C est ce que le jeu faisait avant les decisions de Keven
+ *   des 12 et 13 septembre 2026, et un combat engage sous elle la garde.
+ * - **Gel a l admission** (`v2`) : chaque flotte tire avec les niveaux et le bonus de ses classes **de son
+ *   instant d admission** ; la garnison, avec ceux de la photographie d ouverture.
+ *
+ * ## Quelle regle a l ouverture
+ *
+ * Le gel lit l historique des classes, qui commence a sa ligne de base. Un combat ouvert **a cet instant
+ * ou avant** — une flotte arrivee pendant la maintenance du deploiement, traitee apres — garde donc la
+ * premiere regle, explicitement : on n invente pas l historique qui manque. Toute admission d un combat
+ * tombe au plus tot a son ouverture, si bien que ce seul choix couvre toutes ses flottes.
  *
  * ## Une porte de relecture
  *
  * `fromInstance()` refuse une colonne vide, un nom inconnu ou une valeur qui n est pas une chaine. Une
- * regle interpretee par defaut ferait jouer a un combat une bataille sous des regles que personne ne
- * lui a donnees.
+ * regle interpretee par defaut ferait jouer a un combat une bataille sous des regles que personne ne lui a
+ * donnees.
  */
 enum UnitCharacteristicsRule: string
 {
@@ -30,11 +36,27 @@ enum UnitCharacteristicsRule: string
     case FrozenAtEntry = 'v2';
 
     /**
-     * La regle sous laquelle un combat s ouvre aujourd hui.
+     * La regle la plus recente.
      */
     public static function current(): self
     {
         return self::FrozenAtEntry;
+    }
+
+    /**
+     * La regle d un combat qui s ouvre a cet instant.
+     *
+     * @param int|null $historyBaselineAt L instant de la ligne de base des historiques de classe, ou `null`
+     *                                    si la migration n a trouve aucun compte (tout compte est alors ne
+     *                                    apres elle, avec sa ligne de creation).
+     */
+    public static function forOpeningAt(int $openedAt, int|null $historyBaselineAt): self
+    {
+        if ($historyBaselineAt !== null && $openedAt <= $historyBaselineAt) {
+            return self::FirstRule;
+        }
+
+        return self::current();
     }
 
     /**

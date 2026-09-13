@@ -61,6 +61,23 @@ trait OpensARallyWithAWindow
      */
     protected function anOpenRally(int $defences = self::RALLY_DEFENCES, array $moreUnits = []): array
     {
+        [$ouvreuse, $cible, $ouverture] = $this->aRallyAboutToOpen($defences, $moreUnits);
+
+        return [$this->theOpeningProcessedAt($ouvreuse, $ouverture), $cible, $ouverture];
+    }
+
+    /**
+     * Le monde juste avant l ouverture : l ouvreuse est arrivee, **et personne ne l a encore traitee**.
+     *
+     * Un essai qui veut voir ce qu un traitement tardif changerait — une classe posee entre l arrivee et le
+     * passage du travailleur — s arrete ici, agit, puis appelle `theOpeningProcessedAt()`.
+     *
+     * @param int $defences Lance-missiles poses sur la cible avant que le combat ne s'ouvre.
+     * @param array<string, int> $moreUnits D'autres unites posees de meme, par nom de machine.
+     * @return array{0: FleetMission, 1: int, 2: int} L'ouvreuse, la planete visee, l'instant d'ouverture.
+     */
+    protected function aRallyAboutToOpen(int $defences = self::RALLY_DEFENCES, array $moreUnits = []): array
+    {
         for ($i = 0; $i < 6; $i++) {
             $this->createAndLoginUser();
         }
@@ -92,14 +109,26 @@ trait OpensARallyWithAWindow
         ] + $moreUnits);
 
         resolve(SettingsService::class)->set('persistent_combat_enabled', '1');
-        $this->travelTo(Date::createFromTimestamp($ouverture));
+
+        return [$ouvreuse, $cible->getPlanetId(), $ouverture];
+    }
+
+    /**
+     * Le travailleur passe a cet instant, et c est la page du jeu qui ouvre le combat.
+     *
+     * **L instant d ouverture reste l arrivee de l ouvreuse**, meme si le passage est tardif : c est ce que
+     * le combat porte, et ce que le gel a l admission lit.
+     */
+    protected function theOpeningProcessedAt(FleetMission $ouvreuse, int $instant): CombatInstance
+    {
+        $this->travelTo(Date::createFromTimestamp($instant));
         $this->get('/overview')->assertStatus(200);
 
         $combat = CombatInstance::query()->where('mission_id', $ouvreuse->id)->first();
         $this->assertNotNull($combat, 'The arrival did not open a combat.');
         $this->assertSame(CombatState::Rallying, $combat->status, 'The rally closed at once: the second wave did not hold the window open.');
 
-        return [$combat, $cible->getPlanetId(), $ouverture];
+        return $combat;
     }
 
     /**

@@ -5,10 +5,12 @@ namespace OGame\Http\Controllers\Admin;
 use Exception;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
 use OGame\Facades\AppUtil;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\GameConstants\UniverseConstants;
+use OGame\History\ClassHistoryRecorder;
 use OGame\Http\Controllers\OGameController;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
@@ -62,10 +64,15 @@ class DeveloperShortcutsController extends OGameController
         } elseif ($request->has('reset_character_class')) {
             // Reset character class
             $user = $playerService->getUser();
-            $user->character_class = null;
-            $user->character_class_free_used = false;
-            $user->character_class_changed_at = null;
-            $user->save();
+            // La remise a zero est un changement comme un autre : sa ligne d historique part avec elle.
+            DB::transaction(static function () use ($user): void {
+                $user->character_class = null;
+                $user->character_class_free_used = false;
+                $user->character_class_changed_at = null;
+                $user->save();
+
+                resolve(ClassHistoryRecorder::class)->personalClass((int)$user->id, null, ClassHistoryRecorder::CAUSE_ADMIN_RESET);
+            });
             return redirect()->back()->with('success', 'Character class has been reset. You can now select a class for free.');
         } elseif ($request->has('set_mines')) {
             // Handle "Set all mines to level 30"

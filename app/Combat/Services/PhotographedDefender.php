@@ -2,6 +2,7 @@
 
 namespace OGame\Combat\Services;
 
+use OGame\Combat\Support\FrozenCombatCharacteristics;
 use OGame\Combat\Support\FrozenFact;
 
 /**
@@ -86,5 +87,17 @@ final readonly class PhotographedDefender
     public function withSpaceDockLevel(int $level): self
     {
         return new self($this->weaponLevel, $this->shieldLevel, $this->armorLevel, $this->classCombatBonus, max($this->spaceDockLevel, $level));
+    }
+
+    /**
+     * Le meme defenseur, avec les quatre nombres qui arment ses tirs pris ailleurs.
+     *
+     * Sous le gel a l admission, ce sont ceux que le registre a inscrits a la barriere d ouverture, et le
+     * rapport doit annoncer ceux-la. Le niveau du chantier spatial reste celui de la photographie : il ne
+     * fixe aucun tir.
+     */
+    public function withCombatCharacteristics(FrozenCombatCharacteristics $faits): self
+    {
+        return new self($faits->weaponLevel, $faits->shieldLevel, $faits->armorLevel, $faits->classCombatBonus, $this->spaceDockLevel);
     }
 }

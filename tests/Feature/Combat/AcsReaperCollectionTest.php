@@ -14,6 +14,7 @@ use OGame\Models\Resources;
 use OGame\Models\User;
 use OGame\Services\SettingsService;
 use Tests\FleetDispatchTestCase;
+use Tests\RecordsClassHistory;
 
 /**
  * En attaque groupee, la collecte des Faucheurs entre dans un retour, ou reste dans le champ.
@@ -34,6 +35,8 @@ use Tests\FleetDispatchTestCase;
  */
 final class AcsReaperCollectionTest extends FleetDispatchTestCase
 {
+    use RecordsClassHistory;
+
     use OpensAPersistentAcsBattle {
         createAcsAllyPlayer as createAcsAllyPlayerBase;
         createAcsTargetPlayer as createAcsTargetPlayerBase;
@@ -137,7 +140,7 @@ final class AcsReaperCollectionTest extends FleetDispatchTestCase
     protected function createAcsAllyPlayer(): User
     {
         $allie = $this->createAcsAllyPlayerBase();
-        DB::table('users')->where('id', $allie->id)->update(['character_class' => CharacterClass::GENERAL->value]);
+        $this->recordCharacterClass((int)$allie->id, CharacterClass::GENERAL);
 
         return $allie;
     }

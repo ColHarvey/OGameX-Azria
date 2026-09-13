@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use LogicException;
 use OGame\Combat\Allocation\CappedLoot;
@@ -76,6 +77,12 @@ class RallyClosureServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // **Le monde du banc precede le combat qu il fabrique.** Les comptes de ce montage naissent a
+        // l horloge du jeu : a l heure reelle, ils naitraient bien apres l ouverture ecrite ici, et le gel a
+        // l admission ne trouverait aucune classe a cet instant-la. Un combat ne s ouvre pas avant que ses
+        // joueurs existent.
+        $this->travelTo(Date::createFromTimestamp(self::OPENING - 3_600));
 
         $this->ouverture = new CombatOpeningService();
         $this->fermeture = new RallyClosureService();

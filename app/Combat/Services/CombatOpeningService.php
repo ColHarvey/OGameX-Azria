@@ -4,6 +4,7 @@ namespace OGame\Combat\Services;
 
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use OGame\Combat\Admission\AdmissionBudget;
 use OGame\Combat\Admission\AdmissionCeiling;
 use OGame\Combat\Admission\AttackAdmissionSelector;
@@ -17,6 +18,7 @@ use OGame\Combat\Causality\CausalEventOrderRegistry;
 use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Enums\UnitCharacteristicsRule;
+use OGame\Combat\Exceptions\UnknownAdmissionHistory;
 use OGame\Combat\MoonDestruction\MoonDestructionRuleRegistry;
 use OGame\Combat\Policies\LootPolicyRegistry;
 use OGame\Combat\Projection\SnapshotProjectionRegistry;
@@ -25,6 +27,7 @@ use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\CombatRallyWindow;
 use OGame\Combat\Support\FrozenCombatVersionSet;
 use OGame\Combat\Support\SnapshotFingerprint;
+use OGame\History\ClassHistoryReader;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
 use OGame\Models\FleetMission;
@@ -207,10 +210,10 @@ final class CombatOpeningService
             // sous une constante de classe : c'etait un second mecanisme de gel pour un besoin
             // que le premier couvrait deja.
             'projection_version' => $versions->projection,
-            // **La regle qui composera les unites a la cloture**, ecrite avec le combat. Un combat
-            // ouvert aujourd hui gele ce que chaque flotte apporte a ses tirs a son entree ; un combat
-            // ouvert avant le 12 septembre 2026 garde la premiere regle (migration).
-            'unit_characteristics_version' => UnitCharacteristicsRule::current()->value,
+            // **La regle qui composera les unites a la cloture**, ecrite avec le combat. Un combat ouvert
+            // apres la ligne de base des historiques de classe gele chaque flotte a son admission ; un
+            // combat ouvert a cet instant ou avant garde la premiere regle, sans historique invente.
+            'unit_characteristics_version' => UnitCharacteristicsRule::forOpeningAt($openedAt, resolve(ClassHistoryReader::class)->baselineInstant())->value,
             'frozen_alliance_membership' => $appartenances->toStorage(),
             ...$this->frozenColumns($faits),
             // L'empreinte porte les versions **et** les faits : deux combats sous deux regles
@@ -357,7 +360,17 @@ final class CombatOpeningService
             $lien = FleetMission::query()->whereKey($candidate->missionId)->value('combat_instance_id');
 
             if (is_numeric($lien) && (int)$lien === (int)$combat->id) {
-                resolve(CombatEntryCharacteristicsRegistry::class)->recordAtEntry($combat, $candidate->missionId, $candidate->userId, $openedAt);
+                // Une anomalie d historique est journalisee sans lever : l ouverture vit dans le traitement
+                // d une page, et la cloture la retrouvera pour se suspendre.
+                try {
+                    resolve(CombatEntryCharacteristicsRegistry::class)->recordAtOpening($combat, $candidate->missionId, $candidate->userId, $openedAt);
+                } catch (UnknownAdmissionHistory $anomalie) {
+                    Log::critical('Gel a l admission impossible : historique de classe inconnu.', [
+                        'combat' => $combat->id,
+                        'fleet_mission_id' => $candidate->missionId,
+                        'raison' => $anomalie->getMessage(),
+                    ]);
+                }
             }
         }
     }

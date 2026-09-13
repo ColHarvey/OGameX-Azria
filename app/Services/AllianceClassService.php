@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use OGame\Enums\AllianceClass;
 use OGame\Enums\DarkMatterTransactionType;
+use OGame\History\ClassHistoryRecorder;
 use OGame\Models\Alliance;
 use OGame\Models\AllianceRank;
 use OGame\Models\User;
@@ -187,7 +188,26 @@ class AllianceClassService
      */
     public function getAdditionalCombatResearchLevels(User $user): int
     {
-        return $this->isWarriors($user) ? 1 : 0;
+        return $this->combatResearchLevelsOfClass($this->classOf($user));
+    }
+
+    /**
+     * Les niveaux de combat qu une classe d alliance donne, sans lire aucune alliance.
+     *
+     * **La source unique du nombre** : le joueur vivant la lit par la classe actuelle de son alliance, le gel
+     * a l admission par la classe que l historique donne a cet instant.
+     */
+    public function combatResearchLevelsOfClass(AllianceClass|null $classe): int
+    {
+        return $classe === AllianceClass::WARRIORS ? 1 : 0;
+    }
+
+    /**
+     * La classe que designe un nom stocke — dans la colonne ou dans son historique —, ou aucune.
+     */
+    public function classFromStoredName(mixed $nom): AllianceClass|null
+    {
+        return $this->fromStoredName($nom);
     }
 
     /**
@@ -364,6 +384,9 @@ class AllianceClassService
                 'alliance_class_selected_at' => (int)Date::now()->timestamp,
                 'updated_at' => Date::now(),
             ]);
+
+            // La classe et sa ligne d historique, dans la transaction qui tient l alliance.
+            resolve(ClassHistoryRecorder::class)->allianceClass((int)$verrouillee->id, $classe->name, ClassHistoryRecorder::CAUSE_CHOICE);
         });
 
         // Ce que le cache de cette requete croyait savoir n'est plus vrai.

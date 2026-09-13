@@ -51,6 +51,7 @@ use ReflectionClass;
 use RuntimeException;
 use SplFileInfo;
 use Tests\FleetDispatchTestCase;
+use Tests\RecordsClassHistory;
 use Throwable;
 
 /**
@@ -79,6 +80,8 @@ use Throwable;
  */
 class CombatSettlementServiceTest extends FleetDispatchTestCase
 {
+    use RecordsClassHistory;
+
     /**
      * La graine des batailles de ce banc.
      *
@@ -1009,7 +1012,7 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
     public function testAClassGivenUpAfterTheClosureDoesNotShrinkTheReturn(): void
     {
         [$combat, $missions, ] = $this->anEngagedCombat(avantEnvoi: function (): void {
-            DB::table('users')->where('id', $this->currentUserId)->update(['character_class' => CharacterClass::COLLECTOR->value]);
+            $this->recordCharacterClass($this->currentUserId, CharacterClass::COLLECTOR);
         });
 
         $resultat = BattleResultCodec::fromStorage($combat->battle_result);
@@ -1033,7 +1036,7 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
         $this->assertLessThanOrEqual($capaciteALaCloture, $aRapporter, 'The frozen capacity does not even hold what the fleet earned.');
 
         // **Le geste du joueur**, apres la bataille et avant l'echeance.
-        DB::table('users')->where('id', $this->currentUserId)->update(['character_class' => null]);
+        $this->recordCharacterClass($this->currentUserId, null);
 
         $ordinaire = resolve(PlayerServiceFactory::class)->make($this->currentUserId, true);
         $capaciteRelue = $resultat->attackerUnitsResult->getTotalCargoCapacity($ordinaire);
@@ -1070,7 +1073,7 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
         [$combat, $missions, ] = $this->anEngagedCombat(
             2,
             avantEnvoi: function (): void {
-                DB::table('users')->where('id', $this->currentUserId)->update(['character_class' => CharacterClass::COLLECTOR->value]);
+                $this->recordCharacterClass($this->currentUserId, CharacterClass::COLLECTOR);
             },
             stock: ['metal' => 1_500_000, 'crystal' => 900_000, 'deuterium' => 300_000],
         );
@@ -1089,7 +1092,7 @@ class CombatSettlementServiceTest extends FleetDispatchTestCase
         }
 
         // **Le geste du joueur**, apres la bataille et avant l'echeance.
-        DB::table('users')->where('id', $this->currentUserId)->update(['character_class' => null]);
+        $this->recordCharacterClass($this->currentUserId, null);
         $ordinaire = resolve(PlayerServiceFactory::class)->make($this->currentUserId, true);
 
         // Le solde de la cible n'a pas bouge : chaque part appliquee est la part gelee, et c'est

@@ -3,7 +3,6 @@
 namespace Tests\Unit\Combat;
 
 use OGame\Combat\Exceptions\CorruptedFrozenMoonPlan;
-use OGame\Combat\Services\PhotographedDefender;
 use OGame\Combat\Support\FrozenCombatCharacteristics;
 use Tests\TestCase;
 
@@ -79,19 +78,5 @@ class FrozenCombatCharacteristicsTest extends TestCase
                 $this->assertStringContainsString($champ, $refus->getMessage());
             }
         }
-    }
-
-    /**
-     * La garnison porte exactement les nombres de sa photographie — sans le chantier spatial, qui ne
-     * fixe aucun tir.
-     */
-    public function testTheGarrisonCarriesItsPhotographNumbersExactly(): void
-    {
-        $faits = FrozenCombatCharacteristics::ofPhotographedDefender(new PhotographedDefender(12, 9, 4, 3, 5));
-
-        $this->assertSame(
-            ['weapon_level' => 12, 'shield_level' => 9, 'armor_level' => 4, 'class_combat_bonus' => 3],
-            $faits->toStorage()
-        );
     }
 }

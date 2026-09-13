@@ -33,6 +33,12 @@ on:
       # L ordre des verrous d alliance (journal §142) : la dissolution et le choix de classe.
       - 'app/Services/AllianceService.php'
       - 'app/Services/AllianceClassService.php'
+      # Les historiques de classe (journal §144) : ils decident de ce qu une flotte apporte a ses
+      # tirs, et la course qui les eprouve vit ici. Sans ces chemins, un changement du lecteur ou
+      # d un de ses ecrivains ne lancerait plus le bac.
+      - 'app/History/**'
+      - 'app/Services/CharacterClassService.php'
+      - 'app/Observers/UserObserver.php'
       - 'tests/Feature/HullRepairTest.php'
       - 'tests/Feature/Patrol*.php'
       - 'tests/MariaDb/**'
@@ -57,6 +63,12 @@ on:
       # L ordre des verrous d alliance (journal §142) : la dissolution et le choix de classe.
       - 'app/Services/AllianceService.php'
       - 'app/Services/AllianceClassService.php'
+      # Les historiques de classe (journal §144) : ils decident de ce qu une flotte apporte a ses
+      # tirs, et la course qui les eprouve vit ici. Sans ces chemins, un changement du lecteur ou
+      # d un de ses ecrivains ne lancerait plus le bac.
+      - 'app/History/**'
+      - 'app/Services/CharacterClassService.php'
+      - 'app/Observers/UserObserver.php'
       - 'tests/Feature/HullRepairTest.php'
       - 'tests/Feature/Patrol*.php'
       - 'tests/MariaDb/**'
@@ -280,13 +292,16 @@ jobs:
       # rend zero essai et un vert vide.
       - name: Lire les quatre compteurs
         if: always()
-        # Le plancher ne dit pas lesquels ont tourne : les courses des classes d alliance sont exigees
-        # par leur nom (journal §143). 168 essais au run 34695884708, plus ces trois-la.
+        # Le plancher ne dit pas lesquels ont tourne : les courses des classes d alliance et celle des
+        # historiques de classe sont exigees par leur nom (journal §143 et §144). 168 essais au run
+        # 34695884708, plus ces cinq-la.
         run: >-
-          php scripts/verifier-junit.php storage/logs/junit-mariadb.xml --minimum=171 --sans-ignores
+          php scripts/verifier-junit.php storage/logs/junit-mariadb.xml --minimum=173 --sans-ignores
           --exige=testTwoFreeFirstChoicesAtOnceGrantOnlyOneFreeClass
           --exige=testDisbandingWaitsOnTheAllianceBeforeLockingAnyAccount
           --exige=testTwoConcurrentDisbandsBothFinishAndLeaveTheAllianceGone
+          --exige=testTheClassAtAnAdmissionIsNeverAMixOfTheColumnAndTheHistory
+          --exige=testTwoSeparateReadsWouldMixWhereTheReaderDoesNot
 
       - name: Publier les journaux
         if: always()

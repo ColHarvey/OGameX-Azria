@@ -4,6 +4,7 @@ namespace Tests\Unit\Combat;
 
 use OGame\Combat\Exceptions\CorruptedFrozenMoonPlan;
 use OGame\Combat\Services\PhotographedDefender;
+use OGame\Combat\Support\FrozenCombatCharacteristics;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -76,6 +77,24 @@ final class PhotographedDefenderFactsTest extends TestCase
         $defenseur = new PhotographedDefender(12, 9, 4, 2, 5);
 
         $this->assertSame($defenseur->toFrozenFacts(), $defenseur->withResearchLevel('computer_technology', 30)->toFrozenFacts());
+    }
+
+    /**
+     * **Les quatre nombres qui arment les tirs peuvent venir d ailleurs ; le chantier spatial, jamais.**
+     *
+     * C est ce que fait la cloture sous le gel a l admission : la garnison tire avec ce que le registre a
+     * inscrit a la barriere d ouverture, et le rapport annonce ces nombres-la.
+     */
+    public function testTheCombatNumbersMayComeFromElsewhereButNotTheSpaceDock(): void
+    {
+        $defenseur = new PhotographedDefender(12, 9, 4, 2, 5);
+
+        $releve = $defenseur->withCombatCharacteristics(new FrozenCombatCharacteristics(3, 1, 7, 0));
+
+        $this->assertSame(
+            ['weapon_level' => 3, 'shield_level' => 1, 'armor_level' => 7, 'class_combat_bonus' => 0, 'space_dock_level' => 5],
+            $releve->toFrozenFacts()
+        );
     }
 
     /**
