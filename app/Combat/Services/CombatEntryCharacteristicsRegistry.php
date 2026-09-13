@@ -12,6 +12,7 @@ use OGame\Combat\Exceptions\UnknownAdmissionHistory;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\EffectOrderKey;
 use OGame\Combat\Support\FrozenCombatCharacteristics;
+use OGame\Combat\Support\FrozenFact;
 use OGame\Enums\CharacterClass;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\History\ClassHistoryReader;
@@ -47,6 +48,15 @@ use OGame\Services\ObjectService;
  * combat en espace libre se resout a l arrivee, sans instance a laquelle rattacher une ligne : il demande
  * ces faits ici au lieu d en recalculer une copie — memes files de recherche, memes historiques de
  * classe, meme ordre de la seconde. Une seconde derivation finirait par diverger de celle-ci.
+ *
+ * ## La classe elle-meme, et pas seulement son bonus
+ *
+ * Chaque ligne porte aussi la **classe de personnage** de l admission (`character_class`, avec le marqueur
+ * `character_class_recorded`) : manoeuvre de Hamill, fret, champ d epaves du General, part de pillage du
+ * Decouvreur et classe du rapport en dependent. Elle se lit au meme instant et par le meme historique que
+ * le bonus (`characterClassAt()`), sinon un combattant porterait le bonus d une classe et l identite d une
+ * autre. Une ligne ecrite avant que le registre porte la classe se reprend depuis l historique a son
+ * `entered_at`, ou se refuse — jamais depuis le compte (`admittedCharacterClassOf()`).
  *
  * ## La garnison n a pas de ligne, et pourquoi
  *
@@ -159,17 +169,34 @@ final class CombatEntryCharacteristicsRegistry
     /**
      * La classe de personnage du joueur **a cet instant** — son identite, pas son bonus.
      *
-     * Une photographie qui gele la classe elle-meme (manoeuvre de Hamill, fret des transporteurs) la prend
-     * ici, au meme instant et par le meme historique que le bonus : sinon elle porterait le bonus d une classe
-     * et l identite d une autre.
+     * Tout ce qui gele la classe elle-meme (manoeuvre de Hamill, fret, champ d epaves du General, part du
+     * Decouvreur, rapport) la prend ici, au meme instant et par le meme historique que le bonus — que
+     * `classBonusAt()` lit par cette meme methode : sinon un combattant porterait le bonus d une classe et
+     * l identite d une autre.
+     *
+     * **Une valeur que le jeu ne connait pas n est pas « aucune classe ».** La rendre nulle inventerait un
+     * joueur sans classe : c est un inconnu, et il se refuse comme tel.
      *
      * @throws UnknownAdmissionHistory
      */
-    public function characterClassAt(int $playerId, int $instant, string $quoi): int|null
+    public function characterClassAt(int $playerId, int $instant, string $quoi): CharacterClass|null
     {
-        $classe = $this->known($this->history()->personalClassAt($playerId, $instant), $quoi);
+        $valeur = $this->known($this->history()->personalClassAt($playerId, $instant), $quoi);
 
-        return is_int($classe) ? $classe : null;
+        if ($valeur === null) {
+            return null;
+        }
+
+        $classe = is_int($valeur) ? CharacterClass::tryFrom($valeur) : null;
+
+        if ($classe === null) {
+            throw new UnknownAdmissionHistory(
+                $quoi . ' ne peut pas etre gelee a son admission : l historique porte la classe '
+                . var_export($valeur, true) . ', que le jeu ne connait pas.'
+            );
+        }
+
+        return $classe;
     }
 
     /**
@@ -177,19 +204,59 @@ final class CombatEntryCharacteristicsRegistry
      */
     public function of(CombatInstance $combat, int $fleetMissionId): FrozenCombatCharacteristics
     {
-        $ligne = CombatEntryCharacteristic::query()
-            ->where('combat_instance_id', $combat->id)
-            ->where('participant_key', CombatParticipantKey::forFleet($fleetMissionId))
-            ->first();
+        return FrozenCombatCharacteristics::fromStorage($this->rowOf($combat, $fleetMissionId)->getAttributes());
+    }
 
-        if (!$ligne instanceof CombatEntryCharacteristic) {
-            throw new MissingEntryCharacteristics(
-                'La flotte ' . $fleetMissionId . ' du combat ' . $combat->id . ' n a pas de caracteristiques '
-                . 'gelees a son entree : ses tirs ne se composent pas depuis le joueur vivant.'
+    /**
+     * La classe de personnage que cette flotte avait **a son admission**.
+     *
+     * ## Une ligne ecrite avec sa classe
+     *
+     * Le marqueur `character_class_recorded` vaut 1 : la classe se relit telle qu elle a ete ecrite, par la
+     * porte des faits geles. Nulle, elle veut dire « aucune classe ».
+     *
+     * ## Une ligne anterieure a l enregistrement de la classe
+     *
+     * Le marqueur vaut 0 : la ligne a ete ecrite avant que le registre porte la classe. **Sa reprise est
+     * l historique a son instant d admission** (`entered_at`) — la lecture meme qui a fixe son bonus, donc une
+     * classe qui ne peut pas le contredire. Si l historique ne sait pas, c est `UnknownAdmissionHistory` : la
+     * cloture se suspend et alerte, l avanceur compte l echec. **Jamais la classe courante du compte** : elle
+     * est precisement ce que le gel ecarte.
+     *
+     * Tout ce qui ne suit pas ces deux formes — un marqueur ni 0 ni 1, une classe posee sans son marqueur, une
+     * valeur que le jeu ne connait pas — est un inconnu, jamais une valeur par defaut.
+     *
+     * @throws UnknownAdmissionHistory
+     */
+    public function admittedCharacterClassOf(CombatInstance $combat, int $fleetMissionId): CharacterClass|null
+    {
+        $faits = $this->rowOf($combat, $fleetMissionId)->getAttributes();
+        $quoi = 'La flotte ' . $fleetMissionId . ' du combat ' . $combat->id;
+        $marqueur = FrozenFact::int($faits, 'character_class_recorded');
+        $ecrite = FrozenFact::intOrNull($faits, 'character_class');
+
+        if ($marqueur === 1) {
+            $classe = $ecrite === null ? null : CharacterClass::tryFrom($ecrite);
+
+            if ($ecrite !== null && $classe === null) {
+                throw new UnknownAdmissionHistory($quoi . ' porte la classe ' . $ecrite . ', que le jeu ne connait pas.');
+            }
+
+            return $classe;
+        }
+
+        if ($marqueur !== 0 || $ecrite !== null) {
+            throw new UnknownAdmissionHistory(
+                $quoi . ' porte un marqueur de classe ' . $marqueur . ' et la classe ' . var_export($ecrite, true)
+                . ' : ni une classe enregistree, ni une ligne anterieure.'
             );
         }
 
-        return FrozenCombatCharacteristics::fromStorage($ligne->getAttributes());
+        return $this->characterClassAt(
+            FrozenFact::int($faits, 'player_id'),
+            FrozenFact::int($faits, 'entered_at'),
+            $quoi . ', ecrite avant l enregistrement de la classe,'
+        );
     }
 
     /**
@@ -203,6 +270,16 @@ final class CombatEntryCharacteristicsRegistry
     public function garrisonClassBonusAt(CombatInstance $combat, int $ownerId, int $openedAt): int
     {
         return $this->classBonusAt('La garnison du combat ' . $combat->id, $ownerId, $openedAt);
+    }
+
+    /**
+     * La classe de personnage de la garnison, **a l instant d ouverture** — le meme instant que son bonus.
+     *
+     * @throws UnknownAdmissionHistory
+     */
+    public function garrisonCharacterClassAt(CombatInstance $combat, int $ownerId, int $openedAt): CharacterClass|null
+    {
+        return $this->characterClassAt($ownerId, $openedAt, 'La garnison du combat ' . $combat->id);
     }
 
     /**
@@ -230,7 +307,12 @@ final class CombatEntryCharacteristicsRegistry
         // **L ordre du combat, relu depuis sa version persistee** : jamais l ordre courant pris au vol.
         $ordre = $this->orders()->forVersion((string)$combat->causal_order_version);
 
-        $faits = $this->characteristicsAt($playerId, $admission($ordre), $ordre, $instant, 'La flotte ' . $fleetMissionId . ' du combat ' . $combat->id);
+        $quoi = 'La flotte ' . $fleetMissionId . ' du combat ' . $combat->id;
+        $faits = $this->characteristicsAt($playerId, $admission($ordre), $ordre, $instant, $quoi);
+
+        // **La classe elle-meme, au meme instant et par le meme historique que son bonus.** Le marqueur dit
+        // qu elle a ete enregistree : nulle, elle veut dire « aucune classe », jamais « inconnue ».
+        $classe = $this->characterClassAt($playerId, $instant, $quoi);
 
         CombatEntryCharacteristic::query()->create([
             'combat_instance_id' => $combat->id,
@@ -238,8 +320,30 @@ final class CombatEntryCharacteristicsRegistry
             'participant_key' => $cle,
             'player_id' => $playerId,
             ...$faits->toStorage(),
+            'character_class' => $classe?->value,
+            'character_class_recorded' => 1,
             'entered_at' => $instant,
         ]);
+    }
+
+    /**
+     * La ligne de cette flotte, ou un refus : ses tirs ne se composent jamais depuis le joueur vivant.
+     */
+    private function rowOf(CombatInstance $combat, int $fleetMissionId): CombatEntryCharacteristic
+    {
+        $ligne = CombatEntryCharacteristic::query()
+            ->where('combat_instance_id', $combat->id)
+            ->where('participant_key', CombatParticipantKey::forFleet($fleetMissionId))
+            ->first();
+
+        if (!$ligne instanceof CombatEntryCharacteristic) {
+            throw new MissingEntryCharacteristics(
+                'La flotte ' . $fleetMissionId . ' du combat ' . $combat->id . ' n a pas de caracteristiques '
+                . 'gelees a son entree : ses tirs ne se composent pas depuis le joueur vivant.'
+            );
+        }
+
+        return $ligne;
     }
 
     /**
@@ -312,9 +416,10 @@ final class CombatEntryCharacteristicsRegistry
     {
         $histoire = $this->history();
 
-        $personnelle = $this->known($histoire->personalClassAt($playerId, $instant), $quoi);
+        // La classe personnelle par la lecture unique de l identite : une valeur que le jeu ne connait pas se
+        // refuse ici comme partout, au lieu de devenir « aucune classe » pour le seul bonus.
         $niveaux = resolve(CharacterClassService::class)->combatResearchLevelsOfClass(
-            is_int($personnelle) ? CharacterClass::tryFrom($personnelle) : null
+            $this->characterClassAt($playerId, $instant, $quoi)
         );
 
         $alliance = $this->known($histoire->membershipAt($playerId, $instant), $quoi);

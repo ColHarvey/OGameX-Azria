@@ -43,6 +43,14 @@ interface CombatApplicationContext
     public function isGeneral(PlayerService $player): bool;
 
     /**
+     * Cette flotte attaquante de ce proprietaire recupere-t-elle un champ d'epaves ?
+     *
+     * Une question par flotte, pas par joueur : deux flottes d'un meme joueur entrees dans un combat
+     * durable avec deux classes differentes ne se decident pas par une seule.
+     */
+    public function isGeneralForFleet(int $fleetMissionId, PlayerService $owner): bool;
+
+    /**
      * La part des debris qu'un Faucheur de ce joueur ramasse automatiquement.
      */
     public function reaperDebrisCollectionPercentage(PlayerService $player): float;

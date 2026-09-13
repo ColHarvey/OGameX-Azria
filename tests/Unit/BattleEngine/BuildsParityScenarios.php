@@ -2,8 +2,11 @@
 
 namespace Tests\Unit\BattleEngine;
 
+use Closure;
 use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Enums\NoLootReason;
+use OGame\Combat\Support\CombatantFrozenAtEntry;
+use OGame\Combat\Support\FrozenCombatCharacteristics;
 use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\Enums\CharacterClass;
 use OGame\Factories\PlanetServiceFactory;
@@ -16,7 +19,9 @@ use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Hull\DamagedHulls;
 use OGame\Models\Planet;
 use OGame\Models\Resources;
+use OGame\Models\User;
 use OGame\Models\UserTech;
+use OGame\Services\CharacterClassService;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
@@ -286,6 +291,78 @@ trait BuildsParityScenarios
                 ['units' => ['light_fighter' => 300, 'cruiser' => 25], 'tech' => $technologies],
             ],
         );
+    }
+
+    /**
+     * **Un General gele a son admission, dont le compte est devenu Collecteur.**
+     *
+     * Le combattant est celui du combat durable (`CombatantFrozenAtEntry`) : ses tirs, sa manoeuvre de Hamill et
+     * son fret doivent venir de la classe de l admission, pas du compte. Des chasseurs legers contre une Etoile
+     * de la mort — la manoeuvre est rendue certaine par l essai qui joue le scenario — et des petits
+     * transporteurs, pour que le fret du Collecteur differe de celui du General.
+     *
+     * @return array{attaquantes: array<int, AttackerFleet>, defenseurs: array<int, DefenderFleet>, cible: PlanetService, contexte: \OGame\Combat\Support\LootContext}
+     */
+    private function aGeneralFrozenAtAdmissionWhoseAccountBecameACollector(): array
+    {
+        $technologies = ['weapon_technology' => 6, 'shielding_technology' => 5, 'armor_technology' => 6];
+
+        $bataille = $this->aBattle(
+            planete: ['metal' => 90_000, 'crystal' => 40_000, 'deathstar' => 1, 'rocket_launcher' => 60],
+            attaquantes: [
+                ['units' => ['light_fighter' => 250, 'small_cargo' => 30], 'tech' => $technologies, 'classe' => CharacterClass::COLLECTOR],
+            ],
+        );
+
+        $flotte = $bataille['attaquantes'][0];
+        $flotte->player = $this->aCombatantFrozenAtAdmission($flotte->player, $technologies, CharacterClass::GENERAL);
+
+        // Le contexte de pillage se prend sur les combattants, comme a la cloture : le fret libre suit la classe
+        // gelee.
+        $bataille['contexte'] = LiveLootContextFactory::forBattle($bataille['attaquantes'], $bataille['cible'], FrozenLootAllocation::atOperationStart());
+
+        return $bataille;
+    }
+
+    /**
+     * Le combattant du combat durable, monte sans base sur le compte fictif d un joueur du banc.
+     *
+     * Le compte garde son identite, sa classe et ses technologies ; seul le porteur que le combattant rend dit la
+     * classe de l admission.
+     *
+     * @param array<string, int> $technologies
+     */
+    private function aCombatantFrozenAtAdmission(PlayerService $compte, array $technologies, CharacterClass $classe): CombatantFrozenAtEntry
+    {
+        $combattant = new CombatantFrozenAtEntry(0, new FrozenCombatCharacteristics(
+            $technologies['weapon_technology'],
+            $technologies['shielding_technology'],
+            $technologies['armor_technology'],
+            resolve(CharacterClassService::class)->combatResearchLevelsOfClass($classe),
+        ), $classe);
+
+        $utilisateur = $this->accountBehind($combattant);
+        $utilisateur->id = $compte->getId();
+        $utilisateur->username = $compte->getUser()->username;
+        $utilisateur->is_npc = false;
+        $utilisateur->character_class = $compte->getUser()->character_class;
+        $utilisateur->time = $compte->getUser()->time;
+
+        $combattant->setUserTech(UserTech::factory()->make($technologies + ['user_id' => $compte->getId()]));
+
+        return $combattant;
+    }
+
+    /**
+     * Le compte qu un joueur a charge, sous ce que `getUser()` rend.
+     */
+    private function accountBehind(PlayerService $joueur): User
+    {
+        $lecture = Closure::bind(function (): User {
+            return $this->user;
+        }, $joueur, PlayerService::class);
+
+        return $lecture();
     }
 
     /**

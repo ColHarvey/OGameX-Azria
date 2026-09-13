@@ -189,19 +189,58 @@ final class CombatRosterReader
                 : $this->fleetCombatant($combat, $regle, $flotte->ownerId, $flotte->fleetMissionId);
         }
 
-        return $effectif;
+        if ($regle === UnitCharacteristicsRule::FirstRule) {
+            return $effectif;
+        }
+
+        // **Le proprietaire de la cible et celui de l initiatrice sont leurs combattants.** La photographie
+        // d application lit la classe de chaque joueur sur ces deux-la en dernier : charges vivants par
+        // `forCombat()`, ils remplacaient la classe d admission de l initiatrice et de la garnison par celle
+        // du compte a la cloture — champ d epaves du General et classe du rapport compris.
+        return new CombatRoster(
+            $effectif->attackers,
+            $effectif->defenders,
+            $effectif->target,
+            $this->combatantOfFleet($combat, $effectif->defenders, 0),
+            $this->combatantOfFleet($combat, $effectif->attackers, (int)$combat->mission_id),
+            $effectif->initiator,
+            $effectif->originBodies,
+        );
+    }
+
+    /**
+     * Le combattant compose pour cette flotte de l effectif ; la garnison est la flotte zero.
+     *
+     * @param array<int, AttackerFleet>|array<int, DefenderFleet> $flottes
+     */
+    private function combatantOfFleet(CombatInstance $combat, array $flottes, int $fleetMissionId): PlayerService
+    {
+        foreach ($flottes as $flotte) {
+            if ($flotte->fleetMissionId === $fleetMissionId) {
+                return $flotte->player;
+            }
+        }
+
+        throw new RuntimeException(
+            'Le combat ' . $combat->id . ' ne compose aucune flotte ' . $fleetMissionId
+            . ' : la photographie d application ne peut pas lire son proprietaire.'
+        );
     }
 
     private function fleetCombatant(CombatInstance $combat, UnitCharacteristicsRule $regle, int $ownerId, int $fleetMissionId): PlayerService
     {
         return match ($regle) {
-            UnitCharacteristicsRule::FrozenAtEntry => new CombatantFrozenAtEntry($ownerId, $this->entries()->of($combat, $fleetMissionId)),
+            UnitCharacteristicsRule::FrozenAtEntry => new CombatantFrozenAtEntry(
+                $ownerId,
+                $this->entries()->of($combat, $fleetMissionId),
+                $this->entries()->admittedCharacterClassOf($combat, $fleetMissionId),
+            ),
             UnitCharacteristicsRule::FirstRule => new CombatantUnderTheFirstRule($ownerId),
         };
     }
 
     /**
-     * La garnison : les niveaux de sa photographie, et le bonus de classe de l instant d ouverture.
+     * La garnison : les niveaux de sa photographie, et sa classe avec son bonus a l instant d ouverture.
      *
      * **Les deux sources ne se remplacent pas.** Une recherche du defenseur engagee avant l ouverture et
      * achevee avant la fermeture appartient au combat et releve la photographie (`ClosureReconciliation`) :
@@ -217,7 +256,7 @@ final class CombatRosterReader
                 $photographedDefender->shieldLevel,
                 $photographedDefender->armorLevel,
                 $this->entries()->garrisonClassBonusAt($combat, $ownerId, (int)$combat->started_at),
-            )),
+            ), $this->entries()->garrisonCharacterClassAt($combat, $ownerId, (int)$combat->started_at)),
             UnitCharacteristicsRule::FirstRule => new CombatantUnderTheFirstRule($ownerId),
         };
     }

@@ -66,8 +66,9 @@ use OGame\Services\SettingsService;
  * Ils entrent desormais avec `CombatantFrozenAtEntry` — le combattant du combat durable, pas un second —,
  * composes par la derivation de `CombatEntryCharacteristicsRegistry` a l **arrivee physique** de
  * l attaquante : elle comme un evenement d arrivee, la patrouille, deja la, a la barriere de cet instant.
- * Seuls les trois niveaux et le bonus des classes sont geles ; le reste du compte (fret, manoeuvre de
- * Hamill) est lu vivant, exactement comme dans le combat durable.
+ * Les trois niveaux, le bonus des classes **et la classe elle-meme** sont geles a cet instant : la
+ * manoeuvre de Hamill, le fret et la part du Decouvreur se decident depuis l admission, exactement comme
+ * dans le combat durable. Le reste du compte (technologie hyperespace comprise) est lu au traitement.
  *
  * Avant la ligne de base des historiques, la premiere regle garde l ancien geste : le compte vivant. Un
  * historique inconnu leve `UnknownAdmissionHistory`, que l arrivee attrape pour suspendre sans rien
@@ -134,7 +135,10 @@ final class SpatialBattle
         $joueur = match ($regle) {
             UnitCharacteristicsRule::FrozenAtEntry => new CombatantFrozenAtEntry(
                 (int)$mission->user_id,
-                $this->entries()->atArrival((int)$mission->user_id, (int)$mission->id, (int)$mission->time_arrival, $ordre)
+                $this->entries()->atArrival((int)$mission->user_id, (int)$mission->id, (int)$mission->time_arrival, $ordre),
+                // Sa classe au meme instant et par le meme historique : Hamill, fret et part du Decouvreur se
+                // decident depuis l arrivee, jamais depuis le compte au traitement.
+                $this->entries()->characterClassAt((int)$mission->user_id, (int)$mission->time_arrival, 'La flotte ' . $mission->id),
             ),
             UnitCharacteristicsRule::FirstRule => $this->players->make((int)$mission->user_id, true),
         };
@@ -169,7 +173,8 @@ final class SpatialBattle
         $proprietaire = match ($regle) {
             UnitCharacteristicsRule::FrozenAtEntry => new CombatantFrozenAtEntry(
                 (int)$cible->user_id,
-                $this->entries()->atBarrier((int)$cible->user_id, $admission, $ordre, 'La patrouille ' . $cible->id)
+                $this->entries()->atBarrier((int)$cible->user_id, $admission, $ordre, 'La patrouille ' . $cible->id),
+                $this->entries()->characterClassAt((int)$cible->user_id, $admission, 'La patrouille ' . $cible->id),
             ),
             UnitCharacteristicsRule::FirstRule => $this->players->make((int)$cible->user_id, true),
         };

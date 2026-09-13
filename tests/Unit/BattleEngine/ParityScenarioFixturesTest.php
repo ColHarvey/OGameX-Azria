@@ -5,6 +5,7 @@ namespace Tests\Unit\BattleEngine;
 use OGame\Combat\Enums\NoLootReason;
 use OGame\Combat\Policies\CargoWeightedV1;
 use OGame\Combat\Policies\NoLootV1;
+use OGame\Combat\Support\CombatantFrozenAtEntry;
 use OGame\Enums\CharacterClass;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
@@ -140,6 +141,38 @@ class ParityScenarioFixturesTest extends UnitTestCase
 
         // Et la bataille se joue vraiment : sans round, le bonus n atteindrait aucun tir.
         $this->assertNotEmpty($this->fight(PhpBattleEngine::class, $bataille)->rounds, 'The battle played no round: the bonus never reached a shot.');
+    }
+
+    /**
+     * **Le scenario de la classe gelee porte bien son ecart** : le compte est Collecteur, le combattant General,
+     * et le moteur PHP joue la manoeuvre et le fret du General.
+     */
+    public function testTheFrozenClassScenarioFightsWithTheClassOfTheAdmissionNotOfTheAccount(): void
+    {
+        $chance = $this->settingsService->hamillManoeuvreChance();
+        $this->settingsService->set('hamill_manoeuvre_chance', 1);
+
+        try {
+            $bataille = $this->aGeneralFrozenAtAdmissionWhoseAccountBecameACollector();
+            $flotte = $bataille['attaquantes'][0];
+            $technologies = ['weapon_technology' => 6, 'shielding_technology' => 5, 'armor_technology' => 6];
+
+            $this->assertInstanceOf(CombatantFrozenAtEntry::class, $flotte->player, 'The scenario does not fight with the combatant of the durable combat.');
+            $this->assertSame(CharacterClass::GENERAL->value, $flotte->player->getUser()->character_class, 'The combatant does not carry the class of its admission.');
+            $this->assertSame(CharacterClass::COLLECTOR->value, $this->accountBehind($flotte->player)->character_class, 'The account behind the combatant is not a Collector: the scenario would not separate the two classes.');
+
+            $auCollecteur = $flotte->units->getTotalCargoCapacity($this->aPlayer(7_001, $technologies, CharacterClass::COLLECTOR));
+            $auGeneral = $flotte->units->getTotalCargoCapacity($this->aPlayer(7_002, $technologies, CharacterClass::GENERAL));
+            $this->assertNotSame($auCollecteur, $auGeneral, 'Both classes give the same capacity: the scenario would not show which one was read.');
+
+            $resultat = $this->fight(PhpBattleEngine::class, $bataille);
+
+            $this->assertTrue($resultat->hamillManoeuvreTriggered, 'The General frozen at its admission lost its Hamill manoeuvre to its account.');
+            $this->assertSame($auGeneral, $resultat->attackerFleetResults[0]->startingCargoCapacity, 'The capacity was read on the account, not on the class of the admission.');
+            $this->assertNotEmpty($resultat->rounds, 'The battle played no round.');
+        } finally {
+            $this->settingsService->set('hamill_manoeuvre_chance', $chance);
+        }
     }
 
     /**

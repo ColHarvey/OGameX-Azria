@@ -328,25 +328,27 @@ class CombatResolutionService
                     // Fleet survived - create return mission with survivors
                     $fleetOwner = $this->playerServiceFactory->make($fleetResult->playerId);
 
-                    $totalResources = new Resources(
-                        $fleetResult->survivingCargo->metal->get() + $fleetResult->lootShare->metal->get(),
-                        $fleetResult->survivingCargo->crystal->get() + $fleetResult->lootShare->crystal->get(),
-                        $fleetResult->survivingCargo->deuterium->get() + $fleetResult->lootShare->deuterium->get(),
-                        0
-                    );
+                    // **La cargaison des survivants rentre entiere ; seul ce que la bataille ajoute se borne.**
+                    // Elle a ete chargee avant le combat, et une baisse de la capacite — une classe changee
+                    // avant l admission, par exemple — ne la retire pas au retour. La part des vaisseaux
+                    // detruits est deja perdue : le moteur ne garde que la proportion de capacite qui a
+                    // survecu. Butin et collecte n occupent que la place que cette cargaison laisse libre.
+                    $cargaisonSurvivante = $fleetResult->survivingCargo;
+                    $placeApresCargaison = max(0, (int)($fleetResult->survivingCargoCapacity - $cargaisonSurvivante->sum()));
+                    $ajouts = $fleetResult->lootShare;
 
                     // **La part de collecte de cette flotte entre dans son retour**, dans la place que son
                     // fret gele laisse libre ; le reste demeure dans le champ, il ne disparait pas.
                     $collecte = $collectesParFlotte[(int)$fleetResult->fleetMissionId] ?? null;
                     if ($collecte !== null && $collecte->sum() > 0) {
-                        $placeLibre = max(0, (int)($fleetResult->survivingCargoCapacity - $totalResources->sum()));
+                        $placeLibre = max(0, (int)($placeApresCargaison - $ajouts->sum()));
                         if ($collecte->sum() > $placeLibre) {
                             $collecte = $this->capAndCollect($collecte, $placeLibre, $allocation, $diagnostics, CombatResolutionOutcome::PHASE_ATTACKER_REAPER);
                         }
-                        $totalResources = new Resources(
-                            $totalResources->metal->get() + $collecte->metal->get(),
-                            $totalResources->crystal->get() + $collecte->crystal->get(),
-                            $totalResources->deuterium->get() + $collecte->deuterium->get(),
+                        $ajouts = new Resources(
+                            $ajouts->metal->get() + $collecte->metal->get(),
+                            $ajouts->crystal->get() + $collecte->crystal->get(),
+                            $ajouts->deuterium->get() + $collecte->deuterium->get(),
                             0
                         );
                         $collecteGroupee = new Resources(
@@ -357,12 +359,19 @@ class CombatResolutionService
                         );
                     }
 
-                    // Ensure total doesn't exceed surviving cargo capacity
-                    // La capacite survivante de cette flotte, gelee a la cloture.
-                    $remainingCargoCapacity = $fleetResult->survivingCargoCapacity;
-                    if ($totalResources->sum() > $remainingCargoCapacity) {
-                        $totalResources = $this->capAndCollect($totalResources, $remainingCargoCapacity, $allocation, $diagnostics, CombatResolutionOutcome::PHASE_RETURN_CAP, CombatParticipantKey::forFleet($fleetResult->fleetMissionId));
+                    // Le plafond ne porte que sur les ajouts, dans la place laissee par la cargaison survivante
+                    // et mesuree sur la capacite gelee a la cloture : il n entame jamais ce que la flotte
+                    // portait deja.
+                    if ($ajouts->sum() > $placeApresCargaison) {
+                        $ajouts = $this->capAndCollect($ajouts, $placeApresCargaison, $allocation, $diagnostics, CombatResolutionOutcome::PHASE_RETURN_CAP, CombatParticipantKey::forFleet($fleetResult->fleetMissionId));
                     }
+
+                    $totalResources = new Resources(
+                        $cargaisonSurvivante->metal->get() + $ajouts->metal->get(),
+                        $cargaisonSurvivante->crystal->get() + $ajouts->crystal->get(),
+                        $cargaisonSurvivante->deuterium->get() + $ajouts->deuterium->get(),
+                        0
+                    );
 
                     // Calculate natural return duration based on surviving ships and owner's tech.
                     // In original OGame, post-battle returns use each fleet's own natural speed,
@@ -389,7 +398,7 @@ class CombatResolutionService
                     // Calculate wreck field for General class attacker
                     // General perk: wreck field from attacker's lost ships is transported back with the return mission
                     $attackerWreckFieldData = null;
-                    if ($context->isGeneral($fleetOwner)) {
+                    if ($context->isGeneralForFleet((int)$fleetResult->fleetMissionId, $fleetOwner)) {
                         $attackerWreckFieldData = $this->calculateAttackerWreckField($fleetResult->unitsLost, $fleetResult->unitsStart, $originPlanet, $context);
                     }
 
@@ -670,19 +679,30 @@ class CombatResolutionService
             $remainingCargoCapacity = $battleResult->attackerSurvivingCargoCapacity;
             $singleFleetResult = $battleResult->attackerFleetResults[0];
 
-            // Total resources = remaining mission resources + remaining loot + collected debris (from attacker Reapers)
-            $totalResources = new Resources(
-                $singleFleetResult->survivingCargo->metal->get() + $singleFleetResult->lootShare->metal->get() + $attackerCollectedDebris->metal->get(),
-                $singleFleetResult->survivingCargo->crystal->get() + $singleFleetResult->lootShare->crystal->get() + $attackerCollectedDebris->crystal->get(),
-                $singleFleetResult->survivingCargo->deuterium->get() + $singleFleetResult->lootShare->deuterium->get() + $attackerCollectedDebris->deuterium->get(),
+            // Ce que la bataille ajoute a la cargaison : la part de butin et les debris des Faucheurs attaquants.
+            $ajouts = new Resources(
+                $singleFleetResult->lootShare->metal->get() + $attackerCollectedDebris->metal->get(),
+                $singleFleetResult->lootShare->crystal->get() + $attackerCollectedDebris->crystal->get(),
+                $singleFleetResult->lootShare->deuterium->get() + $attackerCollectedDebris->deuterium->get(),
                 0
             );
 
-            // Defensive cap only: loot and carried cargo are already normalized before we reach
-            // this point, so only edge-case rounding should ever hit this.
-            if ($totalResources->sum() > $remainingCargoCapacity) {
-                $totalResources = $this->capAndCollect($totalResources, $remainingCargoCapacity, $allocation, $diagnostics, CombatResolutionOutcome::PHASE_RETURN_CAP_FINAL, CombatParticipantKey::forFleet($singleFleetResult->fleetMissionId));
+            // **La cargaison des survivants rentre entiere ; seul ce que la bataille ajoute se borne**, a la
+            // place que cette cargaison laisse dans le fret gele. Une baisse de capacite ne retire rien de ce
+            // que la flotte portait deja ; la part des vaisseaux detruits est deja perdue dans le moteur. Le
+            // plafond reste defensif : butin et collecte sont deja bornes a cette place en amont.
+            $placeApresCargaison = max(0, (int)($remainingCargoCapacity - $singleFleetResult->survivingCargo->sum()));
+            if ($ajouts->sum() > $placeApresCargaison) {
+                $ajouts = $this->capAndCollect($ajouts, $placeApresCargaison, $allocation, $diagnostics, CombatResolutionOutcome::PHASE_RETURN_CAP_FINAL, CombatParticipantKey::forFleet($singleFleetResult->fleetMissionId));
             }
+
+            // Total resources = remaining mission resources + remaining loot + collected debris (from attacker Reapers)
+            $totalResources = new Resources(
+                $singleFleetResult->survivingCargo->metal->get() + $ajouts->metal->get(),
+                $singleFleetResult->survivingCargo->crystal->get() + $ajouts->crystal->get(),
+                $singleFleetResult->survivingCargo->deuterium->get() + $ajouts->deuterium->get(),
+                0
+            );
 
             // Calculate wreck field for General class attacker
             // General perk: wreck field from attacker's lost ships is transported back with the return mission

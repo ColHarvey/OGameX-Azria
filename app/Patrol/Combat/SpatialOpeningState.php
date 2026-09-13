@@ -222,7 +222,7 @@ final class SpatialOpeningState
 
         return [
             $this->entries()->atBarrier($ownerId, $openedAt, $ordre, $quoi),
-            $this->entries()->characterClassAt($ownerId, $openedAt, $quoi),
+            $this->entries()->characterClassAt($ownerId, $openedAt, $quoi)?->value,
         ];
     }
 

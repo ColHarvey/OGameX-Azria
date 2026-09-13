@@ -320,6 +320,11 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
                     return false;
                 }
 
+                public function isGeneralForFleet(int $fleetMissionId, PlayerService $owner): bool
+                {
+                    return false;
+                }
+
                 public function reaperDebrisCollectionPercentage(PlayerService $player): float
                 {
                     return 0.0;

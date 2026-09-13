@@ -2,23 +2,36 @@
 
 namespace OGame\Combat\Support;
 
+use OGame\Enums\CharacterClass;
+use OGame\Models\User;
 use OGame\Services\PlayerService;
 use RuntimeException;
 
 /**
- * Un joueur tel qu une bataille durable le voit : **vivant**, sauf ce qui arme ses tirs.
+ * Un joueur tel qu une bataille le voit : **vivant**, sauf ce que son admission a fixe.
  *
  * ## Pourquoi pas `FrozenCombatant`
  *
- * `FrozenCombatant` (espace libre) refuse toute lecture qu il ne porte pas, et son utilisateur n est
- * pas un compte. Une bataille contre un corps lit bien davantage sur le joueur de chaque flotte : la
- * capacite de fret des Faucheurs et des survivants (`BattleEngine`, technologie hyperespace), la classe
- * pour la manoeuvre de Hamill et le fret des transporteurs, le nom du compte pour les avis. Ces lectures
- * ont leur propre photographie a la cloture ; les refuser arreterait la bataille, les geler ici
- * changerait des regles que la decision de Keven ne touche pas.
+ * `FrozenCombatant` (combat progressif en espace libre) refuse toute lecture qu il ne porte pas, et son
+ * utilisateur n est pas un compte. Une bataille contre un corps lit bien davantage sur le joueur de chaque
+ * flotte : la technologie hyperespace pour le fret, le nom et le genre du compte pour les avis et le pillage.
+ * Les refuser arreterait la bataille.
  *
- * Cette classe ne remplace donc que **quatre** lectures : les niveaux d armes, de boucliers et de
- * blindage, et le bonus de combat des classes. Tout le reste est le compte, charge a neuf.
+ * ## Ce que l admission fixe
+ *
+ * - **Ce qui arme les tirs** : les niveaux d armes, de boucliers et de blindage, et le bonus de combat des
+ *   classes (`FrozenCombatCharacteristics`).
+ * - **La classe de personnage elle-meme** : `getUser()` rend un porteur detache (`FrozenClassCarrier`) qui la
+ *   porte. Tout ce que le jeu decide depuis la classe repond ainsi depuis l admission — manoeuvre de Hamill,
+ *   fret des transporteurs du Collecteur et des vaisseaux du General, part de pillage du Decouvreur, et ce
+ *   que la cloture photographie sur ce combattant : champ d epaves du General, classe du rapport.
+ *
+ * Tout le reste est le compte, charge a neuf.
+ *
+ * ## Ce qui n est pas fixe ici, et le dire
+ *
+ * La technologie hyperespace, qui agrandit le fret, se lit sur le compte quand la bataille se calcule, et la
+ * duree du retour sur un compte vivant. Ce sont des points distincts, que ce combattant ne tranche pas.
  *
  * ## Le bonus n est compte qu une fois
  *
@@ -27,8 +40,11 @@ use RuntimeException;
  */
 final class CombatantFrozenAtEntry extends PlayerService
 {
-    public function __construct(int $playerId, private readonly FrozenCombatCharacteristics $characteristics)
-    {
+    public function __construct(
+        int $playerId,
+        private readonly FrozenCombatCharacteristics $characteristics,
+        private readonly CharacterClass|null $characterClass,
+    ) {
         parent::__construct($playerId);
     }
 
@@ -48,11 +64,31 @@ final class CombatantFrozenAtEntry extends PlayerService
     }
 
     /**
+     * Le compte avec la classe de l admission : **un porteur neuf a chaque demande**.
+     *
+     * Neuf, parce qu un porteur garde d un appel a l autre survivrait a un rechargement du compte par
+     * `load()`, et que deux lecteurs partageraient alors un meme objet. Le modele que ce combattant a charge,
+     * lui, n est jamais modifie.
+     */
+    public function getUser(): User
+    {
+        return FrozenClassCarrier::carrying(parent::getUser(), $this->characterClass);
+    }
+
+    /**
      * Ce que ce combattant apporte a ses tirs — pour que le rapport annonce exactement cela.
      */
     public function characteristics(): FrozenCombatCharacteristics
     {
         return $this->characteristics;
+    }
+
+    /**
+     * La classe de personnage que ce combattant avait a son admission.
+     */
+    public function characterClass(): CharacterClass|null
+    {
+        return $this->characterClass;
     }
 
     /**

@@ -18,7 +18,7 @@ use OGame\Services\PlayerService;
  *
  * | fait | ce qu'il changerait s'il etait relu vivant |
  * | --- | --- |
- * | classe General d'un attaquant | un champ d'epaves apparait ou disparait |
+ * | classe General de chaque flotte attaquante | un champ d'epaves apparait ou disparait |
  * | niveau de chantier spatial | la taille de ce champ |
  * | part des vaisseaux detruits qui devient debris | la taille de ce champ, encore |
  * | part ramassee par un Faucheur | ce que la flotte rapporte des debris |
@@ -57,7 +57,7 @@ use OGame\Services\PlayerService;
  */
 final readonly class FrozenCombatApplicationContext implements CombatApplicationContext
 {
-    private const array KEYS = ['schema', 'applied_at', 'players', 'space_docks', 'held_fleet_cargo', 'return_durations', 'wreck_field', 'npc_narrative'];
+    private const array KEYS = ['schema', 'applied_at', 'players', 'space_docks', 'held_fleet_cargo', 'return_durations', 'attacker_generals', 'wreck_field', 'npc_narrative'];
 
     private const array NARRATIVE_KEYS = ['motive', 'variation', 'variations'];
 
@@ -70,17 +70,32 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
     /**
      * Le schema 2 ajoute l'instant d'application, la part de debris et la duree de vie des epaves,
      * et ne tire une variante narrative que pour un raid de faction. Le schema 3 y ajoute la
-     * cargaison des renforts retenus, que l'application relisait vivante. Aucun document des
-     * schemas anterieurs n'a jamais ete ecrit hors des essais : ils se refusent, ils ne se
-     * convertissent pas.
+     * cargaison des renforts retenus, que l'application relisait vivante ; le schema 4, la duree du
+     * retour de chaque attaquante. Aucun document des schemas 1 a 3 n'a jamais ete ecrit hors des
+     * essais : ils se refusent, ils ne se convertissent pas.
+     *
+     * **Le schema 5 porte la classe General de chaque flotte attaquante** (`attacker_generals`). La
+     * photographie par joueur n en tient qu une : un joueur dont deux flottes sont entrees dans le
+     * combat avec deux classes differentes voyait le champ d epaves de l une decide par la classe de
+     * l autre.
      */
-    public const int SCHEMA = 4;
+    public const int SCHEMA = 5;
+
+    /**
+     * **Le schema 4 se relit toujours.** Il a ete ecrit en production, et un combat clos sous lui peut
+     * etre encore en cours a un deploiement : sa classe General par joueur est celle sous laquelle il a
+     * ete clos. Il se relit tel quel, et se reecrit tel quel.
+     */
+    public const int SCHEMA_WITHOUT_FLEET_GENERALS = 4;
 
     /**
      * @param array<int, array{is_general: bool, reaper_debris_percentage: float, character_class: int|null}> $players
      * @param array<int, int> $spaceDocks Niveau de chantier spatial, par identifiant de corps d'origine.
      * @param array<int, array{metal: int, crystal: int, deuterium: int}> $heldFleetCargo La cargaison
      *        de chaque renfort retenu, par identifiant de mission.
+     * @param array<int, int> $returnDurations
+     * @param array<int, bool>|null $attackerGenerals La classe General de chaque flotte attaquante, par
+     *        identifiant de mission ; nulle pour un document au schema 4, qui ne la porte que par joueur.
      */
     private function __construct(
         private int $appliedAt,
@@ -88,6 +103,7 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
         private array $spaceDocks,
         private array $heldFleetCargo,
         private array $returnDurations,
+        private array|null $attackerGenerals,
         private int $minResourcesLoss,
         private int $minFleetPercentage,
         private int $debrisFieldFromShips,
@@ -123,6 +139,17 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
                 'reaper_debris_percentage' => $live->reaperDebrisCollectionPercentage($joueur),
                 'character_class' => $live->characterClassOf($joueur)?->value,
             ];
+        }
+
+        // **La classe General de chaque flotte attaquante, lue sur son propre combattant.** La ligne par
+        // joueur n en garde qu une : deux flottes d un meme joueur, entrees avec deux classes, verraient
+        // leur champ d epaves decide par la meme.
+        $generaux = [];
+
+        foreach ($roster->attackers as $attaquante) {
+            if ($attaquante->fleetMissionId > 0) {
+                $generaux[$attaquante->fleetMissionId] = $live->isGeneral($attaquante->player);
+            }
         }
 
         $chantiers = [];
@@ -168,6 +195,7 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
             $chantiers,
             $cargaisons,
             self::returnDurationsOf($roster, $returnDurations),
+            $generaux,
             $live->wreckFieldMinResourcesLoss(),
             $live->wreckFieldMinFleetPercentage(),
             $live->debrisFieldFromShips(),
@@ -183,13 +211,22 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
      */
     public function toStorage(): array
     {
-        return [
-            'schema' => self::SCHEMA,
+        $document = [
+            'schema' => $this->attackerGenerals === null ? self::SCHEMA_WITHOUT_FLEET_GENERALS : self::SCHEMA,
             'applied_at' => $this->appliedAt,
             'players' => $this->players,
             'space_docks' => $this->spaceDocks,
             'held_fleet_cargo' => $this->heldFleetCargo,
             'return_durations' => $this->returnDurations,
+        ];
+
+        // Un document relu au schema 4 se reecrit au schema 4 : lui ajouter une classe par flotte ecrirait
+        // ce que sa cloture n a jamais photographie.
+        if ($this->attackerGenerals !== null) {
+            $document['attacker_generals'] = $this->attackerGenerals;
+        }
+
+        return $document + [
             'wreck_field' => [
                 'min_resources_loss' => $this->minResourcesLoss,
                 'min_fleet_percentage' => $this->minFleetPercentage,
@@ -214,8 +251,31 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
 
         $schema = self::int($stored, 'schema', 'contexte');
 
-        if ($schema !== self::SCHEMA) {
-            throw new CorruptedFrozenApplicationContext('le schema ' . $schema . ' est inconnu, seul le schema ' . self::SCHEMA . ' se relit', $stored);
+        if ($schema !== self::SCHEMA && $schema !== self::SCHEMA_WITHOUT_FLEET_GENERALS) {
+            throw new CorruptedFrozenApplicationContext('le schema ' . $schema . ' est inconnu, seuls les schemas ' . self::SCHEMA_WITHOUT_FLEET_GENERALS . ' et ' . self::SCHEMA . ' se relisent', $stored);
+        }
+
+        // **La classe par flotte appartient au schema 5, et a lui seul.** Absente d un schema 5, elle ferait
+        // decider un champ d epaves par la classe d une autre flotte ; presente dans un schema 4, elle serait
+        // une reparation a la main.
+        $generaux = null;
+
+        if ($schema === self::SCHEMA) {
+            $generaux = [];
+
+            foreach (self::structure($stored, 'attacker_generals', 'contexte') as $flotte => $general) {
+                if (!is_int($flotte) || $flotte < 1) {
+                    throw new CorruptedFrozenApplicationContext('« attacker_generals » porte une flotte dont l identifiant est ' . self::describe($flotte) . ' et non un entier positif', $stored);
+                }
+
+                if (!is_bool($general)) {
+                    throw new CorruptedFrozenApplicationContext('« attacker_generals[' . $flotte . '] » est ' . self::describe($general) . ' et non un booleen', $stored);
+                }
+
+                $generaux[$flotte] = $general;
+            }
+        } elseif (array_key_exists('attacker_generals', $stored)) {
+            throw new CorruptedFrozenApplicationContext('le schema ' . $schema . ' ne porte pas de classe General par flotte', $stored);
         }
 
         $instant = self::int($stored, 'applied_at', 'contexte');
@@ -371,6 +431,7 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
             $chantiers,
             $cargaisons,
             $durees,
+            $generaux,
             $perteMinimale,
             $partMinimale,
             $partDebris,
@@ -440,6 +501,19 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
                 $this->returnDurations
             );
         }
+        if ($this->attackerGenerals !== null) {
+            $generauxFiges = array_keys($this->attackerGenerals);
+            sort($generauxFiges);
+
+            if ($generauxFiges !== $attaquantesAttendues) {
+                throw new CorruptedFrozenApplicationContext(
+                    'la photographie porte la classe General des flottes ' . implode(', ', $generauxFiges)
+                    . ' alors que l effectif compte les attaquantes ' . implode(', ', $attaquantesAttendues),
+                    $this->attackerGenerals
+                );
+            }
+        }
+
         $corpsAttendus = array_keys(self::bodiesOf($roster));
         $corpsFiges = array_keys($this->spaceDocks);
         sort($corpsAttendus);
@@ -547,6 +621,24 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
     public function isGeneral(PlayerService $player): bool
     {
         return $this->factsOf($player->getId())['is_general'];
+    }
+
+    public function isGeneralForFleet(int $fleetMissionId, PlayerService $owner): bool
+    {
+        // Un document au schema 4 n a photographie qu une classe par joueur : c est celle sous laquelle son
+        // combat a ete clos, et elle seule existe.
+        if ($this->attackerGenerals === null) {
+            return $this->isGeneral($owner);
+        }
+
+        if (!array_key_exists($fleetMissionId, $this->attackerGenerals)) {
+            throw new CorruptedFrozenApplicationContext(
+                'la photographie ne porte pas la classe General de la flotte ' . $fleetMissionId,
+                $this->attackerGenerals
+            );
+        }
+
+        return $this->attackerGenerals[$fleetMissionId];
     }
 
     public function reaperDebrisCollectionPercentage(PlayerService $player): float

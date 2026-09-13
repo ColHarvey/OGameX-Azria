@@ -140,6 +140,29 @@ class RustParityBenchTest extends UnitTestCase
     }
 
     /**
+     * **La classe gelee a l admission traverse la couture a l identique.**
+     *
+     * Le compte est Collecteur, le combattant a ete admis General. La manoeuvre de Hamill se decide cote PHP pour
+     * les deux moteurs, et le fret se mesure cote PHP aussi : une classe lue sur le compte au lieu du porteur
+     * ferait diverger la manoeuvre, les capacites et le butin. `ParityScenarioFixturesTest` etablit, sans
+     * bibliotheque, que le montage porte bien cet ecart.
+     */
+    public function testAClassFrozenAtAdmissionCrossesTheSeamIdentically(): void
+    {
+        $chance = $this->settingsService->hamillManoeuvreChance();
+        $this->settingsService->set('hamill_manoeuvre_chance', 1);
+
+        try {
+            [$php, $rust] = $this->assertBothEnginesAgree('classe-gelee', $this->aGeneralFrozenAtAdmissionWhoseAccountBecameACollector());
+
+            $this->assertTrue($php->hamillManoeuvreTriggered, 'PHP: the General frozen at its admission lost its Hamill manoeuvre.');
+            $this->assertTrue($rust->hamillManoeuvreTriggered, 'Rust: the General frozen at its admission lost its Hamill manoeuvre.');
+        } finally {
+            $this->settingsService->set('hamill_manoeuvre_chance', $chance);
+        }
+    }
+
+    /**
      * **Un meme type de vaisseau des deux cotes de la defense, avec des technologies differentes.**
      *
      * Si la couture aplatissait les caracteristiques par type de vaisseau, les deux flottes

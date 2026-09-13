@@ -114,6 +114,67 @@ final class SpatialAdmissionCharacteristicsTest extends AccountTestCase
     }
 
     /**
+     * **La manoeuvre de Hamill d une attaquante spatiale suit la classe de son arrivee**, pas celle du compte au
+     * traitement — dans les deux sens.
+     *
+     * General a l arrivee puis sans classe : la manoeuvre se joue contre l Etoile de la mort de la patrouille.
+     * Sans classe a l arrivee puis General : elle ne se joue pas. Une lecture qui rendrait toujours vrai, ou
+     * toujours faux, tomberait sur l un des deux.
+     */
+    public function testTheHamillManoeuvreOfASpatialAttackerFollowsTheClassOfItsArrival(): void
+    {
+        $reglages = resolve(SettingsService::class);
+        $chance = $reglages->hamillManoeuvreChance();
+        $reglages->set('hamill_manoeuvre_chance', 1);
+
+        try {
+            foreach ([[CharacterClass::GENERAL, null, true], [null, CharacterClass::GENERAL, false]] as [$aLArrivee, $auTraitement, $attendu]) {
+                // Posee avant que l helper n avance l horloge : elle precede l arrivee.
+                $this->recordCharacterClass($this->currentUserId, $aLArrivee);
+
+                [$patrouille, $segment, $attaque] = $this->anArrivalOnThePatrolOf($this->aFreshDefender());
+                $segment->forceFill(['deathstar' => 1])->save();
+                $attaque->forceFill(['light_fighter' => 100])->save();
+
+                $this->recordCharacterClass($this->currentUserId, $auTraitement);
+
+                $resultat = resolve(SpatialBattle::class)->fight($attaque, $patrouille, $segment);
+
+                $this->assertSame($attendu, $resultat->hamillManoeuvreTriggered, $attendu
+                    ? 'A General at its arrival lost its Hamill manoeuvre to the class its account has when it is processed.'
+                    : 'A class taken after the arrival granted the Hamill manoeuvre.');
+            }
+        } finally {
+            $reglages->set('hamill_manoeuvre_chance', $chance);
+        }
+    }
+
+    /**
+     * **La capacite de fret d une attaquante spatiale est celle de la classe de son arrivee.**
+     */
+    public function testTheCargoCapacityOfASpatialAttackerIsTheOneOfItsArrival(): void
+    {
+        $this->recordCharacterClass($this->currentUserId, CharacterClass::COLLECTOR);
+
+        [$patrouille, $segment, $attaque] = $this->anArrivalOnThePatrolOf($this->aFreshDefender());
+        $attaque->forceFill(['small_cargo' => 40])->save();
+
+        $unites = new UnitCollection();
+        $unites->addUnit(ObjectService::getUnitObjectByMachineName('battle_ship'), 60);
+        $unites->addUnit(ObjectService::getUnitObjectByMachineName('small_cargo'), 40);
+        $auCollecteur = (int)$unites->getTotalCargoCapacity(resolve(PlayerServiceFactory::class)->make($this->currentUserId, true));
+
+        $this->recordCharacterClass($this->currentUserId, CharacterClass::GENERAL);
+        $auGeneral = (int)$unites->getTotalCargoCapacity(resolve(PlayerServiceFactory::class)->make($this->currentUserId, true));
+
+        $this->assertNotSame($auCollecteur, $auGeneral, 'The premise is missing: both classes give the same capacity.');
+
+        $resultat = resolve(SpatialBattle::class)->fight($attaque, $patrouille, $segment);
+
+        $this->assertSame($auCollecteur, $resultat->attackerFleetResults[0]->startingCargoCapacity, 'The spatial attacker carried the capacity of the class its account has when it is processed.');
+    }
+
+    /**
      * **Et dans l autre sens** : une classe abandonnee apres l arrivee arme encore l attaquante.
      */
     public function testAClassGivenUpAfterTheArrivalStillArmsTheSpatialAttacker(): void

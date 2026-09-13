@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Combat;
 
+use Closure;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Enums\CombatState;
@@ -74,19 +75,30 @@ trait OpensARallyWithAWindow
      *
      * @param int $defences Lance-missiles poses sur la cible avant que le combat ne s'ouvre.
      * @param array<string, int> $moreUnits D'autres unites posees de meme, par nom de machine.
+     * @param Resources|null $cargaison Ce que l'ouvreuse emporte ; posee sur son corps avant le depart.
+     * @param Closure(): void|null $avantEnvoi Ce que le monde doit etre **avant que la flotte parte** — une
+     *        classe, par exemple, qui decide de la capacite sous laquelle la cargaison est chargee.
      * @return array{0: FleetMission, 1: int, 2: int} L'ouvreuse, la planete visee, l'instant d'ouverture.
      */
-    protected function aRallyAboutToOpen(int $defences = self::RALLY_DEFENCES, array $moreUnits = []): array
+    protected function aRallyAboutToOpen(int $defences = self::RALLY_DEFENCES, array $moreUnits = [], Resources|null $cargaison = null, Closure|null $avantEnvoi = null): array
     {
         for ($i = 0; $i < 6; $i++) {
             $this->createAndLoginUser();
         }
         $this->basicSetup();
 
+        if ($cargaison !== null) {
+            $this->planetAddResources($cargaison);
+        }
+
+        if ($avantEnvoi !== null) {
+            $avantEnvoi();
+        }
+
         $unites = new UnitCollection();
         $unites->addUnit(ObjectService::getUnitObjectByMachineName('small_cargo'), 50);
         $unites->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 350);
-        $cible = $this->sendMissionToOtherPlayerCleanPlanet($unites, new Resources(0, 0, 0, 0));
+        $cible = $this->sendMissionToOtherPlayerCleanPlanet($unites, $cargaison ?? new Resources(0, 0, 0, 0));
         $ouvreuse = $this->lastMissionDispatched();
         $ouverture = (int)$ouvreuse->time_arrival;
 

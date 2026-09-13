@@ -4,6 +4,7 @@ namespace Tests\Unit\Combat;
 
 use OGame\Combat\Application\FrozenCombatApplicationContext;
 use OGame\Combat\Exceptions\CorruptedFrozenApplicationContext;
+use OGame\Services\PlayerService;
 use Tests\UnitTestCase;
 
 /**
@@ -274,6 +275,88 @@ class FrozenCombatApplicationContextTest extends UnitTestCase
         $this->assertRefused('{"schema":2}', 'structure');
     }
 
+    /**
+     * **La classe General se relit flotte par flotte.** Le joueur 3 est General, mais sa flotte 21 est entree
+     * sans l etre : c est la flotte qui decide de son champ d epaves, pas la ligne du joueur.
+     */
+    public function testTheGeneralClassIsReadFleetByFleet(): void
+    {
+        $contexte = FrozenCombatApplicationContext::fromStorage($this->aSnapshot());
+
+        $this->assertFalse($contexte->isGeneralForFleet(21, $this->aPlayerNumbered(3)), 'The General class of the player decided for a fleet admitted without it.');
+        $this->assertTrue($contexte->isGeneralForFleet(22, $this->aPlayerNumbered(4)), 'A fleet admitted as a General lost it to the class of its player.');
+    }
+
+    public function testAFleetAbsentFromTheGeneralClassesIsRefused(): void
+    {
+        try {
+            FrozenCombatApplicationContext::fromStorage($this->aSnapshot())->isGeneralForFleet(99, $this->aPlayerNumbered(3));
+            $this->fail('The General class of a fleet absent from the photograph was read.');
+        } catch (CorruptedFrozenApplicationContext $refus) {
+            $this->assertStringContainsString('flotte 99', $refus->defect);
+        }
+    }
+
+    /**
+     * **Le schema 4 se relit tel qu il a ete ecrit** : il a ete ecrit en production, sa classe General est celle
+     * de chaque joueur, et il se reecrit au schema 4.
+     */
+    public function testTheFourthSchemaIsStillReadWithItsGeneralClassByPlayer(): void
+    {
+        $document = $this->aSnapshot();
+        $document['schema'] = 4;
+        unset($document['attacker_generals']);
+
+        $contexte = FrozenCombatApplicationContext::fromStorage($document);
+
+        $this->assertTrue($contexte->isGeneralForFleet(21, $this->aPlayerNumbered(3)), 'A fourth schema document no longer answers with the class its combat was closed under.');
+        $this->assertFalse($contexte->isGeneralForFleet(21, $this->aPlayerNumbered(4)));
+        $this->assertSame($document, $contexte->toStorage(), 'A fourth schema document was rewritten into a schema its closure never wrote.');
+    }
+
+    public function testAFourthSchemaCarryingGeneralClassesByFleetIsRefused(): void
+    {
+        $document = $this->aSnapshot();
+        $document['schema'] = 4;
+
+        $this->assertRefused($document, 'classe General par flotte');
+    }
+
+    public function testAFifthSchemaWithoutGeneralClassesByFleetIsRefused(): void
+    {
+        $document = $this->aSnapshot();
+        unset($document['attacker_generals']);
+
+        $this->assertRefused($document, 'attacker_generals');
+    }
+
+    public function testAGeneralClassByFleetThatIsNotABooleanIsRefused(): void
+    {
+        $document = $this->aSnapshot();
+        $document['attacker_generals'][21] = 1;
+
+        $this->assertRefused($document, 'attacker_generals[21]');
+    }
+
+    public function testAGeneralClassUnderAnInvalidFleetIdentifierIsRefused(): void
+    {
+        $document = $this->aSnapshot();
+        $document['attacker_generals'][0] = true;
+
+        $this->assertRefused($document, 'attacker_generals');
+    }
+
+    /**
+     * Un joueur fictif, sous un identifiant donne : sans base, la photographie ne lit que son identifiant.
+     */
+    private function aPlayerNumbered(int $id): PlayerService
+    {
+        $joueur = resolve(PlayerService::class, ['player_id' => 0]);
+        $joueur->getUser()->id = $id;
+
+        return $joueur;
+    }
+
     private function assertRefused(mixed $document, string $attendu): void
     {
         try {
@@ -375,6 +458,9 @@ class FrozenCombatApplicationContextTest extends UnitTestCase
             // La duree du retour naturel de chaque attaquante, gelee a la cloture : relue sur le joueur
             // vivant, une propulsion recherchee pendant la bataille changeait l'heure du retour.
             'return_durations' => [21 => 3_600, 22 => 0],
+            // La classe General de chaque attaquante, lue sur son propre combattant : deux flottes d un meme
+            // joueur peuvent etre entrees sous deux classes.
+            'attacker_generals' => [21 => false, 22 => true],
             'wreck_field' => [
                 'min_resources_loss' => 150_000,
                 'min_fleet_percentage' => 5,

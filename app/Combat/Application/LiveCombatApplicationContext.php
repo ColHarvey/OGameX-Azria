@@ -35,6 +35,12 @@ final class LiveCombatApplicationContext implements CombatApplicationContext
         return $this->classes->isGeneral($player->getUser());
     }
 
+    public function isGeneralForFleet(int $fleetMissionId, PlayerService $owner): bool
+    {
+        // Sur le chemin instantane, la flotte n a pas d autre classe que celle du compte, lu maintenant.
+        return $this->isGeneral($owner);
+    }
+
     public function reaperDebrisCollectionPercentage(PlayerService $player): float
     {
         return $this->classes->getReaperDebrisCollectionPercentage($player->getUser());

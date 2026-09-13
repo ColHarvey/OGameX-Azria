@@ -22,6 +22,9 @@ use Illuminate\Support\Carbon;
  * @property int $shield_level
  * @property int $armor_level
  * @property int $class_combat_bonus
+ * @property int|null $character_class La classe de personnage a l admission ; nulle = aucune classe.
+ * @property int $character_class_recorded 1 si la classe a ete enregistree a l admission ; 0 pour une
+ *                                          ligne anterieure, dont la classe se relit dans l historique.
  * @property int $entered_at
  * @property Carbon $created_at
  * @property Carbon $updated_at
@@ -39,6 +42,8 @@ use Illuminate\Support\Carbon;
     'shield_level',
     'armor_level',
     'class_combat_bonus',
+    'character_class',
+    'character_class_recorded',
     'entered_at',
 ])]
 class CombatEntryCharacteristic extends Model

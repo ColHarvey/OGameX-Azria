@@ -8,9 +8,10 @@ namespace OGame\Combat\Support;
  * ## Pourquoi ces quatre nombres, et eux seuls
  *
  * Ce sont les seules lectures du joueur qui fixent la puissance de feu, le bouclier et la coque d une
- * unite (`AttackPropertyService`, `ShieldPropertyService`, `StructuralIntegrityPropertyService`). Le
- * reste de ce que le moteur lit sur un joueur — capacite de fret, classe pour la manoeuvre de Hamill,
- * duree de retour — a sa propre photographie a la cloture, et n appartient pas a cette decision.
+ * unite (`AttackPropertyService`, `ShieldPropertyService`, `StructuralIntegrityPropertyService`). La
+ * **classe elle-meme** — manoeuvre de Hamill, fret, champ d epaves, part du Decouvreur, rapport — se gele a
+ * la meme admission, a cote de ces nombres (`CombatantFrozenAtEntry`) ; la duree du retour a sa propre
+ * photographie a la cloture.
  *
  * ## Aucune lecture du compte vivant ici
  *
