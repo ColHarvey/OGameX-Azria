@@ -126,6 +126,20 @@ class RustParityBenchTest extends UnitTestCase
     }
 
     /**
+     * **Le bonus de classe du General traverse la couture a l identique.**
+     *
+     * Deux attaquantes aux memes vaisseaux et aux memes technologies, l une Generale : leurs tirs ne
+     * different que par la classe. Rust ne recalcule rien, il recoit la puissance, le bouclier et la
+     * coque de chaque flotte — un bonus perdu, aplati ou lu sur le mauvais joueur ferait diverger les
+     * deux moteurs ici. `ParityScenarioFixturesTest` etablit, sans bibliotheque, que ce montage porte
+     * bien l ecart annonce.
+     */
+    public function testAGeneralsClassBonusCrossesTheSeamIdentically(): void
+    {
+        $this->assertBothEnginesAgree('general', $this->aGeneralAndItsClasslessTwinAgainstAGarrison());
+    }
+
+    /**
      * **Un meme type de vaisseau des deux cotes de la defense, avec des technologies differentes.**
      *
      * Si la couture aplatissait les caracteristiques par type de vaisseau, les deux flottes

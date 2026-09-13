@@ -16,6 +16,7 @@ use OGame\Combat\Allocation\LootAllocatorRegistry;
 use OGame\Combat\Causality\CausalEventOrderRegistry;
 use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Enums\UnitCharacteristicsRule;
 use OGame\Combat\MoonDestruction\MoonDestructionRuleRegistry;
 use OGame\Combat\Policies\LootPolicyRegistry;
 use OGame\Combat\Projection\SnapshotProjectionRegistry;
@@ -206,6 +207,10 @@ final class CombatOpeningService
             // sous une constante de classe : c'etait un second mecanisme de gel pour un besoin
             // que le premier couvrait deja.
             'projection_version' => $versions->projection,
+            // **La regle qui composera les unites a la cloture**, ecrite avec le combat. Un combat
+            // ouvert aujourd hui gele ce que chaque flotte apporte a ses tirs a son entree ; un combat
+            // ouvert avant le 12 septembre 2026 garde la premiere regle (migration).
+            'unit_characteristics_version' => UnitCharacteristicsRule::current()->value,
             'frozen_alliance_membership' => $appartenances->toStorage(),
             ...$this->frozenColumns($faits),
             // L'empreinte porte les versions **et** les faits : deux combats sous deux regles
@@ -343,6 +348,17 @@ final class CombatOpeningService
                 ->whereKey($candidate->missionId)
                 ->whereNull('combat_instance_id')
                 ->update(['combat_instance_id' => $combat->id]);
+
+            // **Posee avant l ouverture, elle entre a l ouverture** : c est l instant ou ce combat la
+            // retient, donc celui ou ce qu elle apporte a ses tirs se gele.
+            //
+            // La decision se prend sur le lien **relu**, jamais sur le nombre de lignes que l ecriture
+            // rend : MariaDB compte les lignes changees, SQLite les lignes trouvees.
+            $lien = FleetMission::query()->whereKey($candidate->missionId)->value('combat_instance_id');
+
+            if (is_numeric($lien) && (int)$lien === (int)$combat->id) {
+                resolve(CombatEntryCharacteristicsRegistry::class)->recordAtEntry($combat, $candidate->missionId, $candidate->userId, $openedAt);
+            }
         }
     }
 

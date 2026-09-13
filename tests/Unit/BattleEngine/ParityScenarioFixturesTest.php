@@ -105,6 +105,44 @@ class ParityScenarioFixturesTest extends UnitTestCase
     }
 
     /**
+     * **Le scenario du General porte vraiment un bonus de combat, et la classe est son seul ecart.**
+     *
+     * Le banc de parite ne tourne pas ici. Si ce montage donnait la meme puissance aux deux
+     * attaquantes — classe perdue, technologies differentes, meme joueur —, il serait vert en
+     * integration continue sans rien prouver du bonus. Les nombres sont ecrits en toutes lettres :
+     * armes 6, boucliers 4, blindage 5, et deux niveaux de plus partout pour le General.
+     */
+    public function testTheGeneralScenarioFiresTwoLevelsHigherThanItsClasslessTwin(): void
+    {
+        $bataille = $this->aGeneralAndItsClasslessTwinAgainstAGarrison();
+        [$general, $jumelle] = $bataille['attaquantes'];
+
+        $this->assertNotSame($general->ownerId, $jumelle->ownerId, 'Both attacking fleets belong to the same player.');
+        $this->assertSame(CharacterClass::GENERAL->value, $general->player->getUser()->character_class);
+        $this->assertNull($jumelle->player->getUser()->character_class, 'The twin also has a class: the bonus would not be isolated.');
+
+        foreach (['weapon_technology', 'shielding_technology', 'armor_technology'] as $recherche) {
+            $this->assertSame(
+                $general->player->getResearchLevel($recherche),
+                $jumelle->player->getResearchLevel($recherche),
+                'The two attackers do not share their ' . $recherche . ': the class would not be the only difference.'
+            );
+        }
+
+        $chasseur = ObjectService::getUnitObjectByMachineName('light_fighter');
+
+        $this->assertSame(80, $chasseur->properties->attack->calculate($jumelle->player)->totalValue);
+        $this->assertSame(90, $chasseur->properties->attack->calculate($general->player)->totalValue, 'The General does not fire two levels higher.');
+        $this->assertSame(14, $chasseur->properties->shield->calculate($jumelle->player)->totalValue);
+        $this->assertSame(16, $chasseur->properties->shield->calculate($general->player)->totalValue, 'The General does not shield two levels higher.');
+        $this->assertSame(6000, $chasseur->properties->structural_integrity->calculate($jumelle->player)->totalValue);
+        $this->assertSame(6800, $chasseur->properties->structural_integrity->calculate($general->player)->totalValue, 'The General hull is not two levels higher.');
+
+        // Et la bataille se joue vraiment : sans round, le bonus n atteindrait aucun tir.
+        $this->assertNotEmpty($this->fight(PhpBattleEngine::class, $bataille)->rounds, 'The battle played no round: the bonus never reached a shot.');
+    }
+
+    /**
      * Le pillage interdit l'est par la politique, pas par un stock vide.
      */
     public function testTheForbiddenLootIsForbiddenByThePolicyAndNotByAnEmptyStock(): void

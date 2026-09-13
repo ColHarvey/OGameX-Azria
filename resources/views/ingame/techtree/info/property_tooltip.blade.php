@@ -7,7 +7,7 @@
     @foreach ($property_breakdown['bonuses'] as $property_bonus)
         <tr>
             <th>
-                {{ $property_bonus['type'] }}:
+                {{ __($property_bonus['type']) }}:
                 <span class=&quot;formula&quot;>({{ $property_bonus['percentage'] }}%)</span>
             </th>
             <td>{{ \OGame\Facades\AppUtil::formatNumber($property_bonus['value']) }}</td>

@@ -68,6 +68,18 @@ class PlayerService
     private int|null $cachedGeneralScore = null;
 
     /**
+     * Les deux services de classe, resolus a la premiere lecture du bonus de combat.
+     *
+     * **Une bataille demande ce bonus des centaines de fois** : trois proprietes par type de
+     * vaisseau, par flotte et par moteur. Le resoudre a chaque appel referait une lecture de la
+     * table des alliances a chaque fois, le memo de `AllianceClassService` etant porte par
+     * l instance.
+     */
+    private CharacterClassService|null $characterClassService = null;
+
+    private AllianceClassService|null $allianceClassService = null;
+
+    /**
      * Player constructor.
      *
      * @param int $player_id
@@ -482,6 +494,65 @@ class PlayerService
         } else {
             return 0;
         }
+    }
+
+    /**
+     * Les niveaux de combat que les classes ajoutent : celle du personnage **et** celle de l alliance.
+     *
+     * ------------------------------------------------------------------------------------
+     * UNE SEULE SOURCE, PARCE QUE DEUX DIVERGENT
+     *
+     * Depuis la decision de Keven du 12 septembre 2026, ce nombre entre dans les **caracteristiques
+     * reelles** des unites — puissance de feu, points de bouclier, coque — et pas seulement dans les
+     * niveaux **rapportes** par le rapport de combat. Avant elle, un General lisait « armes 7 » dans
+     * son rapport et tirait comme un joueur d armes 5 : le bonus etait affiche, jamais applique.
+     *
+     * Les deux lectures passent maintenant par cette methode. Un second site qui referait la somme
+     * lui-meme compterait le bonus deux fois du cote ou il se trouve, et l ecart ne se verrait ni
+     * dans un effectif ni dans un rapport : seulement dans l issue des batailles.
+     *
+     * ------------------------------------------------------------------------------------
+     * LES DEUX CLASSES S ADDITIONNENT
+     *
+     * Un General dans une alliance de Guerriers gagne les deux : +2 de sa classe, +1 de son
+     * alliance. C est la regle deja appliquee aux niveaux rapportes ; elle ne change pas.
+     *
+     * ------------------------------------------------------------------------------------
+     * CETTE LECTURE EST VIVANTE, ET C EST POURQUOI UN COMBAT DURABLE NE L EMPLOIE PAS
+     *
+     * Elle interroge le monde tel qu il est. Une bataille deja engagee ne doit pas la lire : elle
+     * lit sa photographie, par `FrozenCombatant`, qui surcharge cette methode. Sans cela, une
+     * classe achetee pendant un ralliement renforcerait des tirs deja partis.
+     */
+    public function getCombatResearchBonusLevels(): int
+    {
+        $user = $this->getUser();
+
+        return $this->characterClasses()->getAdditionalCombatResearchLevels($user)
+            + $this->allianceClasses()->getAdditionalCombatResearchLevels($user);
+    }
+
+    /**
+     * Le bonus que le rapport de combat annonce : **celui qui arme les tirs**.
+     *
+     * Les deux ne different que pour un combat engage sous la premiere regle
+     * (`CombatantUnderTheFirstRule`) : ses tirs ne portaient pas le bonus, son rapport l annoncait.
+     * Pour tout autre joueur c est la meme lecture — et c est ce qui empeche le rapport de dire autre
+     * chose que ce que les unites ont employe.
+     */
+    public function getReportedCombatResearchBonusLevels(): int
+    {
+        return $this->getCombatResearchBonusLevels();
+    }
+
+    private function characterClasses(): CharacterClassService
+    {
+        return $this->characterClassService ??= resolve(CharacterClassService::class);
+    }
+
+    private function allianceClasses(): AllianceClassService
+    {
+        return $this->allianceClassService ??= resolve(AllianceClassService::class);
     }
 
     /**

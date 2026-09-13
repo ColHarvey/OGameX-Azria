@@ -140,12 +140,13 @@ class FrozenCombatantTest extends AccountTestCase
      * Le moteur pose trois questions differentes : « est-il General » pour la manoeuvre de Hamill,
      * « quel supplement de combat » pour les niveaux rapportes, « quel fret » pour un transporteur.
      * Toutes trois s adressent au `User`. Geler la **classe** les fait donc repondre depuis la
-     * photographie **sans qu aucun bonus soit ajoute nulle part** : on ne touche a aucun site
-     * d application, on change seulement ce qu ils lisent.
+     * photographie : on ne touche a aucun site d application, on change seulement ce qu ils lisent.
      *
-     * C est la garde contre l application en double : le supplement derive de la classe gelee est
-     * exactement celui que la photographie porte, et il **n entre pas** dans les niveaux bruts —
-     * comme dans le chemin vivant.
+     * C est la garde contre l application en double. Le bonus **arme les tirs** depuis la decision
+     * de Keven du 12 septembre 2026, mais il n entre pas pour autant dans les niveaux **bruts** :
+     * les trois services de proprietes l ajoutent une fois, a partir de
+     * `getCombatResearchBonusLevels()`, et le rapport lit la meme source. L ajouter aussi aux
+     * niveaux bruts le compterait deux fois.
      */
     public function testTheFrozenClassAnswersTheEngineAndItsBonusIsCountedOnce(): void
     {
@@ -165,11 +166,49 @@ class FrozenCombatantTest extends AccountTestCase
         );
 
         // **Le bonus n entre pas dans les niveaux bruts.** Le chemin vivant ne l y met pas non plus :
-        // l ajouter ici le compterait deux fois, une dans les unites et une dans le rapport.
+        // il vit a cote, dans `getCombatResearchBonusLevels()`, et les services de proprietes l y
+        // prennent. L ajouter ici le compterait deux fois, une dans les unites et une dans le rapport.
         $this->assertSame(
             7,
             $general->getResearchLevel('weapon_technology'),
             'The class bonus was added to the raw weapon level: it would be counted twice.'
+        );
+    }
+
+    /**
+     * **Le bonus gele arme les tirs, et il bat celui que le monde deriverait de la classe.**
+     *
+     * L utilisateur porteur ne connait que la classe de **personnage** : une derivation vivante
+     * rendrait 2 pour un General, jamais le 3 d un General dans une alliance de Guerriers. Sans la
+     * surcharge, un renfort perdrait donc le niveau paye par son alliance au premier rechargement
+     * de l etat de champ — en silence, et seulement sur l issue de la bataille.
+     *
+     * Les deux nombres sont ecrits en toutes lettres : armes 7 + bonus 3 donnent 50 x (1 + 10/10),
+     * soit 100 ; la derivation vivante donnerait 95. L essai separe donc bien les deux regles.
+     */
+    public function testTheFrozenBonusArmsTheShotsAndBeatsTheClassDerivedFromTheUser(): void
+    {
+        $gele = new FrozenCombatant($this->currentUserId, 7, 5, 3, 3, CharacterClass::GENERAL->value);
+
+        // **La premisse** : le monde, lui, ne deriverait que 2 de cet utilisateur porteur. Sans elle,
+        // « 100 » pourrait etre la valeur des deux regles a la fois et ne separerait rien.
+        $this->assertSame(
+            2,
+            resolve(CharacterClassService::class)->getAdditionalCombatResearchLevels($gele->getUser()),
+            'The frozen user already derives three levels: this witness cannot separate the photograph from the world.'
+        );
+
+        $this->assertSame(
+            3,
+            $gele->getCombatResearchBonusLevels(),
+            'The frozen combatant does not arm its shots with the photographed bonus.'
+        );
+
+        $this->assertSame(
+            100,
+            $this->puissance($gele),
+            'The light fighter of a frozen General allied to Warriors does not fire at ten levels: '
+            . 'the photographed bonus was lost, or derived from the class instead of being read.'
         );
     }
 

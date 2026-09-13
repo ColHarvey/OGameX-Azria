@@ -624,6 +624,7 @@ class FleetMovementGateTest extends TestCase
         $tables = [
             'combat_fleet_dispositions',
             'combat_participants',
+            'combat_entry_characteristics',
             'celestial_body_combat_barriers',
             'combat_instances',
             'fleet_missions',

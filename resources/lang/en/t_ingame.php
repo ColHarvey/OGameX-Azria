@@ -1150,6 +1150,10 @@ return [
 
         // Property tooltip
         'tooltip_basic_value'                   => 'Basic value',
+        'tooltip_research_bonus'                => 'Research bonus',
+        'tooltip_class_bonus'                   => 'Class bonus',
+        'tooltip_character_class_bonus'         => 'Character class bonus',
+        'tooltip_alliance_class_bonus'          => 'Alliance class bonus',
 
         // Rapidfire
         'rapidfire_from'                        => 'Rapidfire from',

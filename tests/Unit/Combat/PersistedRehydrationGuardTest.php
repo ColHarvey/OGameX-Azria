@@ -40,6 +40,14 @@ class PersistedRehydrationGuardTest extends TestCase
      * @var array<string, array{0: string, 1: string}> Classe::methode => [fichier d'essai, methode d'essai]
      */
     private const array PROVEN = [
+        'Combat/Enums/UnitCharacteristicsRule::fromInstance' => [
+            'tests/Unit/Combat/UnitCharacteristicsRuleTest.php',
+            'testARuleThatIsNotAStringIsRefused',
+        ],
+        'Combat/Support/FrozenCombatCharacteristics::fromStorage' => [
+            'tests/Unit/Combat/FrozenCombatCharacteristicsTest.php',
+            'testANumericStringOrAFloatLevelIsRefused',
+        ],
         'Combat/Admission/FrozenAllianceMembership::fromStorage' => [
             'tests/Unit/Combat/FrozenAllianceMembershipTest.php',
             'testAStoredIdentifierOfTheWrongTypeIsRefused',

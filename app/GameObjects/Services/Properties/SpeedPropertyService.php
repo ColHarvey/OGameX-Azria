@@ -37,7 +37,7 @@ class SpeedPropertyService extends ObjectPropertyService
             'rawValue' => $effectiveBase,
             'bonuses' => [
                 [
-                    'type' => 'Research bonus',
+                    'type' => 't_ingame.techtree.tooltip_research_bonus',
                     'value' => $bonusValue,
                     'percentage' => $bonusPercentage,
                 ],
@@ -61,7 +61,7 @@ class SpeedPropertyService extends ObjectPropertyService
             $totalValue += $allianceBonusValue;
 
             $breakdown['bonuses'][] = [
-                'type' => 'Alliance class bonus',
+                'type' => 't_ingame.techtree.tooltip_alliance_class_bonus',
                 'value' => $allianceBonusValue,
                 'percentage' => $allianceBonus,
             ];
@@ -75,7 +75,7 @@ class SpeedPropertyService extends ObjectPropertyService
             $totalValue += $classBonusValue;
 
             $breakdown['bonuses'][] = [
-                'type' => 'Character class bonus',
+                'type' => 't_ingame.techtree.tooltip_character_class_bonus',
                 'value' => $classBonusValue,
                 'percentage' => $classBonus,
             ];

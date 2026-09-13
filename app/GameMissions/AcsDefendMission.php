@@ -4,6 +4,7 @@ namespace OGame\GameMissions;
 
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Services\CombatEntryCharacteristicsRegistry;
 use OGame\Combat\Services\EngagedFleetCheck;
 use OGame\Combat\Services\FleetMovementGate;
 use OGame\Combat\Services\RefusedFleetHomecoming;
@@ -202,6 +203,10 @@ class AcsDefendMission extends GameMission
 
         $mission->combat_instance_id = $combat->id;
         $mission->save();
+
+        // **Retenue a son arrivee, elle y gele ce qu elle apporte a ses tirs** : le meme instant que
+        // le lien, et la meme porte.
+        resolve(CombatEntryCharacteristicsRegistry::class)->recordAtEntry($combat, (int)$mission->id, (int)$mission->user_id, ReturnOrder::physicalArrivalOf($mission));
     }
 
     /**

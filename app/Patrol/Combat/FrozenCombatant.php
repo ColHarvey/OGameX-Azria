@@ -35,18 +35,20 @@ use RuntimeException;
  * champ se compose — l ouverture pour les premiers, l admission pour chaque renfort.
  *
  * ------------------------------------------------------------------------------------
- * CE QU ELLE NE CHANGE PAS, ET C EST VOULU
+ * LE BONUS DE CLASSE PORTE SUR LES TIRS, ET IL EST GELE COMME LE RESTE
  *
- * `getResearchLevel()` rend les niveaux **bruts**, sans y ajouter le bonus de classe. Ce
- * n est pas un oubli : c est exactement ce que le chemin vivant lit, `getResearchLevel()`
- * n interrogeant que `user_tech`. Le bonus de classe, lui, n entre aujourd hui que dans les
- * niveaux **rapportes** (`BattleEngine`, ligne des `attackerWeaponLevel`).
+ * `getResearchLevel()` rend les niveaux **bruts**, sans y ajouter le bonus : c est exactement
+ * ce que le chemin vivant lit, `getResearchLevel()` n interrogeant que `user_tech`. Le bonus
+ * vit a cote, dans `getCombatResearchBonusLevels()`, et **les trois services de proprietes
+ * l ajoutent** depuis la decision de Keven du 12 septembre 2026.
  *
- * Geler ne doit pas corriger : si ce bonus doit un jour porter sur les unites, c est une
- * decision de jeu, elle vaudra pour les deux camps et pour les deux moteurs. Le noter ici
- * evite qu un lecteur prenne l ecart pour un defaut de cette classe. Le bonus est donc
- * **porte** — il fait partie de ce qui est gele — et rendu par `classCombatBonus()`, pret
- * pour le jour ou le rapport le demandera.
+ * Cette classe surcharge donc cette lecture pour rendre le bonus **photographie**, et non
+ * celui que le monde derivera plus tard. L ecart n est pas theorique : l utilisateur porteur
+ * ne connait que la classe de personnage, jamais l alliance — un defenseur d une alliance de
+ * Guerriers perdrait son niveau au rechargement si l on laissait le monde le deriver.
+ *
+ * Le bonus n est ajoute qu **une fois** : il n entre pas dans les niveaux bruts, et le rapport
+ * le prend a la meme source que les tirs.
  */
 final class FrozenCombatant extends PlayerService
 {
@@ -128,9 +130,23 @@ final class FrozenCombatant extends PlayerService
     }
 
     /**
-     * Le bonus de classe gele — porte, mais non ajoute aux niveaux ci-dessous.
+     * Le bonus de classe gele — porte, mais non ajoute aux niveaux **bruts** ci-dessous.
      */
     public function classCombatBonus(): int
+    {
+        return $this->classCombatBonus;
+    }
+
+    /**
+     * Le bonus que ce combattant applique a ses tirs : **celui de la photographie**.
+     *
+     * Le monde ne le derive plus ici. Un joueur vivant additionne sa classe de personnage et
+     * celle de son alliance ; un combattant gele porte deja cette somme, prise a son entree dans
+     * la bataille. Laisser la derivation vivante s appliquer donnerait un nombre **plus petit** —
+     * l utilisateur porteur n a pas d alliance — et un renfort perdrait son niveau au premier
+     * rechargement de l etat, sans qu aucune decision ne le lui ait retire.
+     */
+    public function getCombatResearchBonusLevels(): int
     {
         return $this->classCombatBonus;
     }

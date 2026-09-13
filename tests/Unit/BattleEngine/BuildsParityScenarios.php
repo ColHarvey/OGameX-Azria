@@ -261,6 +261,34 @@ trait BuildsParityScenarios
     }
 
     /**
+     * Deux attaquantes identiques en tout, sauf la classe : l une est Generale.
+     *
+     * **Le scenario existe pour la couture, pas pour l equilibre.** Depuis la decision de Keven du
+     * 12 septembre 2026, le +2 du General entre dans la puissance de feu, le bouclier et la coque
+     * calcules **cote PHP** ; Rust ne recoit que ces nombres. Aucun autre scenario ne portait un bonus
+     * de combat — le Decouvreur de l union n en donne pas —, et la parite ne disait donc rien du chemin
+     * qui les produit.
+     *
+     * Memes vaisseaux, memes technologies : la classe est le seul ecart. Si la couture aplatissait les
+     * caracteristiques par type de vaisseau, ou lisait le bonus sur le mauvais joueur, les deux flottes
+     * tireraient pareil et les moteurs divergeraient.
+     *
+     * @return array{attaquantes: array<int, AttackerFleet>, defenseurs: array<int, DefenderFleet>, cible: PlanetService, contexte: \OGame\Combat\Support\LootContext}
+     */
+    private function aGeneralAndItsClasslessTwinAgainstAGarrison(): array
+    {
+        $technologies = ['weapon_technology' => 6, 'shielding_technology' => 4, 'armor_technology' => 5];
+
+        return $this->aBattle(
+            planete: ['metal' => 80_000, 'crystal' => 40_000, 'rocket_launcher' => 120, 'light_laser' => 40],
+            attaquantes: [
+                ['units' => ['light_fighter' => 300, 'cruiser' => 25], 'tech' => $technologies, 'classe' => CharacterClass::GENERAL],
+                ['units' => ['light_fighter' => 300, 'cruiser' => 25], 'tech' => $technologies],
+            ],
+        );
+    }
+
+    /**
      * Un meme type de vaisseau dans la garnison et dans un renfort, avec des boucliers differents.
      *
      * @return array{attaquantes: array<int, AttackerFleet>, defenseurs: array<int, DefenderFleet>, cible: PlanetService, contexte: \OGame\Combat\Support\LootContext}

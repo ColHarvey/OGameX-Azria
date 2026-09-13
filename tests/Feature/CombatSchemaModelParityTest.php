@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Schema;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatEffectReceipt;
+use OGame\Models\CombatEntryCharacteristic;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatLootReservation;
 use OGame\Models\CombatOutboxMessage;
@@ -109,6 +110,7 @@ class CombatSchemaModelParityTest extends TestCase
             CombatParticipant::class,
             CelestialBodyCombatBarrier::class,
             CombatEffectReceipt::class,
+            CombatEntryCharacteristic::class,
             CombatSnapshotInclusion::class,
             CombatLootReservation::class,
             CombatOutboxMessage::class,

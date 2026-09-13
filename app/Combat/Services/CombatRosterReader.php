@@ -5,8 +5,12 @@ namespace OGame\Combat\Services;
 use Illuminate\Support\Collection;
 use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Enums\UnitCharacteristicsRule;
 use OGame\Combat\Exceptions\IncoherentCombatEnrolment;
+use OGame\Combat\Support\CombatantFrozenAtEntry;
+use OGame\Combat\Support\CombatantUnderTheFirstRule;
 use OGame\Combat\Support\CombatParticipantKey;
+use OGame\Combat\Support\FrozenCombatCharacteristics;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
@@ -16,6 +20,7 @@ use OGame\Models\CombatInstance;
 use OGame\Models\CombatParticipant;
 use OGame\Models\FleetMission;
 use OGame\Services\FleetMissionService;
+use OGame\Services\PlayerService;
 use RuntimeException;
 
 /**
@@ -44,6 +49,7 @@ final class CombatRosterReader
         private FleetMissionService|null $fleetMissions = null,
         private PlayerServiceFactory|null $players = null,
         private PlanetServiceFactory|null $planets = null,
+        private CombatEntryCharacteristicsRegistry|null $entries = null,
     ) {
     }
 
@@ -139,6 +145,70 @@ final class CombatRosterReader
             $initiatrice,
             array_values($origines)
         );
+    }
+
+    /**
+     * L effectif **tel que la bataille le compose** : chaque joueur tire avec ce que sa regle lui donne.
+     *
+     * ## Pourquoi une entree distincte de `forCombat()`
+     *
+     * `forCombat()` sert aussi le reglement et l annulation, qui ne composent aucune unite : ils lisent
+     * des identites, des effectifs et des credits, sur les comptes vivants. Seule la cloture calcule une
+     * bataille, et c est elle seule qui substitue aux joueurs ce qui arme leurs tirs.
+     *
+     * ## Ce qui change selon la regle du combat
+     *
+     * - **Gel a l entree** : chaque flotte porte un `CombatantFrozenAtEntry` construit depuis ce que le
+     *   registre a inscrit a son entree ; la garnison, depuis la photographie d ouverture relevee par les
+     *   seuls effets admissibles. Une ligne manquante est un refus, jamais un repli sur le compte.
+     * - **Premiere regle** : chaque joueur, garnison comprise, est un `CombatantUnderTheFirstRule` — les
+     *   niveaux vivants, aucun bonus dans les tirs, le bonus au rapport. C est ce que le jeu faisait.
+     *
+     * ## Le defaut que la garnison ferme
+     *
+     * `fromPhotographedGarrison()` remplacait l effectif et les coques de la garnison, **pas son
+     * joueur** : ses tirs lisaient les niveaux vivants a la cloture pendant que son rapport lisait la
+     * photographie. Une recherche achevee pendant le ralliement, hors des effets admissibles, renforcait
+     * des defenses deja engagees.
+     */
+    public function forTheBattle(CombatInstance $combat, UnitCollection $photographedGarrison, PhotographedDefender $photographedDefender): CombatRoster
+    {
+        $effectif = $this->forCombat($combat, $photographedGarrison);
+        $regle = UnitCharacteristicsRule::fromInstance($combat);
+
+        foreach ($effectif->attackers as $flotte) {
+            $flotte->player = $this->fleetCombatant($combat, $regle, $flotte->ownerId, $flotte->fleetMissionId);
+        }
+
+        foreach ($effectif->defenders as $flotte) {
+            // La garnison n a pas de mission : c est la flotte d identifiant zero.
+            $flotte->player = $flotte->fleetMissionId === 0
+                ? $this->garrisonCombatant($regle, $flotte->ownerId, $photographedDefender)
+                : $this->fleetCombatant($combat, $regle, $flotte->ownerId, $flotte->fleetMissionId);
+        }
+
+        return $effectif;
+    }
+
+    private function fleetCombatant(CombatInstance $combat, UnitCharacteristicsRule $regle, int $ownerId, int $fleetMissionId): PlayerService
+    {
+        return match ($regle) {
+            UnitCharacteristicsRule::FrozenAtEntry => new CombatantFrozenAtEntry($ownerId, $this->entries()->of($combat, $fleetMissionId)),
+            UnitCharacteristicsRule::FirstRule => new CombatantUnderTheFirstRule($ownerId),
+        };
+    }
+
+    private function garrisonCombatant(UnitCharacteristicsRule $regle, int $ownerId, PhotographedDefender $photographedDefender): PlayerService
+    {
+        return match ($regle) {
+            UnitCharacteristicsRule::FrozenAtEntry => new CombatantFrozenAtEntry($ownerId, FrozenCombatCharacteristics::ofPhotographedDefender($photographedDefender)),
+            UnitCharacteristicsRule::FirstRule => new CombatantUnderTheFirstRule($ownerId),
+        };
+    }
+
+    private function entries(): CombatEntryCharacteristicsRegistry
+    {
+        return $this->entries ??= resolve(CombatEntryCharacteristicsRegistry::class);
     }
 
     /**

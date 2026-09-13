@@ -33,6 +33,19 @@ abstract class ObjectPropertyService
     abstract protected function getBonusPercentage(PlayerService $player): int;
 
     /**
+     * La part du bonus qui vient des **classes**, en pourcentage — zero, sauf la ou une classe ajoute
+     * des niveaux.
+     *
+     * Elle est tenue a part de la recherche pour une seule raison : l infobulle la montre sur sa propre
+     * ligne (decision de Keven, 12 septembre 2026). Le **calcul**, lui, additionne les deux avant
+     * d arrondir, comme les niveaux s additionnent.
+     */
+    protected function getClassBonusPercentage(PlayerService $player): int
+    {
+        return 0;
+    }
+
+    /**
      * Calculate the total value of a property.
      *
      * @param PlayerService $player
@@ -40,27 +53,41 @@ abstract class ObjectPropertyService
      */
     public function calculateProperty(PlayerService $player): GameObjectPropertyDetails
     {
-        $bonusPercentage = $this->getBonusPercentage($player);
+        $researchPercentage = $this->getBonusPercentage($player);
+        $classPercentage = $this->getClassBonusPercentage($player);
+        $bonusPercentage = $researchPercentage + $classPercentage;
         // Use integer arithmetic to avoid floating point precision issues
         $bonusValue = intdiv($this->base_value * $bonusPercentage, 100);
 
         $totalValue = $this->base_value + $bonusValue;
 
-        // Prepare the breakdown for future-proofing (assuming more components might be added)
-        // TODO: add model for breakdown
-        // TODO: Add more components to the breakdown if necessary like class bonuses, premium member
-        // bonuses, item bonuses etc.
+        // **Une seule assiette, deux lignes.** Le total vient de la somme des pourcentages, arrondie une
+        // fois : c est le nombre que les tirs emploient. Arrondir chaque ligne a part pourrait donner un
+        // total que la bataille ne connait pas. La ligne de classe affiche donc ce qui reste apres la
+        // ligne de recherche, et les deux somment exactement au bonus.
+        $researchValue = intdiv($this->base_value * $researchPercentage, 100);
+
+        // Les libelles sont des **clefs**, traduites par l infobulle : ce calcul tourne des centaines de
+        // fois par bataille, ou aucune infobulle n est affichee.
         $breakdown = [
             'rawValue' => $this->base_value,
             'bonuses' => [
                 [
-                    'type' => 'Research bonus',
-                    'value' => $bonusValue,
-                    'percentage' => $bonusPercentage,
+                    'type' => 't_ingame.techtree.tooltip_research_bonus',
+                    'value' => $researchValue,
+                    'percentage' => $researchPercentage,
                 ],
             ],
             'totalValue' => $totalValue,
         ];
+
+        if ($classPercentage > 0) {
+            $breakdown['bonuses'][] = [
+                'type' => 't_ingame.techtree.tooltip_class_bonus',
+                'value' => $bonusValue - $researchValue,
+                'percentage' => $classPercentage,
+            ];
+        }
 
         return new GameObjectPropertyDetails($this->base_value, $bonusValue, $totalValue, $breakdown);
     }

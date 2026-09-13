@@ -46,6 +46,7 @@ class AllianceMembershipDuringBattleTest extends AccountTestCase
     {
         if ($this->combats !== []) {
             CombatParticipant::query()->whereIn('combat_instance_id', $this->combats)->delete();
+            DB::table('combat_entry_characteristics')->whereIn('combat_instance_id', $this->combats)->delete();
             CombatInstance::query()->whereIn('id', $this->combats)->delete();
             $this->combats = [];
         }

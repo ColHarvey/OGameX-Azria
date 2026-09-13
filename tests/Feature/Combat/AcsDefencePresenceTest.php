@@ -14,7 +14,10 @@ use OGame\Combat\Services\CombatOpeningService;
 use OGame\Combat\Services\EngagedFleetCheck;
 use OGame\Combat\Services\RallyCandidateReader;
 use OGame\Combat\Services\RallyClosureService;
+use OGame\Combat\Support\CombatParticipantKey;
+use OGame\GameMissions\AcsDefendMission;
 use OGame\Models\CelestialBodyCombatBarrier;
+use OGame\Models\CombatEntryCharacteristic;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatParticipant;
 use OGame\Models\FleetMission;
@@ -199,6 +202,69 @@ class AcsDefencePresenceTest extends TestCase
         $this->assertSame(CombatState::Rallying, $combat->refresh()->status, 'The rally closed at once: the hold would not be observable.');
         $this->assertSame($combat->id, (int)$presente->refresh()->combat_instance_id, 'A reinforcement already on the body was not held.');
         $this->assertTrue((new EngagedFleetCheck())->isEngaged($presente), 'The held reinforcement is not seen as engaged: recall and hold expiry would still let it leave.');
+    }
+
+    /**
+     * **Retenue des l'ouverture, elle gele a l'ouverture ce qu'elle apporte a ses tirs** (decision de
+     * Keven, 12 septembre 2026).
+     *
+     * Posee cinq minutes avant, elle n'entre pourtant dans ce combat qu'a l'instant ou il la retient :
+     * c'est cet instant qui s'inscrit, et c'est son proprietaire — pas celui du corps — qui s'y lit.
+     */
+    public function testAReinforcementHeldFromTheOpeningFreezesItsCharacteristicsAtTheOpening(): void
+    {
+        $corps = $this->aPlanetOwnedBy($this->aPlayer())->id;
+        $renforcant = $this->aPlayer();
+        $presente = $this->anAcsDefence($renforcant, $corps, self::OPENING - 300, 3600);
+        $attaquant = $this->aPlayer();
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $attaquant);
+        $this->anAttackAt($corps, self::OPENING + 20, $attaquant);
+
+        $combat = (new CombatOpeningService())->openOrJoin($ouvreur, $corps, self::OPENING);
+
+        $this->assertSame(CombatState::Rallying, $combat->refresh()->status, 'The rally closed at once: the hold would not be observable.');
+
+        $ligne = $this->entryLineOf($combat, $presente->id);
+
+        $this->assertNotNull($ligne, 'A reinforcement held from the opening has no frozen characteristics.');
+        $this->assertSame(self::OPENING, (int)$ligne->entered_at, 'A reinforcement held from the opening is not frozen at the opening.');
+        $this->assertSame($renforcant->id, (int)$ligne->player_id, 'The characteristics were read on another account than the reinforcement owner.');
+    }
+
+    /**
+     * **Arrivee pendant le ralliement, elle gele a son arrivee physique** — jamais a la fin de son
+     * stationnement, que `time_arrival` porte pour une Defense ACS a l'aller.
+     *
+     * Une heure separe ici les deux instants : un gel date de `time_arrival` se verrait aussitot.
+     */
+    public function testAnAcsDefenceArrivingDuringTheRallyFreezesAtItsPhysicalArrival(): void
+    {
+        $corps = $this->aPlanetOwnedBy($this->aPlayer())->id;
+        $attaquant = $this->aPlayer();
+        $ouvreur = $this->anAttackAt($corps, self::OPENING, $attaquant);
+        $this->anAttackAt($corps, self::OPENING + 20, $attaquant);
+
+        $combat = (new CombatOpeningService())->openOrJoin($ouvreur, $corps, self::OPENING);
+        $this->assertSame(CombatState::Rallying, $combat->refresh()->status, 'The rally closed at once: the hold would not be observable.');
+
+        $renfort = $this->anAcsDefence($this->aPlayer(), $corps, self::OPENING + 10, 3600);
+
+        resolve(AcsDefendMission::class)->settleArrival($renfort, self::OPENING + 10);
+
+        $this->assertSame($combat->id, (int)$renfort->refresh()->combat_instance_id, 'The premise is missing: the reinforcement was not held by the rallying combat.');
+
+        $ligne = $this->entryLineOf($combat, $renfort->id);
+
+        $this->assertNotNull($ligne, 'An ACS defence held during the rally has no frozen characteristics.');
+        $this->assertSame(self::OPENING + 10, (int)$ligne->entered_at, 'The ACS defence is frozen at the end of its hold instead of its physical arrival.');
+    }
+
+    private function entryLineOf(CombatInstance $combat, int $fleetMissionId): CombatEntryCharacteristic|null
+    {
+        return CombatEntryCharacteristic::query()
+            ->where('combat_instance_id', $combat->id)
+            ->where('participant_key', CombatParticipantKey::forFleet($fleetMissionId))
+            ->first();
     }
 
     /**

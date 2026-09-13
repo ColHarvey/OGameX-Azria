@@ -9,7 +9,6 @@ use OGame\Factories\PlayerServiceFactory;
 use OGame\Models\CombatInstance;
 use OGame\Models\FleetMission;
 use OGame\Models\Patrol;
-use OGame\Services\CharacterClassService;
 use OGame\Services\FleetMissionService;
 use OGame\Services\SettingsService;
 
@@ -54,7 +53,6 @@ final class SpatialOpeningState
         private FleetMissionService|null $fleetMissions = null,
         private PlayerServiceFactory|null $players = null,
         private SettingsService|null $settings = null,
-        private CharacterClassService|null $classes = null,
     ) {
     }
 
@@ -154,10 +152,14 @@ final class SpatialOpeningState
                 $proprietaire->getResearchLevel('weapon_technology'),
                 $proprietaire->getResearchLevel('shielding_technology'),
                 $proprietaire->getResearchLevel('armor_technology'),
-                // **Le bonus derive, pas la classe.** C est la valeur que le moteur additionne ;
-                // photographier la classe laisserait un changement de classe pendant la bataille
-                // changer des tirs deja joues.
-                $this->classes()->getAdditionalCombatResearchLevels($proprietaire->getUser()),
+                // **Le bonus derive, pas la classe.** C est la valeur que le moteur applique aux
+                // tirs ; photographier la classe laisserait un changement de classe pendant la
+                // bataille changer des tirs deja joues.
+                //
+                // **Les deux classes, et non celle du personnage seule.** Cette ligne n interrogeait
+                // que `CharacterClassService` : un defenseur d une alliance de Guerriers perdait son
+                // niveau en espace libre, alors que la photographie d un corps le portait deja.
+                $proprietaire->getCombatResearchBonusLevels(),
                 // **Aucun chantier spatial en espace libre.** La part d epaves retombe sur le
                 // plancher du jeu, que le moteur applique par `max(1, …)`.
                 0,
@@ -185,11 +187,6 @@ final class SpatialOpeningState
     private function players(): PlayerServiceFactory
     {
         return $this->players ??= resolve(PlayerServiceFactory::class);
-    }
-
-    private function classes(): CharacterClassService
-    {
-        return $this->classes ??= resolve(CharacterClassService::class);
     }
 
     private function settings(): SettingsService

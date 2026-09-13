@@ -134,6 +134,10 @@ final class ClosureLockOrderTest extends FleetDispatchTestCase
             // que cette fermeture tient : la ligne est ecrite ici, et lue juste apres par la meme
             // fermeture. Une seule source pour l effet applique ici et pour celui que le monde a livre.
             'combat_effect_ledger',
+            // **Les caracteristiques gelees a l entree** (decision de Keven, 12 septembre 2026). La cloture
+            // inscrit chaque flotte admise que personne n avait vue a son arrivee, dans sa transaction et
+            // sous les verrous qu elle tient : chaque ligne porte l identifiant de ce combat.
+            'combat_entry_characteristics',
         ];
         $inattendues = array_values(array_diff(array_keys($ecrites), $attendues));
 

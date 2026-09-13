@@ -133,7 +133,7 @@ jobs:
       # aussi. 44 : les 30 essais historiques du moteur, les pertes par participant (2), le contrat
       # FFI (5) et le banc de parite (7). Un fichier d'essai qui disparaitrait ferait tomber le compte.
       - name: Exiger les essais Rust executes, aucun ignore
-        run: php scripts/verifier-junit.php storage/logs/junit-rust.xml --minimum=45 --sans-ignores
+        run: php scripts/verifier-junit.php storage/logs/junit-rust.xml --minimum=45 --sans-ignores --exige=testAGeneralsClassBonusCrossesTheSeamIdentically
 
       - name: Resumer le verdict
         if: always()

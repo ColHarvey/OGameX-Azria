@@ -81,6 +81,7 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
             'combat_snapshot_inclusions',
             'combat_outbox',
             'combat_participants',
+            'combat_entry_characteristics',
             'combat_effect_receipts',
             'combat_loot_reservations',
             'celestial_body_combat_barriers',

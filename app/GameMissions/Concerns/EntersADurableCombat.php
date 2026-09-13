@@ -9,6 +9,7 @@ use OGame\Alliance\AllianceOffensiveGuard;
 use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Combat\Enums\CombatReasonCode;
 use OGame\Combat\Enums\CombatState;
+use OGame\Combat\Services\CombatEntryCharacteristicsRegistry;
 use OGame\Combat\Services\CombatOpeningService;
 use OGame\Combat\Services\RefusedFleetHomecoming;
 use OGame\Combat\Support\RefusedFleetVerdict;
@@ -71,6 +72,12 @@ trait EntersADurableCombat
         if ($combat->status === CombatState::Rallying || $this->belongsToCombat($mission, $combat)) {
             $mission->combat_instance_id = $combat->id;
             $mission->save();
+
+            // **Ce que la flotte apporte a ses tirs se gele ici, a son arrivee** (decision de Keven,
+            // 12 septembre 2026) : une recherche achevee ou une classe achetee pendant le ralliement ne
+            // change plus la bataille. Deja inscrite — un rejeu, une vague deja vue —, rien ne se
+            // reecrit.
+            resolve(CombatEntryCharacteristicsRegistry::class)->recordAtEntry($combat, (int)$mission->id, (int)$mission->user_id, (int)$mission->time_arrival);
 
             return;
         }

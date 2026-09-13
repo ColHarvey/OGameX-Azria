@@ -78,6 +78,7 @@ use OGame\Combat\Enums\CombatState;
  * @property array<mixed>|null $moon_destruction_plan
  * @property string|null $frozen_facts_fingerprint
  * @property array<mixed>|null $frozen_alliance_membership
+ * @property string|null $unit_characteristics_version La regle qui compose les unites a la cloture : v1, niveaux vivants sans bonus aux tirs ; v2, gel a l entree.
  * @property string|null $projection_version
  * @property string|null $presentation_version La regle de presentation sous laquelle le fil a ete ecrit.
  * @property int|null $potential_loot_metal
@@ -151,6 +152,7 @@ use OGame\Combat\Enums\CombatState;
     'frozen_alliance_membership',
     'projection_version',
     'presentation_version',
+    'unit_characteristics_version',
     'potential_loot_metal',
     'potential_loot_crystal',
     'potential_loot_deuterium',

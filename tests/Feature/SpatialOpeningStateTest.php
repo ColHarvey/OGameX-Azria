@@ -2,19 +2,25 @@
 
 namespace Tests\Feature;
 
+use Illuminate\Support\Facades\DB;
 use OGame\Combat\Enums\CombatState;
+use OGame\Enums\AllianceClass;
 use OGame\Enums\CharacterClass;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\Models\CombatInstance;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\Patrol;
+use OGame\Models\User;
 use OGame\Patrol\Combat\CorruptedSpatialDefence;
 use OGame\Patrol\Combat\FrozenCombatant;
 use OGame\Patrol\Combat\FrozenSpatialDefence;
 use OGame\Patrol\Combat\SpatialOpeningState;
 use OGame\Patrol\Enums\PatrolState;
+use OGame\Services\AllianceClassService;
+use OGame\Services\AllianceService;
 use OGame\Services\CharacterClassService;
+use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
 
 /**
@@ -253,6 +259,46 @@ class SpatialOpeningStateTest extends AccountTestCase
             $classes->isGeneral($combattant->getUser()),
             'A combatant rebuilt from the photograph lost the class it entered with: the Hamill manoeuvre would vanish.'
         );
+    }
+
+    /**
+     * **La photographie porte le niveau de l alliance, pas seulement celui du personnage.**
+     *
+     * Elle n interrogeait que la classe de personnage : un defenseur d une alliance de Guerriers perdait
+     * son niveau en espace libre, alors que la photographie d un corps le portait. Le joueur n a ici
+     * aucune classe de personnage : seul le niveau d alliance peut rendre 1.
+     */
+    public function testThePhotographCarriesTheAllianceLevelAndNotOnlyTheCharacterOne(): void
+    {
+        $reglages = resolve(SettingsService::class);
+        $reglages->set('alliance_classes_enabled', '1');
+
+        try {
+            DB::table('users')->where('id', $this->currentUserId)->update(['character_class' => null]);
+
+            $alliance = resolve(AllianceService::class)->createAlliance(
+                $this->currentUserId,
+                'SP' . substr(md5(uniqid((string)mt_rand(), true)), 0, 5),
+                'Espace ' . substr(md5(uniqid((string)mt_rand(), true)), 0, 8)
+            );
+            $this->assertNotNull($alliance);
+
+            // Une alliance fondee a l instant n a pas les quatorze jours qui offrent le premier choix.
+            DB::table('users')->where('id', $this->currentUserId)->increment('dark_matter', AllianceClass::PRICE_IN_DARK_MATTER);
+            resolve(AllianceClassService::class)->choose(User::query()->findOrFail($this->currentUserId), $alliance, AllianceClass::WARRIORS);
+
+            $patrouille = $this->patrouille();
+            $flotte = $this->flotte();
+            $combat = $this->combat();
+
+            new SpatialOpeningState()->capture($combat, $patrouille, $flotte, 1_700_000_000);
+
+            $gele = new SpatialOpeningState()->protectedDefenceOf(CombatInstance::query()->findOrFail($combat->id));
+
+            $this->assertSame(1, $gele->defender->classCombatBonus, 'The free-space photograph lost the level of the Warriors alliance.');
+        } finally {
+            $reglages->set('alliance_classes_enabled', '0');
+        }
     }
 
     /**

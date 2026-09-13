@@ -120,7 +120,10 @@ final class CombatEngagementService
             return $this->alreadyEngaged($combat);
         }
 
-        $effectif = $this->roster->forCombat($combat, $photographedGarrison);
+        // **L effectif tel que la bataille le compose** : chaque joueur avec ce que la regle du combat
+        // lui donne pour tirer — gele a son entree, ou sous la premiere regle pour un combat ouvert
+        // avant elle. La garnison tire enfin avec sa photographie, et plus avec le compte vivant.
+        $effectif = $this->roster->forTheBattle($combat, $photographedGarrison, $photographedDefender);
 
         // **Aucune attaquante sans mission dans un combat durable.** Son effectif est fait
         // d'inscriptions, et une inscription nomme une mission ; une flotte a l'identifiant zero

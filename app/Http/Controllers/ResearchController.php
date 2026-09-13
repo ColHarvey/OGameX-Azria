@@ -7,7 +7,6 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
 use OGame\Http\Traits\ObjectAjaxTrait;
-use OGame\Services\CharacterClassService;
 use OGame\Services\HalvingService;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
@@ -60,9 +59,10 @@ class ResearchController extends OGameController
         // Combat research technologies that get General class bonus
         $combat_research = ['weapon_technology', 'shielding_technology', 'armor_technology'];
 
-        // Get character class bonus for combat research
-        $characterClassService = app(CharacterClassService::class);
-        $combatResearchBonus = $characterClassService->getAdditionalCombatResearchLevels($player->getUser());
+        // Le bonus que les classes ajoutent a ces trois recherches — personnage **et** alliance,
+        // a la source qui arme les tirs. La page ne montrait que celui du personnage : un membre
+        // d une alliance de Guerriers combattait avec un niveau que sa propre page taisait.
+        $combatResearchBonus = $player->getCombatResearchBonusLevels();
 
         $count = 0;
 

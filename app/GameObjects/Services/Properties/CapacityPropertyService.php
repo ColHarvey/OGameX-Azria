@@ -34,7 +34,7 @@ class CapacityPropertyService extends ObjectPropertyService
             'rawValue' => $this->base_value,
             'bonuses' => [
                 [
-                    'type' => 'Research bonus',
+                    'type' => 't_ingame.techtree.tooltip_research_bonus',
                     'value' => $bonusValue,
                     'percentage' => $bonusPercentage,
                 ],
@@ -50,7 +50,7 @@ class CapacityPropertyService extends ObjectPropertyService
             $totalValue += $classBonusValue;
 
             $breakdown['bonuses'][] = [
-                'type' => 'Character class bonus',
+                'type' => 't_ingame.techtree.tooltip_character_class_bonus',
                 'value' => $classBonusValue,
                 'percentage' => $classBonus,
             ];

@@ -341,6 +341,12 @@ final class RallyClosureService
                         'participant_type' => $this->participantTypeOf($mission),
                     ]
                 );
+
+                // **Toute flotte admise a ses caracteristiques gelees avant la bataille.** Une vague
+                // arrivee avant l echeance peut etre inscrite ici sans que son travailleur soit passe :
+                // la cloture l observe, mais l instant d admission reste **son arrivee** — celle que le
+                // selecteur a jugee. Une flotte deja vue a sa porte garde ce qu elle y a inscrit.
+                resolve(CombatEntryCharacteristicsRegistry::class)->recordAtEntry($combat, $mission->missionId, $mission->userId, $mission->scheduledArrivalAt);
             }
         }
     }

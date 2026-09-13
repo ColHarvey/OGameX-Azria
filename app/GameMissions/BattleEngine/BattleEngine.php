@@ -25,8 +25,6 @@ use OGame\GameMissions\BattleEngine\Services\TacticalRetreatService;
 use OGame\GameObjects\Models\Enums\GameObjectType;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Resources;
-use OGame\Services\AllianceClassService;
-use OGame\Services\CharacterClassService;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
@@ -280,11 +278,17 @@ abstract class BattleEngine
         $defenderShieldBase = $photographie !== null ? $photographie->shieldLevel : $defenderPlayer->getResearchLevel('shielding_technology');
         $defenderArmorBase = $photographie !== null ? $photographie->armorLevel : $defenderPlayer->getResearchLevel('armor_technology');
 
-        // Apply General class combat research bonus (+2 levels)
-        $characterClassService = app(CharacterClassService::class);
-        $allianceClassService = app(AllianceClassService::class);
-
         /*
+         * **Le bonus des classes, lu a la source qui a arme les tirs.**
+         *
+         * Depuis le 12 septembre 2026 il porte sur les caracteristiques reelles des unites. Le
+         * rapport doit donc afficher exactement ce que ces unites ont employe : le lire ailleurs
+         * ferait reapparaitre l ecart que cette decision ferme — un rapport annoncant « armes 7 »
+         * sur des tirs d armes 5. `getReportedCombatResearchBonusLevels()` rend ce nombre : un joueur
+         * vivant y additionne ses deux classes, un combattant gele y rend sa photographie. Il ne
+         * differe des tirs que sous la premiere regle, ou le rapport annoncait un bonus que les tirs
+         * ne portaient pas (`CombatantUnderTheFirstRule`).
+         *
          * **Les deux classes s additionnent** : un General dans une alliance de Guerriers gagne les
          * deux niveaux de sa classe et le niveau de son alliance.
          *
@@ -292,12 +296,10 @@ abstract class BattleEngine
          * a l ouverture et porte **deja** la somme des deux — le relire au vol ferait dependre une
          * bataille figee d une alliance qui a pu changer entre-temps.
          */
-        $attackerCombatBonus = $characterClassService->getAdditionalCombatResearchLevels($attackerPlayer->getUser())
-            + $allianceClassService->getAdditionalCombatResearchLevels($attackerPlayer->getUser());
+        $attackerCombatBonus = $attackerPlayer->getReportedCombatResearchBonusLevels();
         $defenderCombatBonus = $photographie !== null
             ? $photographie->classCombatBonus
-            : $characterClassService->getAdditionalCombatResearchLevels($defenderPlayer->getUser())
-                + $allianceClassService->getAdditionalCombatResearchLevels($defenderPlayer->getUser());
+            : $defenderPlayer->getReportedCombatResearchBonusLevels();
 
         $result->attackerWeaponLevel = $attackerWeaponBase + $attackerCombatBonus;
         $result->attackerShieldLevel = $attackerShieldBase + $attackerCombatBonus;
