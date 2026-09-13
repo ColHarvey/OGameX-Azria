@@ -8,6 +8,8 @@ use OGame\Combat\Enums\HamillManoeuvreRule;
 use OGame\Combat\Replay\BattleResultCodec;
 use OGame\Combat\Services\RallyClosureService;
 use OGame\Enums\CharacterClass;
+use OGame\GameMissions\BattleEngine\Models\BattleResult;
+use OGame\GameMissions\BattleEngine\Models\DefenderFleetResult;
 use OGame\Models\CombatInstance;
 use OGame\Models\FleetMission;
 use OGame\Services\SettingsService;
@@ -92,6 +94,13 @@ final class RustHamillRuleOfADurableCombatTest extends FleetDispatchTestCase
         $this->assertTrue($resultat->hamillManoeuvreTriggered, 'La manoeuvre ne s est pas jouee : le reste ne prouverait rien.');
         $this->assertSame(1, $resultat->defenderUnitsStart->getAmountByMachineName('deathstar'), 'Le depart annonce ne porte plus l Etoile.');
         $this->assertSame(1, $resultat->defenderUnitsLost->getAmountByMachineName('deathstar'), 'La manoeuvre n a detruit aucune Etoile.');
+
+        // **Le chiffre que le reglement applique au corps**, relu apres persistance. Le decompte global
+        // suffisait a passer avec un moteur qui ne detruisait rien : la perte y est inscrite a part, hors de
+        // la bataille. Celui-ci ne peut pas mentir — c est l effectif que la planete recevra.
+        $garnison = $this->laGarnison($resultat);
+        $this->assertSame(0, $garnison->unitsResult->getAmountByMachineName('deathstar'), 'L Etoile figure encore parmi les survivants du corps : la manoeuvre n a rien detruit.');
+        $this->assertSame(1, $garnison->unitsLost->getAmountByMachineName('deathstar'), 'L Etoile n est pas comptee perdue dans la flotte qui la portait.');
     }
 
     /**
@@ -108,6 +117,24 @@ final class RustHamillRuleOfADurableCombatTest extends FleetDispatchTestCase
         $this->assertTrue($resultat->hamillManoeuvreTriggered, 'La manoeuvre ne s est pas jouee : le reste ne prouverait rien.');
         $this->assertSame(0, $resultat->defenderUnitsStart->getAmountByMachineName('deathstar'), 'Sous la regle livree, l Etoile quitte le depart annonce.');
         $this->assertSame(0, $resultat->defenderUnitsLost->getAmountByMachineName('deathstar'), 'La correction a ete appliquee a un combat deja ouvert.');
+
+        // Et le corps garde son Etoile : c est exactement ce que la regle livree faisait. Un combat ouvert
+        // avant la correction ne doit pas se regler autrement que promis.
+        $this->assertSame(1, $this->laGarnison($resultat)->unitsResult->getAmountByMachineName('deathstar'), 'La correction a atteint un combat ouvert sous la regle livree.');
+    }
+
+    /**
+     * La flotte defensive du corps lui-meme : celle dont l identifiant de mission est zero.
+     */
+    private function laGarnison(BattleResult $resultat): DefenderFleetResult
+    {
+        foreach ($resultat->defenderFleetResults as $flotte) {
+            if ($flotte->fleetMissionId === 0) {
+                return $flotte;
+            }
+        }
+
+        $this->fail('La garnison manque au resultat de la bataille.');
     }
 
     /**

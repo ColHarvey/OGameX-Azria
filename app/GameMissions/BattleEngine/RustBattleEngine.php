@@ -47,6 +47,14 @@ class RustBattleEngine extends BattleEngine
     private FFI $ffi;
 
     /**
+     * @var int|null La flotte defensive a qui la manoeuvre de Hamill prend son Etoile, ou `null`.
+     *
+     * Pose une seule fois, avant l entree, et lu deux fois : par l entree qui retire l unite, et par
+     * l inscription qui comble ce que la bibliotheque ne pouvait pas savoir.
+     */
+    private int|null $hamillTakesTheDeathstarOf = null;
+
+    /**
      * RustBattleEngine constructor.
      *
      * @param array<AttackerFleet> $attackers All attacking fleets.
@@ -135,9 +143,23 @@ class RustBattleEngine extends BattleEngine
             }
             foreach ($result->defenderFleetResults as $fleetResult) {
                 $fleetResult->unitsResult = clone $fleetResult->unitsStart;
-                $fleetResult->completelyDestroyed = false;
+
+                // **Ce que la manoeuvre a pris n est jamais un survivant**, meme quand aucun round ne
+                // se joue — et c est precisement ce qui arrive quand elle vide la derniere defense :
+                // la bibliotheque n a plus personne a opposer. Le moteur PHP balaye alors un tableau
+                // etendu dont l Etoile a disparu, et rend la flotte detruite.
+                if ($this->hamillTakesTheDeathstarOf === $fleetResult->fleetMissionId) {
+                    $fleetResult->unitsResult->removeUnit(ObjectService::getShipObjectByMachineName('deathstar'), 1);
+                }
+
+                // Derive plutot qu impose a `false` : c est la regle du moteur PHP, et la seule qui
+                // reste juste quand une flotte sort de la manoeuvre sans une unite.
+                $fleetResult->completelyDestroyed = $fleetResult->unitsResult->getAmount() === 0;
             }
         }
+
+        // Ce que la bibliotheque ne pouvait pas savoir, une fois ses resultats lus.
+        $this->bookTheManoeuvre($result, $rounds);
 
         return $rounds;
     }
@@ -211,6 +233,10 @@ class RustBattleEngine extends BattleEngine
                 throw new RuntimeException('Defending fleet ' . $fleetResult->fleetMissionId . ' has no owner among the defenders.');
             }
 
+            // **C est ici que la manoeuvre de Hamill prend son Etoile**, et nulle part ailleurs : cette
+            // entree est la seule composition que la bibliotheque voit.
+            $laManoeuvrePrendIci = $this->hamillTakesTheDeathstarOf === $fleetResult->fleetMissionId;
+
             $defenderUnits = new stdClass();
             foreach ($fleetResult->unitsStart->units as $unit) {
                 $rapidfire = new stdClass();
@@ -221,21 +247,39 @@ class RustBattleEngine extends BattleEngine
 
                 $coquePleine = (int)floor($unit->unitObject->properties->structural_integrity->calculate($defenderPlayer)->totalValue / 10);
 
+                $combien = $unit->amount;
+                $coques = self::initialHullsFor(
+                    $degatsDefensifs[$fleetResult->fleetMissionId] ?? DamagedHulls::none(),
+                    $unit->unitObject->machine_name,
+                    $combien,
+                    $coquePleine
+                );
+
+                if ($laManoeuvrePrendIci && $unit->unitObject->machine_name === 'deathstar') {
+                    $combien--;
+
+                    // **La plus intacte part, pas la plus abimee.** Le moteur PHP retire la premiere
+                    // unite etendue du type, et la suite de degats range les plus intactes d abord :
+                    // retirer la derniere coque ferait combattre deux flottes differentes.
+                    array_shift($coques);
+
+                    if ($combien === 0) {
+                        // La flotte reste dans l entree, vide : la bibliotheque refuse une liste
+                        // defensive sans garnison, et une flotte sans unite n ajoute rien au champ.
+                        continue;
+                    }
+                }
+
                 $defenderUnits->{$unit->unitObject->id} = (object)[
                     'unit_id' => $unit->unitObject->id,
-                    'amount' => $unit->amount,
+                    'amount' => $combien,
                     'shield_points' => $unit->unitObject->properties->shield->calculate($defenderPlayer)->totalValue,
                     'attack_power' => $unit->unitObject->properties->attack->calculate($defenderPlayer)->totalValue,
                     'hull_plating' => $coquePleine,
                     'rapidfire' => $rapidfire,
                     // Meme regle cote defenseur, y compris pour la garnison : les coques viennent
                     // d ici, Rust les applique.
-                    'initial_hulls' => self::initialHullsFor(
-                        $degatsDefensifs[$fleetResult->fleetMissionId] ?? DamagedHulls::none(),
-                        $unit->unitObject->machine_name,
-                        $unit->amount,
-                        $coquePleine
-                    ),
+                    'initial_hulls' => $coques,
                 ];
             }
 
@@ -511,50 +555,91 @@ class RustBattleEngine extends BattleEngine
             // Hamill Manoeuvre triggered! Destroy one Deathstar
             $result->hamillManoeuvreTriggered = true;
 
-            // Remove the Deathstar from defender units so it doesn't participate in battle
-            $deathstarObject = ObjectService::getShipObjectByMachineName('deathstar');
-
             if ($this->hamillRule === HamillManoeuvreRule::Effective) {
-                // **L Etoile quitte la bataille, pas le decompte de depart.** L entree envoyee a la
-                // bibliotheque se compose **des flottes** : la retirer du seul `defenderUnitsStart`
-                // la laissait tirer, et la faisait disparaitre des pertes — la manoeuvre ne detruisait
-                // rien. Elle est donc retiree de la flotte qui la porte, la premiere dans l ordre
-                // canonique, exactement comme le moteur PHP retire la premiere de ses unites etendues.
-                $this->removeOneDeathstarFromTheDefendingFleets();
+                // **L Etoile quitte l entree envoyee a la bibliotheque, pas le decompte de depart.**
+                // La retirer du seul `defenderUnitsStart` — ou des flottes, qui ne composent plus
+                // l entree defensive — la laissait tirer, et la faisait disparaitre des pertes : la
+                // manoeuvre ne detruisait rien. La flotte visee est designee ici, l entree la retire
+                // (`prepareBattleInput()`) et le moteur inscrit ensuite ce que la bibliotheque ne
+                // pouvait pas savoir (`bookTheManoeuvre()`).
+                $this->hamillTakesTheDeathstarOf = $this->fleetTheManoeuvreTakesFrom();
             } else {
                 // **La regle telle qu elle a ete livree**, gardee pour les combats ouverts avant la
                 // correction : l Etoile disparait du depart annonce et continue de tirer. Aucun combat
                 // neuf ne l emploie.
-                $result->defenderUnitsStart->removeUnit($deathstarObject, 1);
+                $result->defenderUnitsStart->removeUnit(ObjectService::getShipObjectByMachineName('deathstar'), 1);
             }
-            // NOTE: The loss will be properly calculated after battle rounds complete
-            // by comparing the modified defenderUnitsStart with defenderUnitsResult.
         }
     }
 
     /**
-     * Retire une Etoile de la mort **des flottes qui se battent**, la premiere dans l ordre canonique.
+     * La flotte defensive a qui la manoeuvre prend son Etoile : la premiere dans l ordre canonique.
      *
      * L ordre compte : les deux moteurs doivent detruire **la meme** Etoile, sinon ce sont deux batailles
      * differentes — les flottes n ont ni les memes technologies ni les memes coques. L ordre canonique est
-     * celui des identifiants de mission, la garnison portant l identifiant zero.
+     * celui des identifiants de mission, la garnison portant l identifiant zero ; le moteur PHP retire la
+     * premiere Etoile de ses unites etendues, qu il construit dans ce meme ordre.
+     *
+     * L appelant a deja etabli qu une Etoile defend : `null` n arrive pas, et se traite comme une manoeuvre
+     * qui ne prend rien plutot que par une exception, car aucune bataille ne doit s arreter ici.
      */
-    private function removeOneDeathstarFromTheDefendingFleets(): void
+    private function fleetTheManoeuvreTakesFrom(): int|null
     {
-        $etoile = ObjectService::getShipObjectByMachineName('deathstar');
         $flottes = $this->defenders;
         usort($flottes, static fn (DefenderFleet $a, DefenderFleet $b): int => $a->fleetMissionId <=> $b->fleetMissionId);
 
         foreach ($flottes as $flotte) {
             if ($flotte->units->getAmountByMachineName('deathstar') > 0) {
-                $flotte->units->removeUnit($etoile, 1);
+                return $flotte->fleetMissionId;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Inscrit ce que la bibliotheque ne pouvait pas savoir : l Etoile que la manoeuvre a prise.
+     *
+     * ## Ce que le moteur PHP produit, mesure et non suppose
+     *
+     * Le moteur PHP retire l unite de son tableau etendu, et **rien d autre** : le decompte des survivants
+     * d un round part de `defenderUnitsStart` et ne baisse que sur une mort en round. L Etoile prise par la
+     * manoeuvre y reste donc affichee jusqu au dernier round, et la perte est inscrite une fois, a part, par
+     * `BattleEngine::simulateBattle()`. Le resultat par flotte, lui, est balaye sur les survivants : la
+     * flotte visee la compte bien perdue.
+     *
+     * La bibliotheque, elle, ne recoit jamais cette Etoile. Ses rounds et ses pertes par flotte sont donc
+     * exacts d un vaisseau pres, et c est cet ecart — le seul — qui se comble ici. **Ce n est pas une
+     * correction de la regle du jeu** : c est ce qu il faut pour que les deux moteurs rendent la meme
+     * bataille. L incoherence d affichage du moteur PHP (une Etoile detruite qui figure encore parmi les
+     * survivants du rapport) est anterieure, commune aux deux moteurs une fois la parite tenue, et reste une
+     * decision de jeu ouverte.
+     *
+     * @param array<BattleResultRound> $rounds
+     */
+    private function bookTheManoeuvre(BattleResult $result, array $rounds): void
+    {
+        if ($this->hamillTakesTheDeathstarOf === null) {
+            return;
+        }
+
+        $etoile = ObjectService::getShipObjectByMachineName('deathstar');
+
+        foreach ($rounds as $round) {
+            $round->defenderShips->addUnit($etoile, 1);
+        }
+
+        foreach ($result->defenderFleetResults as $fleetResult) {
+            if ($fleetResult->fleetMissionId === $this->hamillTakesTheDeathstarOf) {
+                $fleetResult->unitsLost->addUnit($etoile, 1);
 
                 return;
             }
         }
     }
 
-    /**     * Les coques avec lesquelles chaque unite d un type entre dans la bataille.
+    /**
+     * Les coques avec lesquelles chaque unite d un type entre dans la bataille.
      *
      * **La formule vit d un seul cote de la frontiere.** Rust pourrait deriver ces valeurs d un
      * rapport de degats, mais ce serait une seconde implementation d une regle d arrondi — et deux
