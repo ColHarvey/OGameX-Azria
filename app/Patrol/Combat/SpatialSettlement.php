@@ -3,6 +3,8 @@
 namespace OGame\Patrol\Combat;
 
 use Illuminate\Support\Facades\DB;
+use LogicException;
+use OGame\GameMissions\BattleEngine\Models\AttackerFleetResult;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\FleetMission;
@@ -22,10 +24,15 @@ use OGame\Services\SettingsService;
  *    detruite disparait ; une patrouille entierement detruite meurt avec sa reserve.
  * 2. **Les debris restent au point**, pas sur une planete : il n y en a pas. Un recycleur devra s y
  *    rendre, et c est ce qui donne un interet a se battre loin de tout.
- * 3. **Le butin est la cargaison**, jamais un stock au sol. La reserve de carburant de la patrouille
- *    vit sur sa ligne, pas sur le segment : elle n est donc pas pillable, et c est voulu — sans
- *    carburant une patrouille ne rentrerait jamais.
- * 4. **L attaquante repart**, avec ce qui lui reste et ce qu elle a pris.
+ * 3. **Le butin serait la cargaison, jamais un stock au sol — mais rien ne la rend encore pillable.** Le
+ *    moteur prend ce qu il peut piller dans les ressources protegees de la photographie, ou a defaut sur le
+ *    corps vise. Un point de l espace n a pas de corps, et **aucune ressource protegee ne lui est passee** :
+ *    `$resultat->loot` vaut donc zero, toujours. Le reglement le soustrait quand meme, pour que le jour ou
+ *    la decision sera prise il n y ait qu un seul endroit a changer. La reserve de carburant de la
+ *    patrouille, elle, vit sur sa ligne et non sur le segment : elle ne sera pillable dans aucun cas, et
+ *    c est voulu — sans carburant une patrouille ne rentrerait jamais.
+ * 4. **L attaquante repart avec la cargaison de ses survivants**, et ce qu elle a pris. Ce que portaient ses
+ *    vaisseaux detruits est perdu, comme dans toute bataille : une soute qui explose n arrive nulle part.
  *
  * ------------------------------------------------------------------------------------
  * TOUT VIT DANS UNE TRANSACTION, ET L ORDRE DES ECRITURES EST LE MEME QUE PARTOUT
@@ -87,10 +94,16 @@ final class SpatialSettlement
                         $survivantsDefense->getAmountByMachineName($unite->unitObject->machine_name);
                 }
 
-                // La cargaison perdue au pillage quitte le segment.
-                $segment->metal = max(0.0, (float)$segment->metal - $cargaisonPillee->metal->get());
-                $segment->crystal = max(0.0, (float)$segment->crystal - $cargaisonPillee->crystal->get());
-                $segment->deuterium = max(0.0, (float)$segment->deuterium - $cargaisonPillee->deuterium->get());
+                // **La cargaison d une patrouille meurt avec ses vaisseaux.** Elle restait entiere quelles que
+                // soient ses pertes : une patrouille qui perdait la moitie de ses transporteurs gardait tout
+                // son metal. La part qui survit se mesure sur les capacites de la bataille — celles-la memes
+                // que le combat durable emploie pour un renfort — et le pillage prend **ensuite**, sur ce qui
+                // reste : la destruction precede le pillage, et rien ne se prend a ce qui n existe plus.
+                $partSurvivante = self::survivingCargoShareOf($resultat, (int)$segment->id);
+
+                $segment->metal = self::whatIsLeft((float)$segment->metal, $partSurvivante, $cargaisonPillee->metal->get());
+                $segment->crystal = self::whatIsLeft((float)$segment->crystal, $partSurvivante, $cargaisonPillee->crystal->get());
+                $segment->deuterium = self::whatIsLeft((float)$segment->deuterium, $partSurvivante, $cargaisonPillee->deuterium->get());
 
                 if ($this->settings->hullDamageEnabled()) {
                     $segment->damaged_hulls = $coquesDefense->toStorage();
@@ -124,10 +137,19 @@ final class SpatialSettlement
                 return;
             }
 
+            // **Seule la cargaison des survivants rentre, et le butin ne prend que la place qui reste.**
+            //
+            // Le moteur a deja fait les deux calculs pour cette flotte : la cargaison ramenee a la part de
+            // capacite qui a survecu, et la part de butin bornee par le fret encore libre. Les relire evite
+            // une seconde formule — et celle qui vivait ici rendait **la colonne entiere**, cargaison des
+            // vaisseaux detruits comprise : une flotte qui perdait ses transporteurs rentrait avec ce qu ils
+            // portaient.
+            $flotteAttaquante = self::attackerResultOf($resultat, (int)$attaquante->id);
+
             $ramene = new Resources(
-                (float)$attaquante->metal + $cargaisonPillee->metal->get(),
-                (float)$attaquante->crystal + $cargaisonPillee->crystal->get(),
-                (float)$attaquante->deuterium + $cargaisonPillee->deuterium->get(),
+                $flotteAttaquante->survivingCargo->metal->get() + $flotteAttaquante->lootShare->metal->get(),
+                $flotteAttaquante->survivingCargo->crystal->get() + $flotteAttaquante->lootShare->crystal->get(),
+                $flotteAttaquante->survivingCargo->deuterium->get() + $flotteAttaquante->lootShare->deuterium->get(),
                 0
             );
 
@@ -136,7 +158,54 @@ final class SpatialSettlement
     }
 
     /**
-     * L effectif de depart d une flotte defensive, tel que le resultat le porte.
+     * La part de la cargaison d une flotte defensive qui survit : le rapport des capacites de la bataille.
+     *
+     * **Les deux capacites bougent ensemble, mais pas du meme facteur** — la survivante ne compte que les
+     * vaisseaux restants —, et c est ce rapport qui dit ce qui reste a bord. Une flotte sans capacite de
+     * depart ne portait rien : sa part est nulle.
+     */
+    private static function survivingCargoShareOf(BattleResult $resultat, int $fleetMissionId): float
+    {
+        foreach ($resultat->defenderFleetResults as $flotte) {
+            if ($flotte->fleetMissionId === $fleetMissionId) {
+                return $flotte->startingCargoCapacity > 0
+                    ? $flotte->survivingCargoCapacity / $flotte->startingCargoCapacity
+                    : 0.0;
+            }
+        }
+
+        // Inatteignable par l appelant : il a deja lu les survivants de cette flotte dans ce meme resultat.
+        // La garde reste, parce qu une cargaison effacee par un resultat incomplet ne se verrait pas.
+        throw new LogicException('Le resultat ne porte pas la flotte defensive ' . $fleetMissionId . ' : sa cargaison ne peut pas etre reduite.');
+    }
+
+    /**
+     * Ce qui reste d une cargaison : la part qui survit aux pertes, moins ce que le pillage a pris.
+     *
+     * L unite est entiere avant la soustraction : une cargaison se compte en unites, et un reste
+     * fractionnaire reapparaitrait a chaque bataille suivante.
+     */
+    private static function whatIsLeft(float $porte, float $partSurvivante, float $pille): float
+    {
+        return max(0.0, (float)(int)($porte * $partSurvivante) - $pille);
+    }
+
+    /**
+     * Le resultat de la flotte attaquante, ou un refus.
+     */
+    private static function attackerResultOf(BattleResult $resultat, int $fleetMissionId): AttackerFleetResult
+    {
+        foreach ($resultat->attackerFleetResults as $flotte) {
+            if ($flotte->fleetMissionId === $fleetMissionId) {
+                return $flotte;
+            }
+        }
+
+        // Inatteignable de meme : l appelant vient de lire les survivants de cette flotte.
+        throw new LogicException('Le resultat ne porte pas la flotte attaquante ' . $fleetMissionId . ' : son retour ne peut pas etre compose.');
+    }
+
+    /**     * L effectif de depart d une flotte defensive, tel que le resultat le porte.
      *
      * C est la liste des colonnes que le reglement a le droit d ecrire : une flotte qui n avait pas
      * de recycleur n a pas de colonne a remettre a zero pour lui, et `fleet_missions` n en a de
