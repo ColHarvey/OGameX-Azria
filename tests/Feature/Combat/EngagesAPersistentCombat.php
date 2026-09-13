@@ -137,12 +137,52 @@ trait EngagesAPersistentCombat
         $this->travelTo(Date::createFromTimestamp((int)$mission->time_arrival));
         $this->get('/overview')->assertStatus(200);
 
-        $combat = CombatInstance::query()->where('mission_id', $mission->id)->first();
+        // **Le combat de cet essai, et pas celui d un voisin.** Chercher par la seule mission ramene la ligne
+        // la plus ancienne qui porte cet identifiant : un banc de schema ecrit les siennes avec
+        // `mission_id = 1`, en ralliement et sans barriere, et ne les efface pas. Quand la mission de cet
+        // essai recoit l identifiant 1 dans la base de son processus, la recherche ramenait cette ligne-la —
+        // un ralliement qui ne se fermera jamais, faute de barriere. Le corps vise et le plus recent
+        // ferment cette confusion.
+        $combat = CombatInstance::query()
+            ->where('mission_id', $mission->id)
+            ->where('target_planet_id', $cible->getPlanetId())
+            ->orderByDesc('id')
+            ->first();
         $this->assertNotNull($combat, 'The arrival did not open a combat.');
-        $this->assertSame(CombatState::Active, $combat->status, 'The rally did not close on arrival: a single fleet closes its window at once.');
+        $this->assertSame(CombatState::Active, $combat->status, 'The rally did not close on arrival: a single fleet closes its window at once. ' . $this->whyTheRallyIsStillOpen($combat));
         $this->assertNotNull($combat->battle_result);
 
         return $combat;
+    }
+
+    /**
+     * Ce qui retient ce ralliement ouvert, lu sur la base a l instant de l echec.
+     *
+     * **Un « false » nu a deja coute deux passages.** Quatre causes laissent un ralliement ouvert et ne se
+     * corrigent pas de la meme facon : une fenetre non nulle (une arrivee admissible est attendue), une
+     * arrivee tenue par un autre travailleur, une fermeture suspendue par une anomalie, ou un combat qui
+     * n est pas celui qu on croit. Ce diagnostic les separe au lieu de laisser chercher.
+     */
+    protected function whyTheRallyIsStillOpen(CombatInstance $combat): string
+    {
+        $barriere = DB::table('celestial_body_combat_barriers')
+            ->where('combat_instance_id', $combat->id)
+            ->first(['owned_through_effect_at', 'celestial_body_id']);
+
+        $entrantes = DB::table('fleet_missions')
+            ->where('planet_id_to', $combat->target_planet_id)
+            ->where(static function ($requete): void {
+                $requete->where('processed', 0)->orWhere('canceled', 1);
+            })
+            ->orderBy('id')
+            ->get(['id', 'user_id', 'mission_type', 'time_arrival', 'processed', 'canceled', 'processing_claimed_at', 'combat_instance_id']);
+
+        return '[diagnostic] combat=' . $combat->id
+            . ' corps=' . $combat->target_planet_id
+            . ' ouverture=' . (int)$combat->started_at
+            . ' fenetre_jusqu_a=' . var_export($barriere->owned_through_effect_at ?? null, true)
+            . ' horloge=' . (int)Date::now()->timestamp
+            . ' entrantes=' . $entrantes->toJson();
     }
 
     /**
