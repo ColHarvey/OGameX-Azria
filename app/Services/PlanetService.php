@@ -3051,10 +3051,10 @@ class PlanetService
      */
     public function isBuilding(): bool
     {
-        $queue = resolve(BuildingQueueService::class);
-        $build_queue = $queue->retrieveQueue($this)->queue;
-
-        return count($build_queue) > 0;
+        // **Ce qui reste a faire, pas ce qui reste a appliquer.** Compter les lignes non traitees laissait la
+        // cle a molette allumee sur une planete dont la construction etait finie : seule la planete courante
+        // est mise a jour a chaque requete, donc la ligne y survivait jusqu a la visite suivante.
+        return resolve(BuildingQueueService::class)->pendingWorkOf($this) !== null;
     }
 
     /**
@@ -3064,15 +3064,10 @@ class PlanetService
      */
     public function isDowngrading(): bool
     {
-        $queue = resolve(BuildingQueueService::class);
-        $build_queue = $queue->retrieveQueue($this);
-        $currently_building = $build_queue->getCurrentlyBuildingFromQueue();
-
-        if ($currently_building !== null) {
-            return $currently_building->is_downgrade;
-        }
-
-        return false;
+        // **La couleur suit le meme travail que l icone.** Lire « la ligne commencee » rendait celle d une
+        // demolition deja terminee, et la cle restait rouge alors que le travail en cours etait tout autre.
+        // `??` suffit : il attrape aussi bien un travail absent qu une colonne vide, sans `?->`.
+        return (bool)(resolve(BuildingQueueService::class)->pendingWorkOf($this)->is_downgrade ?? false);
     }
 
     /**

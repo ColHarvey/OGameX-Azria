@@ -11,4 +11,6 @@ enum HighscoreTypeEnum: int
     case economy = 1;
     case research = 2;
     case military = 3;
+
+    case honor = 4;
 }

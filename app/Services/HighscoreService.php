@@ -63,7 +63,19 @@ class HighscoreService
         // 1 = economy points
         // 2 = research points
         // 3 = military points
-        $this->highscoreType = HighscoreTypeEnum::cases()[$type];
+        // 4 = honour points
+        //
+        // **Trois sous-classements militaires ne sont pas encore comptes** — vaisseaux construits, detruits
+        // et perdus — parce que rien ne les cumule : le score militaire est un instantane de ce qu un joueur
+        // possede, pas une histoire. La page les proposait tout de meme, et `cases()[$type]` levait alors une
+        // erreur de clef absente : la requete tombait, et le classement tournait sans fin.
+        //
+        // En attendant qu ils soient comptes, ils rendent le classement **militaire** : c est leur categorie
+        // parente, donc ce que le joueur voit reste coherent avec le bouton qu il a choisi. Un repli est
+        // acceptable ici parce qu un classement est une lecture publique dont rien ne depend — ce n est pas
+        // la regle ailleurs : une version de combat inconnue, elle, se refuse, parce qu elle decide d une
+        // bataille.
+        $this->highscoreType = HighscoreTypeEnum::tryFrom($type) ?? HighscoreTypeEnum::military;
     }
 
     /**
@@ -243,6 +255,30 @@ class HighscoreService
     }
 
     /**
+     * Get the scores a ranking photograph stores for a player.
+     *
+     * **L honneur se lit, il ne se calcule pas.** Il vit sur le compte et bouge a chaque bataille ; le classement
+     * en prend une photographie, comme des autres scores. Il peut etre negatif : un combat deshonorant en retire.
+     *
+     * La composition vit ici plutot que dans la tache planifiee, pour qu un essai la lise sur un seul joueur : la
+     * tache parcourt tous les comptes de la base, plusieurs centaines dans un processus de la suite.
+     *
+     * @param PlayerService $player
+     * @return array{general: int, economy: int, research: int, military: int, honor: int}
+     * @throws Exception
+     */
+    public function getPlayerScores(PlayerService $player): array
+    {
+        return [
+            'general' => $this->getPlayerScore($player),
+            'economy' => $this->getPlayerScoreEconomy($player),
+            'research' => $this->getPlayerScoreResearch($player),
+            'military' => $this->getPlayerScoreMilitary($player),
+            'honor' => resolve(HonorService::class)->pointsOf($player->getUser()),
+        ];
+    }
+
+    /**
      * Get player economy score.
      *
      * @param PlayerService $player
@@ -318,6 +354,9 @@ class HighscoreService
                 ->whereHas('player.tech')
                 ->with(['player', 'player.alliance', 'player.roles'])
                 ->validRanks()
+                // **Un rang absent se range en dernier.** Un classement neuf n a pas encore de rang tant que la
+                // tache planifiee n est pas passee, et un tri ascendant placerait ces NULL en tete.
+                ->orderByRaw($this->highscoreType->name.'_rank IS NULL')
                 ->orderBy($this->highscoreType->name.'_rank');
 
             // Filter out admin users if setting is disabled
@@ -546,6 +585,7 @@ class HighscoreService
             $highscores = AllianceHighscore::query()
                 ->with('alliance.members')
                 ->validRanks()
+                ->orderByRaw($this->highscoreType->name.'_rank IS NULL')
                 ->orderBy($this->highscoreType->name.'_rank')
                 ->paginate(perPage: $perPage, page: $pageOn);
 

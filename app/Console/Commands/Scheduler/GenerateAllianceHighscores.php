@@ -34,7 +34,8 @@ class GenerateAllianceHighscores extends Command
                         COALESCE(SUM(highscores.general), 0) as total_general,
                         COALESCE(SUM(highscores.economy), 0) as total_economy,
                         COALESCE(SUM(highscores.research), 0) as total_research,
-                        COALESCE(SUM(highscores.military), 0) as total_military
+                        COALESCE(SUM(highscores.military), 0) as total_military,
+                        COALESCE(SUM(highscores.honor), 0) as total_honor
                     ')
                     ->first();
 
@@ -46,6 +47,7 @@ class GenerateAllianceHighscores extends Command
                         'economy' => $memberScores->total_economy ?? 0,
                         'research' => $memberScores->total_research ?? 0,
                         'military' => $memberScores->total_military ?? 0,
+                        'honor' => $memberScores->total_honor ?? 0,
                     ]
                 );
 

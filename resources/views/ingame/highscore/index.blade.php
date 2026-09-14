@@ -76,11 +76,12 @@
                                     <span class="small-marker"></span>
                                 </a>
 
-                                <a href="javascript:void(0);" rel="4" class="subnavButton subnavButton_lost tooltip js_hideTipOnMobile" title="{{ __('t_ingame.highscore.military_lost') }}">
+                                {{-- Vaisseaux perdus : pas encore compte, ce bouton rend le classement militaire. --}}
+                                <a href="javascript:void(0);" rel="8" class="subnavButton subnavButton_lost tooltip js_hideTipOnMobile" title="{{ __('t_ingame.highscore.military_lost') }}">
                                     <span class="small-marker"></span>
                                 </a>
 
-                                <a href="javascript:void(0);" rel="7" class="subnavButton subnavButton_honor tooltip js_hideTipOnMobile" title="{{ __('t_ingame.highscore.honour_points') }}">
+                                <a href="javascript:void(0);" rel="4" class="subnavButton subnavButton_honor tooltip js_hideTipOnMobile" title="{{ __('t_ingame.highscore.honour_points') }}">
                                     <span class="small-marker"></span>
                                 </a>
                             </div>

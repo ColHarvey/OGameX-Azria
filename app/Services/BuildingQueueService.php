@@ -60,6 +60,35 @@ class BuildingQueueService
     }
 
     /**
+     * Le premier travail qui **reste a faire** sur ce corps, ou `null` s il n en reste aucun.
+     *
+     * ## Pourquoi l echeance compte, et pas seulement la ligne
+     *
+     * Une ligne dont l echeance est passee n est plus du travail : elle attend seulement d etre appliquee,
+     * ce que fait la mise a jour du corps. Or **seule la planete courante est mise a jour a chaque
+     * requete** (`GlobalGame`) : sur les autres, la ligne d une construction terminee reste « non traitee »
+     * aussi longtemps que le joueur n y va pas.
+     *
+     * La compter comme du travail affichait donc une cle a molette sur une planete ou plus rien ne se
+     * construisait — et **aucun rechargement ne l enlevait**, puisque le rechargement ne traite pas cette
+     * planete-la. Il fallait aller sur la planete pour que l icone disparaisse de la liste.
+     *
+     * Une ligne pas encore commencee compte, elle : elle demarrera des que la precedente sera appliquee.
+     */
+    public function pendingWorkOf(PlanetService $planet): BuildingQueue|null
+    {
+        $maintenant = (int)Date::now()->timestamp;
+
+        foreach ($this->retrieveQueueItems($planet) as $item) {
+            if ((int)$item->time_start === 0 || (int)$item->time_end > $maintenant) {
+                return $item;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Add a building to the building queue for the current planet.
      *
      * @param PlanetService $planet

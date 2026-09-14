@@ -26,12 +26,7 @@ class GenerateHighscores extends Command
         $users->chunk(200, function ($players) use ($playerServiceFactory, $highscoreService, &$bar) {
             foreach ($players as $player) {
                 $playerService = $playerServiceFactory->make($player->id);
-                Highscore::updateOrCreate(['player_id' => $player->id], [
-                    'general' => $highscoreService->getPlayerScore($playerService),
-                    'economy' => $highscoreService->getPlayerScoreEconomy($playerService),
-                    'research' => $highscoreService->getPlayerScoreResearch($playerService),
-                    'military' => $highscoreService->getPlayerScoreMilitary($playerService),
-                ]);
+                Highscore::updateOrCreate(['player_id' => $player->id], $highscoreService->getPlayerScores($playerService));
                 unset($playerService);
                 $bar->advance();
             }
