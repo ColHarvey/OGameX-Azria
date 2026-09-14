@@ -118,6 +118,11 @@ class RallyClosureServiceTest extends TestCase
         $this->assertFalse($issue->closed);
         $this->assertSame('trop tot', $issue->reason);
 
+        // L'issue garde ce qu'elle a lu : l'instant de la tentative, puis l'echeance trouvee, qui lui est posterieure.
+        $this->assertMatchesRegularExpression('/^maintenant ' . (self::OPENING + 10) . ', echeance (\d+)$/', $issue->detail, 'L’issue « trop tot » ne dit ni l’instant ni l’echeance qu’elle a lus.');
+        preg_match('/echeance (\d+)$/', $issue->detail, $echeance);
+        $this->assertGreaterThan(self::OPENING + 10, (int)($echeance[1] ?? 0));
+
         $combat->refresh();
         $this->assertSame(CombatState::Rallying, $combat->status);
     }

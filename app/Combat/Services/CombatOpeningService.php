@@ -265,8 +265,29 @@ final class CombatOpeningService
         // retenus a leur arrivee physique, par le meme lien.
         $this->holdReinforcementsAlreadyPresent($combat, $targetBodyId, $openedAt, $appartenances);
 
-        if ($this->closure()->close($combat->id, $openedAt)->closed) {
+        $issue = $this->closure()->close($combat->id, $openedAt);
+
+        if ($issue->closed) {
             $combat->refresh();
+        } else {
+            // **Une fermeture immediate qui ne ferme pas se dit, avec sa raison.** Une fenetre courante est
+            // ordinaire et s'ecrit en information ; une fenetre nulle qui ne ferme pas est une anomalie. Sans
+            // cette ligne, l'issue etait jetee ici : un combat reste en ralliement ne disait plus pourquoi.
+            $echeance = (int)CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->value('owned_through_effect_at');
+            $contexte = [
+                'combat' => $combat->id,
+                'corps' => $targetBodyId,
+                'ouverture' => $openedAt,
+                'echeance' => $echeance,
+                'issue' => $issue->reason,
+                'detail' => $issue->detail,
+            ];
+
+            if ($echeance <= $openedAt) {
+                Log::warning('Fenetre nulle non fermee a l ouverture.', $contexte);
+            } else {
+                Log::info('Ralliement ouvert, fermeture a l echeance.', $contexte);
+            }
         }
 
         return $combat;

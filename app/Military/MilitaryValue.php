@@ -79,7 +79,7 @@ final class MilitaryValue
     }
 
     /**
-     * Les unités de cette collection qu'aucune famille ne sait pondérer.
+     * Les unités de cette collection que la version courante ne sait pas pondérer.
      *
      * @return list<string> les noms machine, triés, sans doublon.
      */
@@ -88,7 +88,7 @@ final class MilitaryValue
         $inconnues = [];
 
         foreach ($units->units as $entree) {
-            if ($entree->amount > 0 && !isset(self::table()[$entree->unitObject->machine_name])) {
+            if ($entree->amount > 0 && self::weightOf($entree->unitObject->machine_name, self::WEIGHTING_VERSION) === null) {
                 $inconnues[$entree->unitObject->machine_name] = true;
             }
         }
@@ -97,6 +97,31 @@ final class MilitaryValue
         sort($noms);
 
         return $noms;
+    }
+
+    /**
+     * Les complétions de chaque version : des unités qu'elle classe explicitement, parce que le catalogue les a ajoutées
+     * après elle. Une complétion se revoit et se commite ; elle ne change le poids d'aucune unité que la version savait
+     * déjà pondérer. Aucune pour `v1` à ce jour.
+     *
+     * @var array<string, array<string, int>>
+     */
+    private static array $completions = [self::WEIGHTING_VERSION => []];
+
+    /**
+     * Le poids d'une unité **dans une version donnée**, ou `null` si cette version ne sait pas la pondérer.
+     *
+     * Une version, ce sont ses familles — défense et vaisseau militaire pour la valeur entière, vaisseau civil pour la
+     * moitié — puis ses complétions. Une version que ce code ne connaît pas ne pondère rien : la reprise d'un événement en
+     * attente ne bascule jamais vers une autre version.
+     */
+    public static function weightOf(string $machineName, string $version): int|null
+    {
+        if ($version !== self::WEIGHTING_VERSION) {
+            return null;
+        }
+
+        return self::table()[$machineName] ?? self::$completions[$version][$machineName] ?? null;
     }
 
     /**
@@ -112,7 +137,7 @@ final class MilitaryValue
      */
     private static function poidsDe(string $machineName): int
     {
-        $poids = self::table()[$machineName] ?? null;
+        $poids = self::weightOf($machineName, self::WEIGHTING_VERSION);
 
         if ($poids === null) {
             throw new UnknownMilitaryUnit($machineName);

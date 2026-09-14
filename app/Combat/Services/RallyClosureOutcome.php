@@ -33,6 +33,7 @@ final readonly class RallyClosureOutcome
      * @param AdmissionVerdict|null $attackers Le verdict du camp attaquant, quand il a ete rendu.
      * @param AdmissionVerdict|null $defenders Le verdict du camp defenseur.
      * @param bool $suspended Si une anomalie a suspendu la fermeture, qui doit compter comme un echec.
+     * @param string $detail Ce que la tentative a lu pour decider, quand la raison seule ne permet pas de la relire.
      */
     private function __construct(
         public bool $closed,
@@ -40,6 +41,7 @@ final readonly class RallyClosureOutcome
         public AdmissionVerdict|null $attackers = null,
         public AdmissionVerdict|null $defenders = null,
         public bool $suspended = false,
+        public string $detail = '',
     ) {
     }
 
@@ -61,10 +63,13 @@ final readonly class RallyClosureOutcome
 
     /**
      * La fenetre court encore.
+     *
+     * **L'instant et l'echeance lus sont gardes.** « Trop tot » seul ne se relit pas : un ralliement reste ouvert alors
+     * qu'on l'attendait ferme ne disait ni l'heure de la tentative, ni l'echeance qu'elle avait trouvee.
      */
-    public static function tooEarly(): self
+    public static function tooEarly(int $now, int $deadline): self
     {
-        return new self(false, 'trop tot');
+        return new self(false, 'trop tot', null, null, false, 'maintenant ' . $now . ', echeance ' . $deadline);
     }
 
     /**

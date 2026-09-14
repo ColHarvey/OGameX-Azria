@@ -98,6 +98,10 @@ return new class () extends Migration {
             // L'instant où l'agrégation a ajouté cet événement au compteur de son compte ; nul tant qu'il ne l'est pas.
             $table->unsignedInteger('aggregated_at')->nullable();
 
+            // L'instant où un événement en attente a été repris et évalué, avec sa propre version ; nul sinon. La raison
+            // de l'attente reste écrite : l'événement dit pourquoi il a attendu, et quand il a été repris.
+            $table->unsignedInteger('resolved_at')->nullable();
+
             // La recherche des candidats de l'agrégation, et le compte des événements en attente.
             $table->index(['status', 'aggregated_at', 'player_id'], 'military_tally_candidates_idx');
 

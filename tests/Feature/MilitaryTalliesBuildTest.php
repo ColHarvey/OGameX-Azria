@@ -202,7 +202,19 @@ class MilitaryTalliesBuildTest extends AccountTestCase
         $this->assertSame(MilitaryTallyRecorder::PENDING, $evenement->status);
         $this->assertSame('unknown_unit_family', $evenement->reason);
         $this->assertSame([0, 0, 0], [(int)$evenement->built_value, (int)$evenement->destroyed_value, (int)$evenement->lost_value], 'Une tranche en attente porte une valeur inventée.');
-        $this->assertSame(['queue_id' => $lot, 'object' => 'rocket_launcher', 'from' => 0, 'to' => 12], json_decode((string)$evenement->payload, true), 'Les faits nécessaires à la reprise ne sont pas gardés.');
+        $this->assertSame(
+            [
+                'kind' => 'build',
+                'part' => 'built',
+                'queue_id' => $lot,
+                'object' => 'rocket_launcher',
+                'from' => 0,
+                'to' => 12,
+                'raw_price' => (int)ObjectService::getObjectRawPrice('rocket_launcher')->sum(),
+            ],
+            json_decode((string)$evenement->payload, true),
+            'Les faits nécessaires à la reprise ne sont pas gardés : forme, part, tranche et prix brut de l’unité au moment du fait.'
+        );
         $this->assertSame(0, $this->construits(), 'Une tranche en attente a été comptée.');
     }
 

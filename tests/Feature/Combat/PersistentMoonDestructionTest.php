@@ -2,8 +2,10 @@
 
 namespace Tests\Feature\Combat;
 
+use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\MoonDestruction\FrozenMoonDestructionPlan;
 use OGame\Combat\MoonDestruction\MoonDestructionOutcome;
@@ -203,14 +205,58 @@ final class PersistentMoonDestructionTest extends FleetDispatchTestCase
 
         resolve(SettingsService::class)->set('persistent_combat_enabled', '1');
         $this->travelTo(Date::createFromTimestamp((int)$mission->time_arrival + 1));
+
+        // **Ce que la fermeture a dit, garde pour le cas ou elle ne ferme pas.** L'ouverture journalise l'issue d'une
+        // fermeture immediate qui ne ferme pas. Un rouge intermittent (14 septembre 2026) a perdu sa raison : l'issue
+        // etait jetee, et les bases avaient ete nettoyees par les essais suivants.
+        $journal = new class () {
+            /** @var list<string> */
+            public array $lignes = [];
+        };
+        Event::listen(MessageLogged::class, static function (MessageLogged $message) use ($journal): void {
+            $journal->lignes[] = $message->level . ' ' . $message->message . ' ' . json_encode($message->context, JSON_PARTIAL_OUTPUT_ON_ERROR);
+        });
+
         $this->get('/overview')->assertStatus(200);
 
         $combat = CombatInstance::query()->where('mission_id', $mission->id)->first();
         $this->assertNotNull($combat, 'The arrival did not open a durable combat.');
-        $this->assertSame(CombatState::Active, $combat->status, 'The rally did not close at once.');
+
+        if ($combat->status !== CombatState::Active) {
+            $this->fail('The rally did not close at once. ' . $this->closureDiagnostics($combat, $journal->lignes));
+        }
+
         $this->assertNotNull($combat->moon_destruction_plan, 'The closure froze no moon destruction plan.');
 
         return [$combat, $lune, $mission];
+    }
+
+    /**
+     * Ce qu'il faut pour relire un ralliement qui n'a pas ferme, **pris avant toute remise a zero** : l'etat du combat,
+     * sa barriere et son echeance, l'issue de la fermeture et sa raison, et les missions encore en vol vers le corps.
+     *
+     * @param list<string> $journal
+     */
+    private function closureDiagnostics(CombatInstance $combat, array $journal): string
+    {
+        $barriere = DB::table('celestial_body_combat_barriers')->where('combat_instance_id', $combat->id)->first(['opened_at', 'owned_through_effect_at', 'revision']);
+
+        $missions = [];
+        foreach (DB::table('fleet_missions')->where('planet_id_to', $combat->target_planet_id)->where('processed', 0)->orderBy('time_arrival')->get(['id', 'user_id', 'mission_type', 'parent_id', 'time_departure', 'time_arrival', 'combat_instance_id']) as $enVol) {
+            $missions[] = (array)$enVol;
+        }
+
+        $issues = array_values(array_filter(
+            $journal,
+            static fn (string $ligne): bool => str_contains($ligne, 'ermeture') || str_contains($ligne, 'alliement') || str_contains($ligne, 'enetre')
+        ));
+
+        return (string)json_encode([
+            'combat' => ['id' => $combat->id, 'statut' => $combat->status->value, 'corps' => $combat->target_planet_id, 'mission' => $combat->mission_id],
+            'barriere' => $barriere === null ? null : (array)$barriere,
+            'issues_de_fermeture' => $issues,
+            'missions_en_vol_vers_le_corps' => $missions,
+        ], JSON_PARTIAL_OUTPUT_ON_ERROR | JSON_UNESCAPED_UNICODE);
     }
 
     private function aForeignTransportTowards(PlanetService $lune): FleetMission

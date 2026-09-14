@@ -6,6 +6,7 @@ use OGame\Combat\Support\UnitQueueProduction;
 use OGame\GameObjects\Models\UnitObject;
 use OGame\Military\Exceptions\UnknownMilitaryUnit;
 use OGame\Models\UnitQueue;
+use OGame\Services\ObjectService;
 
 /**
  * Le cumul « construits » d'une file d'unités : une tranche livrée, un événement.
@@ -32,6 +33,9 @@ use OGame\Models\UnitQueue;
  */
 final class MilitaryBuildTally
 {
+    /** La forme d'une tranche de construction, écrite dans la charge d'un événement en attente et lue par la reprise. */
+    public const string KIND = 'build';
+
     public function __construct(private MilitaryTallyRecorder $recorder)
     {
     }
@@ -86,11 +90,16 @@ final class MilitaryBuildTally
         try {
             $valeur = MilitaryValue::ofObject($object, $to - $from);
         } catch (UnknownMilitaryUnit $inconnue) {
+            // **Tout ce que la reprise lira, et rien qu'elle devra relire ailleurs** : la forme, la part, l'unité, la
+            // tranche, et le prix brut de l'unité au moment du fait. Attendre ne doit pas changer la valeur.
             $this->recorder->defer($clef, $playerId, $occurredAt, 'unknown_unit_family', [
+                'kind' => self::KIND,
+                'part' => 'built',
                 'queue_id' => (int)$item->id,
                 'object' => $inconnue->machineName,
                 'from' => $from,
                 'to' => $to,
+                'raw_price' => (int)ObjectService::getObjectRawPrice($inconnue->machineName)->sum(),
             ]);
 
             return;

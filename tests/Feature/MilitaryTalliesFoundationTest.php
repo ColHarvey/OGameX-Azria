@@ -11,6 +11,7 @@ use OGame\Military\Exceptions\UnknownMilitaryUnit;
 use OGame\Military\MilitaryTallyAggregator;
 use OGame\Military\MilitaryTallyPublisher;
 use OGame\Military\MilitaryTallyRecorder;
+use OGame\Military\MilitaryTallySources;
 use OGame\Military\MilitaryValue;
 use OGame\Services\ObjectService;
 use Tests\AccountTestCase;
@@ -197,6 +198,13 @@ class MilitaryTalliesFoundationTest extends AccountTestCase
      */
     public function testTheActivationWritesTheDateOnceAndNeverTouchesTheCounters(): void
     {
+        // Chaque source a son témoin : cet essai éprouve l'écriture de la date et l'intégrité des compteurs, pas le
+        // refus des sources, qui appartient à `MilitaryTallySourcesTest`.
+        $this->app->instance(MilitaryTallySources::class, new MilitaryTallySources(array_map(
+            static fn (string|null $temoin): string => $temoin ?? 'Tests\\Feature\\MilitaryTalliesBuildTest::testEachDeliveredSliceIsOneEventAndTheSlicesCoverTheProgressExactly',
+            MilitaryTallySources::WITNESSES
+        )));
+
         DB::table('military_tallies')->insert([
             'player_id' => $this->currentUserId,
             'built_value' => 0,

@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use OGame\Military\MilitaryTallyRecorder;
+use OGame\Military\MilitaryTallySources;
 use OGame\Services\SettingsService;
 
 /**
@@ -36,10 +37,10 @@ use OGame\Services\SettingsService;
 #[Signature('ogamex:military:demarrer-cumuls')]
 class StartMilitaryTallies extends Command
 {
-    public function handle(SettingsService $settings, MilitaryTallyRecorder $tallies): int
+    public function handle(SettingsService $settings, MilitaryTallyRecorder $tallies, MilitaryTallySources $sources): int
     {
         foreach ([
-            'military_tally_events' => ['event_key', 'player_id', 'status', 'aggregated_at'],
+            'military_tally_events' => ['event_key', 'player_id', 'status', 'aggregated_at', 'resolved_at'],
             'military_tallies' => ['player_id', 'built_value', 'destroyed_value', 'lost_value'],
             'highscores' => ['military_built', 'military_destroyed', 'military_lost'],
             'alliance_highscores' => ['military_built', 'military_destroyed', 'military_lost'],
@@ -55,6 +56,16 @@ class StartMilitaryTallies extends Command
 
                 return self::FAILURE;
             }
+        }
+
+        // **Chaque source de credit doit avoir son temoin d'effet.** Declaree raccordee ne suffit pas : une source sans
+        // essai qui prouve qu'elle credite reellement ferait commencer un classement public incomplet des le premier jour.
+        $manquantes = $sources->unwired();
+
+        if ($manquantes !== []) {
+            $this->error('Activation refusee : sources de credit sans temoin d effet : ' . implode(', ', $manquantes) . '.');
+
+            return self::FAILURE;
         }
 
         $depuis = $tallies->collectingSince();

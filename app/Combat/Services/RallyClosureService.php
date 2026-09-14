@@ -191,7 +191,7 @@ final class RallyClosureService
             // L'echeance a ete calculee a l'ouverture. Fermer avant elle exclurait des flottes qu'on
             // avait promis d'attendre.
             if ($now < $barriere->owned_through_effect_at) {
-                return RallyClosureOutcome::tooEarly();
+                return RallyClosureOutcome::tooEarly($now, (int)$barriere->owned_through_effect_at);
             }
 
             return $this->closeUnderLock($combat, $barriere->opened_at, $barriere->owned_through_effect_at);
