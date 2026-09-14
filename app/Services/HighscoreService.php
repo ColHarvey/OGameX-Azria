@@ -11,6 +11,7 @@ use OGame\Facades\AppUtil;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameObjects\CivilShipObjects;
 use OGame\GameObjects\MilitaryShipObjects;
+use OGame\Military\MilitaryValue;
 use OGame\Models\Alliance;
 use OGame\Models\AllianceHighscore;
 use OGame\Models\FleetMission;
@@ -67,12 +68,11 @@ class HighscoreService
         // 3 = military points
         // 4 = honour points
         //
-        // **Un type inconnu se refuse.** Construits, detruits et perdus n ont pas de compteur : aucun classement ne
-        // leur repond, et `cases()[$type]` faisait tomber la requete (le classement tournait sans fin). Une premiere
-        // correction leur rendait le classement militaire ; Keven l a refuse le 13 septembre 2026 — ce sont des
-        // donnees differentes, et les afficher sous leur nom tromperait le joueur. Le controleur verifie avant
-        // d appeler et rend « Statistiques non encore disponibles » ; ce refus garde tout autre appelant d un choix
-        // fait en silence.
+        // **Un type inconnu se refuse.** `cases()[$type]` faisait tomber la requete, et le classement tournait sans fin.
+        // Une premiere correction rendait le classement militaire aux trois cumuls, qui n avaient pas de compteur ;
+        // Keven l a refuse le 13 septembre 2026 — ce sont des donnees differentes. Les trois cumuls ont desormais leurs
+        // colonnes, et le controleur ne les sert qu une fois la collecte activee. Ce refus-ci garde tout appelant d un
+        // choix fait en silence.
         $this->highscoreType = HighscoreTypeEnum::tryFrom($type)
             ?? throw new InvalidArgumentException('Unknown highscore type ' . $type . '.');
     }
@@ -262,8 +262,12 @@ class HighscoreService
      * La composition vit ici plutot que dans la tache planifiee, pour qu un essai la lise sur un seul joueur : la
      * tache parcourt tous les comptes de la base, plusieurs centaines dans un processus de la suite.
      *
+     * **Les trois cumuls militaires se convertissent ici, et seulement ici.** Les comptes les gardent en demi-unites
+     * de ressources, sans arrondi par evenement (`MilitaryValue`) ; la photographie les ramene en points, vers le bas,
+     * une seule fois.
+     *
      * @param PlayerService $player
-     * @return array{general: int, economy: int, research: int, military: int, honor: int}
+     * @return array{general: int, economy: int, research: int, military: int, honor: int, military_built: int, military_destroyed: int, military_lost: int}
      * @throws Exception
      */
     public function getPlayerScores(PlayerService $player): array
@@ -274,6 +278,9 @@ class HighscoreService
             'research' => $this->getPlayerScoreResearch($player),
             'military' => $this->getPlayerScoreMilitary($player),
             'honor' => resolve(HonorService::class)->pointsOf($player->getUser()),
+            'military_built' => MilitaryValue::pointsOf((int)$player->getUser()->military_value_built),
+            'military_destroyed' => MilitaryValue::pointsOf((int)$player->getUser()->military_value_destroyed),
+            'military_lost' => MilitaryValue::pointsOf((int)$player->getUser()->military_value_lost),
         ];
     }
 

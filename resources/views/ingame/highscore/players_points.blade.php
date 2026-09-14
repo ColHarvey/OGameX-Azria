@@ -45,6 +45,8 @@
         <div class="fleft" id="highscoreHeadline">
             {{ __('t_ingame.highscore.points') }}
         </div>
+        @include('ingame.highscore.partials.military-tally-note', ['isAllianceRanking' => false])
+
         <table id="ranks" class="userHighscore">
             <thead>
             <tr>

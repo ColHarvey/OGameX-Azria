@@ -24,6 +24,12 @@ use Illuminate\Support\Carbon;
  * @property int $research_rank
  * @property int $military_rank
  * @property int|null $honor_rank
+ * @property int $military_built
+ * @property int $military_destroyed
+ * @property int $military_lost
+ * @property int|null $military_built_rank
+ * @property int|null $military_destroyed_rank
+ * @property int|null $military_lost_rank
  * @property-read User $player
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
@@ -52,11 +58,17 @@ use Illuminate\Support\Carbon;
     'research',
     'military',
     'honor',
+    'military_built',
+    'military_destroyed',
+    'military_lost',
     'general_rank',
     'economy_rank',
     'research_rank',
     'military_rank',
     'honor_rank',
+    'military_built_rank',
+    'military_destroyed_rank',
+    'military_lost_rank',
 ])]
 class Highscore extends Model
 {

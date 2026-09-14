@@ -43,8 +43,18 @@
                 {{ __('t_ingame.highscore.research') }}
             @elseif($highscoreCurrentType == 3)
                 {{ __('t_ingame.highscore.military') }}
+            @elseif($highscoreCurrentType == 4)
+                {{ __('t_ingame.highscore.honour_points') }}
+            @elseif($highscoreCurrentType == 5)
+                {{ __('t_ingame.highscore.military_built') }}
+            @elseif($highscoreCurrentType == 6)
+                {{ __('t_ingame.highscore.military_destroyed') }}
+            @elseif($highscoreCurrentType == 7)
+                {{ __('t_ingame.highscore.military_lost') }}
             @endif
         </div>
+
+        @include('ingame.highscore.partials.military-tally-note', ['isAllianceRanking' => true])
 
         <table id="ranks" class="allyHighscore">
             <thead>

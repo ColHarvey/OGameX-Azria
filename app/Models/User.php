@@ -58,6 +58,9 @@ use Spatie\Permission\Traits\HasRoles;
  * @property int|null $character_class
  * @property bool $character_class_free_used
  * @property Carbon|null $character_class_changed_at
+ * @property int $military_value_built Valeur militaire construite depuis l activation, en demi-unites de ressources.
+ * @property int $military_value_destroyed Valeur detruite chez l adversaire, en demi-unites de ressources.
+ * @property int $military_value_lost Valeur perdue, en demi-unites de ressources.
  * @property-read DatabaseNotificationCollection<int, DatabaseNotification> $notifications
  * @property-read int|null $notifications_count
  * @property-read UserTech|null $tech

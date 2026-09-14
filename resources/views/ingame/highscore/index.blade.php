@@ -67,22 +67,20 @@
                             </a>
 
                             <div id="subnav_fleet" class="fleft subnav">
-                                {{-- **Trois statistiques ne sont pas encore comptees** : rien ne cumule les points militaires construits,
-                                     detruits et perdus. Leurs boutons restent visibles mais desactives — ce ne sont pas des liens, le
-                                     script du classement n ecoute que `a.subnavButton`, ils n envoient donc rien et ne rendent jamais un
-                                     autre classement sous leur nom (decision de Keven, 13 septembre 2026). --}}
-                                <span class="subnavButton subnavButton_built tooltip js_hideTipOnMobile" aria-disabled="true" style="opacity: 0.35; cursor: default;" title="{{ __('t_ingame.highscore.military_built') }} — {{ __('t_ingame.highscore.statistics_not_yet_available') }}">
-                                    <span class="small-marker"></span>
-                                </span>
-
-
-                                <span class="subnavButton subnavButton_destroyed tooltip js_hideTipOnMobile" aria-disabled="true" style="opacity: 0.35; cursor: default;" title="{{ __('t_ingame.highscore.military_destroyed') }} — {{ __('t_ingame.highscore.statistics_not_yet_available') }}">
-                                    <span class="small-marker"></span>
-                                </span>
-
-                                <span class="subnavButton subnavButton_lost tooltip js_hideTipOnMobile" aria-disabled="true" style="opacity: 0.35; cursor: default;" title="{{ __('t_ingame.highscore.military_lost') }} — {{ __('t_ingame.highscore.statistics_not_yet_available') }}">
-                                    <span class="small-marker"></span>
-                                </span>
+                                {{-- **Les trois cumuls militaires** : construits, detruits, perdus. Tant que la collecte n est pas activee, leurs
+                                     boutons restent visibles mais inertes — ce ne sont pas des liens, le script du classement
+                                     n ecoute que `a.subnavButton`. Liste et valeurs viennent du controleur, donc de l enum. --}}
+                                @foreach ($militaryTallyButtons['buttons'] as $bouton)
+                                    @if ($militaryTallyButtons['active'])
+                                        <a href="javascript:void(0);" rel="{{ $bouton['type'] }}" class="subnavButton subnavButton_{{ $bouton['name'] }} tooltip js_hideTipOnMobile" title="{{ __($bouton['label']) }}">
+                                            <span class="small-marker"></span>
+                                        </a>
+                                    @else
+                                        <span class="subnavButton subnavButton_{{ $bouton['name'] }} tooltip js_hideTipOnMobile" aria-disabled="true" style="opacity: 0.35; cursor: default;" title="{{ __($bouton['label']) }} — {{ __('t_ingame.highscore.statistics_not_yet_available') }}">
+                                            <span class="small-marker"></span>
+                                        </span>
+                                    @endif
+                                @endforeach
 
                                 <a href="javascript:void(0);" rel="4" class="subnavButton subnavButton_honor tooltip js_hideTipOnMobile" title="{{ __('t_ingame.highscore.honour_points') }}">
                                     <span class="small-marker"></span>

@@ -2,9 +2,11 @@
 
 namespace Tests\Feature;
 
+use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
 use InvalidArgumentException;
 use OGame\Enums\HighscoreTypeEnum;
+use OGame\Military\MilitaryTallyRecorder;
 use OGame\Models\Highscore;
 use OGame\Services\HighscoreService;
 use Tests\AccountTestCase;
@@ -23,7 +25,7 @@ use Tests\AccountTestCase;
  * ## Ce qui est desormais vrai
  *
  * - **Les points d honneur se classent pour de bon** (`HighscoreHonourRankingTest`).
- * - **Construits, detruits, perdus ne sont pas comptes** : rien ne cumule ces nombres. Leurs boutons sont
+ * - **Construits, detruits, perdus ne sont servis qu une fois la collecte activee** (`MilitaryTalliesRankingTest`). Avant, leurs boutons sont
  *   **desactives** et disent « Statistiques non encore disponibles ». Une premiere version leur faisait rendre le
  *   classement militaire ; Keven l a refuse le 13 septembre 2026 — ce sont des donnees differentes, et les montrer
  *   sous leur nom tromperait le joueur. Le service refuse un type inconnu ; la page repond par le message.
@@ -36,6 +38,15 @@ use Tests\AccountTestCase;
  */
 class HighscoreMilitarySubTypesTest extends AccountTestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // Ces essais supposent la collecte des cumuls **non activee** : ils l etablissent, une classe voisine du meme
+        // processus ayant pu la laisser activee.
+        DB::table('settings')->where('key', MilitaryTallyRecorder::SINCE_KEY)->delete();
+    }
+
     /**
      * **Le classement par points d honneur rend l honneur**, et pas un autre score.
      */
@@ -122,7 +133,7 @@ class HighscoreMilitarySubTypesTest extends AccountTestCase
     {
         $this->expectException(InvalidArgumentException::class);
 
-        resolve(HighscoreService::class)->setHighscoreType(5);
+        resolve(HighscoreService::class)->setHighscoreType(99);
     }
 
     /**

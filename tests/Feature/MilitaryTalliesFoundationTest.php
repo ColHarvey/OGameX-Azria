@@ -46,6 +46,8 @@ class MilitaryTalliesFoundationTest extends AccountTestCase
     protected function tearDown(): void
     {
         DB::table('settings')->where('key', MilitaryTallyRecorder::SINCE_KEY)->delete();
+        // Les événements de l'essai, en attente compris : un voisin du même processus compte ceux qui attendent.
+        DB::table('military_tally_events')->where('event_key', 'like', 'essai:%')->delete();
 
         parent::tearDown();
     }
