@@ -2,7 +2,6 @@
 
 namespace Tests\Feature\Combat;
 
-use Illuminate\Support\Facades\DB;
 use OGame\Enums\CharacterClass;
 use OGame\GameMissions\MoonDestructionMission;
 use OGame\GameObjects\Models\Units\UnitCollection;
@@ -13,6 +12,7 @@ use OGame\Services\FleetMissionService;
 use OGame\Services\ObjectService;
 use OGame\Services\SettingsService;
 use Tests\FleetDispatchTestCase;
+use Tests\RecordsClassHistory;
 
 /**
  * **La destruction de lune apres une manoeuvre de Hamill, par son propre chemin.**
@@ -39,6 +39,8 @@ use Tests\FleetDispatchTestCase;
  */
 final class MoonDestructionAfterTheManoeuvreTest extends FleetDispatchTestCase
 {
+    use RecordsClassHistory;
+
     protected int $missionType = 9;
 
     protected string $missionName = 'Moon Destruction';
@@ -85,8 +87,11 @@ final class MoonDestructionAfterTheManoeuvreTest extends FleetDispatchTestCase
 
         $this->planetAddResources(new Resources(0, 0, 1_000_000, 0));
 
-        // **Le General est celui qui attaque** : la manoeuvre lit sa classe au moment de la bataille.
-        DB::table('users')->where('id', $this->currentUserId)->update(['character_class' => CharacterClass::GENERAL->value]);
+        // **Le General est celui qui attaque** : la manoeuvre lit sa classe au moment de la bataille. Colonne et
+        // ligne d historique ensemble : ecrite seule, la classe restait sur ce compte, dont la lune devenait la
+        // cible « etrangere la plus proche » de `PersistentMoonDestructionTest` quatre classes plus loin — et sa
+        // fermeture se suspendait (« did not close at once »).
+        $this->recordCharacterClass($this->currentUserId, CharacterClass::GENERAL);
     }
 
     /**

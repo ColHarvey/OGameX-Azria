@@ -17,12 +17,15 @@ use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
 use OGame\Services\SettingsService;
 use Tests\FleetDispatchTestCase;
+use Tests\RecordsClassHistory;
 
 /**
  * Test that Reaper ships automatically collect 30% of debris from attacks (all classes).
  */
 class ReaperDebrisCollectionTest extends FleetDispatchTestCase
 {
+    use RecordsClassHistory;
+
     protected int $missionType = 1; // Attack mission
     protected string $missionName = 'Attack';
 
@@ -130,8 +133,7 @@ class ReaperDebrisCollectionTest extends FleetDispatchTestCase
         }
 
         // Set character class to General (required for Reaper ships)
-        $attackerPlayer->getUser()->character_class = CharacterClass::GENERAL->value;
-        $attackerPlayer->getUser()->save();
+        $this->recordCharacterClassOn($attackerPlayer->getUser(), CharacterClass::GENERAL);
 
         // Clear any existing units from previous tests to ensure test isolation
         $attacker->removeUnits($attacker->getShipUnits(), true);
@@ -276,8 +278,7 @@ class ReaperDebrisCollectionTest extends FleetDispatchTestCase
         }
 
         // Set character class to Collector (not General - to prove Reapers work for all classes)
-        $attackerPlayer->getUser()->character_class = CharacterClass::COLLECTOR->value;
-        $attackerPlayer->getUser()->save();
+        $this->recordCharacterClassOn($attackerPlayer->getUser(), CharacterClass::COLLECTOR);
 
         // Clear any existing units from previous tests to ensure test isolation
         $attacker->removeUnits($attacker->getShipUnits(), true);

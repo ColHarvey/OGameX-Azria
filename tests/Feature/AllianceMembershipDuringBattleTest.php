@@ -6,7 +6,6 @@ use Exception;
 use Illuminate\Support\Facades\DB;
 use OGame\Alliance\AllianceMembershipChangeGuard;
 use OGame\Combat\Enums\CombatState;
-use OGame\Models\Alliance;
 use OGame\Models\AllianceMember;
 use OGame\Models\CombatInstance;
 use OGame\Models\CombatParticipant;
@@ -57,10 +56,9 @@ class AllianceMembershipDuringBattleTest extends AccountTestCase
         }
 
         if ($this->alliances !== []) {
-            DB::table('users')->whereIn('alliance_id', $this->alliances)->update(['alliance_id' => null]);
+            // Colonne et ligne d historique ensemble, sinon le compte laisse au processus suspend le prochain ralliement.
+            $this->dissolveTheBenchAlliances(...$this->alliances);
             DB::table('users')->update(['alliance_cooldown_until' => null, 'alliance_left_at' => null]);
-            AllianceMember::query()->whereIn('alliance_id', $this->alliances)->delete();
-            Alliance::query()->whereIn('id', $this->alliances)->delete();
             $this->alliances = [];
         }
 

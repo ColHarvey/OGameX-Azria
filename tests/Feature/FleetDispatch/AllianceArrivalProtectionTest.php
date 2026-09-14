@@ -6,8 +6,6 @@ use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameObjects\Models\Units\UnitCollection;
-use OGame\Models\Alliance;
-use OGame\Models\AllianceMember;
 use OGame\Models\FleetMission;
 use OGame\Models\Message;
 use OGame\Models\Resources;
@@ -64,12 +62,9 @@ class AllianceArrivalProtectionTest extends FleetDispatchTestCase
 
     protected function tearDown(): void
     {
-        if ($this->alliance !== null) {
-            DB::table('users')->where('alliance_id', $this->alliance)->update(['alliance_id' => null, 'alliance_left_at' => null]);
-            AllianceMember::query()->where('alliance_id', $this->alliance)->delete();
-            Alliance::query()->whereKey($this->alliance)->delete();
-            $this->alliance = null;
-        }
+        // Colonne et ligne d historique ensemble, sinon le compte laisse au processus suspend le prochain ralliement.
+        $this->dissolveTheBenchAlliances($this->alliance);
+        $this->alliance = null;
 
         resolve(SettingsService::class)->set('alliance_offensive_protection_enabled', 0);
 

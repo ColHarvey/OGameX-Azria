@@ -198,6 +198,12 @@ final class PersistentMoonDestructionTest extends FleetDispatchTestCase
         $mission = FleetMission::query()->where('user_id', $this->currentUserId)->where('mission_type', 9)->where('processed', 0)->orderByDesc('id')->first();
         $this->assertNotNull($mission, 'The moon destruction mission was not dispatched.');
 
+        // **Le montage exige ce que la fermeture exigera** : voir `requireAnAdmissibleHistoryFor()`. C'est ici que
+        // l'intermittent « did not close at once » naissait : la lune visee appartenait au compte d'un voisin
+        // (`MoonDestructionAfterTheManoeuvreTest`) qui avait ecrit sa classe sans sa ligne.
+        $this->requireAnAdmissibleHistoryFor((int)$lune->getPlayer()?->getId(), (int)$mission->time_arrival, 'le proprietaire de la lune');
+        $this->requireAnAdmissibleHistoryFor($this->currentUserId, (int)$mission->time_arrival, 'l attaquant');
+
         // **Le stub se pose ici, pas avant.** Le montage ci-dessus reconstruit le conteneur : une
         // instance enregistree plus tot serait orpheline, et la cloture tirerait au hasard — le juste
         // et le faux coincideraient un passage sur deux.

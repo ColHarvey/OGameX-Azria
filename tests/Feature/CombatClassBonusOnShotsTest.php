@@ -30,6 +30,7 @@ use OGame\Services\ObjectService;
 use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
+use Tests\RecordsClassHistory;
 
 /**
  * **Le bonus de combat des classes arme les tirs**, et plus seulement le rapport.
@@ -56,6 +57,8 @@ use Tests\AccountTestCase;
  */
 class CombatClassBonusOnShotsTest extends AccountTestCase
 {
+    use RecordsClassHistory;
+
     private const string CHASSEUR = 'light_fighter';
 
     /**
@@ -73,8 +76,9 @@ class CombatClassBonusOnShotsTest extends AccountTestCase
         parent::setUp();
 
         // **L essai pose ce qu il suppose.** Le montage ne donne aucune classe de personnage, mais
-        // l ecrire rend la mesure independante de ce qu un voisin aurait laisse sur ce compte.
-        DB::table('users')->where('id', $this->currentUserId)->update(['character_class' => null]);
+        // l ecrire rend la mesure independante de ce qu un voisin aurait laisse sur ce compte — colonne
+        // et ligne d historique ensemble.
+        $this->recordCharacterClass($this->currentUserId, null);
 
         $this->playerSetResearchLevel('weapon_technology', 5);
         $this->playerSetResearchLevel('shielding_technology', 3);
@@ -363,7 +367,7 @@ class CombatClassBonusOnShotsTest extends AccountTestCase
 
     private function uneClasseDePersonnage(CharacterClass $classe): void
     {
-        DB::table('users')->where('id', $this->currentUserId)->update(['character_class' => $classe->value]);
+        $this->recordCharacterClass($this->currentUserId, $classe);
     }
 
     /**

@@ -5,6 +5,7 @@ namespace Tests\Unit;
 use Illuminate\Contracts\Container\BindingResolutionException;
 use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Support\LiveLootContextFactory;
+use OGame\Enums\CharacterClass;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
@@ -16,12 +17,15 @@ use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
+use Tests\RecordsClassHistory;
 
 /**
  * Test that the Hamill Manoeuvre (Light Fighter vs Deathstar) works correctly.
  */
 class HamillManoeuvreTest extends AccountTestCase
 {
+    use RecordsClassHistory;
+
     protected int $userPlanetAmount = 2;
 
     /**
@@ -93,8 +97,7 @@ class HamillManoeuvreTest extends AccountTestCase
             $this->fail('Player not found.');
         }
         $user = $player->getUser();
-        $user->character_class = 2; // General class
-        $user->save();
+        $this->recordCharacterClassOn($user, CharacterClass::GENERAL);
 
         // Set Hamill Manoeuvre probability to 100% for testing (1 in 1)
         $settingsService = app(SettingsService::class);
@@ -140,8 +143,7 @@ class HamillManoeuvreTest extends AccountTestCase
             $this->fail('Player not found.');
         }
         $user = $player->getUser();
-        $user->character_class = 1; // Collector class
-        $user->save();
+        $this->recordCharacterClassOn($user, CharacterClass::COLLECTOR);
 
         // Set Hamill Manoeuvre probability to 100% for testing
         $settingsService = app(SettingsService::class);
@@ -184,8 +186,7 @@ class HamillManoeuvreTest extends AccountTestCase
             $this->fail('Player not found.');
         }
         $user = $player->getUser();
-        $user->character_class = 2; // General class
-        $user->save();
+        $this->recordCharacterClassOn($user, CharacterClass::GENERAL);
 
         // Set Hamill Manoeuvre probability to 100% for testing
         $settingsService = app(SettingsService::class);
@@ -228,8 +229,7 @@ class HamillManoeuvreTest extends AccountTestCase
             $this->fail('Player not found.');
         }
         $user = $player->getUser();
-        $user->character_class = 2; // General class
-        $user->save();
+        $this->recordCharacterClassOn($user, CharacterClass::GENERAL);
 
         // Set Hamill Manoeuvre probability to 100% for testing
         $settingsService = app(SettingsService::class);
@@ -269,8 +269,7 @@ class HamillManoeuvreTest extends AccountTestCase
             $this->fail('Player not found.');
         }
         $user = $player->getUser();
-        $user->character_class = 2; // General class
-        $user->save();
+        $this->recordCharacterClassOn($user, CharacterClass::GENERAL);
 
         // Set Hamill Manoeuvre probability to 100% for testing
         $settingsService = app(SettingsService::class);

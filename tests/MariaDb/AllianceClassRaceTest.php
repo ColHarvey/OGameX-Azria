@@ -69,11 +69,9 @@ final class AllianceClassRaceTest extends AccountTestCase
         DB::purge('mysql_temoin');
         DB::purge('mysql_sonde');
 
-        foreach ($this->alliances as $alliance) {
-            DB::table('users')->where('alliance_id', $alliance)->update(['alliance_id' => null]);
-            AllianceMember::query()->where('alliance_id', $alliance)->delete();
-            Alliance::query()->whereKey($alliance)->delete();
-        }
+        // Colonne et ligne d historique ensemble, sinon le compte laisse au processus suspend le prochain ralliement.
+        $this->dissolveTheBenchAlliances(...$this->alliances);
+        $this->alliances = [];
 
         resolve(SettingsService::class)->set('alliance_classes_enabled', '0');
 

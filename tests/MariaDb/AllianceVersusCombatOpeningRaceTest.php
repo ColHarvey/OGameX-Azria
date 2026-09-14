@@ -7,8 +7,6 @@ use Illuminate\Support\Facades\DB;
 use OGame\Combat\Services\CombatsInvolvingPlayer;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameObjects\Models\Units\UnitCollection;
-use OGame\Models\Alliance;
-use OGame\Models\AllianceMember;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet;
 use OGame\Models\Resources;
@@ -113,12 +111,10 @@ final class AllianceVersusCombatOpeningRaceTest extends FleetDispatchTestCase
 
     protected function tearDown(): void
     {
-        if ($this->alliance !== null) {
-            DB::table('users')->where('alliance_id', $this->alliance)->update(['alliance_id' => null]);
-            AllianceMember::query()->where('alliance_id', $this->alliance)->delete();
-            Alliance::query()->whereKey($this->alliance)->delete();
-            $this->alliance = null;
-        }
+        // Colonne et ligne d historique ensemble : ce demontage remettait `alliance_id` a vide sans sa ligne, et la
+        // fermeture d un ralliement voisin sur ce compte se suspendait (run `34886508611`, `eb983eb9`).
+        $this->dissolveTheBenchAlliances($this->alliance);
+        $this->alliance = null;
 
         resolve(SettingsService::class)->set('alliance_offensive_protection_enabled', 0);
         resolve(SettingsService::class)->set('persistent_combat_enabled', 0);

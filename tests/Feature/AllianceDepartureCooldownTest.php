@@ -4,9 +4,6 @@ namespace Tests\Feature;
 
 use Exception;
 use Illuminate\Support\Facades\Date;
-use Illuminate\Support\Facades\DB;
-use OGame\Models\Alliance;
-use OGame\Models\AllianceMember;
 use OGame\Models\User;
 use OGame\Services\AllianceService;
 use OGame\Services\SettingsService;
@@ -41,21 +38,14 @@ class AllianceDepartureCooldownTest extends AccountTestCase
 
     protected function tearDown(): void
     {
-        if ($this->alliances !== []) {
-            DB::table('users')->whereIn('alliance_id', $this->alliances)->update(['alliance_id' => null]);
-            AllianceMember::query()->whereIn('alliance_id', $this->alliances)->delete();
-            Alliance::query()->whereIn('id', $this->alliances)->delete();
-            $this->alliances = [];
-        }
+        // Colonne et ligne d historique ensemble : un compte detache sans sa ligne suspend le prochain ralliement
+        // durable qui le gele, et le second membre est le proprietaire de la planete voisine, partage par tout le
+        // processus. Le detachement remet aussi l echeance de depart, que cette classe pose deliberement.
+        $this->dissolveTheBenchAlliances(...$this->alliances);
+        $this->alliances = [];
 
-        if ($this->comptes !== []) {
-            DB::table('users')->whereIn('id', $this->comptes)->update([
-                'alliance_id' => null,
-                'alliance_left_at' => null,
-                'alliance_cooldown_until' => null,
-            ]);
-            $this->comptes = [];
-        }
+        $this->detachFromAnyAlliance(...$this->comptes);
+        $this->comptes = [];
 
         Date::setTestNow();
 

@@ -95,15 +95,35 @@ trait RunsInParallelProcesses
 
         DB::reconnect();
 
+        /*
+         * **Toutes les issues sont lues avant de conclure, et toutes sont rapportees.** Un echec qui ne
+         * citait que le processus fautif a coute un run : le processus 1 disait « the rally never closed »
+         * apres quinze secondes, et le processus 0, sorti normalement, avait ecrit pourquoi — une fermeture
+         * suspendue — dans une issue que personne ne lisait. Une issue normale n est pas une reussite : elle
+         * est rendue telle quelle, et c est a l epreuve de la juger.
+         */
         $issues = [];
+        $rapport = [];
+        $defaillant = false;
         for ($rang = 0; $rang < $processus; $rang++) {
             $fichier = $dossier . '/' . $rang . '.txt';
-            $this->assertFileExists($fichier, "Process {$rang} reported nothing: it died before writing its outcome.");
+            if (!is_file($fichier)) {
+                $rapport[] = "process {$rang}: reported nothing, it died before writing its outcome";
+                $defaillant = true;
+                continue;
+            }
             $contenu = (string)file_get_contents($fichier);
             if (str_starts_with($contenu, 'erreur:')) {
-                $this->fail("Process {$rang} failed: " . substr($contenu, strlen('erreur:')));
+                $rapport[] = "process {$rang}: failed, " . substr($contenu, strlen('erreur:'));
+                $defaillant = true;
+                continue;
             }
             $issues[$rang] = substr($contenu, strlen('ok:'));
+            $rapport[] = "process {$rang}: " . $issues[$rang];
+        }
+
+        if ($defaillant) {
+            $this->fail("A process failed. Every outcome, so that the failure reads whole:\n" . implode("\n", $rapport));
         }
 
         return $issues;

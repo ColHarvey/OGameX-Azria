@@ -14,12 +14,15 @@ use OGame\Services\FleetMissionService;
 use OGame\Services\ObjectService;
 use OGame\Services\SettingsService;
 use Tests\FleetDispatchTestCase;
+use Tests\RecordsClassHistory;
 
 /**
  * Test that General class generates wreck fields at their origin planet from their lost ships.
  */
 class GeneralWreckFieldTest extends FleetDispatchTestCase
 {
+    use RecordsClassHistory;
+
     protected int $missionType = 1; // Attack mission
     protected string $missionName = 'Attack';
 
@@ -80,8 +83,7 @@ class GeneralWreckFieldTest extends FleetDispatchTestCase
         }
 
         // Set character class to General (required for wreck field generation)
-        $attackerPlayer->getUser()->character_class = CharacterClass::GENERAL->value;
-        $attackerPlayer->getUser()->save();
+        $this->recordCharacterClassOn($attackerPlayer->getUser(), CharacterClass::GENERAL);
 
         DB::table('planets')
             ->where('id', $attacker->getPlanetId())
@@ -172,8 +174,7 @@ class GeneralWreckFieldTest extends FleetDispatchTestCase
         }
 
         // Set character class to General
-        $attackerPlayer->getUser()->character_class = CharacterClass::GENERAL->value;
-        $attackerPlayer->getUser()->save();
+        $this->recordCharacterClassOn($attackerPlayer->getUser(), CharacterClass::GENERAL);
 
         DB::table('planets')
             ->where('id', $attacker->getPlanetId())
@@ -252,8 +253,7 @@ class GeneralWreckFieldTest extends FleetDispatchTestCase
         }
 
         // Set character class to General
-        $attackerPlayer->getUser()->character_class = CharacterClass::GENERAL->value;
-        $attackerPlayer->getUser()->save();
+        $this->recordCharacterClassOn($attackerPlayer->getUser(), CharacterClass::GENERAL);
 
         DB::table('planets')
             ->where('id', $attacker->getPlanetId())
@@ -365,8 +365,7 @@ class GeneralWreckFieldTest extends FleetDispatchTestCase
         }
 
         // Set character class to Collector (NOT General)
-        $attackerPlayer->getUser()->character_class = CharacterClass::COLLECTOR->value;
-        $attackerPlayer->getUser()->save();
+        $this->recordCharacterClassOn($attackerPlayer->getUser(), CharacterClass::COLLECTOR);
 
         DB::table('planets')
             ->where('id', $attacker->getPlanetId())
@@ -445,8 +444,7 @@ class GeneralWreckFieldTest extends FleetDispatchTestCase
         }
 
         // Set character class to General
-        $attackerPlayer->getUser()->character_class = CharacterClass::GENERAL->value;
-        $attackerPlayer->getUser()->save();
+        $this->recordCharacterClassOn($attackerPlayer->getUser(), CharacterClass::GENERAL);
 
         // Clear any existing units
         $attacker->removeUnits($attacker->getShipUnits(), true);
@@ -519,8 +517,7 @@ class GeneralWreckFieldTest extends FleetDispatchTestCase
         }
 
         // Set character class to General
-        $attackerPlayer->getUser()->character_class = CharacterClass::GENERAL->value;
-        $attackerPlayer->getUser()->save();
+        $this->recordCharacterClassOn($attackerPlayer->getUser(), CharacterClass::GENERAL);
 
         // Clear any existing units
         $attacker->removeUnits($attacker->getShipUnits(), true);
@@ -606,8 +603,7 @@ class GeneralWreckFieldTest extends FleetDispatchTestCase
         }
 
         // Set character class to General
-        $attackerPlayer->getUser()->character_class = CharacterClass::GENERAL->value;
-        $attackerPlayer->getUser()->save();
+        $this->recordCharacterClassOn($attackerPlayer->getUser(), CharacterClass::GENERAL);
 
         // Clear any existing units
         $attacker->removeUnits($attacker->getShipUnits(), true);

@@ -4,6 +4,7 @@ namespace Tests;
 
 use Illuminate\Contracts\Container\BindingResolutionException;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\History\ClassHistoryReader;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
@@ -256,6 +257,45 @@ abstract class FleetDispatchTestCase extends MoonTestCase
 
         $this->dispatchFleet($nearbyForeignCleanPlanet->getPlanetCoordinates(), $units, $resources, PlanetType::Planet, 0, $assertStatus);
         return $nearbyForeignCleanPlanet;
+    }
+
+    /**
+     * Le montage d un combat durable exige ce que sa fermeture exigera : l historique de ce compte est connu
+     * a cet instant.
+     *
+     * La fermeture gele chaque compte a son admission par `ClassHistoryReader` — classe personnelle,
+     * appartenance, classe de l alliance — et se **suspend** si l un des trois est inconnu. Le proprietaire
+     * de la planete etrangere voisine est partage par tout le processus : un voisin qui l a laisse avec une
+     * colonne ecrite sans sa ligne fait suspendre le ralliement de l essai suivant, qui ne disait rien de
+     * plus que « never closed » (quinze secondes d attente sur le bac MariaDB, run de `eb983eb9`) ou
+     * « did not close at once ». Le montage le dit a la source, avec la raison du lecteur.
+     *
+     * Cette garde detecte une pollution ; elle ne prouve pas que les voisins nettoient. Ce temoin-la est
+     * `BenchCleanupKeepsTheClassHistoryCoherentTest`.
+     */
+    protected function requireAnAdmissibleHistoryFor(int $playerId, int $instant, string $role): void
+    {
+        $lecteur = resolve(ClassHistoryReader::class);
+
+        $lectures = [
+            'classe personnelle' => $lecteur->personalClassAt($playerId, $instant),
+            'appartenance' => $lecteur->membershipAt($playerId, $instant),
+        ];
+
+        $appartenance = $lectures['appartenance'];
+        if ($appartenance->isKnown() && is_int($appartenance->value())) {
+            $lectures['classe de l alliance'] = $lecteur->allianceClassAt($appartenance->value(), $instant);
+        }
+
+        foreach ($lectures as $quoi => $valeur) {
+            if (!$valeur->isKnown()) {
+                $this->fail(
+                    'Premisse du montage : ' . $role . ' (compte ' . $playerId . ') n a pas d historique admissible a l instant '
+                    . $instant . ' ; la fermeture se suspendrait pour cela, pas pour ce que l essai mesure. '
+                    . ucfirst($quoi) . ' : ' . $valeur->reason
+                );
+            }
+        }
     }
 
     /**

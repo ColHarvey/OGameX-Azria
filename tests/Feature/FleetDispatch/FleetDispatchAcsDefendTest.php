@@ -5,7 +5,6 @@ namespace Tests\Feature\FleetDispatch;
 use Illuminate\Support\Facades\DB;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\GameObjects\Models\Units\UnitCollection;
-use OGame\Models\AllianceMember;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet;
@@ -20,12 +19,15 @@ use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
 use RuntimeException;
 use Tests\FleetDispatchTestCase;
+use Tests\Support\DetachesFromAnyAlliance;
 
 /**
  * Test that fleet dispatch works as expected for ACS Defend missions.
  */
 class FleetDispatchAcsDefendTest extends FleetDispatchTestCase
 {
+    use DetachesFromAnyAlliance;
+
     /**
      * @var int The mission type for the test.
      */
@@ -120,32 +122,9 @@ class FleetDispatchAcsDefendTest extends FleetDispatchTestCase
     protected function tearDown(): void
     {
         // Clean up alliance data created during this test
-        if ($this->createdAllianceId !== null) {
-            // Delete alliance members
-            DB::table('alliance_members')
-                ->where('alliance_id', $this->createdAllianceId)
-                ->delete();
-
-            // Delete alliance applications
-            DB::table('alliance_applications')
-                ->where('alliance_id', $this->createdAllianceId)
-                ->delete();
-
-            // Delete alliance
-            DB::table('alliances')
-                ->where('id', $this->createdAllianceId)
-                ->delete();
-
-            // Reset current user's alliance_id
-            if ($this->currentUserId !== 0) {
-                DB::table('users')
-                    ->where('id', $this->currentUserId)
-                    ->update([
-                        'alliance_id' => null,
-                        'alliance_left_at' => null,
-                    ]);
-            }
-        }
+        // Membres detaches avec leur ligne d historique, puis inscriptions, candidatures et alliance : une colonne
+        // remise a vide sans sa ligne suspend le prochain ralliement durable qui gele ce compte.
+        $this->dissolveTheBenchAlliances($this->createdAllianceId);
 
         // Clean up buddy relationships and vacation mode created during this test run
         // Process and remove each ID to avoid accumulation
@@ -160,13 +139,8 @@ class FleetDispatchAcsDefendTest extends FleetDispatchTestCase
                 })
                 ->delete();
 
-            // Reset alliance_id for this user (in case they were added as alliance member)
-            DB::table('users')
-                ->where('id', $buddyUserId)
-                ->update([
-                    'alliance_id' => null,
-                    'alliance_left_at' => null,
-                ]);
+            // Reset alliance_id for this user (in case they were added as alliance member), with its history line.
+            $this->detachFromAnyAlliance((int)$buddyUserId);
 
             // Reset all vacation mode fields for buddy user
             // activateVacationMode() sets: vacation_mode, vacation_mode_activated_at, vacation_mode_until
@@ -1271,18 +1245,9 @@ class FleetDispatchAcsDefendTest extends FleetDispatchTestCase
 
         $this->allianceMemberPlanet = $this->createPlanetAtSafeCoordinate($allianceMemberUser->id);
 
-        // Add new member to alliance (bypass cooldown for testing)
-        /** @phpstan-ignore assign.propertyType */
-        $allianceMemberUser->alliance_id = $alliance->id;
-        $allianceMemberUser->alliance_left_at = null;
-        $allianceMemberUser->save();
-
-        AllianceMember::create([
-            'alliance_id' => $alliance->id,
-            'user_id' => $allianceMemberUser->id,
-            'rank_id' => null,
-            'joined_at' => now(),
-        ]);
+        // Add new member to alliance (bypass cooldown for testing) — colonne, inscription et ligne
+        // d historique ensemble, comme le jeu les ecrit.
+        $this->joinTheBenchAlliance($allianceMemberUser, (int)$alliance->id);
 
         return $allianceMemberUser;
     }

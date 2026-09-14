@@ -3,10 +3,10 @@
 namespace Tests\Feature;
 
 use Illuminate\Support\Facades\DB;
-use OGame\Models\Alliance;
 use OGame\Models\AllianceMember;
 use OGame\Services\AllianceService;
 use Tests\AccountTestCase;
+use Tests\Support\DetachesFromAnyAlliance;
 
 /**
  * `users.alliance_id` et la ligne d `alliance_members` disent la meme chose, sur les cinq routes.
@@ -31,16 +31,15 @@ use Tests\AccountTestCase;
  */
 class AllianceMembershipMirrorsTheMemberRowTest extends AccountTestCase
 {
+    use DetachesFromAnyAlliance;
+
     private int|null $alliance = null;
 
     protected function tearDown(): void
     {
-        if ($this->alliance !== null) {
-            DB::table('users')->where('alliance_id', $this->alliance)->update(['alliance_id' => null, 'alliance_left_at' => null]);
-            AllianceMember::query()->where('alliance_id', $this->alliance)->delete();
-            Alliance::query()->whereKey($this->alliance)->delete();
-            $this->alliance = null;
-        }
+        // Colonne et ligne d historique ensemble — la regle meme que ce temoin tient pour les cinq routes du jeu.
+        $this->dissolveTheBenchAlliances($this->alliance);
+        $this->alliance = null;
 
         parent::tearDown();
     }

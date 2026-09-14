@@ -104,6 +104,10 @@ trait OpensARallyWithAWindow
         $ouvreuse = $this->lastMissionDispatched();
         $ouverture = (int)$ouvreuse->time_arrival;
 
+        // **Le montage exige ce que la fermeture exigera** : voir `requireAnAdmissibleHistoryFor()`.
+        $this->requireAnAdmissibleHistoryFor((int)DB::table('planets')->where('id', $cible->getPlanetId())->value('user_id'), $ouverture, 'le proprietaire de la cible');
+        $this->requireAnAdmissibleHistoryFor($this->currentUserId, $ouverture, 'l attaquant');
+
         $coordonnees = $cible->getPlanetCoordinates();
         $vague = new UnitCollection();
         $vague->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 100);

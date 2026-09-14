@@ -20,6 +20,7 @@ use OGame\Services\HighscoreService;
 use OGame\Services\SettingsService;
 use RuntimeException;
 use Tests\AccountTestCase;
+use Tests\Support\DetachesFromAnyAlliance;
 
 /**
  * **Les trois cumuls militaires au classement : publiés d'un seul état, servis seulement une fois publiés.**
@@ -45,6 +46,8 @@ use Tests\AccountTestCase;
  */
 class MilitaryTalliesRankingTest extends AccountTestCase
 {
+    use DetachesFromAnyAlliance;
+
     /** @var list<int> Les comptes créés par l'essai, dont les compteurs partent avec lui. */
     private array $comptes = [];
 
@@ -201,9 +204,10 @@ class MilitaryTalliesRankingTest extends AccountTestCase
         $this->publier();
         $this->assertSame(1_500, (int)AllianceHighscore::query()->where('alliance_id', $alliance->id)->value('military_built'));
 
-        // Le membre part. Le raccourci par la colonne est voulu : la somme se lit sur `users.alliance_id`, et c'est cela
-        // seul que l'essai éprouve, pas le parcours de départ d'une alliance.
-        DB::table('users')->where('id', $membre->id)->update(['alliance_id' => null]);
+        // Le membre part, colonne et ligne d’historique ensemble. La somme se lit sur `users.alliance_id`, et c’est cela
+        // seul que l’essai éprouve, pas le parcours de départ d’une alliance — mais une colonne écrite seule ferait
+        // suspendre le prochain combat durable qui gèlerait ce compte.
+        $this->detachFromAnyAlliance((int)$membre->id);
 
         $this->publier();
         $this->assertSame(1_000, (int)AllianceHighscore::query()->where('alliance_id', $alliance->id)->value('military_built'), 'La somme ne suit pas les membres actuels.');

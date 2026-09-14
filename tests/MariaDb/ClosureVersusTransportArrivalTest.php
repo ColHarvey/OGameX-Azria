@@ -149,9 +149,17 @@ final class ClosureVersusTransportArrivalTest extends FleetDispatchTestCase
         $this->assertTheCausalOutcome($combat, $transport, $cible);
     }
 
+    /**
+     * **Une fermeture qui ne ferme pas dit pourquoi.** « non fermee » seul a coute un run : la fermeture
+     * s etait suspendue sur un historique de classe que le demontage d une classe voisine avait laisse
+     * incoherent, et le rapport ne disait que l attente du travailleur. Seule une fermeture qui a ferme
+     * vaut « fermee » ; une suspension n est jamais prise pour une reussite.
+     */
     private static function closeTheRally(CombatInstance $combat, int $fermeture): string
     {
-        return (new RallyClosureService())->close($combat->id, $fermeture)->closed ? 'fermee' : 'non fermee';
+        $issue = (new RallyClosureService())->close($combat->id, $fermeture);
+
+        return $issue->closed ? 'fermee' : 'non fermee : ' . $issue->reason;
     }
 
     /**

@@ -9,6 +9,7 @@ use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
 use OGame\Services\ObjectService;
 use Tests\FleetDispatchTestCase;
+use Tests\RecordsClassHistory;
 
 /**
  * La raison d'un refus d'expedition atteint le joueur.
@@ -25,6 +26,8 @@ use Tests\FleetDispatchTestCase;
  */
 class ExpeditionRefusalReasonTest extends FleetDispatchTestCase
 {
+    use RecordsClassHistory;
+
     protected int $missionType = 15;
 
     protected string $missionName = 'Expedition';
@@ -104,7 +107,7 @@ class ExpeditionRefusalReasonTest extends FleetDispatchTestCase
     {
         $this->basicSetup();
         $this->playerSetResearchLevel('astrophysics', 0);
-        DB::table('users')->where('id', $this->currentUserId)->update(['character_class' => CharacterClass::DISCOVERER->value]);
+        $this->recordCharacterClass($this->currentUserId, CharacterClass::DISCOVERER);
 
         $verdict = $this->verdictPourLEspaceProfond();
 

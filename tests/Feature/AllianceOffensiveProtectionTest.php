@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use OGame\Combat\Enums\CombatMissionKind;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\Models\Alliance;
-use OGame\Models\AllianceMember;
 use OGame\Services\AllianceService;
 use OGame\Services\SettingsService;
 use ReflectionClass;
@@ -38,14 +37,11 @@ class AllianceOffensiveProtectionTest extends AccountTestCase
 
     protected function tearDown(): void
     {
-        if ($this->alliance !== null) {
-            // Le lien vit sur `users` autant que dans `alliance_members` : les deux partent, sinon un
-            // essai voisin heriterait d une appartenance que plus rien ne porte.
-            \Illuminate\Support\Facades\DB::table('users')->where('alliance_id', $this->alliance)->update(['alliance_id' => null, 'alliance_left_at' => null]);
-            AllianceMember::query()->where('alliance_id', $this->alliance)->delete();
-            Alliance::query()->whereKey($this->alliance)->delete();
-            $this->alliance = null;
-        }
+        // Le lien vit sur `users`, dans `alliance_members` **et dans l historique** : les trois partent ensemble,
+        // sinon un essai voisin herite d une appartenance que plus rien ne porte — ou d un compte dont la colonne
+        // contredit sa derniere ligne, qui suspend le prochain ralliement durable.
+        $this->dissolveTheBenchAlliances($this->alliance);
+        $this->alliance = null;
 
         resolve(SettingsService::class)->set('alliance_offensive_protection_enabled', 0);
 

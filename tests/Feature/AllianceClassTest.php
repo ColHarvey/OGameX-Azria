@@ -13,6 +13,7 @@ use OGame\Services\AllianceClassService;
 use OGame\Services\AllianceService;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
+use Tests\Support\DetachesFromAnyAlliance;
 
 /**
  * La classe d une alliance : qui peut la choisir, ce qu elle coute, ce qu elle devient.
@@ -33,6 +34,15 @@ use Tests\AccountTestCase;
  */
 class AllianceClassTest extends AccountTestCase
 {
+    use DetachesFromAnyAlliance;
+
+    /**
+     * Les alliances fondees par l essai, defaites au demontage.
+     *
+     * @var list<int>
+     */
+    private array $alliances = [];
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -45,6 +55,12 @@ class AllianceClassTest extends AccountTestCase
     protected function tearDown(): void
     {
         resolve(SettingsService::class)->set('alliance_classes_enabled', '0');
+
+        // Les alliances de cette classe restaient, avec les classes qu elle ecrit sur la colonne seule pour eprouver
+        // un modele perime ou une valeur illisible : un membre laisse au processus suspendait le prochain ralliement
+        // durable qui le gelait. Le scenario reste ; le demontage defait ce qu il a fonde.
+        $this->dissolveTheBenchAlliances(...$this->alliances);
+        $this->alliances = [];
 
         parent::tearDown();
     }
@@ -67,6 +83,7 @@ class AllianceClassTest extends AccountTestCase
         $alliance = resolve(AllianceService::class)->createAlliance($this->currentUserId, $this->unTag(), $this->unNom());
 
         $this->assertNotNull($alliance);
+        $this->alliances[] = (int)$alliance->id;
 
         return $alliance;
     }
@@ -323,7 +340,8 @@ class AllianceClassTest extends AccountTestCase
         $classes->choose($this->leJoueur(), $alliance, AllianceClass::RESEARCHERS);
         $this->assertSame(AllianceClass::RESEARCHERS, $classes->classOf($this->leJoueur()));
 
-        DB::table('users')->where('id', $this->currentUserId)->update(['alliance_id' => null]);
+        // Le depart s ecrit comme le jeu l ecrit, colonne et ligne d historique ensemble.
+        $this->detachFromAnyAlliance($this->currentUserId);
 
         // Un service neuf : le cache par requete ne doit pas tenir lieu de verite entre requetes.
         $this->assertNull(resolve(AllianceClassService::class)->classOf($this->leJoueur()));

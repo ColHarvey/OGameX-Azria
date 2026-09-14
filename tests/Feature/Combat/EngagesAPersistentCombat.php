@@ -119,6 +119,10 @@ trait EngagesAPersistentCombat
         $mission = DB::table('fleet_missions')->where('user_id', $this->currentUserId)->where('processed', 0)->orderByDesc('id')->first();
         $this->assertNotNull($mission, 'No fleet was dispatched.');
 
+        // **Le montage exige ce que la fermeture exigera** : voir `requireAnAdmissibleHistoryFor()`.
+        $this->requireAnAdmissibleHistoryFor($proprietaire, (int)$mission->time_arrival, 'le proprietaire de la cible');
+        $this->requireAnAdmissibleHistoryFor($this->currentUserId, (int)$mission->time_arrival, 'l attaquant');
+
         // **La bataille de ce banc est rejouable.** Sans graine, elle est tiree au sort : les
         // essais qui exigent une perte de chaque camp echouaient au hasard — mesure faite, run
         // `34018471017` sur `885d2ad3`, avec le meme message que celui de la galaxie. Un rouge

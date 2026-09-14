@@ -4,9 +4,12 @@ namespace Tests\Feature;
 
 use OGame\Enums\CharacterClass;
 use Tests\AccountTestCase;
+use Tests\RecordsClassHistory;
 
 class FleetSpeedGeneralClassTest extends AccountTestCase
 {
+    use RecordsClassHistory;
+
     /**
      * Test that General class can use 5% fleet speed.
      */
@@ -18,8 +21,7 @@ class FleetSpeedGeneralClassTest extends AccountTestCase
             $this->fail('Player not found.');
         }
         $user = $player->getUser();
-        $user->character_class = CharacterClass::GENERAL->value;
-        $user->save();
+        $this->recordCharacterClassOn($user, CharacterClass::GENERAL);
 
         // Add a ship to the planet
         $this->planetAddUnit('light_fighter', 1);
@@ -59,8 +61,7 @@ class FleetSpeedGeneralClassTest extends AccountTestCase
             $this->fail('Player not found.');
         }
         $user = $player->getUser();
-        $user->character_class = null;
-        $user->save();
+        $this->recordCharacterClassOn($user, null);
 
         // Add a ship to the planet
         $this->planetAddUnit('light_fighter', 1);
@@ -100,8 +101,7 @@ class FleetSpeedGeneralClassTest extends AccountTestCase
             $this->fail('Player not found.');
         }
         $user = $player->getUser();
-        $user->character_class = CharacterClass::COLLECTOR->value;
-        $user->save();
+        $this->recordCharacterClassOn($user, CharacterClass::COLLECTOR);
 
         // Add a ship to the planet
         $this->planetAddUnit('light_fighter', 1);
@@ -141,8 +141,7 @@ class FleetSpeedGeneralClassTest extends AccountTestCase
             $this->fail('Player not found.');
         }
         $user = $player->getUser();
-        $user->character_class = CharacterClass::DISCOVERER->value;
-        $user->save();
+        $this->recordCharacterClassOn($user, CharacterClass::DISCOVERER);
 
         // Add a ship to the planet
         $this->planetAddUnit('light_fighter', 1);
@@ -182,8 +181,7 @@ class FleetSpeedGeneralClassTest extends AccountTestCase
             $this->fail('Player not found.');
         }
         $user = $player->getUser();
-        $user->character_class = CharacterClass::GENERAL->value;
-        $user->save();
+        $this->recordCharacterClassOn($user, CharacterClass::GENERAL);
 
         // Add a ship to the planet
         $this->planetAddUnit('light_fighter', 1);

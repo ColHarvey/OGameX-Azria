@@ -93,6 +93,11 @@ final class UnitCharacteristicsFrozenAtEntryTest extends FleetDispatchTestCase
     {
         resolve(SettingsService::class)->set('persistent_combat_enabled', '0');
         resolve(SettingsService::class)->set('alliance_classes_enabled', '0');
+
+        // Un essai de cette classe contredit volontairement l historique de son compte pour eprouver la suspension.
+        // Le scenario reste entier ; le compte, lui, ne reste pas ainsi au processus.
+        $this->leaveTheClassHistoryCoherentFor($this->currentUserId);
+
         parent::tearDown();
     }
 

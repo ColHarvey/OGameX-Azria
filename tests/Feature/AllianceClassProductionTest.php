@@ -12,6 +12,7 @@ use OGame\Services\AllianceService;
 use OGame\Services\ObjectService;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
+use Tests\RecordsClassHistory;
 
 /**
  * Le bonus de production d une alliance de Commercants : +5 % sur les mines et sur l energie.
@@ -30,6 +31,8 @@ use Tests\AccountTestCase;
  */
 class AllianceClassProductionTest extends AccountTestCase
 {
+    use RecordsClassHistory;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -180,8 +183,8 @@ class AllianceClassProductionTest extends AccountTestCase
     {
         $this->desMinesQuiTournent();
 
-        // Collecteur : +25 % sur les mines. L essai pose la classe, il ne l espere pas.
-        DB::table('users')->where('id', $this->currentUserId)->update(['character_class' => CharacterClass::COLLECTOR->value]);
+        // Collecteur : +25 % sur les mines. L essai pose la classe, il ne l espere pas — avec sa ligne d historique.
+        $this->recordCharacterClass($this->currentUserId, CharacterClass::COLLECTOR);
         $this->get('/overview')->assertStatus(200);
         $this->relireLaPlanete();
 

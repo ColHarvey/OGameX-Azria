@@ -392,6 +392,7 @@ final class ClassIdentityFrozenAtAdmissionTest extends FleetDispatchTestCase
             [$combat] = $this->aLoneAttackProcessedLate(null, function (int $proprietaire) use ($avant): void {
                 $avant['proprietaire'] = $proprietaire;
                 $avant['classe'] = DB::table('users')->where('id', $proprietaire)->value('character_class');
+                $avant['instant'] = (int)Date::now()->timestamp;
                 $this->recordCharacterClass($proprietaire, CharacterClass::GENERAL);
             });
 
@@ -407,6 +408,10 @@ final class ClassIdentityFrozenAtAdmissionTest extends FleetDispatchTestCase
             );
         } finally {
             if (is_int($avant['proprietaire'] ?? null)) {
+                // **La remise en etat se date apres la ligne qu elle annule.** Le reglement a ramene l horloge a
+                // l echeance, cinq secondes avant la classe posee ci-dessus : ecrite la, la ligne de retour n etait
+                // pas la derniere, et le proprietaire — partage par tout le processus — restait illisible.
+                $this->travelTo(Date::createFromTimestamp(max((int)Date::now()->timestamp, (int)$avant['instant']) + 1));
                 $this->recordCharacterClass($avant['proprietaire'], is_numeric($avant['classe']) ? CharacterClass::from((int)$avant['classe']) : null);
             }
         }

@@ -7,8 +7,6 @@ use Illuminate\Support\Facades\DB;
 use OGame\Combat\Enums\CombatState;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameObjects\Models\Units\UnitCollection;
-use OGame\Models\Alliance;
-use OGame\Models\AllianceMember;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
 use OGame\Models\FleetMission;
@@ -88,14 +86,11 @@ class AllianceUnderTheCombatGateTest extends FleetDispatchTestCase
 
     protected function tearDown(): void
     {
-        if ($this->alliance !== null) {
-            // Le lien vit sur `users` autant que dans `alliance_members` : les deux partent, sinon un
-            // essai voisin heriterait d une appartenance que plus rien ne porte.
-            DB::table('users')->where('alliance_id', $this->alliance)->update(['alliance_id' => null, 'alliance_left_at' => null]);
-            AllianceMember::query()->where('alliance_id', $this->alliance)->delete();
-            Alliance::query()->whereKey($this->alliance)->delete();
-            $this->alliance = null;
-        }
+        // Le lien vit sur `users`, dans `alliance_members` **et dans l historique** : les trois partent ensemble,
+        // sinon un essai voisin herite d une appartenance que plus rien ne porte — ou d un compte dont la colonne
+        // contredit sa derniere ligne, qui suspend le prochain ralliement durable.
+        $this->dissolveTheBenchAlliances($this->alliance);
+        $this->alliance = null;
 
         $reglages = resolve(SettingsService::class);
         $reglages->set('alliance_offensive_protection_enabled', 0);

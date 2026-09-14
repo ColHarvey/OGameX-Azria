@@ -119,6 +119,12 @@ trait OpensAPersistentAcsBattle
 
         resolve(SettingsService::class)->set('persistent_combat_enabled', '1');
         $arrivee = max((int)$initiatrice->time_arrival, (int)$alliee->time_arrival);
+
+        // **Le montage exige ce que la fermeture exigera** : voir `requireAnAdmissibleHistoryFor()`.
+        $this->requireAnAdmissibleHistoryFor($proprietaire, $arrivee, 'le proprietaire de la cible');
+        $this->requireAnAdmissibleHistoryFor($this->currentUserId, $arrivee, 'l initiateur');
+        $this->requireAnAdmissibleHistoryFor((int)$this->acsAllyUser()->id, $arrivee, 'l allie');
+
         $this->travelTo(Date::createFromTimestamp($arrivee + 1));
         $this->get('/overview')->assertStatus(200);
 

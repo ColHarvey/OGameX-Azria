@@ -7,7 +7,6 @@ use Exception;
 use Illuminate\Support\Facades\Date;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\GameObjects\Models\Units\UnitCollection;
-use OGame\Models\AllianceMember;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet;
@@ -18,12 +17,15 @@ use OGame\Services\BuddyService;
 use OGame\Services\FleetMissionService;
 use OGame\Services\ObjectService;
 use Tests\AccountTestCase;
+use Tests\Support\DetachesFromAnyAlliance;
 
 /**
  * Test that Alliance Depot supply rocket functionality works as expected.
  */
 class AllianceDepotSupplyRocketTest extends AccountTestCase
 {
+    use DetachesFromAnyAlliance;
+
     /** @var array<int> */
     private array $createdPlanetIds = [];
 
@@ -44,32 +46,11 @@ class AllianceDepotSupplyRocketTest extends AccountTestCase
     protected function tearDown(): void
     {
         // Remove alliance data created during this test
-        if (!empty($this->createdAllianceIds)) {
-            // Delete alliance members
-            DB::table('alliance_members')
-                ->whereIn('alliance_id', $this->createdAllianceIds)
-                ->delete();
-
-            // Delete alliance applications
-            DB::table('alliance_applications')
-                ->whereIn('alliance_id', $this->createdAllianceIds)
-                ->delete();
-
-            // Delete alliances
-            DB::table('alliances')
-                ->whereIn('id', $this->createdAllianceIds)
-                ->delete();
-
-            // Reset alliance_id for current user
-            if ($this->currentUserId !== 0) {
-                DB::table('users')
-                    ->where('id', $this->currentUserId)
-                    ->update([
-                        'alliance_id' => null,
-                        'alliance_left_at' => null,
-                    ]);
-            }
-        }
+        // Membres detaches avec leur ligne d historique, puis inscriptions, candidatures et alliances. Le membre
+        // cree par l essai gardait une alliance effacee sur sa colonne, et sa planete pouvait devenir la cible
+        // d un ralliement voisin, dont la fermeture se suspendait.
+        $this->dissolveTheBenchAlliances(...$this->createdAllianceIds);
+        $this->createdAllianceIds = [];
 
         // Remove planets created during this test
         if (!empty($this->createdPlanetIds)) {
@@ -563,18 +544,9 @@ class AllianceDepotSupplyRocketTest extends AccountTestCase
             $this->fail('Alliance member planet service is null.');
         }
 
-        // Add alliance member to alliance (bypass cooldown for testing)
-        /** @phpstan-ignore assign.propertyType */
-        $allianceMemberUser->alliance_id = $alliance->id;
-        $allianceMemberUser->alliance_left_at = null;
-        $allianceMemberUser->save();
-
-        AllianceMember::create([
-            'alliance_id' => $alliance->id,
-            'user_id' => $allianceMemberUser->id,
-            'rank_id' => null,
-            'joined_at' => now(),
-        ]);
+        // Add alliance member to alliance (bypass cooldown for testing) — colonne, inscription et ligne
+        // d historique ensemble, comme le jeu les ecrit.
+        $this->joinTheBenchAlliance($allianceMemberUser, (int)$alliance->id);
 
         // Send an ACS Defend fleet to alliance member's planet with 4 hour hold
         $this->planetAddUnit('light_fighter', 10);
