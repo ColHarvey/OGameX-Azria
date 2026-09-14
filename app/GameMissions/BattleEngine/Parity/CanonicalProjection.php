@@ -4,6 +4,7 @@ namespace OGame\GameMissions\BattleEngine\Parity;
 
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Hull\DamagedHulls;
 use OGame\Models\Resources;
 
 /**
@@ -108,6 +109,45 @@ final class CanonicalProjection
     }
 
     /**
+     * Les degats des survivants, flotte par flotte — **a part de `of()`, et c est voulu**.
+     *
+     * ## Pourquoi pas dans la projection canonique
+     *
+     * `BattleReferenceVectorsTest` epingle **l empreinte de `of()`**, relevee sur le moteur d avant la
+     * couture d etat et figee telle quelle. Y ajouter une clef changerait cette empreinte, et ces vecteurs
+     * ne se recopient jamais depuis la version courante : ils ne diraient plus rien. Les coques se
+     * comparent donc par cette projection-ci, que rien ne fige.
+     *
+     * ## Ce qu elle ferme
+     *
+     * Sans elle, **aucun essai ne comparait l etat de coque rendu** par les deux moteurs. Les coques
+     * entamees entraient bien dans la bataille — un scenario dedie s en assure —, mais ce que chaque moteur
+     * en rendait n etait compare par rien, et deux divergences y ont vecu jusqu au 13 septembre 2026.
+     *
+     * @return array<string, mixed>
+     */
+    public static function hullsOf(BattleResult $result): array
+    {
+        $attaquantes = [];
+
+        foreach ($result->attackerFleetResults as $flotte) {
+            $attaquantes[$flotte->fleetMissionId] = self::coques($flotte->survivorHulls());
+        }
+
+        ksort($attaquantes);
+
+        $defensives = [];
+
+        foreach ($result->defenderFleetResults as $flotte) {
+            $defensives[$flotte->fleetMissionId] = self::coques($flotte->survivorHulls());
+        }
+
+        ksort($defensives);
+
+        return ['attacker_fleets' => $attaquantes, 'defender_fleets' => $defensives];
+    }
+
+    /**
      * Le premier chemin ou deux projections different, avec les deux valeurs — ou null.
      *
      * @param array<string, mixed> $a
@@ -141,6 +181,21 @@ final class CanonicalProjection
         }
 
         return null;
+    }
+
+    /**
+     * Les paliers de degats d une flotte, tels que `DamagedHulls` les range deja.
+     *
+     * **Aucun tri ici, et c est voulu.** `DamagedHulls::of()` range les types par nom et les niveaux par
+     * valeur — « les plus intactes d abord », la regle de jeu, tenue par `DamagedHullsTest`. Re-trier serait
+     * une seconde regle au meme endroit, et deux regles derivent. Une mutation survivante a pose la question ;
+     * la reponse etait de n avoir qu un seul decideur, pas d ajouter un essai.
+     *
+     * @return array<string, array<int, int>>
+     */
+    private static function coques(DamagedHulls $degats): array
+    {
+        return $degats->toStorage() ?? [];
     }
 
     /**

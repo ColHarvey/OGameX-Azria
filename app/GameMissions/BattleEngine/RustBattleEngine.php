@@ -10,6 +10,7 @@ use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameMissions\BattleEngine\Models\BattleResultRound;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
+use OGame\GameObjects\Models\Enums\GameObjectType;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Hull\DamagedHulls;
 use OGame\Services\CharacterClassService;
@@ -139,6 +140,12 @@ class RustBattleEngine extends BattleEngine
             foreach ($result->attackerFleetResults as $fleetResult) {
                 $fleetResult->unitsResult = clone $fleetResult->unitsStart;
                 $fleetResult->completelyDestroyed = false;
+
+                // **Une flotte entamee ne rentre pas reparee.** Aucune bataille n a eu lieu : elle ressort
+                // exactement comme elle est entree, et le moteur PHP le dit deja. Ne rien poser ici la
+                // rendait intacte sous Rust — une divergence invisible, la projection canonique ne portant
+                // pas les coques.
+                $fleetResult->survivorHulls = $this->survivorHullsWithoutARound($fleetResult->fleetMissionId, $fleetResult->unitsStart, $this->attackers, false);
             }
             foreach ($result->defenderFleetResults as $fleetResult) {
                 $fleetResult->unitsResult = clone $fleetResult->unitsStart;
@@ -154,6 +161,14 @@ class RustBattleEngine extends BattleEngine
                 // Derive plutot qu impose a `false` : c est la regle du moteur PHP, et la seule qui
                 // reste juste quand une flotte sort de la manoeuvre sans une unite.
                 $fleetResult->completelyDestroyed = $fleetResult->unitsResult->getAmount() === 0;
+
+                // Meme regle cote defenseur — l Etoile que la manoeuvre a prise en moins.
+                $fleetResult->survivorHulls = $this->survivorHullsWithoutARound(
+                    $fleetResult->fleetMissionId,
+                    $fleetResult->unitsStart,
+                    $this->defenders,
+                    $this->hamillTakesTheDeathstarOf === $fleetResult->fleetMissionId
+                );
             }
         }
 
@@ -672,6 +687,58 @@ class RustBattleEngine extends BattleEngine
     }
 
     /**
+     * Les degats que gardent les survivants quand **aucun round** n a ete joue.
+     *
+     * Personne n a tire : chaque unite ressort avec les degats qu elle portait en entrant. Le moteur PHP
+     * l obtient sans y penser — il balaie ses unites etendues, qui portent deja ces coques — tandis que la
+     * bibliotheque n a rien rendu, faute de bataille.
+     *
+     * **L ordre d entree decide**, comme partout ailleurs : la suite range les plus intactes d abord, et
+     * c est la premiere que la manoeuvre de Hamill emporte. Les defenses sont exclues, comme cote PHP.
+     *
+     * @param array<int, AttackerFleet|DefenderFleet> $flottes
+     */
+    private function survivorHullsWithoutARound(int $fleetMissionId, UnitCollection $depart, array $flottes, bool $laManoeuvreYAPris): DamagedHulls
+    {
+        $degats = null;
+
+        foreach ($flottes as $flotte) {
+            if ($flotte->fleetMissionId === $fleetMissionId) {
+                $degats = $flotte->damagedHulls();
+                break;
+            }
+        }
+
+        if ($degats === null || $degats->isEmpty()) {
+            return DamagedHulls::none();
+        }
+
+        $paliers = [];
+
+        foreach ($depart->units as $unite) {
+            $type = $unite->unitObject->machine_name;
+
+            if ($unite->unitObject->type !== GameObjectType::Ship) {
+                continue;
+            }
+
+            $suite = $degats->damageSequenceFor($type, $unite->amount);
+
+            if ($laManoeuvreYAPris && $type === 'deathstar') {
+                array_shift($suite);
+            }
+
+            foreach ($suite as $niveau) {
+                if ($niveau > 0) {
+                    $paliers[$type][$niveau] = ($paliers[$type][$niveau] ?? 0) + 1;
+                }
+            }
+        }
+
+        return DamagedHulls::of($paliers);
+    }
+
+    /**
      * Les degats des survivants, depuis les coques que Rust rend.
      *
      * Rust ne connait pas la coque pleine de chaque type une fois les technologies appliquees : il
@@ -710,6 +777,15 @@ class RustBattleEngine extends BattleEngine
             }
 
             $objet = ObjectService::getUnitObjectById((int)$unitId);
+
+            // **Les vaisseaux seulement**, comme le moteur PHP. Une defense a deja sa propre reparation,
+            // automatique et gratuite : lui donner en plus une coque persistante creerait deux mecanismes
+            // concurrents sur le meme objet. La bibliotheque, elle, rend l etat de **toutes** les unites —
+            // c est ici que le tri se fait, et son absence etait une divergence entre les deux moteurs.
+            if ($objet->type !== GameObjectType::Ship) {
+                continue;
+            }
+
             $coquePleine = (int)floor($objet->properties->structural_integrity->calculate($joueur)->totalValue / 10);
 
             foreach ($coques as $coque) {

@@ -308,6 +308,16 @@ class RustParityBenchTest extends UnitTestCase
 
         $this->assertProjectionsAgree($nom, $projectionPhp, $projectionRust);
 
+        // **Les coques rendues se comparent aussi, et a part.** La projection canonique ne les porte pas — son
+        // empreinte est figee par les vecteurs de reference — et deux divergences y ont vecu sans que rien ne
+        // rougisse. Cette comparaison-ci vaut pour **tous** les scenarios du banc.
+        $divergenceDesCoques = CanonicalProjection::firstDivergence(
+            CanonicalProjection::hullsOf($php),
+            CanonicalProjection::hullsOf($rust)
+        );
+
+        $this->assertNull($divergenceDesCoques, "Scenario « " . $nom . " » : les deux moteurs ne rendent pas le meme etat de coque — " . $divergenceDesCoques);
+
         // **La bande a ete consommee entierement et a l'identique** : memes tirages semantiques,
         // memes tirages bruts — rejets compris —, meme empreinte de genre, borne et valeur.
         $this->assertNotNull($php->drawsConsumed, 'The PHP engine kept no journal of its draws.');
