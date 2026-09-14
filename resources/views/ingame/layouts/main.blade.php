@@ -1724,7 +1724,7 @@ However, the Space Dock's engineers think that some of the remains can be salvag
                                 <span>{{ $currentPlayer->planets->planetCount() }}/{{ $currentPlayer->getMaxPlanetAmount() }}</span> {{ __('t_ingame.layout.planets') }}
                             </p>
                         </div>
-                        <div id="planetList">
+                        <div id="planetList" data-construction-next-change-in="{{ $resourceBarTicker['planetList']['nextChangeIn'] ?? '' }}">
                             @foreach ($planets->allPlanets() as $key => $planet)
                                 @php
                                     // Set or replace the 'cp' parameter

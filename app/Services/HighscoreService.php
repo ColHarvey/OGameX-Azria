@@ -5,6 +5,7 @@ namespace OGame\Services;
 use Cache;
 use Exception;
 use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
 use OGame\Enums\HighscoreTypeEnum;
 use OGame\Facades\AppUtil;
 use OGame\Factories\PlayerServiceFactory;
@@ -56,6 +57,7 @@ class HighscoreService
      *
      * @param int $type
      * @return void
+     * @throws InvalidArgumentException when no ranking answers this type
      */
     public function setHighscoreType(int $type): void
     {
@@ -65,17 +67,14 @@ class HighscoreService
         // 3 = military points
         // 4 = honour points
         //
-        // **Trois sous-classements militaires ne sont pas encore comptes** — vaisseaux construits, detruits
-        // et perdus — parce que rien ne les cumule : le score militaire est un instantane de ce qu un joueur
-        // possede, pas une histoire. La page les proposait tout de meme, et `cases()[$type]` levait alors une
-        // erreur de clef absente : la requete tombait, et le classement tournait sans fin.
-        //
-        // En attendant qu ils soient comptes, ils rendent le classement **militaire** : c est leur categorie
-        // parente, donc ce que le joueur voit reste coherent avec le bouton qu il a choisi. Un repli est
-        // acceptable ici parce qu un classement est une lecture publique dont rien ne depend — ce n est pas
-        // la regle ailleurs : une version de combat inconnue, elle, se refuse, parce qu elle decide d une
-        // bataille.
-        $this->highscoreType = HighscoreTypeEnum::tryFrom($type) ?? HighscoreTypeEnum::military;
+        // **Un type inconnu se refuse.** Construits, detruits et perdus n ont pas de compteur : aucun classement ne
+        // leur repond, et `cases()[$type]` faisait tomber la requete (le classement tournait sans fin). Une premiere
+        // correction leur rendait le classement militaire ; Keven l a refuse le 13 septembre 2026 — ce sont des
+        // donnees differentes, et les afficher sous leur nom tromperait le joueur. Le controleur verifie avant
+        // d appeler et rend « Statistiques non encore disponibles » ; ce refus garde tout autre appelant d un choix
+        // fait en silence.
+        $this->highscoreType = HighscoreTypeEnum::tryFrom($type)
+            ?? throw new InvalidArgumentException('Unknown highscore type ' . $type . '.');
     }
 
     /**

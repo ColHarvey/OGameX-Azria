@@ -4,6 +4,7 @@ namespace OGame\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\View\View;
+use OGame\Enums\HighscoreTypeEnum;
 use OGame\Services\HighscoreService;
 use OGame\Services\PlayerService;
 
@@ -36,6 +37,19 @@ class HighscoreController extends OGameController
      */
     public function ajax(Request $request, PlayerService $player, HighscoreService $highscoreService): View
     {
+        // **Un classement qui n est pas compte ne rend aucun classement.** Construits, detruits et perdus n ont pas de
+        // compteur ; leurs boutons sont desactives. Une demande qui arrive quand meme — un lien garde, une adresse
+        // tapee — recoit le message, jamais un autre classement sous leur nom ni une erreur qui ferait tourner la page.
+        $requestedType = $request->input('type', '0');
+        $requestedType = empty($requestedType) ? 0 : (int)$requestedType;
+
+        if (HighscoreTypeEnum::tryFrom($requestedType) === null) {
+            return view('ingame.highscore.unavailable')->with([
+                'highscoreCurrentCategory' => (int)$request->input('category', '1') === 2 ? 2 : 1,
+                'highscoreCurrentType' => $requestedType,
+            ]);
+        }
+
         // Check if we received category parameter, if so, use it to determine which highscore category to show.
         // 1 = players
         // 2 = alliances

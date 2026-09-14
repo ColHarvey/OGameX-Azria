@@ -1115,6 +1115,7 @@ return [
         'military_destroyed'    => '摧毀的軍事積分',
         'military_lost'         => '損失的軍事積分',
         'honour_points'         => '榮譽點數',
+        'statistics_not_yet_available' => '統計資料尚未提供',
         'position'              => '排名',
         'player_name_honour'    => '玩家名稱（榮譽點數）',
         'action'                => '操作',

@@ -1256,6 +1256,7 @@ return [
         'military_destroyed'    => 'Militaire punten vernietigd',
         'military_lost'         => 'Militaire punten verloren',
         'honour_points'         => 'Eerepunten',
+        'statistics_not_yet_available' => 'Statistieken nog niet beschikbaar',
         'position'              => 'Positie',
         'player_name_honour'    => 'Spelernaam (Eerepunten)',
         'action'                => 'Actie',

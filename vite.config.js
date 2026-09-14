@@ -29,6 +29,7 @@ const ingameScripts = [
     'resources/js/ingame/galaxy-tactical.js',
     'resources/js/ingame/messages-badge.js',
     'resources/js/ingame/resource-bar.js',
+    'resources/js/ingame/planet-list-construction.js',
 ]
 
 const outgameScripts = [

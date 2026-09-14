@@ -222,6 +222,20 @@
     }
 
     /**
+     * Annoncer la reponse appliquee a qui suit le bandeau — la cle a molette de la liste des planetes.
+     *
+     * Un evenement plutot qu'un appel : le bandeau ne connait pas ceux qui l'ecoutent, et un ecouteur qui leve ne
+     * prive ni le bandeau ni les rappels des appelants.
+     */
+    function annoncer(reponse) {
+        try {
+            document.dispatchEvent(new CustomEvent('ogamex:resourcebox', { detail: reponse }));
+        } catch (e) {
+            signaler('la reponse n a pas pu etre annoncee', e);
+        }
+    }
+
+    /**
      * Resynchroniser le bandeau avec le serveur — c'est `getAjaxResourcebox()`.
      *
      * @param {Function=} rappel recoit `resources` une fois la reponse appliquee
@@ -264,6 +278,10 @@
                 } catch (e) {
                     signaler('la reponse n a pas pu etre appliquee', e);
                 }
+
+                // Hors de l enveloppe : une reponse qui n a pas pu etre appliquee au bandeau porte quand meme
+                // l etat de la liste des planetes. Une reponse illisible, elle, est sortie plus haut.
+                annoncer(reponse);
             })
             .fail(function () {
                 echecsConsecutifs++;

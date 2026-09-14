@@ -2,12 +2,16 @@
 
 namespace Tests\Feature;
 
+use Illuminate\Testing\TestResponse;
+use InvalidArgumentException;
 use OGame\Enums\HighscoreTypeEnum;
 use OGame\Models\Highscore;
+use OGame\Services\HighscoreService;
 use Tests\AccountTestCase;
 
 /**
- * **Les sous-boutons du classement militaire ne font plus tourner la page dans le vide.**
+ * **Les sous-boutons du classement militaire ne font plus tourner la page dans le vide, et aucun ne rend un autre
+ * classement sous son nom.**
  *
  * ## Le defaut, tel que Keven l a vu
  *
@@ -18,21 +22,17 @@ use Tests\AccountTestCase;
  *
  * ## Ce qui est desormais vrai
  *
- * - **Les points d honneur se classent pour de bon** : la donnee existait sur le compte, elle a maintenant sa
- *   colonne et son rang dans la photographie du classement, joueurs et alliances (`HighscoreHonourRankingTest`).
- * - **Les trois autres ne sont pas encore comptes** — vaisseaux construits, detruits, perdus. Rien ne les
- *   cumule. En attendant, ils rendent le classement militaire, leur categorie parente.
+ * - **Les points d honneur se classent pour de bon** (`HighscoreHonourRankingTest`).
+ * - **Construits, detruits, perdus ne sont pas comptes** : rien ne cumule ces nombres. Leurs boutons sont
+ *   **desactives** et disent « Statistiques non encore disponibles ». Une premiere version leur faisait rendre le
+ *   classement militaire ; Keven l a refuse le 13 septembre 2026 — ce sont des donnees differentes, et les montrer
+ *   sous leur nom tromperait le joueur. Le service refuse un type inconnu ; la page repond par le message.
  *
  * ## Pourquoi des valeurs toutes differentes, et pourquoi on lit la ligne
  *
- * La ligne du joueur porte 0 en general, 4 242 en honneur et 7 777 en militaire. Lire 7 777 et pas 4 242, c est
- * savoir **quel** classement a ete rendu ; des valeurs egales feraient coincider le juste et le faux. Les nombres
- * s ecrivent avec une virgule pour les milliers (`AppUtil::formatNumber`).
- *
- * **On lit la cellule de score de la ligne du joueur, jamais la page.** La premiere version cherchait le nombre
- * dans la page entiere : la base d un processus garde les classements des essais voisins, et l une de ces lignes
- * affichait justement 4 242 en militaire. L essai tombait sans que le code soit en faute — c est une mutation
- * sans rapport qui l a montre.
+ * La ligne du joueur porte 0 en general, 4 242 en honneur et 7 777 en militaire : lire 4 242, c est savoir **quel**
+ * classement a ete rendu. On lit la cellule de score de la ligne du joueur, jamais la page : la base d un processus
+ * garde les classements des essais voisins, et l une de ces lignes affichait justement 4 242 en militaire.
  */
 class HighscoreMilitarySubTypesTest extends AccountTestCase
 {
@@ -47,56 +47,82 @@ class HighscoreMilitarySubTypesTest extends AccountTestCase
     }
 
     /**
-     * **Un sous-classement pas encore compte rend le classement militaire**, au lieu de faire tomber la page.
+     * **Un sous-classement pas encore compte ne rend aucun classement**, ni pour les joueurs ni pour les alliances :
+     * le message, et pas une ligne.
      *
-     * Les trois valeurs sont celles que les boutons envoient : construits, detruits, perdus.
+     * Les trois valeurs sont celles que les boutons envoyaient : construits, detruits, perdus.
      */
-    public function testTheUncountedMilitarySubTypesShowTheMilitaryRanking(): void
+    public function testTheUncountedMilitaryStatisticsShowNoRankingAtAll(): void
     {
         $this->uneLigneDeClassement();
 
-        foreach ([5, 6, 8] as $type) {
-            $this->assertSame('7,777', $this->scoreAffiche(['category' => 1, 'type' => $type]), "Type $type.");
+        foreach ([1, 2] as $categorie) {
+            foreach ([5, 6, 8] as $type) {
+                $this->assertIndisponible($this->post('/ajax/highscore', ['category' => $categorie, 'type' => $type]), "Categorie $categorie, type $type.");
+            }
         }
     }
 
     /**
-     * **Une valeur que personne n envoie ne casse rien non plus**, et rend le meme repli.
+     * **Une valeur que personne n envoie ne rend pas davantage de classement.**
      */
-    public function testATypeNobodyOffersFallsBackToTheMilitaryRanking(): void
+    public function testATypeNobodyOffersShowsNoRankingEither(): void
     {
         $this->uneLigneDeClassement();
 
-        $this->assertSame('7,777', $this->scoreAffiche(['category' => 1, 'type' => 99]));
+        $this->assertIndisponible($this->post('/ajax/highscore', ['category' => 1, 'type' => 99]), 'Type 99.');
     }
 
     /**
-     * **Chaque sous-bouton envoie un type que le serveur sait rendre.**
-     *
-     * Le JavaScript envoie la valeur de `rel` telle quelle comme type. Le bouton d honneur doit donc porter la valeur
-     * de l honneur, et les trois sous-classements pas encore comptes des valeurs qu aucun classement ne revendique :
-     * « perdus » portait 4, et rendrait aujourd hui l honneur. Les quatre valeurs restent distinctes, la page s en
-     * servant pour savoir quel bouton est actif.
+     * **La page du classement ouverte sur un tel type s ouvre quand meme**, le message a la place du tableau.
      */
-    public function testTheSubButtonsSendTheTypesTheServerKnows(): void
+    public function testTheHighscorePageOpenedOnAnUncountedTypeStillOpens(): void
+    {
+        $this->uneLigneDeClassement();
+
+        $this->assertIndisponible($this->get('/highscore?type=5'), 'Page complete, type 5.');
+    }
+
+    /**
+     * **Les trois boutons sont desactives et disent pourquoi ; celui de l honneur reste un lien.**
+     *
+     * Le script du classement n ecoute que `a.subnavButton` et envoie la valeur de `rel` comme type : un bouton qui
+     * n est pas un lien et ne porte aucun `rel` n envoie rien. Il garde ses classes, donc son icone.
+     */
+    public function testTheUncountedButtonsAreDisabledAndSayWhy(): void
     {
         $page = (string)$this->get('/highscore')->assertStatus(200)->getContent();
+        $message = __('t_ingame.highscore.statistics_not_yet_available');
 
-        preg_match_all('#<a\b[^>]*\brel="(\d+)"[^>]*\bclass="subnavButton subnavButton_(\w+)\b#', $page, $boutons, PREG_SET_ORDER);
+        preg_match_all('#<(\w+)\b([^>]*)\bclass="subnavButton subnavButton_(\w+)\b[^"]*"([^>]*)>#', $page, $boutons, PREG_SET_ORDER);
 
-        $types = [];
+        $parNom = [];
+
         foreach ($boutons as $bouton) {
-            $types[$bouton[2]] = (int)$bouton[1];
+            $parNom[$bouton[3]] = ['balise' => $bouton[1], 'attributs' => $bouton[2] . ' ' . $bouton[4]];
         }
 
-        $this->assertSame(['built', 'destroyed', 'lost', 'honor'], array_keys($types));
-        $this->assertSame(HighscoreTypeEnum::honor->value, $types['honor']);
+        $this->assertSame(['built', 'destroyed', 'lost', 'honor'], array_keys($parNom));
+
+        $this->assertSame('a', $parNom['honor']['balise'], 'Le bouton d honneur n est plus un lien.');
+        $this->assertStringContainsString('rel="' . HighscoreTypeEnum::honor->value . '"', $parNom['honor']['attributs'], 'Le bouton d honneur n envoie pas la valeur de l honneur.');
 
         foreach (['built', 'destroyed', 'lost'] as $nom) {
-            $this->assertNull(HighscoreTypeEnum::tryFrom($types[$nom]), "The $nom button sends a type that another ranking already answers.");
+            $this->assertSame('span', $parNom[$nom]['balise'], "Le bouton $nom est un lien : le script du classement l ecouterait et enverrait une demande.");
+            $this->assertStringNotContainsString('rel=', $parNom[$nom]['attributs'], "Le bouton $nom porte encore un type a envoyer.");
+            $this->assertStringContainsString('aria-disabled="true"', $parNom[$nom]['attributs'], "Le bouton $nom ne se dit pas desactive.");
+            $this->assertStringContainsString($message, $parNom[$nom]['attributs'], "Le bouton $nom ne dit pas pourquoi il est desactive.");
         }
+    }
 
-        $this->assertCount(4, array_unique($types));
+    /**
+     * **Le service refuse un type inconnu** au lieu d en choisir un autre en silence.
+     */
+    public function testTheServiceRefusesAnUnknownType(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+
+        resolve(HighscoreService::class)->setHighscoreType(5);
     }
 
     /**
@@ -139,5 +165,19 @@ class HighscoreMilitarySubTypesTest extends AccountTestCase
         }
 
         return trim(strip_tags($cellule[1]));
+    }
+
+    /**
+     * Une reponse qui dit « Statistiques non encore disponibles » et ne montre aucune ligne de classement.
+     *
+     * On cherche l identifiant des lignes (`id="position…"`), pas un score : un nombre peut apparaitre ailleurs sur
+     * la page, une ligne de classement non.
+     */
+    private function assertIndisponible(TestResponse $reponse, string $cas): void
+    {
+        $page = (string)$reponse->assertStatus(200)->getContent();
+
+        $this->assertStringContainsString(__('t_ingame.highscore.statistics_not_yet_available'), $page, $cas . ' Le message manque.');
+        $this->assertStringNotContainsString('id="position', $page, $cas . ' Une ligne de classement est rendue sous un type qui n est pas compte.');
     }
 }

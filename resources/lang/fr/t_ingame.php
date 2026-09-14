@@ -1220,6 +1220,7 @@ return [
         'military_destroyed' => 'Points militaires détruits',
         'military_lost' => 'Points militaires perdus',
         'honour_points' => 'Points d\'honneur',
+        'statistics_not_yet_available' => 'Statistiques non encore disponibles',
         'position' => 'Position',
         'player_name_honour' => 'Nom du joueur (points d\'honneur)',
         'badge_admin' => 'Administrateur',

@@ -1256,6 +1256,7 @@ return [
         'military_destroyed'    => 'Punti militari distrutti',
         'military_lost'         => 'Punti militari persi',
         'honour_points'         => 'Punti onore',
+        'statistics_not_yet_available' => 'Statistiche non ancora disponibili',
         'position'              => 'Posizione',
         'player_name_honour'    => 'Nome giocatore (Punti onore)',
         'action'                => 'Azione',

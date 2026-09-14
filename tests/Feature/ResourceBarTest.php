@@ -2,11 +2,14 @@
 
 namespace Tests\Feature;
 
+use ArrayObject;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use OGame\Facades\AppUtil;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\Models\Resources;
+use OGame\Models\User;
 use Tests\AccountTestCase;
 
 /**
@@ -78,7 +81,8 @@ class ResourceBarTest extends AccountTestCase
         $this->assertEqualsWithDelta($joueur->getDarkMatter(), $charge['resources']['darkmatter']['amount'], 0.001, 'La matiere noire du bandeau n est pas celle du joueur.');
         $this->assertStringContainsString(AppUtil::formatNumber($joueur->getDarkMatter()), $charge['resources']['darkmatter']['tooltip'], 'L infobulle de la matiere noire ne porte pas son montant.');
 
-        $this->assertSame(['resources', 'techs', 'honorScore'], array_keys($charge));
+        // `planetList` : la cle a molette de la liste des planetes voyage avec le bandeau (`PlanetListConstructionViewModel`).
+        $this->assertSame(['resources', 'techs', 'honorScore', 'planetList'], array_keys($charge));
         $this->assertSame([], $charge['techs']);
     }
 
@@ -178,6 +182,52 @@ class ResourceBarTest extends AccountTestCase
         // Et pourtant le joueur voit sa production : elle est projetee, pas persistee.
         $this->assertGreaterThan((float)$avant['metal'], $charge['resources']['metal']['amount'], 'La production de dix minutes n est pas projetee : le bandeau resterait fige.');
         $this->assertEqualsWithDelta((float)$avant['metal'] + $this->planetService->getMetalProductionPerHour() / 6, $charge['resources']['metal']['amount'], 1.0, 'La projection ne suit pas la production du jeu.');
+    }
+
+    /**
+     * **Toute la pile de la route, intergiciels compris, n ecrit que la ligne de session — et aucun signal d activite
+     * ne lit cette ligne.**
+     *
+     * L essai voisin compare deux lignes ; celui-ci ecoute **chaque requete SQL** de la demande, du premier intergiciel
+     * au dernier (`web`, `auth`, `banned`, `locale`), avec le pilote de session par defaut de `config/session.php` et
+     * de `.env.example` : `database`. Le pilote `array` des essais cachait justement l ecriture que la pile fait a
+     * chaque passage — la session. Elle est permise ici, et elle seule. L etoile d activite de la Galaxie lit
+     * `planets.time_last_update`, « en ligne » lit `users.time`, et aucun code du jeu ne lit la table `sessions`
+     * (recherche faite le 13 septembre 2026). Toutes les lignes `planets` du joueur — planetes et lunes — sont
+     * comparees, parce que la veille lit desormais la file de chaque planete.
+     */
+    public function testTheWholeStackWritesOnlyTheSessionRow(): void
+    {
+        $this->get('/overview')->assertStatus(200);
+
+        config(['session.driver' => 'database']);
+        $this->actingAs(User::query()->findOrFail($this->currentUserId));
+
+        $corps = fn (): array => DB::table('planets')->where('user_id', $this->currentUserId)->orderBy('id')->get()->map(fn ($ligne) => (array)$ligne)->all();
+        $compte = fn (): array => (array)DB::table('users')->where('id', $this->currentUserId)->first();
+
+        $corpsAvant = $corps();
+        $compteAvant = $compte();
+        $this->assertNotSame([], $corpsAvant, 'Le joueur n a aucune planete : l essai ne comparerait rien.');
+
+        // Dix minutes passent : une page ecrirait tout ; la veille ne doit rien ecrire.
+        $this->travel(10)->minutes();
+
+        $tables = new ArrayObject();
+        DB::listen(function (QueryExecuted $requete) use ($tables): void {
+            if (preg_match('/^\s*(?:insert\s+(?:or\s+\w+\s+)?into|update|delete\s+from|replace\s+into)\s+["`]?(\w+)["`]?/i', $requete->sql, $table) === 1) {
+                $tables->append(strtolower($table[1]));
+            }
+        });
+
+        $this->getJson('/ajax/resourcebox')->assertStatus(200);
+
+        $ecrites = array_values(array_unique($tables->getArrayCopy()));
+
+        $this->assertContains('sessions', $ecrites, 'La session n a rien ecrit : l essai ne mesure pas la pile qu il croit mesurer.');
+        $this->assertSame(['sessions'], $ecrites, 'La pile de la route du bandeau ecrit ailleurs que dans la session : ' . implode(', ', $ecrites) . '.');
+        $this->assertSame($corpsAvant, $corps(), 'Une planete ou une lune du joueur a change : l etoile d activite de la Galaxie s allumerait a chaque veille.');
+        $this->assertSame($compteAvant, $compte(), 'Le compte a change : le joueur paraitrait en ligne en permanence.');
     }
 
     /**

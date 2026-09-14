@@ -57,7 +57,13 @@ final class ResourceBarViewModel
         $planet->updateResources(false);
         $resources = self::resourcesOf($planet, $player);
 
-        return new self($resources, self::tickerOf($resources));
+        $ticker = self::tickerOf($resources);
+
+        // **La cle a molette de la liste des planetes voyage avec le bandeau** : la page l amorce, la veille la
+        // relit par la meme route, qui n ecrit rien. Voir `PlanetListConstructionViewModel`.
+        $ticker['planetList'] = PlanetListConstructionViewModel::of($player);
+
+        return new self($resources, $ticker);
     }
 
     /**

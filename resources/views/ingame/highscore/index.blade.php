@@ -67,19 +67,22 @@
                             </a>
 
                             <div id="subnav_fleet" class="fleft subnav">
-                                <a href="javascript:void(0);" rel="5" class="subnavButton subnavButton_built tooltip js_hideTipOnMobile" title="{{ __('t_ingame.highscore.military_built') }}">
+                                {{-- **Trois statistiques ne sont pas encore comptees** : rien ne cumule les points militaires construits,
+                                     detruits et perdus. Leurs boutons restent visibles mais desactives — ce ne sont pas des liens, le
+                                     script du classement n ecoute que `a.subnavButton`, ils n envoient donc rien et ne rendent jamais un
+                                     autre classement sous leur nom (decision de Keven, 13 septembre 2026). --}}
+                                <span class="subnavButton subnavButton_built tooltip js_hideTipOnMobile" aria-disabled="true" style="opacity: 0.35; cursor: default;" title="{{ __('t_ingame.highscore.military_built') }} — {{ __('t_ingame.highscore.statistics_not_yet_available') }}">
                                     <span class="small-marker"></span>
-                                </a>
+                                </span>
 
 
-                                <a href="javascript:void(0);" rel="6" class="subnavButton subnavButton_destroyed tooltip js_hideTipOnMobile" title="{{ __('t_ingame.highscore.military_destroyed') }}">
+                                <span class="subnavButton subnavButton_destroyed tooltip js_hideTipOnMobile" aria-disabled="true" style="opacity: 0.35; cursor: default;" title="{{ __('t_ingame.highscore.military_destroyed') }} — {{ __('t_ingame.highscore.statistics_not_yet_available') }}">
                                     <span class="small-marker"></span>
-                                </a>
+                                </span>
 
-                                {{-- Vaisseaux perdus : pas encore compte, ce bouton rend le classement militaire. --}}
-                                <a href="javascript:void(0);" rel="8" class="subnavButton subnavButton_lost tooltip js_hideTipOnMobile" title="{{ __('t_ingame.highscore.military_lost') }}">
+                                <span class="subnavButton subnavButton_lost tooltip js_hideTipOnMobile" aria-disabled="true" style="opacity: 0.35; cursor: default;" title="{{ __('t_ingame.highscore.military_lost') }} — {{ __('t_ingame.highscore.statistics_not_yet_available') }}">
                                     <span class="small-marker"></span>
-                                </a>
+                                </span>
 
                                 <a href="javascript:void(0);" rel="4" class="subnavButton subnavButton_honor tooltip js_hideTipOnMobile" title="{{ __('t_ingame.highscore.honour_points') }}">
                                     <span class="small-marker"></span>

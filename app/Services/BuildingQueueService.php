@@ -77,10 +77,23 @@ class BuildingQueueService
      */
     public function pendingWorkOf(PlanetService $planet): BuildingQueue|null
     {
-        $maintenant = (int)Date::now()->timestamp;
+        return self::firstPendingAmong($this->retrieveQueueItems($planet), (int)Date::now()->timestamp);
+    }
 
-        foreach ($this->retrieveQueueItems($planet) as $item) {
-            if ((int)$item->time_start === 0 || (int)$item->time_end > $maintenant) {
+    /**
+     * La premiere ligne qui reste a faire parmi celles d un corps, rangees comme `retrieveQueueItems()` les rend.
+     *
+     * **Le critere vit ici, et seulement ici** : la page (`pendingWorkOf()`) et la veille de la liste des planetes
+     * (`PlanetListConstructionViewModel`) l emploient toutes deux, et ne peuvent donc pas se contredire.
+     *
+     * @param iterable<BuildingQueue> $items
+     * @param int $now
+     * @return BuildingQueue|null
+     */
+    public static function firstPendingAmong(iterable $items, int $now): BuildingQueue|null
+    {
+        foreach ($items as $item) {
+            if ((int)$item->time_start === 0 || (int)$item->time_end > $now) {
                 return $item;
             }
         }
