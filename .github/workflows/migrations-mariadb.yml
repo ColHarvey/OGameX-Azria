@@ -30,6 +30,12 @@ on:
       - 'app/Services/PlanetService.php'
       - 'app/Services/JumpGateService.php'
       - 'app/Services/PlanetMoveService.php'
+      # L ordre des verrous de la file d unites et le registre des cumuls militaires (journal §154) : le
+      # demi-temps, la relecture de la file, l agregation et sa publication. Les courses qui les eprouvent
+      # vivent ici.
+      - 'app/Military/**'
+      - 'app/Services/HalvingService.php'
+      - 'app/Services/UnitQueueService.php'
       # L ordre des verrous d alliance (journal §142) : la dissolution et le choix de classe.
       - 'app/Services/AllianceService.php'
       - 'app/Services/AllianceClassService.php'
@@ -60,6 +66,10 @@ on:
       - 'app/Services/PlanetService.php'
       - 'app/Services/JumpGateService.php'
       - 'app/Services/PlanetMoveService.php'
+      # L ordre des verrous de la file d unites et le registre des cumuls militaires (journal §154).
+      - 'app/Military/**'
+      - 'app/Services/HalvingService.php'
+      - 'app/Services/UnitQueueService.php'
       # L ordre des verrous d alliance (journal §142) : la dissolution et le choix de classe.
       - 'app/Services/AllianceService.php'
       - 'app/Services/AllianceClassService.php'

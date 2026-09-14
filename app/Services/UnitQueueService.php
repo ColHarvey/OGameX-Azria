@@ -94,20 +94,26 @@ class UnitQueueService
     }
 
     /**
-     * Retrieve current unit build queue for a planet.
+     * Les lignes commencees et non traitees d'un corps, **verrouillees**, dans l'ordre ou elles se traitent.
+     *
+     * A lire sous le verrou du corps, dans la transaction qui livre les unites. C'est cette relecture de
+     * l'avancement qui empeche deux progressions, ou une progression et un demi-temps, de livrer la meme
+     * tranche : lu hors verrou, un avancement pouvait etre recalcule apres un demi-temps. L'identifiant
+     * departage deux lignes commencees a la meme seconde.
      *
      * @param int $planet_id
      * @return Collection<int, UnitQueue>
      */
-    public function retrieveBuilding(int $planet_id): Collection
+    public function retrieveDueUnderLock(int $planet_id): Collection
     {
-        // Fetch queue items from model
         return $this->model->where([
             ['planet_id', $planet_id],
             ['time_start', '<=', Date::now()->timestamp],
             ['processed', 0],
         ])
             ->orderBy('time_start', 'asc')
+            ->orderBy('id', 'asc')
+            ->lockForUpdate()
             ->get();
     }
 

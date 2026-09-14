@@ -1292,6 +1292,9 @@ class PlayerService
 
         // Delete highscore record.
         Highscore::where('player_id', $this->getId())->delete();
+        // Le compteur des cumuls militaires part avec le compte, par sa clef primaire. Ses evenements restent au
+        // registre : ils decrivent des faits, et l agregation ne recree aucun compteur pour un compte disparu.
+        DB::table('military_tallies')->where('player_id', $this->getId())->delete();
 
         // Delete tech record.
         UserTech::where('user_id', $this->getId())->delete();

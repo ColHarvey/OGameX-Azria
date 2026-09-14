@@ -1222,6 +1222,7 @@ return [
         'honour_points' => 'Points d\'honneur',
         'statistics_not_yet_available' => 'Statistiques non encore disponibles',
         'cumulative_since' => 'Cumul depuis le :date',
+        'refreshed_at' => 'Actualisé le :date',
         'alliance_sum_current_members' => 'Somme des membres actuels : elle peut diminuer lorsqu’un membre quitte l’alliance.',
         'data_temporarily_incomplete' => 'Données temporairement incomplètes : des événements attendent encore d’être comptés.',
         'position' => 'Position',

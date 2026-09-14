@@ -50,7 +50,8 @@ class HighscoreHonourRankingTest extends AccountTestCase
 
         $scores = resolve(HighscoreService::class)->getPlayerScores($joueur);
 
-        $this->assertSame(['general', 'economy', 'research', 'military', 'honor', 'military_built', 'military_destroyed', 'military_lost'], array_keys($scores));
+        // Les trois cumuls militaires n y sont pas : `MilitaryTallyPublisher` les publie avec leurs rangs.
+        $this->assertSame(['general', 'economy', 'research', 'military', 'honor'], array_keys($scores));
         $this->assertSame(-37, $scores['honor']);
     }
 

@@ -16,6 +16,7 @@ use OGame\GameObjects\Models\Abstracts\GameObject;
 use OGame\GameObjects\Models\Enums\GameObjectType;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Hull\DamagedHulls;
+use OGame\Military\MilitaryBuildTally;
 use OGame\Models\BuildingQueue;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\Enums\ResourceType;
@@ -1402,7 +1403,7 @@ class PlanetService
                 // ------
                 // 3. Update unit queue
                 // ------
-                $this->updateUnitQueue(false);
+                $this->updateUnitQueue();
 
                 // ------
                 // 4. Update resource production / consumption
@@ -1895,13 +1896,21 @@ class PlanetService
      * Update this planet's shipyard and defenses.
      * This should happen on every users page load and every time the planet is touched.
      *
-     * @param bool $save_planet
-     *   Optional flag whether to save the planet in this method. This defaults to TRUE
-     *   but can be set to FALSE when update happens in bulk and the caller method calls
-     *   the save planet itself to prevent on unnecessary multiple updates.
+     * ## L'ordre des verrous : le corps, puis les lignes de sa file
+     *
+     * C'est l'ordre de toute la file d'unites. La progression de page (`update()`) et les missions prennent le
+     * corps en tete ; le demi-temps prend le compte, puis le corps, puis sa ligne ; la fermeture d'un ralliement
+     * prend le corps avant de lire les files (`CausalEventReader::eventsToward()`). Cette methode prend le corps
+     * elle-meme — sans effet quand l'appelant le tient deja — puis relit ses lignes **sous verrou**.
+     *
+     * ## Une transaction : livraison, avancement, evenement
+     *
+     * Les unites sont ajoutees **en base** (`addUnitAtomic()`), l'avancement de la ligne est ecrit, et chaque
+     * tranche livree inscrit son evenement de cumul (`MilitaryBuildTally`) : les trois ensemble, ou aucun.
+     *
      * @throws Exception
      */
-    public function updateUnitQueue(bool $save_planet = true): void
+    public function updateUnitQueue(): void
     {
         // Skip unit queue processing if player is in vacation mode
         $player = $this->getPlayer();
@@ -1913,67 +1922,103 @@ class PlanetService
             return;
         }
 
-        $queue = resolve(UnitQueueService::class);
-        $unit_queue = $queue->retrieveBuilding($this->getPlanetId());
+        DB::transaction(function () use ($player): void {
+            // **Le corps d'abord**, puis les lignes de sa file.
+            Planet::query()->whereKey($this->getPlanetId())->lockForUpdate()->first(['id']);
 
-        // @TODO: add DB transaction wrapper
-        foreach ($unit_queue as $item) {
-            // Get object information.
-            $object = ObjectService::getUnitObjectById($item->object_id);
+            $cumuls = resolve(MilitaryBuildTally::class);
+            $unit_queue = resolve(UnitQueueService::class)->retrieveDueUnderLock($this->getPlanetId());
 
-            $now = (int)Date::now()->timestamp;
+            foreach ($unit_queue as $item) {
+                // Get object information.
+                $object = ObjectService::getUnitObjectById($item->object_id);
 
-            // If time_end has fully elapsed, award all remaining units at once.
-            // This handles cases where time was reduced (e.g. via DM halving/complete).
-            if ($now >= $item->time_end) {
-                $remaining = $item->object_amount - $item->object_amount_progress;
-                if ($remaining > 0) {
-                    $item->time_progress = $item->time_end;
-                    $item->object_amount_progress = $item->object_amount;
-                    $item->processed = 1;
+                $now = (int)Date::now()->timestamp;
+                $avant = (int)$item->object_amount_progress;
+
+                // If time_end has fully elapsed, award all remaining units at once.
+                // This handles cases where time was reduced (e.g. via DM halving/complete).
+                if ($now >= $item->time_end) {
+                    $remaining = $item->object_amount - $item->object_amount_progress;
+                    if ($remaining > 0) {
+                        $item->time_progress = $item->time_end;
+                        $item->object_amount_progress = $item->object_amount;
+                        $item->processed = 1;
+                        $item->save();
+
+                        $this->addUnitAtomic($object->machine_name, $remaining);
+                        $cumuls->recordProgress($item, $object, $player->getId(), $avant);
+                    }
+                    continue;
+                }
+
+                // Calculate if we can partially (or fully) complete this order
+                // yet based on time per unit and amount of ordered units.
+                $time_per_unit = ($item->time_end - $item->time_start) / $item->object_amount;
+
+                // Get timestamp where a unit has been presented lastly.
+                // @TODO: refactor this and abstract it as the UnitQueueService
+                // uses the exact same logic for displaying purposes in the queue.
+                $last_update = $item->time_progress;
+                if ($last_update < $item->time_start) {
+                    $last_update = $item->time_start;
+                }
+
+                // If difference between last update and now is equal to or bigger
+                // than the time per unit, give the unit and record progress.
+                // **Le compte vient d'une seule formule** (`UnitQueueProduction`), la meme que la fermeture
+                // d'un combat durable emploie pour savoir ce qu'un lot a pose avant la barriere : deux
+                // comptes divergeraient d'une unite a la premiere arrondie.
+                $unit_amount = UnitQueueProduction::unitsFinishedBy((int)$item->time_start, (int)$item->time_end, (int)$item->object_amount, $now) - (int)$item->object_amount_progress;
+                if ($unit_amount > 0) {
+                    $new_time_progress = $last_update + ($time_per_unit * $unit_amount);
+
+                    // Update build record
+                    $item->time_progress = $new_time_progress;
+                    $item->object_amount_progress += $unit_amount;
+
+                    if ($item->object_amount_progress >= $item->object_amount) {
+                        $item->processed = 1;
+                    }
+
                     $item->save();
 
-                    $this->addUnit($object->machine_name, $remaining, $save_planet);
+                    // Update planet fleet amount
+                    $this->addUnitAtomic($object->machine_name, $unit_amount);
+                    $cumuls->recordProgress($item, $object, $player->getId(), $avant);
                 }
-                continue;
             }
+        });
+    }
 
-            // Calculate if we can partially (or fully) complete this order
-            // yet based on time per unit and amount of ordered units.
-            $time_per_unit = ($item->time_end - $item->time_start) / $item->object_amount;
-
-            // Get timestamp where a unit has been presented lastly.
-            // @TODO: refactor this and abstract it as the UnitQueueService
-            // uses the exact same logic for displaying purposes in the queue.
-            $last_update = $item->time_progress;
-            if ($last_update < $item->time_start) {
-                $last_update = $item->time_start;
-            }
-            $last_update_diff = $now - $last_update;
-
-            // If difference between last update and now is equal to or bigger
-            // than the time per unit, give the unit and record progress.
-            // **Le compte vient d'une seule formule** (`UnitQueueProduction`), la meme que la fermeture
-            // d'un combat durable emploie pour savoir ce qu'un lot a pose avant la barriere : deux
-            // comptes divergeraient d'une unite a la premiere arrondie.
-            $unit_amount = UnitQueueProduction::unitsFinishedBy((int)$item->time_start, (int)$item->time_end, (int)$item->object_amount, $now) - (int)$item->object_amount_progress;
-            if ($unit_amount > 0) {
-                $new_time_progress = $last_update + ($time_per_unit * $unit_amount);
-
-                // Update build record
-                $item->time_progress = $new_time_progress;
-                $item->object_amount_progress += $unit_amount;
-
-                if ($item->object_amount_progress >= $item->object_amount) {
-                    $item->processed = 1;
-                }
-
-                $item->save();
-
-                // Update planet fleet amount
-                $this->addUnit($object->machine_name, $unit_amount, $save_planet);
-            }
+    /**
+     * Ajoute des unites a ce corps **en base**, et resynchronise le modele en memoire sur la ligne.
+     *
+     * `addUnit()` ajoute a la valeur chargee puis sauvegarde le modele : une livraison faite par une autre
+     * requete entre le chargement et la sauvegarde etait ecrasee. C'est ce qui arrivait au demi-temps, qui
+     * livrait avec le corps charge au debut de la page. Ici l'addition est faite par la base ; la colonne du
+     * modele est relue puis marquee d'origine, et une sauvegarde ulterieure ne la reecrit pas.
+     *
+     * A appeler sous le verrou du corps, dans la transaction qui ecrit l'avancement.
+     */
+    public function addUnitAtomic(string $machine_name, int $amount): void
+    {
+        if ($amount < 1) {
+            throw new RuntimeException('Une livraison d unites porte au moins une unite ; ' . $amount . ' demandee(s).');
         }
+
+        $colonne = ObjectService::getUnitObjectByMachineName($machine_name)->machine_name;
+
+        Planet::query()->whereKey($this->getPlanetId())->update([$colonne => DB::raw("{$colonne} + {$amount}")]);
+
+        $valeur = Planet::query()->whereKey($this->getPlanetId())->value($colonne);
+
+        if ($valeur === null) {
+            throw new RuntimeException('Le corps ' . $this->getPlanetId() . ' a disparu pendant la livraison de ses unites.');
+        }
+
+        $this->planet->setAttribute($colonne, $valeur);
+        $this->planet->syncOriginalAttribute($colonne);
     }
 
     /**

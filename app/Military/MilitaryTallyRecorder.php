@@ -8,31 +8,39 @@ use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Le seul écrivain des trois cumuls militaires : construits, détruits, perdus.
+ * Le seul écrivain du registre des cumuls militaires : construits, détruits, perdus.
+ *
+ * ## Une ligne du registre, et rien d'autre
+ *
+ * Un crédit écrit **un événement** dans la transaction de l'effet, avec ses valeurs, et rien d'autre : ni la ligne
+ * du compte, ni un compteur. Le compteur de chaque compte est une projection du registre, tenue hors du jeu par
+ * `MilitaryTallyAggregator`. Un compteur écrit ici relierait entre eux tous les corps d'un joueur, et un compteur
+ * sur `users` croiserait le lancement de flotte, qui prend le compte avant le corps.
  *
  * ## L'idempotence n'est pas une option
  *
  * Un service unique ne suffirait pas : une reprise, deux travailleurs, un rejeu d'un règlement recommenceraient
- * le crédit. Chaque crédit porte donc une **clef d'événement** — `build:<ligne>:<avant>-<après>`,
- * `combat:<id>:lost:<participant>`, `missile:<mission>:destroyed` — écrite dans la **même transaction** que
+ * le crédit. Chaque crédit porte donc une **clef d'événement**, clef primaire du registre — `build:<ligne>:<avant>-<après>`,
+ * `combat:<id>:lost:<participant>`, `missile:<mission>:destroyed` —, écrite dans la **même transaction** que
  * l'effet. Une clef déjà présente ne compte rien et le dit par `false`.
  *
  * **La clef ne protège que d'un rejeu identique.** Deux tranches de construction qui se chevauchent
  * (`0-10` et `0-5`) portent des clefs différentes : c'est à l'appelant de relire l'avancement **sous verrou**
- * et de n'écrire qu'une tranche à la fois, dans cette transaction-ci.
+ * et de n'écrire qu'une tranche à la fois, dans cette transaction-ci (`MilitaryBuildTally`).
  *
  * ## L'instant qui compte est celui du fait, pas celui du traitement
  *
- * Chaque crédit porte l'instant **logique** de l'événement : la fin de la bataille, la fin de la tranche de
- * construction. Une bataille terminée avant l'activation de la collecte n'entre pas dans les cumuls parce qu'un
- * travailleur en retard la règle après. La décision ne dépend que de l'instant du fait et de la date
- * d'activation : un rejeu tranche donc exactement pareil, et rien n'est écrit dans ce cas.
+ * Chaque crédit porte l'instant **logique** de l'événement : la fin de la bataille, la dernière unité d'une tranche
+ * de construction. Un fait antérieur à l'activation de la collecte n'entre pas parce qu'un travailleur en retard le
+ * traite après. La décision ne dépend que de l'instant du fait et de la date d'activation : un rejeu tranche
+ * exactement pareil, et rien n'est écrit dans ce cas.
  *
  * ## Rien d'inventé, rien de partiel
  *
  * Si une unité n'appartient à aucune famille de pondération, l'événement est mis **en attente** (`defer()`) avec
- * ses unités et la version de la règle : **aucune** de ses trois parts n'est créditée — un cumul partiel
- * deviendrait un double crédit à la reprise. Une reprise idempotente l'appliquera une fois le catalogue corrigé.
+ * ses faits et la version de la règle : **aucune** de ses trois parts n'est créditée — un cumul partiel
+ * deviendrait un double crédit à la reprise. L'agrégation ne compte jamais un événement en attente ; une reprise
+ * idempotente le rendra `applique`, entier, une fois le catalogue corrigé.
  *
  * ## Ce qui n'est jamais compté
  *
@@ -43,29 +51,30 @@ use Illuminate\Support\Facades\DB;
  *
  * `military_tallies_since` est posé une seule fois, à l'**activation** (`ogamex:military:demarrer-cumuls`), quand
  * tous les chemins de crédit sont raccordés. Ni la migration ni le premier crédit ne le posent : si personne ne
- * construit pendant deux jours après l'activation, ces deux jours sont couverts, à zéro. Tant que la date est
- * absente, les trois classements se disent indisponibles ; une fois posée, un zéro est une donnée valide.
+ * construit pendant deux jours après l'activation, ces deux jours sont couverts, à zéro.
  */
 final class MilitaryTallyRecorder
 {
     /** Le réglage qui garde l'instant d'activation de la collecte. */
     public const string SINCE_KEY = 'military_tallies_since';
 
-    private const string APPLIQUE = 'applique';
+    /** Un événement dont les valeurs sont connues : l'agrégation le comptera. */
+    public const string APPLIED = 'applique';
 
-    private const string EN_ATTENTE = 'en_attente';
+    /** Un événement qu'on ne sait pas encore évaluer : il ne crédite rien. */
+    public const string PENDING = 'en_attente';
 
     /**
-     * Crédite un joueur, une fois pour cette clef d'événement.
+     * Inscrit un crédit, une fois pour cette clef d'événement.
      *
      * @param string $eventKey La clef qui rend le crédit rejouable sans effet.
-     * @param int $playerId Le compte crédité.
-     * @param int $occurredAt L'instant **du fait** : fin de bataille, fin de tranche de construction.
+     * @param int $playerId Le compte crédité, tel qu'il est au moment du fait.
+     * @param int $occurredAt L'instant **du fait** : fin de bataille, dernière unité d'une tranche de construction.
      * @param int $built Valeur construite, en demi-unités de ressources.
      * @param int $destroyed Valeur détruite chez l'adversaire, en demi-unités.
      * @param int $lost Valeur perdue, en demi-unités.
-     * @return bool Vrai si ce crédit vient d'être écrit ; faux s'il l'était déjà, s'il précède la collecte, ou
-     *              s'il n'y avait rien à écrire.
+     * @return bool Vrai si l'événement vient d'être inscrit ; faux s'il l'était déjà, s'il précède la collecte, ou
+     *              s'il n'y avait rien à inscrire.
      */
     public function credit(string $eventKey, int $playerId, int $occurredAt, int $built = 0, int $destroyed = 0, int $lost = 0): bool
     {
@@ -73,19 +82,7 @@ final class MilitaryTallyRecorder
             return false;
         }
 
-        return $this->dansUneTransaction(function () use ($eventKey, $playerId, $built, $destroyed, $lost): bool {
-            if (!$this->inscrire($eventKey, $playerId, self::APPLIQUE, null, null, max(0, $built), max(0, $destroyed), max(0, $lost))) {
-                return false;
-            }
-
-            DB::table('users')->where('id', $playerId)->update([
-                'military_value_built' => DB::raw('military_value_built + ' . max(0, $built)),
-                'military_value_destroyed' => DB::raw('military_value_destroyed + ' . max(0, $destroyed)),
-                'military_value_lost' => DB::raw('military_value_lost + ' . max(0, $lost)),
-            ]);
-
-            return true;
-        });
+        return $this->dansUneTransaction(fn (): bool => $this->inscrire($eventKey, $playerId, self::APPLIED, null, null, max(0, $built), max(0, $destroyed), max(0, $lost)));
     }
 
     /**
@@ -101,7 +98,7 @@ final class MilitaryTallyRecorder
             return false;
         }
 
-        return $this->dansUneTransaction(fn (): bool => $this->inscrire($eventKey, $playerId, self::EN_ATTENTE, $reason, $payload, 0, 0, 0));
+        return $this->dansUneTransaction(fn (): bool => $this->inscrire($eventKey, $playerId, self::PENDING, $reason, $payload, 0, 0, 0));
     }
 
     /**
@@ -109,7 +106,7 @@ final class MilitaryTallyRecorder
      */
     public function pendingCount(): int
     {
-        return DB::table('military_tally_events')->where('status', self::EN_ATTENTE)->count();
+        return DB::table('military_tally_events')->where('status', self::PENDING)->count();
     }
 
     /**
@@ -149,6 +146,7 @@ final class MilitaryTallyRecorder
                 'destroyed_value' => $destroyed,
                 'lost_value' => $lost,
                 'recorded_at' => (int)Date::now()->timestamp,
+                'aggregated_at' => null,
                 'created_at' => Date::now(),
                 'updated_at' => Date::now(),
             ]);
@@ -165,8 +163,8 @@ final class MilitaryTallyRecorder
      */
     private function dansUneTransaction(Closure $geste): bool
     {
-        // L'appelant tient déjà sa transaction dans les chemins de règlement ; la file de chantier, elle, ouvre
-        // la sienne. L'effet et son événement ne doivent jamais être séparés par une panne.
+        // L'appelant tient déjà sa transaction quand il livre ce qu'il crédite ; un appel isolé ouvre la sienne.
+        // L'effet et son événement ne doivent jamais être séparés par une panne.
         return DB::transactionLevel() > 0 ? $geste() : DB::transaction($geste);
     }
 }

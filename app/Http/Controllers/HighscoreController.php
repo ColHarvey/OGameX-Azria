@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Date;
 use Illuminate\View\View;
 use OGame\Enums\HighscoreTypeEnum;
+use OGame\Military\MilitaryTallyPublisher;
 use OGame\Military\MilitaryTallyRecorder;
 use OGame\Services\HighscoreService;
 use OGame\Services\PlayerService;
@@ -53,10 +54,11 @@ class HighscoreController extends OGameController
             ]);
         }
 
-        // **Un cumul militaire n est servi qu une fois la collecte activee.** Avant, ses compteurs ne couvrent aucune
-        // periode : des zeros passeraient pour des statistiques completes. L activation est une decision de Keven, apres
-        // raccordement de tous les chemins de credit (`ogamex:military:demarrer-cumuls`).
-        if (HighscoreTypeEnum::from($requestedType)->isMilitaryTally() && resolve(MilitaryTallyRecorder::class)->collectingSince() === null) {
+        // **Un cumul militaire n est servi qu une fois la collecte activee et publiee.** Avant l activation, ses
+        // compteurs ne couvrent aucune periode : des zeros passeraient pour des statistiques completes. Avant la premiere
+        // publication, aucune valeur ni aucun rang ne vient d un etat agrege. L activation est une decision de Keven,
+        // apres raccordement de tous les chemins de credit (`ogamex:military:demarrer-cumuls`).
+        if (HighscoreTypeEnum::from($requestedType)->isMilitaryTally() && !$this->militaryTalliesServed()) {
             return view('ingame.highscore.unavailable')->with([
                 'highscoreCurrentCategory' => (int)$request->input('category', '1') === 2 ? 2 : 1,
                 'highscoreCurrentType' => $requestedType,
@@ -226,8 +228,8 @@ class HighscoreController extends OGameController
     /**
      * Les trois sous-boutons des cumuls militaires, et s ils peuvent etre servis.
      *
-     * Avant l activation de la collecte, ils restent visibles mais inertes : ce ne sont pas des liens, le script du
-     * classement n ecoute que `a.subnavButton`, ils n envoient donc rien. La valeur envoyee vient de l enum, jamais
+     * Tant que les cumuls ne sont pas servis, ils restent visibles mais inertes : ce ne sont pas des liens, le script
+     * du classement n ecoute que `a.subnavButton`, ils n envoient donc rien. La valeur envoyee vient de l enum, jamais
      * d un nombre ecrit dans la vue.
      *
      * @return array{active: bool, buttons: list<array{type: int, name: string, label: string}>}
@@ -235,7 +237,7 @@ class HighscoreController extends OGameController
     private function militaryTallyButtons(): array
     {
         return [
-            'active' => resolve(MilitaryTallyRecorder::class)->collectingSince() !== null,
+            'active' => $this->militaryTalliesServed(),
             'buttons' => [
                 ['type' => HighscoreTypeEnum::military_built->value, 'name' => 'built', 'label' => 't_ingame.highscore.military_built'],
                 ['type' => HighscoreTypeEnum::military_destroyed->value, 'name' => 'destroyed', 'label' => 't_ingame.highscore.military_destroyed'],
@@ -245,12 +247,22 @@ class HighscoreController extends OGameController
     }
 
     /**
-     * Ce que la page dit d un cumul militaire : depuis quand il couvre, et combien d evenements attendent encore.
+     * Les cumuls militaires sont-ils servis ? Il faut une collecte activee **et** une publication : avant la premiere,
+     * aucune valeur ni aucun rang ne vient d un etat agrege.
+     */
+    private function militaryTalliesServed(): bool
+    {
+        return resolve(MilitaryTallyRecorder::class)->collectingSince() !== null && MilitaryTallyPublisher::publishedAt() !== null;
+    }
+
+    /**
+     * Ce que la page dit d un cumul militaire : depuis quand il couvre, quand il a ete publie, et combien d evenements
+     * attendent encore.
      *
-     * Nul pour tout autre classement, et nul tant que la collecte n est pas activee — la page ne sert alors pas ces
+     * Nul pour tout autre classement, et nul tant que les cumuls ne sont pas servis — la page ne sert alors pas ces
      * classements du tout.
      *
-     * @return array{since: string, pending: int}|null
+     * @return array{since: string, refreshed: string, pending: int}|null
      */
     private function militaryTallyNoteFor(int $type): array|null
     {
@@ -262,13 +274,15 @@ class HighscoreController extends OGameController
 
         $registre = resolve(MilitaryTallyRecorder::class);
         $depuis = $registre->collectingSince();
+        $publie = MilitaryTallyPublisher::publishedAt();
 
-        if ($depuis === null) {
+        if ($depuis === null || $publie === null) {
             return null;
         }
 
         return [
             'since' => Date::createFromTimestamp($depuis)->format('d.m.Y'),
+            'refreshed' => Date::createFromTimestamp($publie)->format('d.m.Y H:i:s'),
             'pending' => $registre->pendingCount(),
         ];
     }

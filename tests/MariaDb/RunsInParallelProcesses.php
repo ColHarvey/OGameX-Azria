@@ -225,6 +225,51 @@ trait RunsInParallelProcesses
     }
 
     /**
+     * Attend qu un fichier de signal apparaisse, ou echoue en le disant.
+     *
+     * Un enfant s en sert pour ne partir qu au signal du parent ; un parent, pour savoir qu un enfant a atteint un point
+     * donne. Dans un enfant, l echec est rapporte par le harnais comme une erreur de ce processus.
+     */
+    protected function waitForSignalFile(string $fichier, float $secondes = 30.0): void
+    {
+        $limite = microtime(true) + $secondes;
+
+        while (!file_exists($fichier)) {
+            if (microtime(true) > $limite) {
+                $this->fail('The signal ' . basename($fichier) . ' never came.');
+            }
+
+            usleep(5_000);
+        }
+    }
+
+    /**
+     * Attend que `$combien` autres processus soient arretes sur une lecture verrouillante de cette table.
+     *
+     * Deux acteurs qui attendent le meme verrou tenu par le parent s alignent dans la file du moteur : c est ce qui
+     * permet de forcer un ordre, puis de le verifier par l etat final.
+     */
+    protected function waitUntilProcessesWaitOn(string $table, int $combien, int $timeoutMs = 15_000): void
+    {
+        $limite = microtime(true) + $timeoutMs / 1000;
+
+        do {
+            $vus = (int)(DB::selectOne(
+                'SELECT COUNT(*) AS n FROM information_schema.PROCESSLIST WHERE ID <> CONNECTION_ID() AND INFO LIKE ? AND TIME >= 1',
+                ['%' . $table . '%for update%']
+            )->n ?? 0);
+
+            if ($vus >= $combien) {
+                return;
+            }
+
+            usleep(20_000);
+        } while (microtime(true) < $limite);
+
+        $this->fail("Fewer than {$combien} processes came to wait on {$table}: the order would not be forced.");
+    }
+
+    /**
      * @param Closure(int): string $tache
      */
     private function runAsChild(int $rang, Closure $tache, string $dossier, string $depart): never

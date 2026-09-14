@@ -1511,6 +1511,7 @@ return [
         'honour_points'         => 'Honour points',
         'statistics_not_yet_available' => 'Statistics not yet available',
         'cumulative_since' => 'Cumulative since :date',
+        'refreshed_at' => 'Updated :date',
         'alliance_sum_current_members' => 'Sum of current members: it can decrease when a member leaves the alliance.',
         'data_temporarily_incomplete' => 'Data temporarily incomplete: some events are still waiting to be counted.',
         'position'              => 'Position',

@@ -28,8 +28,8 @@ class GenerateAllianceHighscores extends Command
             foreach ($allianceChunk as $alliance) {
                 // Aggregate scores from all alliance members.
                 //
-                // **La somme suit les membres actuels.** Elle peut donc diminuer quand un membre part, meme pour les trois
-                // cumuls militaires, dont les compteurs de chaque joueur ne redescendent jamais ; la page le dit.
+                // **Les trois cumuls militaires ne sont pas sommes ici** : `MilitaryTallyPublisher` les publie avec leurs
+                // rangs, depuis un seul etat agrege, et additionne lui aussi les membres actuels.
                 $memberScores = Highscore::query()
                     ->join('users', 'highscores.player_id', '=', 'users.id')
                     ->where('users.alliance_id', $alliance->id)
@@ -38,10 +38,7 @@ class GenerateAllianceHighscores extends Command
                         COALESCE(SUM(highscores.economy), 0) as total_economy,
                         COALESCE(SUM(highscores.research), 0) as total_research,
                         COALESCE(SUM(highscores.military), 0) as total_military,
-                        COALESCE(SUM(highscores.honor), 0) as total_honor,
-                        COALESCE(SUM(highscores.military_built), 0) as total_military_built,
-                        COALESCE(SUM(highscores.military_destroyed), 0) as total_military_destroyed,
-                        COALESCE(SUM(highscores.military_lost), 0) as total_military_lost
+                        COALESCE(SUM(highscores.honor), 0) as total_honor
                     ')
                     ->first();
 
@@ -54,9 +51,6 @@ class GenerateAllianceHighscores extends Command
                         'research' => $memberScores->total_research ?? 0,
                         'military' => $memberScores->total_military ?? 0,
                         'honor' => $memberScores->total_honor ?? 0,
-                        'military_built' => $memberScores->total_military_built ?? 0,
-                        'military_destroyed' => $memberScores->total_military_destroyed ?? 0,
-                        'military_lost' => $memberScores->total_military_lost ?? 0,
                     ]
                 );
 

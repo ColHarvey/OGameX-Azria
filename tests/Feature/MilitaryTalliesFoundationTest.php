@@ -8,6 +8,8 @@ use Illuminate\Support\Facades\DB;
 use OGame\GameObjects\Models\ShipObject;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Military\Exceptions\UnknownMilitaryUnit;
+use OGame\Military\MilitaryTallyAggregator;
+use OGame\Military\MilitaryTallyPublisher;
 use OGame\Military\MilitaryTallyRecorder;
 use OGame\Military\MilitaryValue;
 use OGame\Services\ObjectService;
@@ -16,14 +18,16 @@ use Tests\AccountTestCase;
 /**
  * **Le socle des cumuls militaires : ce qui entre, ce qui n'entre pas, et rien deux fois.**
  *
- * Ces essais ne raccordent encore aucun chemin de jeu. Ils tiennent les quatre promesses dont tous les chemins
- * dépendront :
+ * Ces essais tiennent les quatre promesses dont tous les chemins de crédit dépendent :
  *
  * 1. **la frontière d'activation** — un fait antérieur à la date n'entre jamais, même traité en retard ; l'instant
- *    exact d'activation est dedans ; et un rejeu ne crédite rien deux fois ;
+ *    exact d'activation est dedans ; et un rejeu n'inscrit rien deux fois ;
  * 2. **la pondération** — la même que le score militaire, sans arrondi par événement ;
  * 3. **rien d'inventé** — une unité hors catalogue met l'événement en attente, entier, sans aucune part créditée ;
  * 4. **l'activation** — elle écrit sa date une seule fois et ne touche jamais aux compteurs.
+ *
+ * Les compteurs se lisent **après agrégation** : le registre est la seule écriture du jeu, et le compteur d'un compte
+ * n'en est que la projection (`MilitaryTallyAggregator`).
  *
  * ## Pourquoi des valeurs toutes différentes
  *
@@ -40,14 +44,15 @@ class MilitaryTalliesFoundationTest extends AccountTestCase
         parent::setUp();
 
         // La base d'un processus est partagée : l'essai établit lui-même l'état de la collecte qu'il suppose.
-        DB::table('settings')->where('key', MilitaryTallyRecorder::SINCE_KEY)->delete();
+        DB::table('settings')->whereIn('key', [MilitaryTallyRecorder::SINCE_KEY, MilitaryTallyPublisher::PUBLISHED_KEY])->delete();
     }
 
     protected function tearDown(): void
     {
-        DB::table('settings')->where('key', MilitaryTallyRecorder::SINCE_KEY)->delete();
+        DB::table('settings')->whereIn('key', [MilitaryTallyRecorder::SINCE_KEY, MilitaryTallyPublisher::PUBLISHED_KEY])->delete();
         // Les événements de l'essai, en attente compris : un voisin du même processus compte ceux qui attendent.
         DB::table('military_tally_events')->where('event_key', 'like', 'essai:%')->delete();
+        DB::table('military_tallies')->where('player_id', $this->currentUserId)->delete();
 
         parent::tearDown();
     }
@@ -87,7 +92,7 @@ class MilitaryTalliesFoundationTest extends AccountTestCase
 
         // Le rejeu : un travailleur en retard, une reprise. Rien ne bouge, et le fait d'avant reste dehors.
         $this->assertFalse($registre->credit($avant, $this->currentUserId, self::ACTIVATION - 1, lost: 100));
-        $this->assertFalse($registre->credit($pile, $this->currentUserId, self::ACTIVATION, lost: 10), 'Un rejeu a crédité une seconde fois.');
+        $this->assertFalse($registre->credit($pile, $this->currentUserId, self::ACTIVATION, lost: 10), 'Un rejeu a inscrit une seconde fois.');
         $this->assertFalse($registre->credit($apres, $this->currentUserId, self::ACTIVATION + 1, lost: 1));
 
         $this->assertSame([0, 0, 11], $this->compteurs(), 'Le rejeu a changé les compteurs.');
@@ -146,7 +151,7 @@ class MilitaryTalliesFoundationTest extends AccountTestCase
 
     /**
      * **Une unité hors catalogue ne reçoit pas de poids inventé** : l'évaluation refuse, et l'événement est mis en
-     * attente **entier**, sans aucune de ses parts créditée, rejouable sans effet.
+     * attente **entier**, sans aucune de ses parts créditée, rejouable sans effet — et l'agrégation ne le compte pas.
      */
     public function testAnUnknownUnitIsDeferredWholeAndCreditsNothing(): void
     {
@@ -181,6 +186,7 @@ class MilitaryTalliesFoundationTest extends AccountTestCase
         $ligne = DB::table('military_tally_events')->where('event_key', $clef)->first();
         $this->assertNotNull($ligne);
         $this->assertSame('en_attente', $ligne->status);
+        $this->assertNull($ligne->aggregated_at, 'L\'agrégation a marqué compté un événement en attente.');
         $this->assertSame(MilitaryValue::WEIGHTING_VERSION, $ligne->weighting_version);
         $this->assertSame([0, 0, 0], [(int)$ligne->built_value, (int)$ligne->destroyed_value, (int)$ligne->lost_value]);
         $this->assertSame(['lost' => ['unite_hors_catalogue' => 3, 'light_fighter' => 2]], json_decode((string)$ligne->payload, true), 'Les faits nécessaires à la reprise ne sont pas gardés.');
@@ -191,7 +197,14 @@ class MilitaryTalliesFoundationTest extends AccountTestCase
      */
     public function testTheActivationWritesTheDateOnceAndNeverTouchesTheCounters(): void
     {
-        DB::table('users')->where('id', $this->currentUserId)->update(['military_value_lost' => 42]);
+        DB::table('military_tallies')->insert([
+            'player_id' => $this->currentUserId,
+            'built_value' => 0,
+            'destroyed_value' => 0,
+            'lost_value' => 42,
+            'created_at' => Date::now(),
+            'updated_at' => Date::now(),
+        ]);
 
         $this->assertSame(0, Artisan::call('ogamex:military:demarrer-cumuls'), 'La première activation a échoué.');
         $premiere = resolve(MilitaryTallyRecorder::class)->collectingSince();
@@ -202,6 +215,7 @@ class MilitaryTalliesFoundationTest extends AccountTestCase
 
         $this->assertSame($premiere, resolve(MilitaryTallyRecorder::class)->collectingSince(), 'Un second appel a déplacé la date : la période déjà couverte serait effacée.');
         $this->assertSame([0, 0, 42], $this->compteurs(), 'L\'activation a touché les compteurs des comptes.');
+        $this->assertNull(MilitaryTallyPublisher::publishedAt(), 'L\'activation a publié : la première publication appartient à la tâche des rangs.');
     }
 
     private function activer(int $instant): void
@@ -220,15 +234,20 @@ class MilitaryTalliesFoundationTest extends AccountTestCase
     }
 
     /**
-     * Les trois compteurs du joueur courant : construits, détruits, perdus.
+     * Les trois compteurs du joueur courant après agrégation : construits, détruits, perdus.
      *
      * @return array{0: int, 1: int, 2: int}
      */
     private function compteurs(): array
     {
-        $ligne = DB::table('users')->where('id', $this->currentUserId)->first(['military_value_built', 'military_value_destroyed', 'military_value_lost']);
-        $this->assertNotNull($ligne);
+        resolve(MilitaryTallyAggregator::class)->aggregate();
 
-        return [(int)$ligne->military_value_built, (int)$ligne->military_value_destroyed, (int)$ligne->military_value_lost];
+        $ligne = DB::table('military_tallies')->where('player_id', $this->currentUserId)->first(['built_value', 'destroyed_value', 'lost_value']);
+
+        if ($ligne === null) {
+            return [0, 0, 0];
+        }
+
+        return [(int)$ligne->built_value, (int)$ligne->destroyed_value, (int)$ligne->lost_value];
     }
 }

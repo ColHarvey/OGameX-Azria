@@ -11,7 +11,6 @@ use OGame\Facades\AppUtil;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameObjects\CivilShipObjects;
 use OGame\GameObjects\MilitaryShipObjects;
-use OGame\Military\MilitaryValue;
 use OGame\Models\Alliance;
 use OGame\Models\AllianceHighscore;
 use OGame\Models\FleetMission;
@@ -262,12 +261,11 @@ class HighscoreService
      * La composition vit ici plutot que dans la tache planifiee, pour qu un essai la lise sur un seul joueur : la
      * tache parcourt tous les comptes de la base, plusieurs centaines dans un processus de la suite.
      *
-     * **Les trois cumuls militaires se convertissent ici, et seulement ici.** Les comptes les gardent en demi-unites
-     * de ressources, sans arrondi par evenement (`MilitaryValue`) ; la photographie les ramene en points, vers le bas,
-     * une seule fois.
+     * **Les trois cumuls militaires n y sont pas.** Leurs valeurs et leurs rangs sont publies ensemble, depuis un seul
+     * etat agrege, par `MilitaryTallyPublisher` : les ecrire ici, joueur apres joueur, melangerait deux passages.
      *
      * @param PlayerService $player
-     * @return array{general: int, economy: int, research: int, military: int, honor: int, military_built: int, military_destroyed: int, military_lost: int}
+     * @return array{general: int, economy: int, research: int, military: int, honor: int}
      * @throws Exception
      */
     public function getPlayerScores(PlayerService $player): array
@@ -278,9 +276,6 @@ class HighscoreService
             'research' => $this->getPlayerScoreResearch($player),
             'military' => $this->getPlayerScoreMilitary($player),
             'honor' => resolve(HonorService::class)->pointsOf($player->getUser()),
-            'military_built' => MilitaryValue::pointsOf((int)$player->getUser()->military_value_built),
-            'military_destroyed' => MilitaryValue::pointsOf((int)$player->getUser()->military_value_destroyed),
-            'military_lost' => MilitaryValue::pointsOf((int)$player->getUser()->military_value_lost),
         ];
     }
 
@@ -343,6 +338,21 @@ class HighscoreService
     }
 
     /**
+     * Oublie les pages mises en cache d un classement, joueurs et alliances.
+     *
+     * Les clefs sont celles que `getHighscorePlayers()` et `getHighscoreAlliances()` ecrivent, pour les cent pages
+     * que la tache des rangs oublie deja.
+     */
+    public static function forgetCachedPagesOf(HighscoreTypeEnum $type): void
+    {
+        for ($page = 1; $page <= 100; $page++) {
+            Cache::forget(sprintf('highscores-%s-%d-0', $type->name, $page));
+            Cache::forget(sprintf('highscores-%s-%d-1', $type->name, $page));
+            Cache::forget(sprintf('alliance-highscores-%s-%d', $type->name, $page));
+        }
+    }
+
+    /**
      * Get highscores.
      *
      * @param int $perPage
@@ -364,6 +374,12 @@ class HighscoreService
                 // tache planifiee n est pas passee, et un tri ascendant placerait ces NULL en tete.
                 ->orderByRaw($this->highscoreType->name.'_rank IS NULL')
                 ->orderBy($this->highscoreType->name.'_rank');
+
+            // **Un cumul militaire ne montre que ce que sa derniere publication a range.** Une ligne creee depuis n a ni
+            // valeur ni rang publies : l afficher a zero melangerait deux passages.
+            if ($this->highscoreType->isMilitaryTally()) {
+                $query->whereNotNull($this->highscoreType->name.'_rank');
+            }
 
             // Filter out admin users if setting is disabled
             if (!$adminVisible) {
@@ -591,6 +607,8 @@ class HighscoreService
             $highscores = AllianceHighscore::query()
                 ->with('alliance.members')
                 ->validRanks()
+                // Un cumul militaire ne montre que les alliances que sa derniere publication a rangees.
+                ->when($this->highscoreType->isMilitaryTally(), fn ($requete) => $requete->whereNotNull($this->highscoreType->name.'_rank'))
                 ->orderByRaw($this->highscoreType->name.'_rank IS NULL')
                 ->orderBy($this->highscoreType->name.'_rank')
                 ->paginate(perPage: $perPage, page: $pageOn);

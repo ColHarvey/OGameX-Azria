@@ -1117,6 +1117,7 @@ return [
         'honour_points'         => '榮譽點數',
         'statistics_not_yet_available' => '統計資料尚未提供',
         'cumulative_since' => '自 :date 起累計',
+        'refreshed_at' => '更新於 :date',
         'alliance_sum_current_members' => '目前成員總和：成員離開聯盟時可能下降。',
         'data_temporarily_incomplete' => '資料暫時不完整：仍有事件等待計入。',
         'position'              => '排名',

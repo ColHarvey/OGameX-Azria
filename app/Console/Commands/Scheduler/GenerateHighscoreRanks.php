@@ -8,6 +8,7 @@ use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
 use OGame\Enums\HighscoreTypeEnum;
+use OGame\Military\MilitaryTallyPublisher;
 use OGame\Models\AllianceHighscore;
 use OGame\Models\Highscore;
 use OGame\Models\User;
@@ -20,18 +21,31 @@ class GenerateHighscoreRanks extends Command
     /**
      * Execute the console command.
      */
-    public function handle(SettingsService $settingsService): void
+    public function handle(SettingsService $settingsService, MilitaryTallyPublisher $militaryTallies): void
     {
         $adminVisible = $settingsService->highscoreAdminVisible();
 
         foreach (HighscoreTypeEnum::cases() as $type) {
+            // **Les trois cumuls militaires ne se rangent pas ici.** Leurs valeurs et leurs rangs sont publies
+            // ensemble, depuis un seul etat agrege, par `MilitaryTallyPublisher` : les ranger ici, depuis des valeurs
+            // ecrites par un autre passage, melangerait deux publications.
+            if ($type->isMilitaryTally()) {
+                continue;
+            }
+
             $this->updatePlayerRank($type, $adminVisible);
             $this->updateAllianceRank($type);
         }
 
-        // Clear highscore cache so changes are reflected immediately
-        $this->clearHighscoreCache();
-        $this->info("\nHighscore cache cleared.");
+        try {
+            // Agrege ce qui attend, puis publie valeurs, rangs et date d'actualisation dans une seule transaction.
+            // Rien n'est publie tant que la collecte n'est pas activee.
+            $militaryTallies->publish();
+        } finally {
+            // Clear highscore cache so changes are reflected immediately
+            $this->clearHighscoreCache();
+            $this->info("\nHighscore cache cleared.");
+        }
     }
 
     /**

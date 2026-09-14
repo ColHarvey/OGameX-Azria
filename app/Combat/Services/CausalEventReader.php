@@ -105,6 +105,18 @@ final class CausalEventReader
             $evenements[] = $evenement;
         }
 
+        // **Les recherches echues, puis le corps, puis ses files d'unites et de batiments.**
+        //
+        // La progression d'un compte ecrit ses recherches achevees puis debite le corps de la suivante ; celle
+        // d'un corps prend le corps puis ses files. La fermeture suit les deux. Elle verrouillait les lignes de
+        // file avant le corps, puis ecrivait le corps en vidant la file : l'ordre inverse d'une page, et chacune
+        // pouvait tenir ce que l'autre attendait.
+        //
+        // Aucune instruction de la fermeture ne touche le corps ni une file avant celle-ci. Les recherches sont
+        // lues ici et versees plus bas, a leur place : l'ordre des evenements rendus ne change pas.
+        $recherchesEchues = self::completionsDue('research_queues', self::bodiesOf($ownerId), $cursorAt);
+        DB::table('planets')->where('id', $body)->lockForUpdate()->first(['id']);
+
         // **Un lot d'unites produit unite par unite.** Le monde materialise une unite toutes les
         // `(fin − debut) / quantite` secondes : un lot qui finit apres le curseur a deja pose des unites
         // avant lui, et un lot qui finit **pile** au curseur en a pose avant.
@@ -129,7 +141,7 @@ final class CausalEventReader
             $evenements[] = $evenement;
         }
 
-        foreach (self::completionsDue('research_queues', self::bodiesOf($ownerId), $cursorAt) as $file) {
+        foreach ($recherchesEchues as $file) {
             $evenement = self::queueEvent(CombatEventIdentity::forResearchCompletion($file->id), self::RESEARCH_KIND, $file, $body, $order, CombatEventType::ResearchCompletion, [SnapshotContribution::CombatTechnology]);
             $this->recherches[$evenement->identity] = $file;
             $evenements[] = $evenement;

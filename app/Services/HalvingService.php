@@ -6,7 +6,9 @@ use Exception;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use OGame\Enums\DarkMatterTransactionType;
+use OGame\Military\MilitaryBuildTally;
 use OGame\Models\BuildingQueue;
+use OGame\Models\Planet;
 use OGame\Models\ResearchQueue;
 use OGame\Models\UnitQueue;
 use OGame\Models\User;
@@ -424,6 +426,11 @@ class HalvingService
                 throw new Exception('User not found');
             }
 
+            // **Le corps avant la ligne de sa file.** C'est l'ordre de toute la file d'unites : la progression
+            // prend le corps, puis ses lignes. Prendre la ligne d'abord, puis ecrire le corps en livrant, croisait
+            // les deux chemins — chacun tenant ce que l'autre attendait.
+            $corps = $this->lockBody($planet);
+
             // Lock and retrieve queue item
             $queueItem = UnitQueue::where('id', $queueItemId)
                 ->where('planet_id', $planet->getPlanetId())
@@ -479,9 +486,13 @@ class HalvingService
             // Units to award instantly: units that correspond to the removed time
             $unitsToAward = (int)floor($timeReduction / $timePerUnit);
 
-            // Award units instantly to the planet
+            $avancementAvant = (int)$queueItem->object_amount_progress;
+
+            // Award units instantly to the planet.
+            // **En base, sous le verrou du corps.** `addUnit()` sauvegardait le corps charge au debut de la page :
+            // une livraison faite entre-temps par une autre requete etait ecrasee, et des unites payees disparaissaient.
             if ($unitsToAward > 0) {
-                $planet->addUnit($object->machine_name, $unitsToAward);
+                $planet->addUnitAtomic($object->machine_name, $unitsToAward);
             }
 
             // Capture original time_end to know which subsequent items are chained to this one
@@ -509,6 +520,9 @@ class HalvingService
 
             $queueItem->save();
 
+            // L'evenement de cumul des unites livrees, dans la transaction qui les livre et ecrit l'avancement.
+            resolve(MilitaryBuildTally::class)->recordHalving($queueItem, $object, (int)$corps->user_id, $avancementAvant, $currentTime);
+
             // Update any other queued items for this planet to advance their time_start and time_end
             // equally as well to prevent gaps in the queue.
             $this->updateFutureQueueItems($planet->getPlanetId(), $originalTimeEnd, $newTimeEnd);
@@ -523,6 +537,24 @@ class HalvingService
         });
 
         return $result;
+    }
+
+    /**
+     * Tient le corps d'une file d'unites, entre le compte et la ligne de file.
+     *
+     * L'ordre de toute la file d'unites est : compte (seulement pour un geste paye en matiere noire), corps, lignes
+     * de sa file. La progression prend le corps puis ses lignes ; la fermeture d'un ralliement aussi. Le demi-temps
+     * et « terminer » s'y rangent, sinon chacun pouvait tenir ce que l'autre attendait.
+     */
+    private function lockBody(PlanetService $planet): Planet
+    {
+        $corps = Planet::query()->whereKey($planet->getPlanetId())->lockForUpdate()->first(['id', 'user_id']);
+
+        if (!$corps instanceof Planet) {
+            throw new Exception('Planet not found');
+        }
+
+        return $corps;
     }
 
     /**
@@ -546,6 +578,9 @@ class HalvingService
             if (!$lockedUser) {
                 throw new Exception('User not found');
             }
+
+            // Le corps avant la ligne de sa file, comme le demi-temps et la progression.
+            $this->lockBody($planet);
 
             // Lock and retrieve queue item
             $queueItem = UnitQueue::where('id', $queueItemId)

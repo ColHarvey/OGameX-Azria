@@ -39,8 +39,8 @@ class StartMilitaryTallies extends Command
     public function handle(SettingsService $settings, MilitaryTallyRecorder $tallies): int
     {
         foreach ([
-            'military_tally_events' => null,
-            'users' => ['military_value_built', 'military_value_destroyed', 'military_value_lost'],
+            'military_tally_events' => ['event_key', 'player_id', 'status', 'aggregated_at'],
+            'military_tallies' => ['player_id', 'built_value', 'destroyed_value', 'lost_value'],
             'highscores' => ['military_built', 'military_destroyed', 'military_lost'],
             'alliance_highscores' => ['military_built', 'military_destroyed', 'military_lost'],
         ] as $table => $colonnes) {
@@ -50,7 +50,7 @@ class StartMilitaryTallies extends Command
                 return self::FAILURE;
             }
 
-            if ($colonnes !== null && !Schema::hasColumns($table, $colonnes)) {
+            if (!Schema::hasColumns($table, $colonnes)) {
                 $this->error('Prerequis manquant : ' . $table . ' n a pas les colonnes des cumuls militaires.');
 
                 return self::FAILURE;
