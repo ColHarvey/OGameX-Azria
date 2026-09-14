@@ -52,15 +52,17 @@ class FleetTargetDisplayTest extends AccountTestCase
             'The status bar does not show the target coordinates that were passed in.'
         );
 
+        // La page echappe le nom : un nom tire par `fake()->name()` peut porter une apostrophe (O’Kon), que Blade
+        // ecrit `&#039;`. Chercher le nom brut echouait exactement ces fois-la, sans aucun defaut du jeu.
         $this->assertStringContainsString(
-            $proprietaire->getUsername(false),
+            e($proprietaire->getUsername(false)),
             $barre,
             "The status bar does not name the target's owner, so the player sees their own name instead."
         );
 
         // Le point le plus visible du defaut : sa propre planete annoncee comme cible.
         $this->assertStringNotContainsString(
-            $this->planetService->getPlanetName(),
+            e($this->planetService->getPlanetName()),
             $barre,
             'The status bar still announces the player own planet as the target.'
         );
