@@ -24,6 +24,15 @@ final class LifeformRefused extends RuntimeException
     public const string POPULATION_UNMET = 'population_unmet';
     public const string INSUFFICIENT_RESOURCES = 'insufficient_resources';
     public const string NOT_IN_QUEUE = 'not_in_queue';
+    public const string SLOT_LOCKED = 'slot_locked';
+    public const string SLOT_TAKEN = 'slot_taken';
+    public const string WRONG_SLOT = 'wrong_slot';
+    public const string NO_DISCOVERED_SPECIES = 'no_discovered_species';
+    public const string NOT_ENOUGH_ARTIFACTS = 'not_enough_artifacts';
+    public const string RESET_TOO_SOON = 'reset_too_soon';
+    public const string NOTHING_TO_RESET = 'nothing_to_reset';
+    public const string RESEARCH_IN_PROGRESS = 'research_in_progress';
+    public const string RESTORE_EXPIRED = 'restore_expired';
 
     public function __construct(public readonly string $reason, string $detail = '')
     {

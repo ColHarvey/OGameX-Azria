@@ -10,7 +10,7 @@
 
     <div class="content">
         <button class="close">✖</button>
-        <h3>{{ $title }}</h3>
+        <h3>{{ $title }} <span class="smallFont">({{ $species_name }})</span></h3>
 
         <div class="information">
             <span class="level" data-value="{{ $next_level }}">
@@ -20,16 +20,12 @@
                 <li class="build_duration"><strong>{{ __('t_ingame.ajax_object.production_duration') }}</strong>
                     <time class="value tooltip" title="">{{ $production_time }}</time>
                 </li>
-                @if ($energy > 0)
-                    <li class="additional_energy_consumption"><strong>{{ __('t_ingame.ajax_object.energy_needed') }}</strong>
-                        <span class="value tooltip" data-value="{{ $energy }}" title="">{{ $energy }}</span>
-                    </li>
-                @endif
-                @if ($population_required !== null)
-                    <li class="lifeform_population"><strong>{{ __('t_lifeforms_ui.buildings.population_required') }}</strong>
-                        <span class="value tooltip" title="{{ __('t_lifeforms_ui.buildings.population_current', ['current' => $population_current]) }}">{{ $population_required }}</span>
-                    </li>
-                @endif
+                <li class="lifeform_population"><strong>{{ __('t_lifeforms_ui.research.population_label') }}</strong>
+                    <span class="value">{{ __('t_lifeforms_ui.research.requires', ['population' => $population_required, 'tier' => $tier]) }}</span>
+                </li>
+                <li class="lifeform_slot"><strong>{{ __('t_lifeforms_ui.research.slot_label') }}</strong>
+                    <span class="value">{{ __('t_lifeforms_ui.research.technology_slot', ['slot' => $slot, 'tier' => $tier]) }}</span>
+                </li>
             </ul>
 
             <div class="costs">
@@ -50,19 +46,10 @@
                 </ul>
             </div>
 
-            @if (count($requirements) > 0)
-                <div class="lifeform_requirements smallFont" style="margin-top: 6px;">
-                    <strong>{{ __('t_lifeforms_ui.buildings.requirements') }}</strong>
-                    @foreach ($requirements as $requirement)
-                        <span class="{{ $requirement['met'] ? 'undermark' : 'overmark' }}">{{ $requirement['title'] }} {{ $requirement['level'] }}</span>@if (!$loop->last), @endif
-                    @endforeach
-                </div>
-            @endif
-
             <div class="build-it_wrap">
                 <div class="ipiHintable" data-ipi-hint="ipiTechnologyUpgradeLifeform{{ $object->id }}">
                     <button class="upgrade" data-technology="{{ $object->id }}" @if (!$can_build) disabled @endif>
-                        <span class="label tooltip" title="{{ $reason ?? '' }}">{{ __('t_ingame.ajax_object.improve') }}</span>
+                        <span class="label tooltip" title="{{ $reason ?? '' }}">{{ __('t_lifeforms_ui.research.research') }}</span>
                         <span class="label_bg"></span>
                     </button>
                 </div>
@@ -88,6 +75,7 @@
                     @endforeach
                 </tbody>
             </table>
+            <p class="smallFont" style="margin: 4px 0 0 0;">{{ __('t_lifeforms_ui.research.global_note') }}</p>
         </div>
 
         <p class="description smallFont">{{ $description }}</p>

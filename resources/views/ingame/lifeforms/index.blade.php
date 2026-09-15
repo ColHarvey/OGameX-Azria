@@ -42,14 +42,15 @@
                                 <div class="lifeform-portrait" role="img" aria-label="{{ $espece['name'] }}"
                                      style="width: 200px; height: 200px; background: url('{{ asset('img/lifeform/lifeformtype_sprite.png') }}') no-repeat -{{ ($n - 1) * 200 }}px 0; border: 1px solid #3b5164;"></div>
                                 <div class="xpbar" style="margin-top: 8px;">
-                                    @php $niveau = intdiv($espece['experience'], 1000); @endphp
+                                    @php $part = $espece['experience_needed'] > 0 ? min(1, $espece['experience_progress'] / $espece['experience_needed']) : 1; @endphp
                                     <svg width="84" height="84" viewBox="0 0 84 84" aria-hidden="true">
                                         <circle cx="42" cy="42" r="38" fill="none" stroke="#1d2f3d" stroke-width="6"></circle>
                                         <circle class="progress-ring__circle" cx="42" cy="42" r="38" fill="none" stroke="#7fcf93" stroke-width="6"
-                                                stroke-dasharray="238.76 238.76" stroke-dashoffset="{{ 238.76 - (min(1, ($espece['experience'] % 1000) / 1000) * 238.76) }}" transform="rotate(-90 42 42)"></circle>
-                                        <text x="42" y="47" text-anchor="middle" fill="#dce7ef" font-size="16" font-family="Arial">{{ $niveau }}</text>
+                                                stroke-dasharray="238.76 238.76" stroke-dashoffset="{{ 238.76 - ($part * 238.76) }}" transform="rotate(-90 42 42)"></circle>
+                                        <text x="42" y="47" text-anchor="middle" fill="#dce7ef" font-size="16" font-family="Arial">{{ $espece['experience_level'] }}</text>
                                     </svg>
-                                    <div class="smallFont">{{ __('t_lifeforms_ui.selection.level', ['level' => $niveau, 'xp' => $espece['experience']]) }}</div>
+                                    <div class="smallFont">{{ __('t_lifeforms_ui.selection.level', ['level' => $espece['experience_level'], 'xp' => $espece['experience_progress'] . '/' . $espece['experience_needed']]) }}</div>
+                                    <div class="smallFont">{{ __('t_lifeforms_ui.selection.tech_bonus', ['bonus' => rtrim(rtrim(number_format($espece['experience_bonus'], 1, '.', ''), '0'), '.')]) }}</div>
                                 </div>
                             </div>
                             <div style="flex: 1 1 320px; min-width: 0;">
@@ -63,6 +64,7 @@
                                     </form>
                                 @elseif ($espece['chosen'])
                                     <a class="btn_blue" href="{{ route('lifeforms.buildings') }}">{{ __('t_lifeforms_ui.selection.go_to_buildings') }}</a>
+                                    <a class="btn_blue" href="{{ route('lifeforms.research') }}">{{ __('t_lifeforms_ui.selection.go_to_research') }}</a>
                                 @else
                                     <p class="smallFont" style="margin: 0;">{{ __('t_lifeforms_ui.selection.other_species') }}</p>
                                 @endif

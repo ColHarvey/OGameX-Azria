@@ -9,6 +9,7 @@ use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Catalogue\LifeformFormulas;
 use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\Catalogue\LifeformObject;
+use OGame\Lifeforms\Demography\PlanetLifeformProfile;
 use OGame\Lifeforms\LifeformRefused;
 use OGame\Lifeforms\Rules\LifeformRuleRevisions;
 use OGame\Lifeforms\Species;
@@ -47,6 +48,7 @@ final class LifeformQueueService
         private readonly SettingsService $settings,
         private readonly LifeformRuleRevisions $revisions,
         private readonly LifeformLevels $levels,
+        private readonly LifeformResearchService $research,
     ) {
     }
 
@@ -91,6 +93,9 @@ final class LifeformQueueService
             }
             $this->requireRequirements($objet, $niveauxAvecFile);
             $this->requirePopulation($objet, $cible, $etat);
+            if (!$this->researchable($objet, $planet->getPlanetId(), $etat, $niveauxBatiments)) {
+                throw new LifeformRefused(LifeformRefused::SLOT_LOCKED, $objet->machineName);
+            }
 
             $ligne = LifeformQueue::query()->create([
                 'planet_id' => $planet->getPlanetId(),
@@ -131,7 +136,8 @@ final class LifeformQueueService
 
             $incoherent = (int)$element->target_level !== $niveauCourant + 1
                 || !$this->requirementsMet($objet, $niveauxBatiments)
-                || !$this->populationMet($objet, (int)$element->target_level, $etat);
+                || !$this->populationMet($objet, (int)$element->target_level, $etat)
+                || !$this->researchable($objet, $planetId, $etat, $niveauxBatiments);
             if ($incoherent) {
                 $this->markCanceled($element);
                 continue;
@@ -285,6 +291,23 @@ final class LifeformQueueService
     public function populationMet(LifeformObject $object, int $targetLevel, LifeformPlanet $state): bool
     {
         return (float)$state->population + 1e-9 >= LifeformFormulas::populationRequired($object, $targetLevel);
+    }
+
+    /**
+     * Une technologie ne se recherche que depuis un emplacement ouvert de la planete ; un batiment
+     * n est pas concerne.
+     *
+     * @param array<int, int> $buildingLevels
+     */
+    public function researchable(LifeformObject $object, int $planetId, LifeformPlanet $state, array $buildingLevels): bool
+    {
+        if ($object->kind !== LifeformKind::Technology) {
+            return true;
+        }
+        $espece = Species::from((int)$state->species);
+        $profil = PlanetLifeformProfile::fromLevels($espece, $buildingLevels, $this->revisions->live()->demography());
+
+        return $this->research->mayResearch($object, $planetId, $state, $profil, $espece, $buildingLevels);
     }
 
     /**

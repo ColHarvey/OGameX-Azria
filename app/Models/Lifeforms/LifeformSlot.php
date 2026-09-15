@@ -15,7 +15,10 @@ use Illuminate\Support\Carbon;
  * @property int $planet_id
  * @property int $slot
  * @property int|null $object_id
+ * @property int|null $previous_object_id
  * @property int|null $selected_at
+ * @property int|null $reset_at
+ * @property string|null $chosen_via
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  * @method static Builder|LifeformSlot newModelQuery()
@@ -23,7 +26,7 @@ use Illuminate\Support\Carbon;
  * @method static Builder|LifeformSlot query()
  * @mixin \Eloquent
  */
-#[Fillable(['planet_id', 'slot', 'object_id', 'selected_at'])]
+#[Fillable(['planet_id', 'slot', 'object_id', 'previous_object_id', 'selected_at', 'reset_at', 'chosen_via'])]
 #[Table(name: 'lifeform_slots')]
 class LifeformSlot extends Model
 {
@@ -34,6 +37,8 @@ class LifeformSlot extends Model
         'planet_id' => 'integer',
         'slot' => 'integer',
         'object_id' => 'integer',
+        'previous_object_id' => 'integer',
         'selected_at' => 'integer',
+        'reset_at' => 'integer',
     ];
 }

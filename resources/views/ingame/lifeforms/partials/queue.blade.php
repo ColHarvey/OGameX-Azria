@@ -56,7 +56,7 @@
                 <tbody>
                 <tr>
                     <td colspan="2" class="idle">
-                        <a class="tooltip js_hideTipOnMobile" title="{{ __('t_lifeforms_ui.queue.idle_tooltip') }}" href="{{ route('lifeforms.buildings') }}">
+                        <a class="tooltip js_hideTipOnMobile" title="{{ __('t_lifeforms_ui.queue.idle_tooltip') }}" href="{{ $kind === 'building' ? route('lifeforms.buildings') : route('lifeforms.research') }}">
                             {{ $kind === 'building' ? __('t_lifeforms_ui.queue.idle_buildings') : __('t_lifeforms_ui.queue.idle_research') }}
                         </a>
                     </td>

@@ -105,6 +105,11 @@ Route::middleware(['auth', 'banned', 'globalgame', 'locale', 'firstlogin'])->gro
     Route::get('/ajax/lifeforms/buildings', [LifeformsController::class, 'buildingsAjax'])->name('lifeforms.buildings.ajax');
     Route::post('/lifeforms/buildings/add-buildrequest', [LifeformsController::class, 'addBuildRequest'])->name('lifeforms.buildings.addbuildrequest.post');
     Route::post('/lifeforms/buildings/cancel-buildrequest', [LifeformsController::class, 'cancelBuildRequest'])->name('lifeforms.buildings.cancelbuildrequest');
+    Route::get('/lifeforms/research', [LifeformsController::class, 'research'])->name('lifeforms.research');
+    Route::get('/ajax/lifeforms/research', [LifeformsController::class, 'researchAjax'])->name('lifeforms.research.ajax');
+    Route::post('/lifeforms/research/choose', [LifeformsController::class, 'chooseSlot'])->name('lifeforms.research.choose');
+    Route::post('/lifeforms/research/reset', [LifeformsController::class, 'resetTier'])->name('lifeforms.research.reset');
+    Route::post('/lifeforms/research/restore', [LifeformsController::class, 'restoreTier'])->name('lifeforms.research.restore');
 
     // Facilities
     Route::get('/facilities', [FacilitiesController::class, 'index'])->name('facilities.index');

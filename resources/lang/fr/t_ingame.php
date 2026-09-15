@@ -1115,6 +1115,7 @@ return [
         'menu_resources' => 'Ressources',
         'menu_lifeforms' => 'Formes de vie',
         'menu_lifeforms_buildings_title' => 'Bâtiments de formes de vie',
+        'menu_lifeforms_research_title' => 'Recherches de formes de vie',
         'menu_facilities' => 'Installations',
         'menu_merchant' => 'Marchand',
         'menu_research' => 'Recherche',

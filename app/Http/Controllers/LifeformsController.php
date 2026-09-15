@@ -11,14 +11,18 @@ use OGame\Facades\AppUtil;
 use OGame\Lifeforms\Catalogue\LifeformCatalogue;
 use OGame\Lifeforms\Catalogue\LifeformFormulas;
 use OGame\Lifeforms\Catalogue\LifeformKind;
+use OGame\Lifeforms\Demography\PlanetLifeformProfile;
 use OGame\Lifeforms\LifeformRefused;
 use OGame\Lifeforms\Presentation\LifeformBanner;
 use OGame\Lifeforms\Presentation\LifeformEffectPresenter;
+use OGame\Lifeforms\Research\LifeformExperience;
+use OGame\Lifeforms\Research\LifeformSlotRules;
 use OGame\Lifeforms\Rules\LifeformRuleRevisions;
 use OGame\Lifeforms\Services\LifeformInstallationService;
 use OGame\Lifeforms\Services\LifeformLevels;
 use OGame\Lifeforms\Services\LifeformQueueService;
 use OGame\Lifeforms\Services\LifeformQuote;
+use OGame\Lifeforms\Services\LifeformResearchService;
 use OGame\Lifeforms\Species;
 use OGame\Models\Lifeforms\LifeformPlanet;
 use OGame\Models\Lifeforms\LifeformQueue;
@@ -45,6 +49,7 @@ final class LifeformsController extends OGameController
         private readonly LifeformRuleRevisions $revisions,
         private readonly LifeformBanner $banner,
         private readonly LifeformEffectPresenter $effects,
+        private readonly LifeformResearchService $research,
     ) {
     }
 
@@ -63,13 +68,19 @@ final class LifeformsController extends OGameController
         $especes = [];
         foreach (Species::cases() as $espece) {
             $experience = $progres->get($espece->value);
+            $points = $experience === null ? 0 : (int)$experience->experience;
+            [$acquis, $requis] = LifeformExperience::progressOf($points);
             $especes[] = [
                 'species' => $espece,
                 'name' => __('t_lifeforms.species.' . $espece->machineName()),
                 'lore' => __('t_lifeforms_ui.lore.' . $espece->machineName()),
                 'usage' => __('t_lifeforms_ui.usage.' . $espece->machineName()),
                 'chosen' => $choisie === $espece,
-                'experience' => $experience === null ? 0 : (int)$experience->experience,
+                'experience' => $points,
+                'experience_level' => LifeformExperience::levelOf($points),
+                'experience_progress' => $acquis,
+                'experience_needed' => $requis,
+                'experience_bonus' => LifeformExperience::bonusFraction(LifeformExperience::levelOf($points)) * 100,
                 'buildings' => LifeformCatalogue::buildingsOf($espece),
                 'technologies' => LifeformCatalogue::technologiesOf($espece),
             ];
@@ -290,6 +301,277 @@ final class LifeformsController extends OGameController
         }
 
         return response()->json(['status' => 'success', 'message' => __('t_lifeforms_ui.buildings.canceled')]);
+    }
+
+    /**
+     * Les dix-huit emplacements de recherche de la planete courante, en trois paliers.
+     */
+    public function research(PlayerService $player): View|RedirectResponse
+    {
+        $this->requireOpen();
+        $this->setBodyId('lifeforms');
+        $planet = $player->planets->current();
+        $espece = $this->installation->speciesOf($player->getId());
+        if ($espece === null) {
+            return redirect()->route('lifeforms.index')->with('status', __('t_lifeforms_ui.buildings.choose_first'));
+        }
+        if (!$planet->isPlanet()) {
+            return redirect()->route('overview.index')->with('status', __('t_lifeforms_ui.buildings.not_on_a_moon'));
+        }
+        $etat = $this->stateOf($planet);
+        if ($etat === null) {
+            return redirect()->route('lifeforms.index')->with('status', __('t_lifeforms_ui.buildings.choose_first'));
+        }
+
+        $maintenant = (int)Date::now()->timestamp;
+        $niveaux = $this->levels->buildingLevelsOf($planet->getPlanetId());
+        $niveauxTechnologies = $this->levels->technologyLevelsOf($planet->getPlanetId());
+        $vitesses = $this->revisions->live();
+        $profil = PlanetLifeformProfile::fromLevels($espece, $niveaux, $vitesses->demography());
+        $reduction = $this->research->requirementReduction($espece, $niveaux);
+        $emplacements = $this->research->slotsOf($planet->getPlanetId());
+        $enFile = $this->queue->queued($planet->getPlanetId(), LifeformKind::Technology);
+        $enCours = $enFile->firstWhere('status', 'running');
+        $filePleine = $enFile->where('status', 'waiting')->count() >= LifeformQueueService::MAX_WAITING_PER_KIND;
+        $centreOuvert = $this->queue->requirementsMet(LifeformCatalogue::technologiesOf($espece)[0], $niveaux);
+        $vacances = $player->isInVacationMode();
+        $autresEspeces = array_values(array_filter($this->research->discoveredSpeciesOf($player->getId()), fn (Species $s) => $s !== $espece));
+
+        $paliers = [];
+        foreach ([1, 2, 3] as $palier) {
+            $lignes = [];
+            $objetsDuPalier = [];
+            $dernierReset = 0;
+            $precedents = false;
+            foreach (LifeformSlotRules::slotsOfTier($palier) as $slot) {
+                $ligne = $emplacements[$slot];
+                $dernierReset = max($dernierReset, (int)($ligne->reset_at ?? 0));
+                $precedents = $precedents || $ligne->previous_object_id !== null;
+                $ouvert = $this->research->isUnlocked($slot, $etat, $profil, $reduction);
+                $objet = $ligne->object_id === null ? null : LifeformCatalogue::byId((int)$ligne->object_id);
+                if ($objet !== null) {
+                    $objetsDuPalier[] = $objet->id;
+                }
+                $niveau = $objet === null ? 0 : ($niveauxTechnologies[$objet->id] ?? 0);
+                $enCoursIci = $objet !== null && $enCours !== null && (int)$enCours->object_id === $objet->id;
+                $peutRechercher = false;
+                if ($objet !== null && $ouvert && $centreOuvert && !$filePleine && !$vacances && !$enCoursIci) {
+                    $cible = $niveau + $enFile->where('object_id', $objet->id)->count() + 1;
+                    $devis = LifeformQuote::for($objet, $cible, $niveaux, 0, 0, $vitesses);
+                    $peutRechercher = $planet->hasResources($devis->price);
+                }
+                $lignes[] = [
+                    'slot' => $slot,
+                    'position' => LifeformSlotRules::positionOf($slot),
+                    'unlocked' => $ouvert,
+                    'required' => AppUtil::formatNumber((int)ceil(LifeformSlotRules::populationRequired($slot, $reduction))),
+                    'object' => $objet,
+                    'title' => $objet === null ? null : __('t_lifeforms.' . $objet->machineName . '.title'),
+                    'level' => $niveau,
+                    'building_now' => $enCoursIci,
+                    'building_target' => $enCoursIci ? (int)$enCours->target_level : null,
+                    'can_research' => $peutRechercher,
+                    'centre_open' => $centreOuvert,
+                ];
+            }
+            $rechercheDuPalier = $enFile->whereIn('object_id', $objetsDuPalier)->isNotEmpty();
+            $paliers[$palier] = [
+                'slots' => $lignes,
+                'population' => AppUtil::formatNumber((int)floor($this->research->tierPopulationOf(LifeformSlotRules::slotOf($palier, 1), $etat, $profil))),
+                'can_reset' => $objetsDuPalier !== [] && !$rechercheDuPalier && ($dernierReset === 0 || $maintenant - $dernierReset >= LifeformResearchService::RESET_COOLDOWN),
+                'reset_available_at' => $dernierReset === 0 ? null : $dernierReset + LifeformResearchService::RESET_COOLDOWN,
+                'can_restore' => $objetsDuPalier === [] && $precedents && $dernierReset > 0 && $maintenant - $dernierReset <= LifeformResearchService::RESTORE_WINDOW,
+                'research_in_progress' => $rechercheDuPalier,
+            ];
+        }
+
+        return view('ingame.lifeforms.research', [
+            'species' => $espece,
+            'species_name' => __('t_lifeforms.species.' . $espece->machineName()),
+            'planet_name' => $planet->getPlanetName(),
+            'header_filename' => $this->headerOf($planet),
+            'tiers' => $paliers,
+            'other_species' => $autresEspeces,
+            'queue_active' => $enCours,
+            'queue_waiting' => $enFile->where('status', 'waiting')->values(),
+            'is_in_vacation_mode' => $vacances,
+            'lifeforms_error' => session('lifeforms_error'),
+        ]);
+    }
+
+    /**
+     * Le detail d une technologie d un emplacement, ou le choix d un emplacement vide (identifiants
+     * 9001 a 9018).
+     */
+    public function researchAjax(Request $request, PlayerService $player): JsonResponse
+    {
+        $this->requireOpen();
+        $planet = $player->planets->current();
+        $espece = $this->installation->speciesOf($player->getId());
+        $id = (int)$request->input('technology');
+        $etat = $espece === null || !$planet->isPlanet() ? null : $this->stateOf($planet);
+        if ($espece === null || $etat === null) {
+            return response()->json(['success' => false, 'message' => __('t_lifeforms_ui.refused.no_species')], 404);
+        }
+        $niveaux = $this->levels->buildingLevelsOf($planet->getPlanetId());
+        $vitesses = $this->revisions->live();
+        $profil = PlanetLifeformProfile::fromLevels($espece, $niveaux, $vitesses->demography());
+        $reduction = $this->research->requirementReduction($espece, $niveaux);
+
+        if ($id >= 9001 && $id <= 9000 + LifeformSlotRules::SLOTS) {
+            $slot = $id - 9000;
+            $ligne = $this->research->slotsOf($planet->getPlanetId())[$slot];
+            if ($ligne->object_id !== null || !$this->research->isUnlocked($slot, $etat, $profil, $reduction)) {
+                return response()->json(['success' => false, 'message' => __('t_lifeforms_ui.refused.slot_locked')], 404);
+            }
+            $palier = LifeformSlotRules::tierOf($slot);
+            $position = LifeformSlotRules::positionOf($slot);
+            $compte = $this->installation->accountOf($player->getId());
+            $autres = [];
+            foreach ($this->research->discoveredSpeciesOf($player->getId()) as $decouverte) {
+                if ($decouverte === $espece) {
+                    continue;
+                }
+                $technologie = LifeformResearchService::technologyAt($decouverte, $palier, $position);
+                $autres[] = [
+                    'species' => $decouverte,
+                    'species_name' => __('t_lifeforms.species.' . $decouverte->machineName()),
+                    'object' => $technologie,
+                    'title' => __('t_lifeforms.' . $technologie->machineName . '.title'),
+                    'description' => __('t_lifeforms.' . $technologie->machineName . '.description'),
+                    'taken' => $this->research->slotHolding($planet->getPlanetId(), $technologie->id) !== null,
+                ];
+            }
+            $locale = LifeformResearchService::technologyAt($espece, $palier, $position);
+            $html = view('ingame.lifeforms.ajax.slot', [
+                'slot' => $slot,
+                'tier' => $palier,
+                'position' => $position,
+                'local' => $locale,
+                'local_title' => __('t_lifeforms.' . $locale->machineName . '.title'),
+                'local_description' => __('t_lifeforms.' . $locale->machineName . '.description'),
+                'local_taken' => $this->research->slotHolding($planet->getPlanetId(), $locale->id) !== null,
+                'others' => $autres,
+                'artifact_cost' => LifeformSlotRules::ARTIFACT_COST[$palier],
+                'artifacts' => $compte === null ? 0 : (int)$compte->artifacts,
+            ])->render();
+
+            return response()->json(['target' => 'technologydetails', 'content' => ['technologydetails' => $html], 'files' => ['js' => [], 'css' => []], 'newAjaxToken' => csrf_token()]);
+        }
+
+        if (!LifeformCatalogue::has($id)) {
+            return response()->json(['success' => false, 'message' => __('t_lifeforms_ui.refused.unknown_object')], 404);
+        }
+        $objet = LifeformCatalogue::byId($id);
+        $emplacement = $this->research->slotHolding($planet->getPlanetId(), $objet->id);
+        if ($objet->kind !== LifeformKind::Technology || $emplacement === null) {
+            return response()->json(['success' => false, 'message' => __('t_lifeforms_ui.refused.wrong_slot')], 404);
+        }
+        $niveauxTechnologies = $this->levels->technologyLevelsOf($planet->getPlanetId());
+        $niveau = $niveauxTechnologies[$objet->id] ?? 0;
+        $enFile = $this->queue->queued($planet->getPlanetId(), LifeformKind::Technology);
+        $enCours = $enFile->firstWhere('status', 'running');
+        $cible = $niveau + $enFile->where('object_id', $objet->id)->count() + 1;
+        $devis = LifeformQuote::for($objet, $cible, $niveaux, 0, 0, $vitesses);
+        $multiplicateur = $this->research->technologyBonusMultiplier($player->getId(), $espece, $niveaux);
+        $ouvert = $this->research->isUnlocked((int)$emplacement->slot, $etat, $profil, $reduction);
+
+        $effets = [];
+        foreach ($objet->bonuses as $bonus) {
+            if ($bonus->isUnassigned()) {
+                continue;
+            }
+            $effets[] = [
+                'code' => $bonus->code,
+                'label' => __('t_lifeforms_ui.effects.' . $bonus->code, ['target' => $bonus->target === null ? '' : __('t_resources.' . $bonus->target . '.title')]),
+                'now' => self::pourcent(LifeformFormulas::technologyBonusPercent($bonus, $niveau, $multiplicateur - 1)),
+                'next' => self::pourcent(LifeformFormulas::technologyBonusPercent($bonus, $cible, $multiplicateur - 1)),
+            ];
+        }
+
+        $raison = null;
+        if ($player->isInVacationMode()) {
+            $raison = __('t_ingame.ajax_object.vacation_mode');
+        } elseif (!$this->queue->requirementsMet($objet, $niveaux)) {
+            $raison = __('t_lifeforms_ui.research.centre_needed');
+        } elseif (!$ouvert) {
+            $raison = __('t_lifeforms_ui.refused.slot_locked');
+        } elseif ($enFile->where('status', 'waiting')->count() >= LifeformQueueService::MAX_WAITING_PER_KIND) {
+            $raison = __('t_ingame.buildings.queue_full');
+        } elseif (!$planet->hasResources($devis->price)) {
+            $raison = __('t_ingame.buildings.not_enough_resources');
+        }
+
+        $html = view('ingame.lifeforms.ajax.technology', [
+            'object' => $objet,
+            'title' => __('t_lifeforms.' . $objet->machineName . '.title'),
+            'description' => __('t_lifeforms.' . $objet->machineName . '.description'),
+            'species_name' => __('t_lifeforms.species.' . $objet->species->machineName()),
+            'slot' => (int)$emplacement->slot,
+            'tier' => LifeformSlotRules::tierOf((int)$emplacement->slot),
+            'current_level' => $niveau,
+            'next_level' => $cible,
+            'price' => $devis->price,
+            'production_time' => AppUtil::formatTimeDuration($devis->duration),
+            'population_required' => AppUtil::formatNumber((int)ceil(LifeformSlotRules::populationRequired((int)$emplacement->slot, $reduction))),
+            'effects' => $effets,
+            'planet' => $planet,
+            'can_build' => $raison === null,
+            'reason' => $raison,
+            'active_item' => $enCours !== null && (int)$enCours->object_id === $objet->id ? $enCours : null,
+        ])->render();
+
+        return response()->json(['target' => 'technologydetails', 'content' => ['technologydetails' => $html], 'files' => ['js' => [], 'css' => []], 'newAjaxToken' => csrf_token()]);
+    }
+
+    /**
+     * Le choix de la technologie d un emplacement : locale, tiree au sort, ou par artefacts.
+     */
+    public function chooseSlot(Request $request, PlayerService $player): RedirectResponse
+    {
+        $this->requireOpen();
+        $valide = $request->validate(['slot' => ['required', 'integer', 'min:1', 'max:18'], 'choice' => ['required', 'string', 'regex:/^(local|random|[0-9]{5})$/']]);
+        try {
+            $this->research->choose($player->planets->current()->getPlanetId(), $player->getId(), (int)$valide['slot'], (string)$valide['choice'], (int)Date::now()->timestamp);
+        } catch (LifeformRefused $refus) {
+            return redirect()->route('lifeforms.research')->with('lifeforms_error', __($refus->translationKey()));
+        }
+
+        return redirect()->route('lifeforms.research')->with('status', __('t_lifeforms_ui.research.chosen_done', ['slot' => (int)$valide['slot']]));
+    }
+
+    public function resetTier(Request $request, PlayerService $player): RedirectResponse
+    {
+        $this->requireOpen();
+        $valide = $request->validate(['tier' => ['required', 'integer', 'min:1', 'max:3']]);
+        try {
+            $this->research->resetTier($player->planets->current()->getPlanetId(), (int)$valide['tier'], (int)Date::now()->timestamp);
+        } catch (LifeformRefused $refus) {
+            return redirect()->route('lifeforms.research')->with('lifeforms_error', __($refus->translationKey()));
+        }
+
+        return redirect()->route('lifeforms.research')->with('status', __('t_lifeforms_ui.research.reset_done', ['tier' => (int)$valide['tier']]));
+    }
+
+    public function restoreTier(Request $request, PlayerService $player): RedirectResponse
+    {
+        $this->requireOpen();
+        $valide = $request->validate(['tier' => ['required', 'integer', 'min:1', 'max:3']]);
+        try {
+            $this->research->restoreTier($player->planets->current()->getPlanetId(), (int)$valide['tier'], (int)Date::now()->timestamp);
+        } catch (LifeformRefused $refus) {
+            return redirect()->route('lifeforms.research')->with('lifeforms_error', __($refus->translationKey()));
+        }
+
+        return redirect()->route('lifeforms.research')->with('status', __('t_lifeforms_ui.research.restore_done', ['tier' => (int)$valide['tier']]));
+    }
+
+    private static function pourcent(float $valeur): string
+    {
+        $arrondi = round($valeur, 2);
+        $texte = rtrim(rtrim(number_format($arrondi, 2, '.', ''), '0'), '.');
+
+        return ($arrondi > 0 ? '+' : '') . $texte . ' %';
     }
 
     private function requireOpen(): void

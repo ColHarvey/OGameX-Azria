@@ -1378,6 +1378,7 @@ return [
         'menu_resources'            => 'Resources',
         'menu_lifeforms'            => 'Lifeforms',
         'menu_lifeforms_buildings_title' => 'Lifeform buildings',
+        'menu_lifeforms_research_title' => 'Lifeform research',
         'menu_facilities'           => 'Facilities',
         'menu_merchant'             => 'Merchant',
         'menu_research'             => 'Research',

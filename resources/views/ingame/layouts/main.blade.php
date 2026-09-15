@@ -611,10 +611,10 @@
                     </style>
                     <li id="menu-lifeforms">
                         <span class="menu_icon">
-                            <a href="{{ route('lifeforms.buildings') }}"
+                            <a href="{{ route('lifeforms.research') }}"
                                class="tooltipRight js_hideTipOnMobile "
                                target="_self"
-                               title="{{ __('t_ingame.layout.menu_lifeforms_buildings_title') }}">
+                               title="{{ __('t_ingame.layout.menu_lifeforms_research_title') }}">
                                 <div class="menuImage lifeform {{(Request::is('lifeforms*') ? 'highlighted' : '') }}"></div>
                             </a>
                         </span>
