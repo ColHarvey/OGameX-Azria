@@ -5,6 +5,7 @@ namespace Tests\Unit\Combat;
 use OGame\Combat\Exceptions\CorruptedFrozenMoonPlan;
 use OGame\Combat\Services\PhotographedDefender;
 use OGame\Combat\Support\FrozenCombatCharacteristics;
+use OGame\Combat\Support\FrozenLifeformCombatBonuses;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -92,9 +93,35 @@ final class PhotographedDefenderFactsTest extends TestCase
         $releve = $defenseur->withCombatCharacteristics(new FrozenCombatCharacteristics(3, 1, 7, 0));
 
         $this->assertSame(
-            ['weapon_level' => 3, 'shield_level' => 1, 'armor_level' => 7, 'class_combat_bonus' => 0, 'space_dock_level' => 5],
+            ['weapon_level' => 3, 'shield_level' => 1, 'armor_level' => 7, 'class_combat_bonus' => 0, 'space_dock_level' => 5, 'lifeform_bonuses' => FrozenLifeformCombatBonuses::none()->toFrozenFacts()],
             $releve->toFrozenFacts()
         );
+    }
+
+    /**
+     * **Les bonus de formes de vie voyagent avec le defenseur** : les unites viennent avec les tirs releves, les faits
+     * du corps (population, lune, debris, epaves) restent ceux de la photographie ; un document d avant se relit sans rien.
+     */
+    public function testLifeformBonusesTravelWithTheDefenderAndAreAbsentFromOlderDocuments(): void
+    {
+        $corps = new FrozenLifeformCombatBonuses(['defence' => 5.0], 0.3, 0.1, 0.06, 0.13);
+        $defenseur = new PhotographedDefender(12, 9, 4, 2, 5, $corps);
+
+        $this->assertSame($defenseur->toFrozenFacts(), PhotographedDefender::fromFrozenFacts($defenseur->toFrozenFacts())->toFrozenFacts());
+        $this->assertSame(0.3, $defenseur->withResearchLevel('weapon_technology', 14)->lifeformBonuses->protectedShare);
+        $this->assertSame(0.13, $defenseur->withSpaceDockLevel(8)->lifeformBonuses->wreckRecovery);
+
+        $releve = $defenseur->withCombatCharacteristics(new FrozenCombatCharacteristics(3, 1, 7, 0, new FrozenLifeformCombatBonuses(['light_fighter' => 3.0], null, 0.0, 0.0, 0.0)));
+        $this->assertSame(['light_fighter' => 3.0], $releve->lifeformBonuses->unitStats, 'Les unites viennent avec les tirs.');
+        $this->assertSame(0.3, $releve->lifeformBonuses->protectedShare, 'La population protegee reste celle du corps.');
+        $this->assertSame(0.06, $releve->lifeformBonuses->debrisRecovery);
+
+        $ancien = self::facts();
+        $this->assertArrayNotHasKey('lifeform_bonuses', $ancien);
+        $this->assertTrue(PhotographedDefender::fromFrozenFacts($ancien)->lifeformBonuses->isNone(), 'Un document de version 7 ne porte aucune forme de vie.');
+
+        $this->expectException(CorruptedFrozenMoonPlan::class);
+        PhotographedDefender::fromFrozenFacts(self::facts(['lifeform_bonuses' => ['unit_stats' => [], 'protected_share' => '0.3', 'moon_chance' => 0, 'debris_recovery' => 0, 'wreck_recovery' => 0]]));
     }
 
     /**

@@ -13,6 +13,7 @@ use OGame\Factories\PlanetServiceFactory;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Hull\DamagedHulls;
+use OGame\Lifeforms\Combat\LifeformCombatPhotographer;
 use OGame\Models\CombatInstance;
 use OGame\Models\Planet;
 use OGame\Models\Resources;
@@ -66,7 +67,11 @@ use RuntimeException;
  */
 final class OpeningStateRecorder
 {
-    public const int VERSION = 7;
+    /**
+     * La version 8 ajoute au defenseur ses bonus de formes de vie (unites, population protegee, lune,
+     * debris, epaves) ; un document de version 7 se relit sans eux (journal §155.6).
+     */
+    public const int VERSION = 8;
 
     public function __construct(
         private CausalEventReader $reader = new CausalEventReader(),
@@ -278,7 +283,7 @@ final class OpeningStateRecorder
     }
 
     /**
-     * @return array<string, int>
+     * @return array<string, int|array<string, mixed>>
      */
     private static function defenderFactsOf(PlanetService $corps): array
     {
@@ -300,6 +305,9 @@ final class OpeningStateRecorder
             // a paye.
             $proprietaire->getCombatResearchBonusLevels(),
             $chantier->getObjectLevel('space_dock'),
+            // **Les formes de vie du corps et de son proprietaire, photographiees ici** : ce qu elles apportent
+            // a la defense, a la population, a la lune et aux debris ne se relit plus (journal §155.6).
+            resolve(LifeformCombatPhotographer::class)->ofBody($corps),
         ))->toFrozenFacts();
     }
 

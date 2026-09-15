@@ -36,8 +36,9 @@ use OGame\Services\SettingsService;
  *
  * ## Ce que le resolveur sert, et ce qu il ne sert pas
  *
- * `APPLIED` nomme les effets qu il resout ; `HANDLED_ELSEWHERE` ceux que la demographie, la file et les
- * decouvertes appliquent deja ; `NOT_YET_APPLIED` ceux qui attendent une tranche ou une decision
+ * `APPLIED` nomme les effets qu il resout (lune et debris compris : le moteur les lit par la photographie de
+ * combat, journal §155.6) ; `HANDLED_ELSEWHERE` ceux que la demographie, la file et les decouvertes appliquent
+ * deja ; `NOT_YET_APPLIED` ceux qui attendent une decision
  * (`LifeformBonusResolverTest` exige que chaque code du catalogue soit dans une des trois listes : rien
  * ne se perd en silence). Champs de planete du Bio-modificateur : le fichier maitre dit « 200 par
  * niveau », ni un pourcentage ni un nombre de champs credible — non applique tant que ce n est pas
@@ -82,6 +83,8 @@ final class LifeformBonusResolver
         LifeformEffect::EXPEDITION_SPEED,
         LifeformEffect::EXPEDITION_DARK_MATTER,
         LifeformEffect::CLASS_BONUS,
+        LifeformEffect::MOON_CHANCE,
+        LifeformEffect::DEBRIS_RECOVERY,
     ];
 
     public const array HANDLED_ELSEWHERE = [
@@ -108,12 +111,10 @@ final class LifeformBonusResolver
     ];
 
     /**
-     * Attendent une tranche (combat : lune, debris) ou une decision (champs, remboursement au rappel).
+     * Attendent une decision (champs de planete, remboursement au rappel) — journal §155.5.
      */
     public const array NOT_YET_APPLIED = [
         LifeformEffect::PLANET_FIELDS,
-        LifeformEffect::MOON_CHANCE,
-        LifeformEffect::DEBRIS_RECOVERY,
         LifeformEffect::RECALL_FUEL_REFUND,
     ];
 

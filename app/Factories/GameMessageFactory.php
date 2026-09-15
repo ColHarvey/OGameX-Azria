@@ -39,6 +39,7 @@ use OGame\GameMessages\FleetDeploymentWithResources;
 use OGame\GameMessages\FleetLostContact;
 use OGame\GameMessages\FleetUnionInvite;
 use OGame\GameMessages\LifeformDiscoveryReport;
+use OGame\GameMessages\LifeformPopulationLossReport;
 use OGame\GameMessages\MissileAttackReport;
 use OGame\GameMessages\MissileDefenseReport;
 use OGame\GameMessages\MoonDestroyed;
@@ -89,6 +90,7 @@ class GameMessageFactory
         'combat_rally_refused' => CombatRallyRefused::class,
         'combat_cancelled' => CombatCancelled::class,
         'lifeform_discovery_report' => LifeformDiscoveryReport::class,
+        'lifeform_population_loss' => LifeformPopulationLossReport::class,
         'debris_field_harvest' => DebrisFieldHarvest::class,
 
         'expedition_battle' => ExpeditionBattle::class,

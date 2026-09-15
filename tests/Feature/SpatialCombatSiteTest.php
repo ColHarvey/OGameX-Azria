@@ -258,6 +258,12 @@ class SpatialCombatSiteTest extends AccountTestCase
             'app/GameMissions/BattleEngine/BattleEngine.php' => ['this->defenderPlanet', 'spaceDockPlanet'],
             'app/GameMissions/BattleEngine/Services/TacticalRetreatService.php' => ['defenderPlanet', 'planet'],
             'app/Combat/Support/CombatParticipantKey.php' => ['body'],
+            // **Les formes de vie recoivent le defenseur elles aussi** (journal §155.6). L oubli a ete paye : le
+            // moteur ne l interroge pas directement, il le **passe** au photographe, et la garde — qui ne lisait
+            // que les appels ecrits dans le moteur — est restee verte pendant que dix-neuf essais tombaient a la
+            // suite complete. Les deux services qui le recoivent sont donc inventories ici.
+            'app/Lifeforms/Combat/LifeformCombatPhotographer.php' => ['body'],
+            'app/Lifeforms/Combat/LifeformCombatLosses.php' => ['planet'],
         ];
 
         $demandees = [];

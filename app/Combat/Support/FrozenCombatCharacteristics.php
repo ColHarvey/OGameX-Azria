@@ -2,6 +2,8 @@
 
 namespace OGame\Combat\Support;
 
+use OGame\Combat\Exceptions\CorruptedFrozenMoonPlan;
+
 /**
  * Ce qu un participant apporte a ses tirs : trois niveaux de recherche et le bonus de ses classes.
  *
@@ -23,12 +25,20 @@ namespace OGame\Combat\Support;
  */
 final readonly class FrozenCombatCharacteristics
 {
+    /**
+     * Les bonus de formes de vie sur les unites de ce combattant (journal §155.6) ; aucun pour une ligne
+     * ecrite avant qu ils existent.
+     */
+    public FrozenLifeformCombatBonuses $lifeformBonuses;
+
     public function __construct(
         public int $weaponLevel,
         public int $shieldLevel,
         public int $armorLevel,
         public int $classCombatBonus,
+        FrozenLifeformCombatBonuses|null $lifeformBonuses = null,
     ) {
+        $this->lifeformBonuses = $lifeformBonuses ?? FrozenLifeformCombatBonuses::none();
     }
 
     /**
@@ -47,11 +57,34 @@ final readonly class FrozenCombatCharacteristics
             FrozenFact::int($row, 'shield_level'),
             FrozenFact::int($row, 'armor_level'),
             FrozenFact::int($row, 'class_combat_bonus'),
+            self::lifeformBonusesOf($row),
         );
     }
 
     /**
-     * @return array{weapon_level: int, shield_level: int, armor_level: int, class_combat_bonus: int}
+     * La colonne JSON des bonus de formes de vie : absente ou nulle pour une ligne d avant, relue depuis
+     * la base comme un texte JSON, ou deja une structure quand elle vient de `toStorage()`.
+     *
+     * @param array<string, mixed> $row
+     */
+    private static function lifeformBonusesOf(array $row): FrozenLifeformCombatBonuses
+    {
+        $valeur = $row['lifeform_bonuses'] ?? null;
+        if ($valeur === null) {
+            return FrozenLifeformCombatBonuses::none();
+        }
+        if (is_string($valeur)) {
+            $valeur = json_decode($valeur, true);
+        }
+        if (!is_array($valeur)) {
+            throw new CorruptedFrozenMoonPlan('le fait « lifeform_bonuses » n est ni nul, ni une structure, ni un document JSON lisible', $row);
+        }
+
+        return FrozenLifeformCombatBonuses::fromFrozenFacts($valeur);
+    }
+
+    /**
+     * @return array{weapon_level: int, shield_level: int, armor_level: int, class_combat_bonus: int, lifeform_bonuses: array<string, mixed>}
      */
     public function toStorage(): array
     {
@@ -60,6 +93,7 @@ final readonly class FrozenCombatCharacteristics
             'shield_level' => $this->shieldLevel,
             'armor_level' => $this->armorLevel,
             'class_combat_bonus' => $this->classCombatBonus,
+            'lifeform_bonuses' => $this->lifeformBonuses->toFrozenFacts(),
         ];
     }
 }

@@ -239,9 +239,9 @@ class WreckFieldService
      * @param int $spaceDockLevel
      * @return array
      */
-    public function calculateShipsForWreckField(UnitCollection $destroyedShips, int $spaceDockLevel = 1, int|null $planetId = null): array
+    public function calculateShipsForWreckField(UnitCollection $destroyedShips, int $spaceDockLevel = 1, int|null $planetId = null, float|null $frozenLifeformBonus = null): array
     {
-        $wreckFieldPercentage = $this->getRecoverableWreckFieldPercentage($spaceDockLevel, $planetId) / 100;
+        $wreckFieldPercentage = $this->getRecoverableWreckFieldPercentage($spaceDockLevel, $planetId, $frozenLifeformBonus) / 100;
         $shipData = [];
 
         foreach ($destroyedShips->units as $unit) {
@@ -961,7 +961,7 @@ class WreckFieldService
     /**
      * Get the percentage of destroyed ships that become repairable wreckage for a Space Dock level.
      */
-    public function getRecoverableWreckFieldPercentage(int $spaceDockLevel, int|null $planetId = null): float
+    public function getRecoverableWreckFieldPercentage(int $spaceDockLevel, int|null $planetId = null, float|null $frozenLifeformBonus = null): float
     {
         $nonDebrisShare = max(0.0, 100.0 - $this->debrisFieldFromShips());
         $normalizedLevel = max(1, min(15, $spaceDockLevel));
@@ -970,11 +970,13 @@ class WreckFieldService
 
         // Formes de vie : les Nano-robots de reparation de la planete (plafonnes a 50 %) rendent plus d epaves
         // reparables, jamais plus de 100 % (journal §155.5).
-        if ($planetId !== null) {
+        // Un combat durable passe la part photographiee a l ouverture ; sans elle, la planete est lue vivante.
+        $bonus = $frozenLifeformBonus;
+        if ($bonus === null && $planetId !== null) {
             $bonus = app(LifeformBonusResolver::class)->forPlanet($planetId)->fraction(LifeformEffect::WRECK_RECOVERY);
-            if ($bonus > 0) {
-                $part = round(min(100.0, $part * (1 + $bonus)), 1);
-            }
+        }
+        if ($bonus !== null && $bonus > 0) {
+            $part = round(min(100.0, $part * (1 + $bonus)), 1);
         }
 
         return $part;

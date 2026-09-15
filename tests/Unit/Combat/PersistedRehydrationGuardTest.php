@@ -52,6 +52,10 @@ class PersistedRehydrationGuardTest extends TestCase
             'tests/Unit/Combat/FrozenCombatCharacteristicsTest.php',
             'testANumericStringOrAFloatLevelIsRefused',
         ],
+        'Combat/Support/FrozenLifeformCombatBonuses::fromFrozenFacts' => [
+            'tests/Unit/Combat/FrozenLifeformCombatBonusesTest.php',
+            'testANumericStringPercentIsRefused',
+        ],
         'Combat/Admission/FrozenAllianceMembership::fromStorage' => [
             'tests/Unit/Combat/FrozenAllianceMembershipTest.php',
             'testAStoredIdentifierOfTheWrongTypeIsRefused',

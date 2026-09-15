@@ -12,6 +12,7 @@ use OGame\Combat\Policies\CargoWeightedV1;
 use OGame\Combat\Services\PhotographedDefender;
 use OGame\Combat\Services\PhotographedUniverse;
 use OGame\Combat\Support\CombatParticipantKey;
+use OGame\Combat\Support\FrozenLifeformCombatBonuses;
 use OGame\Combat\Support\LootContext;
 use OGame\Combat\Support\ResourceNormalizationDiagnostics;
 use OGame\GameMissions\BattleEngine\Draws\BattleDraws;
@@ -25,6 +26,7 @@ use OGame\GameMissions\BattleEngine\Services\DefenseRepairService;
 use OGame\GameMissions\BattleEngine\Services\TacticalRetreatService;
 use OGame\GameObjects\Models\Enums\GameObjectType;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Lifeforms\Combat\LifeformCombatPhotographer;
 use OGame\Models\Resources;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
@@ -191,6 +193,21 @@ abstract class BattleEngine
         $this->photographedDefender = $defender;
 
         return $this;
+    }
+
+    /**
+     * Les bonus de formes de vie du corps defendu (lune, debris, epaves — journal §155.6) : ceux de la
+     * photographie d un combat durable, ou, sur le chemin instantane, ceux du corps a l arrivee, lus une fois.
+     */
+    private FrozenLifeformCombatBonuses|null $lifeformBonusesOfDefender = null;
+
+    protected function lifeformBonusesOfDefender(): FrozenLifeformCombatBonuses
+    {
+        if ($this->photographedDefender !== null) {
+            return $this->photographedDefender->lifeformBonuses;
+        }
+
+        return $this->lifeformBonusesOfDefender ??= resolve(LifeformCombatPhotographer::class)->ofBody($this->defenderPlanet);
     }
 
     /**
@@ -1054,6 +1071,14 @@ abstract class BattleEngine
         $defenseToDebrisPercentage = $univers !== null ? $univers->debrisFieldFromDefense : $this->settings->debrisFieldFromDefense();
         $deuteriumOn = $univers !== null ? $univers->debrisFieldDeuteriumOn : $this->settings->debrisFieldDeuteriumOn();
 
+        // Formes de vie : l Usine de recyclage avancee du corps rend plus de debris (plafonnee a 30 %), jamais
+        // plus que la valeur entiere des unites (journal §155.6).
+        $recuperation = $this->lifeformBonusesOfDefender()->debrisRecovery;
+        if ($recuperation > 0) {
+            $shipsToDebrisPercentage = min(100.0, $shipsToDebrisPercentage * (1 + $recuperation));
+            $defenseToDebrisPercentage = min(100.0, $defenseToDebrisPercentage * (1 + $recuperation));
+        }
+
         // Combine the attacker and defender losses to calculate the debris.
         $allUnitsLost = new UnitCollection();
         $allUnitsLost->addCollection($attackerUnitsLost);
@@ -1107,8 +1132,10 @@ abstract class BattleEngine
             $this->settings,
             $this->photographedUniverse !== null ? $this->photographedUniverse->debrisFieldFromShips : null
         );
-        $wreckFieldPercentage = $wreckFieldService->getRecoverableWreckFieldPercentage($spaceDockLevel, $spaceDockPlanet->getPlanetId()) / 100;
-        $wreckFieldData = $wreckFieldService->calculateShipsForWreckField($defenderUnitsLost, $spaceDockLevel, $spaceDockPlanet->getPlanetId());
+        // La part d epaves des Nano-robots vient de la meme photographie que la lune et les debris.
+        $epavesFormesDeVie = $this->lifeformBonusesOfDefender()->wreckRecovery;
+        $wreckFieldPercentage = $wreckFieldService->getRecoverableWreckFieldPercentage($spaceDockLevel, $spaceDockPlanet->getPlanetId(), $epavesFormesDeVie) / 100;
+        $wreckFieldData = $wreckFieldService->calculateShipsForWreckField($defenderUnitsLost, $spaceDockLevel, $spaceDockPlanet->getPlanetId(), $epavesFormesDeVie);
 
         // Check if wreck field conditions are met
         $totalLostValue = $defenderUnitsLost->toResources()->metal->get() +
@@ -1212,6 +1239,12 @@ abstract class BattleEngine
         // Every 100k debris results in 1% moon chance, up to a maximum
         // of max moon chance configured in server settings.
         $moon_chance = floor(($debris->sum()) / 100000);
+
+        // Formes de vie : le Supra-refracteur du corps augmente la chance (plafonnee a 30 %), sous le plafond de l univers.
+        $supra = $this->lifeformBonusesOfDefender()->moonChance;
+        if ($supra > 0) {
+            $moon_chance = floor($moon_chance * (1 + $supra));
+        }
         if ($moon_chance > $max_moon_chance) {
             $moon_chance = $max_moon_chance;
         }

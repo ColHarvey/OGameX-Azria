@@ -256,6 +256,7 @@ final class CombatRosterReader
                 $photographedDefender->shieldLevel,
                 $photographedDefender->armorLevel,
                 $this->entries()->garrisonClassBonusAt($combat, $ownerId, (int)$combat->started_at),
+                $photographedDefender->lifeformBonuses,
             ), $this->entries()->garrisonCharacterClassAt($combat, $ownerId, (int)$combat->started_at)),
             UnitCharacteristicsRule::FirstRule => new CombatantUnderTheFirstRule($ownerId),
         };

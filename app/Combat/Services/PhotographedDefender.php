@@ -4,6 +4,7 @@ namespace OGame\Combat\Services;
 
 use OGame\Combat\Support\FrozenCombatCharacteristics;
 use OGame\Combat\Support\FrozenFact;
+use OGame\Combat\Support\FrozenLifeformCombatBonuses;
 
 /**
  * Ce que le defenseur apporte a la bataille, fixe par la photographie.
@@ -25,13 +26,21 @@ use OGame\Combat\Support\FrozenFact;
  */
 final readonly class PhotographedDefender
 {
+    /**
+     * Les bonus de formes de vie du corps et de son proprietaire a l ouverture (journal §155.6) ; aucun
+     * pour un document ecrit sous une version anterieure — les formes de vie n existaient pas alors.
+     */
+    public FrozenLifeformCombatBonuses $lifeformBonuses;
+
     public function __construct(
         public int $weaponLevel,
         public int $shieldLevel,
         public int $armorLevel,
         public int $classCombatBonus,
         public int $spaceDockLevel,
+        FrozenLifeformCombatBonuses|null $lifeformBonuses = null,
     ) {
+        $this->lifeformBonuses = $lifeformBonuses ?? FrozenLifeformCombatBonuses::none();
     }
 
     /**
@@ -51,11 +60,14 @@ final readonly class PhotographedDefender
             FrozenFact::int($facts, 'armor_level'),
             FrozenFact::int($facts, 'class_combat_bonus'),
             FrozenFact::int($facts, 'space_dock_level'),
+            // **L absence est toleree ici**, comme pour les coques entamees : un document d avant la tranche 6
+            // ne porte aucune forme de vie, et « aucune » est la valeur juste — jamais le corps vivant.
+            array_key_exists('lifeform_bonuses', $facts) ? FrozenLifeformCombatBonuses::fromFrozenFacts(FrozenFact::array($facts, 'lifeform_bonuses')) : null,
         );
     }
 
     /**
-     * @return array<string, int>
+     * @return array<string, int|array<string, mixed>>
      */
     public function toFrozenFacts(): array
     {
@@ -65,6 +77,7 @@ final readonly class PhotographedDefender
             'armor_level' => $this->armorLevel,
             'class_combat_bonus' => $this->classCombatBonus,
             'space_dock_level' => $this->spaceDockLevel,
+            'lifeform_bonuses' => $this->lifeformBonuses->toFrozenFacts(),
         ];
     }
 
@@ -77,16 +90,16 @@ final readonly class PhotographedDefender
     public function withResearchLevel(string $machineName, int $level): self
     {
         return match ($machineName) {
-            'weapon_technology' => new self(max($this->weaponLevel, $level), $this->shieldLevel, $this->armorLevel, $this->classCombatBonus, $this->spaceDockLevel),
-            'shielding_technology' => new self($this->weaponLevel, max($this->shieldLevel, $level), $this->armorLevel, $this->classCombatBonus, $this->spaceDockLevel),
-            'armor_technology' => new self($this->weaponLevel, $this->shieldLevel, max($this->armorLevel, $level), $this->classCombatBonus, $this->spaceDockLevel),
+            'weapon_technology' => new self(max($this->weaponLevel, $level), $this->shieldLevel, $this->armorLevel, $this->classCombatBonus, $this->spaceDockLevel, $this->lifeformBonuses),
+            'shielding_technology' => new self($this->weaponLevel, max($this->shieldLevel, $level), $this->armorLevel, $this->classCombatBonus, $this->spaceDockLevel, $this->lifeformBonuses),
+            'armor_technology' => new self($this->weaponLevel, $this->shieldLevel, max($this->armorLevel, $level), $this->classCombatBonus, $this->spaceDockLevel, $this->lifeformBonuses),
             default => $this,
         };
     }
 
     public function withSpaceDockLevel(int $level): self
     {
-        return new self($this->weaponLevel, $this->shieldLevel, $this->armorLevel, $this->classCombatBonus, max($this->spaceDockLevel, $level));
+        return new self($this->weaponLevel, $this->shieldLevel, $this->armorLevel, $this->classCombatBonus, max($this->spaceDockLevel, $level), $this->lifeformBonuses);
     }
 
     /**
@@ -98,6 +111,7 @@ final readonly class PhotographedDefender
      */
     public function withCombatCharacteristics(FrozenCombatCharacteristics $faits): self
     {
-        return new self($faits->weaponLevel, $faits->shieldLevel, $faits->armorLevel, $faits->classCombatBonus, $this->spaceDockLevel);
+        // Les unites viennent avec les tirs ; les faits du corps (population, lune, debris, epaves) restent au corps.
+        return new self($faits->weaponLevel, $faits->shieldLevel, $faits->armorLevel, $faits->classCombatBonus, $this->spaceDockLevel, $this->lifeformBonuses->withUnitStatsOf($faits->lifeformBonuses));
     }
 }

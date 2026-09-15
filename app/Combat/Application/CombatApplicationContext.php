@@ -130,6 +130,16 @@ interface CombatApplicationContext
     public function applicationInstant(): int;
 
     /**
+     * La part de la population du corps vise que le Bouclier planetaire protege quand l attaque reussit,
+     * ou null si le corps ne porte aucune forme de vie (journal §155.6).
+     *
+     * Le chemin instantane la lit a l arrivee ; le combat durable la fige a la cloture **depuis la
+     * photographie d ouverture** : un bouclier livre pendant le ralliement ne protege pas une bataille
+     * deja engagee.
+     */
+    public function lifeformProtectedShareOf(PlanetService $target): float|null;
+
+    /**
      * Le dernier motif qu'une faction hostile a inscrit contre ce joueur.
      *
      * Il ne change pas ce qui est debite, mais il change ce que le rapport **raconte**. Le

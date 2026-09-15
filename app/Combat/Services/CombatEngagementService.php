@@ -201,7 +201,10 @@ final class CombatEngagementService
             // **La duree du retour de chaque attaquante, calculee ici sur ses survivants.** Le reglement
             // la relisait sur le joueur vivant : une propulsion recherchee pendant la bataille changeait
             // l'heure d'arrivee du retour d'un combat deja calcule.
-            $this->returnDurationsOf($effectif, $resultat)
+            $this->returnDurationsOf($effectif, $resultat),
+            // **La part de population protegee vient de la photographie d ouverture**, jamais du corps a la cloture :
+            // un Bouclier livre pendant le ralliement ne protege pas une bataille deja engagee (journal §155.6).
+            $photographedDefender->lifeformBonuses->protectedShare
         )->toStorage();
 
         // **Le resultat part avec son identite** : ce combat, cette cible, ces participants — inscrits

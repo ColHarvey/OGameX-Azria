@@ -65,12 +65,12 @@ final class CombatantFrozenAtEntry extends PlayerService
     }
 
     /**
-     * Les bonus de formes de vie ne sont pas encore dans la photographie (tranche 6) : zero, jamais une
-     * lecture vivante pendant la bataille.
+     * Les bonus de formes de vie sur ses unites, tels que l admission les a geles : jamais une lecture
+     * vivante pendant la bataille (journal §155.6).
      */
     public function getLifeformUnitStatsPercent(GameObject $object): float
     {
-        return 0.0;
+        return $this->characteristics->lifeformBonuses->unitStatsPercent($object);
     }
 
     /**

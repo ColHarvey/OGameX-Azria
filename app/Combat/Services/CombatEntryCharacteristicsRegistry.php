@@ -17,6 +17,7 @@ use OGame\Enums\CharacterClass;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\History\ClassHistoryReader;
 use OGame\History\HistoricValue;
+use OGame\Lifeforms\Combat\LifeformCombatPhotographer;
 use OGame\Models\CombatEntryCharacteristic;
 use OGame\Models\CombatInstance;
 use OGame\Models\ResearchQueue;
@@ -363,6 +364,9 @@ final class CombatEntryCharacteristicsRegistry
             $this->researchLevelAt($compte->getResearchLevel('shielding_technology'), $playerId, 'shielding_technology', $cleDAdmission, $ordre),
             $this->researchLevelAt($compte->getResearchLevel('armor_technology'), $playerId, 'armor_technology', $cleDAdmission, $ordre),
             $this->classBonusAt($quoi, $playerId, $instant),
+            // **Les bonus de formes de vie, lus a l admission et geles ensuite** : leurs niveaux n ont pas
+            // d historique ramenable a un instant, et c est le gel qui protege la bataille (journal §155.6).
+            resolve(LifeformCombatPhotographer::class)->ofPlayer($compte),
         );
     }
 

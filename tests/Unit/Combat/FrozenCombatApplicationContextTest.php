@@ -4,6 +4,7 @@ namespace Tests\Unit\Combat;
 
 use OGame\Combat\Application\FrozenCombatApplicationContext;
 use OGame\Combat\Exceptions\CorruptedFrozenApplicationContext;
+use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
 use Tests\UnitTestCase;
 
@@ -26,6 +27,50 @@ class FrozenCombatApplicationContextTest extends UnitTestCase
         $document = $this->aSnapshot();
 
         $this->assertSame($document, FrozenCombatApplicationContext::fromStorage($document)->toStorage());
+    }
+
+    /**
+     * **Le schema 5 se relit et se reecrit tel quel** : aucune forme de vie n existait a sa cloture, et la part protegee
+     * qu il ne porte pas est nulle — la population d un corps clos sous lui n est pas touchee.
+     */
+    public function testASchemaFiveDocumentReadsAndRewritesWithoutLifeform(): void
+    {
+        $document = $this->aSnapshot();
+        $document['schema'] = FrozenCombatApplicationContext::SCHEMA_WITHOUT_LIFEFORM;
+        unset($document['lifeform']);
+
+        $contexte = FrozenCombatApplicationContext::fromStorage($document);
+        $this->assertSame($document, $contexte->toStorage());
+        $this->assertNull($contexte->lifeformProtectedShareOf($this->createMock(PlanetService::class)));
+    }
+
+    public function testTheProtectedShareIsReadBackAndTheCorpsIsNotReread(): void
+    {
+        $contexte = FrozenCombatApplicationContext::fromStorage($this->aSnapshot());
+        $this->assertSame(0.3, $contexte->lifeformProtectedShareOf($this->createMock(PlanetService::class)));
+
+        $document = $this->aSnapshot();
+        $document['lifeform']['protected_share'] = null;
+        $this->assertNull(FrozenCombatApplicationContext::fromStorage($document)->lifeformProtectedShareOf($this->createMock(PlanetService::class)), 'Nulle : le corps ne porte aucune forme de vie.');
+    }
+
+    public function testALifeformShareOnAnOlderSchemaOrOutOfRangeOrAsAStringIsRefused(): void
+    {
+        $document = $this->aSnapshot();
+        $document['schema'] = FrozenCombatApplicationContext::SCHEMA_WITHOUT_LIFEFORM;
+        $this->assertRefused($document, 'part protegee');
+
+        $document = $this->aSnapshot();
+        $document['lifeform']['protected_share'] = 1.5;
+        $this->assertRefused($document, 'lifeform.protected_share');
+
+        $document = $this->aSnapshot();
+        $document['lifeform']['protected_share'] = '0.3';
+        $this->assertRefused($document, 'lifeform.protected_share');
+
+        $document = $this->aSnapshot();
+        unset($document['lifeform']);
+        $this->assertRefused($document, 'lifeform');
     }
 
     public function testTheApplicationInstantIsReadBack(): void
@@ -305,7 +350,7 @@ class FrozenCombatApplicationContextTest extends UnitTestCase
     {
         $document = $this->aSnapshot();
         $document['schema'] = 4;
-        unset($document['attacker_generals']);
+        unset($document['attacker_generals'], $document['lifeform']);
 
         $contexte = FrozenCombatApplicationContext::fromStorage($document);
 
@@ -461,6 +506,8 @@ class FrozenCombatApplicationContextTest extends UnitTestCase
             // La classe General de chaque attaquante, lue sur son propre combattant : deux flottes d un meme
             // joueur peuvent etre entrees sous deux classes.
             'attacker_generals' => [21 => false, 22 => true],
+            // La part de population protegee par les formes de vie, photographiee a l ouverture et figee a la cloture.
+            'lifeform' => ['protected_share' => 0.3],
             'wreck_field' => [
                 'min_resources_loss' => 150_000,
                 'min_fleet_percentage' => 5,

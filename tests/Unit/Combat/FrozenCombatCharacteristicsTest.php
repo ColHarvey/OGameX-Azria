@@ -27,7 +27,7 @@ class FrozenCombatCharacteristicsTest extends TestCase
      */
     private static function aLine(array $remplace = []): array
     {
-        return $remplace + ['weapon_level' => 7, 'shield_level' => 5, 'armor_level' => 3, 'class_combat_bonus' => 2];
+        return $remplace + ['weapon_level' => 7, 'shield_level' => 5, 'armor_level' => 3, 'class_combat_bonus' => 2, 'lifeform_bonuses' => ['unit_stats' => ['light_fighter' => 3.0], 'protected_share' => null, 'moon_chance' => 0.0, 'debris_recovery' => 0.0, 'wreck_recovery' => 0.0]];
     }
 
     /**
@@ -41,7 +41,42 @@ class FrozenCombatCharacteristicsTest extends TestCase
         $this->assertSame(5, $faits->shieldLevel);
         $this->assertSame(3, $faits->armorLevel);
         $this->assertSame(2, $faits->classCombatBonus);
+        $this->assertSame(3.0, $faits->lifeformBonuses->unitStats['light_fighter']);
         $this->assertSame(self::aLine(), $faits->toStorage());
+    }
+
+    /**
+     * **Une ligne d avant la tranche 6 se relit sans bonus de formes de vie**, et la base rend la colonne en texte JSON.
+     */
+    public function testALineWithoutLifeformBonusesReadsAsNoneAndAJsonColumnIsParsed(): void
+    {
+        $sans = self::aLine();
+        unset($sans['lifeform_bonuses']);
+        $this->assertTrue(FrozenCombatCharacteristics::fromStorage($sans)->lifeformBonuses->isNone());
+        $this->assertTrue(FrozenCombatCharacteristics::fromStorage(self::aLine(['lifeform_bonuses' => null]))->lifeformBonuses->isNone());
+
+        $json = FrozenCombatCharacteristics::fromStorage(self::aLine(['lifeform_bonuses' => json_encode(self::aLine()['lifeform_bonuses'])]));
+        $this->assertSame(3.0, $json->lifeformBonuses->unitStats['light_fighter']);
+    }
+
+    /**
+     * Un pourcentage en chaine, un document JSON illisible ou un entier a la place de la structure sont refuses.
+     */
+    public function testLifeformBonusesThatAreNotFactsAreRefused(): void
+    {
+        foreach ([
+            ['unit_stats' => ['light_fighter' => '3'], 'protected_share' => null, 'moon_chance' => 0.0, 'debris_recovery' => 0.0, 'wreck_recovery' => 0.0],
+            '{pas du json',
+            7,
+            true,
+        ] as $valeur) {
+            try {
+                FrozenCombatCharacteristics::fromStorage(self::aLine(['lifeform_bonuses' => $valeur]));
+                $this->fail('« lifeform_bonuses » stored as ' . get_debug_type($valeur) . ' was read back instead of refused.');
+            } catch (CorruptedFrozenMoonPlan $refus) {
+                $this->addToAssertionCount(1);
+            }
+        }
     }
 
     /**

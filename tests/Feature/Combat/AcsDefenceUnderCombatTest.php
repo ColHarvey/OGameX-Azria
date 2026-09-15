@@ -375,6 +375,11 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
                     return 1;
                 }
 
+                public function lifeformProtectedShareOf(PlanetService $target): float|null
+                {
+                    return null;
+                }
+
                 public function npcMotiveAgainst(PlayerService $defender): string|null
                 {
                     return null;

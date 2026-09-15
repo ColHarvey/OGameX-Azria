@@ -150,6 +150,17 @@ final class SpatialCombatSite extends PlanetService
         return false;
     }
 
+    /**
+     * **Ce n est pas non plus une planete.** La question est posee depuis la tranche des formes de vie
+     * (journal §155.6) : un point de l espace n a ni population, ni Bouclier planetaire, ni batiment, et la
+     * reponse est la meme que pour la lune — il n y a rien ici. Sans cette redefinition, la methode heritee
+     * lirait une planete inexistante et la bataille tomberait en jeu.
+     */
+    public function isPlanet(): bool
+    {
+        return false;
+    }
+
     public function hasMoon(): bool
     {
         return false;

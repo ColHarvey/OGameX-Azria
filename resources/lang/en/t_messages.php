@@ -138,6 +138,11 @@ Your fleets are returning to base. Incident reference: :reference',
             'inconsistent_snapshot' => 'the combat snapshot turned out to be inconsistent',
         ],
     ],
+    'lifeform_population_loss' => [
+        'from' => 'Planetary Administration',
+        'subject' => 'Civilian losses',
+        'body' => 'The successful attack on :coordinates cost the lives of :lost inhabitants. :survivors remain, protected by the Planetary Shield (:protected_percent %) and the shelter.',
+    ],
     'lifeform_discovery_report' => [
         'from' => 'Explorer Corps',
         'subject' => 'Discovery report',

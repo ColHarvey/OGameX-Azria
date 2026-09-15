@@ -57,7 +57,9 @@ use OGame\Services\PlayerService;
  */
 final readonly class FrozenCombatApplicationContext implements CombatApplicationContext
 {
-    private const array KEYS = ['schema', 'applied_at', 'players', 'space_docks', 'held_fleet_cargo', 'return_durations', 'attacker_generals', 'wreck_field', 'npc_narrative'];
+    private const array KEYS = ['schema', 'applied_at', 'players', 'space_docks', 'held_fleet_cargo', 'return_durations', 'attacker_generals', 'lifeform', 'wreck_field', 'npc_narrative'];
+
+    private const array LIFEFORM_KEYS = ['protected_share'];
 
     private const array NARRATIVE_KEYS = ['motive', 'variation', 'variations'];
 
@@ -79,7 +81,14 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
      * combat avec deux classes differentes voyait le champ d epaves de l une decide par la classe de
      * l autre.
      */
-    public const int SCHEMA = 5;
+    public const int SCHEMA = 6;
+
+    /**
+     * **Le schema 6 porte la part de population que les formes de vie protegent** (`lifeform.protected_share`,
+     * nulle quand le corps n en porte aucune), photographiee a l ouverture et figee ici (journal §155.6). Un
+     * document au schema 5 se relit et se reecrit tel quel : aucune forme de vie n existait a sa cloture.
+     */
+    public const int SCHEMA_WITHOUT_LIFEFORM = 5;
 
     /**
      * **Le schema 4 se relit toujours.** Il a ete ecrit en production, et un combat clos sous lui peut
@@ -98,6 +107,8 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
      *        identifiant de mission ; nulle pour un document au schema 4, qui ne la porte que par joueur.
      */
     private function __construct(
+        private int $schema,
+        private float|null $lifeformProtectedShare,
         private int $appliedAt,
         private array $players,
         private array $spaceDocks,
@@ -129,7 +140,7 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
      *                                        calculee a la cloture sur les survivants ; zero pour une
      *                                        flotte detruite, qui n'a pas de retour.
      */
-    public static function photograph(CombatRoster $roster, CombatApplicationContext $live, int $narrativeVariations, int $appliedAt, array $returnDurations = []): self
+    public static function photograph(CombatRoster $roster, CombatApplicationContext $live, int $narrativeVariations, int $appliedAt, array $returnDurations = [], float|null $lifeformProtectedShare = null): self
     {
         $joueurs = [];
 
@@ -190,6 +201,8 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
         $raid = $roster->initiatorOwner->getUser()->is_npc;
 
         return new self(
+            self::SCHEMA,
+            $lifeformProtectedShare,
             $appliedAt,
             $joueurs,
             $chantiers,
@@ -212,7 +225,7 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
     public function toStorage(): array
     {
         $document = [
-            'schema' => $this->attackerGenerals === null ? self::SCHEMA_WITHOUT_FLEET_GENERALS : self::SCHEMA,
+            'schema' => $this->schema,
             'applied_at' => $this->appliedAt,
             'players' => $this->players,
             'space_docks' => $this->spaceDocks,
@@ -224,6 +237,12 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
         // ce que sa cloture n a jamais photographie.
         if ($this->attackerGenerals !== null) {
             $document['attacker_generals'] = $this->attackerGenerals;
+        }
+
+        // Un document relu au schema 5 se reecrit au schema 5 : lui ajouter une part protegee ecrirait ce que sa
+        // cloture n a jamais photographie.
+        if ($this->schema === self::SCHEMA) {
+            $document['lifeform'] = ['protected_share' => $this->lifeformProtectedShare];
         }
 
         return $document + [
@@ -251,8 +270,8 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
 
         $schema = self::int($stored, 'schema', 'contexte');
 
-        if ($schema !== self::SCHEMA && $schema !== self::SCHEMA_WITHOUT_FLEET_GENERALS) {
-            throw new CorruptedFrozenApplicationContext('le schema ' . $schema . ' est inconnu, seuls les schemas ' . self::SCHEMA_WITHOUT_FLEET_GENERALS . ' et ' . self::SCHEMA . ' se relisent', $stored);
+        if ($schema !== self::SCHEMA && $schema !== self::SCHEMA_WITHOUT_LIFEFORM && $schema !== self::SCHEMA_WITHOUT_FLEET_GENERALS) {
+            throw new CorruptedFrozenApplicationContext('le schema ' . $schema . ' est inconnu, seuls les schemas ' . self::SCHEMA_WITHOUT_FLEET_GENERALS . ', ' . self::SCHEMA_WITHOUT_LIFEFORM . ' et ' . self::SCHEMA . ' se relisent', $stored);
         }
 
         // **La classe par flotte appartient au schema 5, et a lui seul.** Absente d un schema 5, elle ferait
@@ -260,7 +279,7 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
         // une reparation a la main.
         $generaux = null;
 
-        if ($schema === self::SCHEMA) {
+        if ($schema !== self::SCHEMA_WITHOUT_FLEET_GENERALS) {
             $generaux = [];
 
             foreach (self::structure($stored, 'attacker_generals', 'contexte') as $flotte => $general) {
@@ -276,6 +295,29 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
             }
         } elseif (array_key_exists('attacker_generals', $stored)) {
             throw new CorruptedFrozenApplicationContext('le schema ' . $schema . ' ne porte pas de classe General par flotte', $stored);
+        }
+
+        // **La part protegee appartient au schema 6, et a lui seul.** Absente d un schema 6, la population d un corps
+        // a forme de vie serait epargnee sans decision ; presente dans un schema anterieur, elle serait une reparation
+        // a la main. Nulle, elle dit que le corps ne porte aucune forme de vie.
+        $partProtegee = null;
+
+        if ($schema === self::SCHEMA) {
+            $formesDeVie = self::structure($stored, 'lifeform', 'contexte');
+            self::refuseUnknownKeys($formesDeVie, self::LIFEFORM_KEYS, 'contexte.lifeform');
+            $partProtegee = self::present($formesDeVie, 'protected_share', 'contexte.lifeform');
+
+            if ($partProtegee !== null) {
+                if (!is_int($partProtegee) && !is_float($partProtegee)) {
+                    throw new CorruptedFrozenApplicationContext('« contexte.lifeform.protected_share » est un ' . get_debug_type($partProtegee) . ' et non un nombre ni null', $stored);
+                }
+                $partProtegee = (float)$partProtegee;
+                if (!is_finite($partProtegee) || $partProtegee < 0.0 || $partProtegee > 1.0) {
+                    throw new CorruptedFrozenApplicationContext('« contexte.lifeform.protected_share » vaut ' . $partProtegee . ' : une part tient entre 0 et 1', $stored);
+                }
+            }
+        } elseif (array_key_exists('lifeform', $stored)) {
+            throw new CorruptedFrozenApplicationContext('le schema ' . $schema . ' ne porte pas de part protegee par les formes de vie', $stored);
         }
 
         $instant = self::int($stored, 'applied_at', 'contexte');
@@ -426,6 +468,8 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
         }
 
         return new self(
+            $schema,
+            $partProtegee,
             $instant,
             $joueurs,
             $chantiers,
@@ -616,6 +660,12 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
     public function applicationInstant(): int
     {
         return $this->appliedAt;
+    }
+
+    public function lifeformProtectedShareOf(PlanetService $target): float|null
+    {
+        // Photographiee a la cloture depuis l ouverture ; le corps passe en argument n est pas relu.
+        return $this->lifeformProtectedShare;
     }
 
     public function isGeneral(PlayerService $player): bool

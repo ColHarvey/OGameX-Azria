@@ -116,6 +116,11 @@ Vos flottes rentrent à leur base. Référence de l\'incident : :reference',
             'inconsistent_snapshot' => 'la photographie du combat s\'est révélée incohérente',
         ],
     ],
+    'lifeform_population_loss' => [
+        'from' => 'Administration planétaire',
+        'subject' => 'Pertes civiles',
+        'body' => 'L’attaque réussie contre :coordinates a coûté la vie à :lost habitants. Il en reste :survivors, protégés par le Bouclier planétaire (:protected_percent %) et l’abri.',
+    ],
     'lifeform_discovery_report' => [
         'from' => 'Corps des explorateurs',
         'subject' => 'Rapport de découverte',

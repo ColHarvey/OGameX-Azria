@@ -23,6 +23,7 @@ use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
 use OGame\GameMissions\BattleEngine\Services\LootService;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Hull\HullRepairService;
+use OGame\Lifeforms\Combat\LifeformCombatLosses;
 use OGame\Military\MilitaryBattleTally;
 use OGame\Models\BattleReport;
 use OGame\Models\FleetMission;
@@ -89,6 +90,7 @@ class CombatResolutionService
         protected PlanetServiceFactory $planetServiceFactory,
         protected PlayerServiceFactory $playerServiceFactory,
         protected SettingsService $settings,
+        protected LifeformCombatLosses $lifeformLosses,
     ) {
     }
 
@@ -291,6 +293,12 @@ class CombatResolutionService
                 }
             }
         }
+
+        // **Les habitants non proteges perissent quand l attaque reussit** (decision de Keven, journal §155.6) : la
+        // part protegee est celle que le contexte porte — photographiee a l ouverture pour un combat durable, lue a
+        // l arrivee sur le chemin instantane —, l abri de cent habitants toujours garde. Le chemin est unique pour
+        // les deux moteurs et les deux genres de combat.
+        $this->lifeformLosses->applyIfAttackerWon($battleResult, $defenderPlanet, $context->lifeformProtectedShareOf($defenderPlanet), $context->applicationInstant());
 
         // **La collecte des Faucheurs attaquants, attribuee flotte par flotte avant tout retour.** Elle
         // etait calculee apres la boucle, pour l'initiateur seul, et retiree du champ sans entrer dans

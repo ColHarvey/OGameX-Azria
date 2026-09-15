@@ -6,6 +6,7 @@ use Closure;
 use Illuminate\Support\Facades\Date;
 use OGame\Combat\Exceptions\MissingHeldFleetCargo;
 use OGame\Enums\CharacterClass;
+use OGame\Lifeforms\Combat\LifeformCombatPhotographer;
 use OGame\Models\FleetMission;
 use OGame\Models\Resources;
 use OGame\Services\CharacterClassService;
@@ -125,5 +126,10 @@ final class LiveCombatApplicationContext implements CombatApplicationContext
     {
         // Le chemin instantane applique maintenant : rien ne separe le calcul de l'ecriture.
         return (int)Date::now()->timestamp;
+    }
+
+    public function lifeformProtectedShareOf(PlanetService $target): float|null
+    {
+        return resolve(LifeformCombatPhotographer::class)->ofBody($target)->protectedShare;
     }
 }
