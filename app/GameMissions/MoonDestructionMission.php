@@ -26,6 +26,9 @@ use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameMissions\Concerns\EntersADurableCombat;
 use OGame\GameMissions\Models\MissionPossibleStatus;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Military\BattleTallyFacts;
+use OGame\Military\MilitaryBattleTally;
+use OGame\Military\MilitaryMoonDestructionTally;
 use OGame\Models\BattleReport;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
@@ -258,6 +261,11 @@ class MoonDestructionMission extends GameMission
         $debrisFieldService->appendResources($battleResult->debris);
         $debrisFieldService->save();
 
+        // **Les cumuls militaires lisent la bataille prealable comme toute bataille**, toutes les pertes appliquees,
+        // dans l espace de la mission : le chemin instantane ne passe pas par le reglement unique, il porte son
+        // propre point d application. Ce que la tentative fera ensuite est compte a part, jamais recompte ici.
+        resolve(MilitaryBattleTally::class)->record($battleResult, CombatParticipantKey::forBody($targetMoon), $mission, (int)$mission->time_arrival);
+
         // Create battle report
         $reportId = $this->createBattleReport($attackerPlayer, $targetMoon, $battleResult);
 
@@ -336,6 +344,18 @@ class MoonDestructionMission extends GameMission
         // Roll for Deathstar loss - single roll for entire fleet
         $lossRoll = random_int(1, 100);
         $allDeathstarsLost = $lossRoll <= $lossChance;
+
+        // **Les cumuls militaires lisent la tentative** : les Etoiles perdues dans la catastrophe sont des « perdus »
+        // sans destructeur, ce que la lune emporte est perdu par son proprietaire et detruit par l attaquant. Lu ici,
+        // avant que la lune disparaisse et que les survivants soient reecrits.
+        resolve(MilitaryMoonDestructionTally::class)->record(
+            BattleTallyFacts::SPACE_MISSION,
+            (int)$mission->id,
+            (int)$mission->time_arrival,
+            $targetMoon,
+            [['mission' => $mission, 'deathstars_lost' => $allDeathstarsLost ? $deathstarCount : 0, 'destroyed_the_moon' => $moonDestroyed]],
+            $moonDestroyed ? MilitaryMoonDestructionTally::unitsOn($targetMoon) : new UnitCollection(),
+        );
 
         // Update surviving units if all Deathstars are lost
         if ($allDeathstarsLost) {

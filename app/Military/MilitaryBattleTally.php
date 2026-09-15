@@ -4,7 +4,6 @@ namespace OGame\Military;
 
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\Models\FleetMission;
-use OGame\Models\User;
 
 /**
  * Le raccordement des cumuls militaires a une bataille reglee d un bloc.
@@ -51,18 +50,33 @@ final class MilitaryBattleTally
      */
     public function record(BattleResult $result, string $bodyKey, FleetMission $initiator, int $echeance): BattleTallyOutcome|null
     {
+        $combat = $initiator->combat_instance_id;
+        [$espace, $identifiant] = $combat === null
+            ? [BattleTallyFacts::SPACE_MISSION, (int)$initiator->id]
+            : [BattleTallyFacts::SPACE_COMBAT, (int)$combat];
+
+        return $this->recordFor($result, $bodyKey, $espace, $identifiant, $echeance);
+    }
+
+    /**
+     * Une bataille que le moteur a jouee hors du reglement d une attaque — expedition, contre-espionnage, espace
+     * libre —, dans son propre espace de clefs. Memes regles, memes faits, meme evaluation.
+     *
+     * @param string $space Un espace de `BattleTallyFacts::SPACES`.
+     * @param int $id L identifiant qui, dans cet espace, designe ce fait et lui seul.
+     * @param list<int> $unrankedOwners Les proprietaires que l appelant declare PNJ en plus des comptes PNJ — les acteurs
+     *        ephemeres du serveur, aux identifiants non positifs : calcules, jamais credites.
+     */
+    public function recordFor(BattleResult $result, string $bodyKey, string $space, int $id, int $echeance, array $unrankedOwners = []): BattleTallyOutcome|null
+    {
         $depuis = $this->recorder->collectingSince();
 
         if ($depuis === null || $echeance < $depuis) {
             return null;
         }
 
-        $combat = $initiator->combat_instance_id;
-        [$espace, $identifiant] = $combat === null
-            ? [BattleTallyFacts::SPACE_MISSION, (int)$initiator->id]
-            : [BattleTallyFacts::SPACE_COMBAT, (int)$combat];
-
-        $faits = BattleTallyFacts::fromBattleResult($result, $bodyKey, $espace, $identifiant, $echeance, $this->npcAmong($result));
+        $npc = array_values(array_unique(array_merge($this->npcAmong($result), $unrankedOwners)));
+        $faits = BattleTallyFacts::fromBattleResult($result, $bodyKey, $space, $id, $echeance, $npc);
         $issue = $this->evaluation->evaluate($faits, MilitaryValue::WEIGHTING_VERSION);
 
         if ($issue->isPending()) {
@@ -136,15 +150,6 @@ final class MilitaryBattleTally
             $proprietaires[$flotte->ownerId] = true;
         }
 
-        $identifiants = array_values(array_filter(array_keys($proprietaires), static fn (int $id): bool => $id > 0));
-
-        if ($identifiants === []) {
-            return [];
-        }
-
-        return array_values(array_map(
-            static fn (mixed $id): int => (int)$id,
-            User::query()->whereIn('id', $identifiants)->where('is_npc', true)->pluck('id')->all()
-        ));
+        return NpcAccounts::among(array_map(static fn (mixed $id): int => (int)$id, array_keys($proprietaires)));
     }
 }

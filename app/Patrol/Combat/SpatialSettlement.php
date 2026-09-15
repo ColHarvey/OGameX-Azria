@@ -4,9 +4,12 @@ namespace OGame\Patrol\Combat;
 
 use Illuminate\Support\Facades\DB;
 use LogicException;
+use OGame\Combat\Support\CombatParticipantKey;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleetResult;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Military\BattleTallyFacts;
+use OGame\Military\MilitaryBattleTally;
 use OGame\Models\FleetMission;
 use OGame\Models\Patrol;
 use OGame\Models\Resources;
@@ -130,6 +133,17 @@ final class SpatialSettlement
             }
 
             $attaquante->save();
+
+            // **Les cumuls militaires lisent cette bataille**, dans la transaction du reglement, toutes les pertes
+            // appliquees : deux joueurs classes, memes regles qu une bataille. Le site n a ni corps ni unites et
+            // porte la clef que le moteur lui donne ; la patrouille et l attaquante sont des flottes.
+            resolve(MilitaryBattleTally::class)->recordFor(
+                $resultat,
+                CombatParticipantKey::UNIDENTIFIED_BODY,
+                BattleTallyFacts::SPACE_SPATIAL,
+                (int)$attaquante->id,
+                (int)$attaquante->time_arrival,
+            );
 
             if ($survivantsAttaque->getAmount() === 0) {
                 // Rien ne rentre : la flotte est morte sur place, et `startReturn()` refuserait de

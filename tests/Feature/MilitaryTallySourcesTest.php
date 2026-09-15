@@ -51,7 +51,8 @@ class MilitaryTallySourcesTest extends AccountTestCase
 
         $nommes = 0;
 
-        foreach (MilitaryTallySources::WITNESSES as $source => $temoin) {
+        // Lu par l’instance, dont le type admet encore un témoin nul : la table du jeu n’en a plus aucun.
+        foreach ((new MilitaryTallySources())->witnesses() as $source => $temoin) {
             if ($temoin === null) {
                 continue;
             }
@@ -71,10 +72,31 @@ class MilitaryTallySourcesTest extends AccountTestCase
         $this->assertGreaterThan(0, $nommes, 'Aucun témoin n’est nommé : la garde ne vérifierait rien.');
     }
 
+    /**
+     * **Les neuf sources du jeu ont chacune leur témoin d’effet** depuis le 15 septembre 2026 : l’activation ne refuse
+     * plus pour cette raison. Elle reste un geste séparé, décidé par Keven ; ce témoin n’en fait rien en production.
+     */
+    public function testEverySourceOfTheGameIsWiredAndTheActivationNoLongerRefusesForThatReason(): void
+    {
+        $this->assertSame([], (new MilitaryTallySources())->unwired(), 'Une source du jeu est encore sans témoin d’effet.');
+
+        $this->assertSame(0, Artisan::call('ogamex:military:demarrer-cumuls'), 'L’activation a refusé alors que chaque source du jeu a son témoin : ' . Artisan::output());
+        $this->assertNotNull(resolve(MilitaryTallyRecorder::class)->collectingSince(), 'L’activation n’a pas écrit sa date.');
+    }
+
+    /**
+     * La garde s’éprouve sur un jeu de sources injecté, une source volontairement sans témoin : les sources du jeu
+     * n’en ont plus aucune.
+     */
     public function testTheActivationRefusesWhileASourceHasNoWitnessAndNamesIt(): void
     {
-        $manquantes = (new MilitaryTallySources())->unwired();
-        $this->assertNotSame([], $manquantes, 'Prémisse : des sources ne sont pas encore raccordées.');
+        $sources = new MilitaryTallySources([
+            'essai-sans-temoin' => null,
+            'essai-avec-temoin' => 'Tests\\Feature\\MilitaryTalliesBuildTest::testEachDeliveredSliceIsOneEventAndTheSlicesCoverTheProgressExactly',
+        ]);
+        $this->app->instance(MilitaryTallySources::class, $sources);
+        $manquantes = $sources->unwired();
+        $this->assertSame(['essai-sans-temoin'], $manquantes, 'Prémisse : une source injectée est sans témoin.');
 
         $this->assertSame(1, Artisan::call('ogamex:military:demarrer-cumuls'), 'L’activation a réussi alors que des sources n’ont pas de témoin d’effet.');
 

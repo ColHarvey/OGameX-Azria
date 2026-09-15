@@ -53,7 +53,8 @@ final class BattleTallyEvaluation
         }
 
         foreach ($participants as $clef => $participant) {
-            if ($participant['owner'] === null) {
+            // Un acteur ephemere du serveur, declare PNJ, n a pas de compte et n en attend aucun.
+            if ($participant['owner'] === null && !$participant['npc']) {
                 return BattleTallyOutcome::pending(self::PARTICIPANT_WITHOUT_OWNER, 'le participant ' . $clef . ' n a pas de proprietaire');
             }
         }

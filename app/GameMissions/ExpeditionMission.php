@@ -5,6 +5,7 @@ namespace OGame\GameMissions;
 use Exception;
 use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Enums\NoLootReason;
+use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\Enums\DarkMatterTransactionType;
 use OGame\Enums\FleetMissionStatus;
@@ -31,6 +32,8 @@ use OGame\GameMissions\Models\ExpeditionOutcomeType;
 use OGame\GameMissions\Models\MissionPossibleStatus;
 use OGame\GameObjects\Models\ShipObject;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Military\BattleTallyFacts;
+use OGame\Military\MilitaryBattleTally;
 use OGame\Models\BattleReport;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\Enums\ResourceType;
@@ -772,6 +775,18 @@ class ExpeditionMission extends GameMission
         $battleEngine = BattleEngineFactory::configured($this->settings, [$attackerFleet], $npcPlanetService, $defenders, $lootContext);
 
         $battleResult = $battleEngine->simulateBattle();
+
+        // **Les cumuls militaires lisent cette bataille** : les pertes du joueur en « perdus », les ennemis abattus en
+        // « detruits » pour lui. Les pirates et les aliens (identifiants non positifs) sont calcules, jamais credites.
+        // La garnison PNJ porte la clef que le moteur lui a donnee — celle du corps d origine que le PNJ emprunte.
+        resolve(MilitaryBattleTally::class)->recordFor(
+            $battleResult,
+            CombatParticipantKey::forBody($npcPlanetService),
+            BattleTallyFacts::SPACE_EXPEDITION,
+            (int)$mission->id,
+            (int)$mission->time_arrival,
+            [$npcPlayer->getId()],
+        );
 
         // Create battle report for expedition battle
         // Note: Battle report uses origin planet coordinates, not deep space position 16

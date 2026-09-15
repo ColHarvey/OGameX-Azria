@@ -9,6 +9,9 @@ use OGame\GameMessages\MoonDestructionCatastrophic;
 use OGame\GameMessages\MoonDestructionFailure;
 use OGame\GameMessages\MoonDestructionRepelled;
 use OGame\GameMessages\MoonDestructionSuccess;
+use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Military\BattleTallyFacts;
+use OGame\Military\MilitaryMoonDestructionTally;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Services\MessageService;
@@ -41,7 +44,10 @@ final class MoonDestructionSettlement
     ) {
     }
 
-    public function apply(FrozenMoonDestructionPlan $plan, PlanetService $moon): void
+    /**
+     * @param int $echeance L echeance du combat : l instant logique de ce que la tentative a fait.
+     */
+    public function apply(FrozenMoonDestructionPlan $plan, PlanetService $moon, int $echeance): void
     {
         if (!$moon->isMoon() || $moon->getPlanetId() !== $plan->moon->moonId) {
             throw new RuntimeException('Le plan de destruction du combat ' . $plan->combatInstanceId . ' vise la lune ' . $plan->moon->moonId . ', pas le corps ' . $moon->getPlanetId() . '.');
@@ -54,6 +60,32 @@ final class MoonDestructionSettlement
         foreach ($plan->attempts as $tentative) {
             $this->notify($tentative, $plan, $proprietaire);
         }
+
+        // **Les cumuls militaires lisent le plan** avant que la lune disparaisse : chaque tentative qui a consomme un
+        // tirage, ses Etoiles perdues, celle qui a detruit la lune, et ce que la lune emportait a cet instant — la
+        // bataille, elle, a ete comptee par le reglement.
+        $tentatives = [];
+
+        foreach ($plan->attempts as $tentative) {
+            if (!$tentative->outcome->consumedADraw()) {
+                continue;
+            }
+
+            $mission = FleetMission::query()->whereKey($tentative->fleetMissionId)->first();
+
+            if ($mission instanceof FleetMission) {
+                $tentatives[] = ['mission' => $mission, 'deathstars_lost' => $tentative->extraDeathstarLosses, 'destroyed_the_moon' => $tentative->destroyedTheMoon()];
+            }
+        }
+
+        resolve(MilitaryMoonDestructionTally::class)->record(
+            BattleTallyFacts::SPACE_COMBAT,
+            $plan->combatInstanceId,
+            $echeance,
+            $moon,
+            $tentatives,
+            $plan->destroysTheMoon() ? MilitaryMoonDestructionTally::unitsOn($moon) : new UnitCollection(),
+        );
 
         if ($plan->destroysTheMoon()) {
             $this->redirectFleetsFromMoon($moon);

@@ -46,6 +46,22 @@ final readonly class BattleTallyFacts
 
     public const string SPACE_MISSION = 'mission';
 
+    /** Une bataille d expedition contre des pirates ou des aliens, identifiee par sa mission. */
+    public const string SPACE_EXPEDITION = 'expedition';
+
+    /** Une bataille de contre-espionnage, identifiee par la mission d espionnage. */
+    public const string SPACE_ESPIONAGE = 'espionage';
+
+    /** Une bataille en espace libre contre une patrouille, identifiee par la mission attaquante. */
+    public const string SPACE_SPATIAL = 'spatial';
+
+    /**
+     * Les espaces de clefs, chacun sans collision avec les autres : un identifiant ne designe qu un fait par espace.
+     *
+     * @var list<string>
+     */
+    public const array SPACES = [self::SPACE_COMBAT, self::SPACE_MISSION, self::SPACE_EXPEDITION, self::SPACE_ESPIONAGE, self::SPACE_SPATIAL];
+
     public const string SIDE_ATTACKER = 'attaquant';
 
     public const string SIDE_DEFENDER = 'defenseur';
@@ -81,7 +97,8 @@ final readonly class BattleTallyFacts
     }
 
     /**
-     * @param list<int> $npcOwners Les comptes PNJ parmi les proprietaires : calcules, jamais credites.
+     * @param list<int> $npcOwners Les PNJ parmi les proprietaires — comptes PNJ, ou identifiants non positifs des
+     *        acteurs ephemeres du serveur : calcules, jamais credites.
      */
     public static function fromBattleResult(BattleResult $result, string $bodyKey, string $space, int $id, int $echeance, array $npcOwners): self
     {
@@ -242,7 +259,7 @@ final readonly class BattleTallyFacts
         $echeance = $document['echeance'] ?? null;
         $hamill = $document['hamill_triggered'] ?? null;
 
-        if (!in_array($space, [self::SPACE_COMBAT, self::SPACE_MISSION], true) || !is_int($id) || $id < 1
+        if (!in_array($space, self::SPACES, true) || !is_int($id) || $id < 1
             || !is_string($corps) || !CombatParticipantKey::isWellFormed($corps) || !is_int($echeance) || !is_bool($hamill)) {
             return null;
         }
@@ -309,11 +326,13 @@ final readonly class BattleTallyFacts
      */
     private static function participant(string $clef, string $camp, int $proprietaire, array $npcOwners, UnitCollection $depart, UnitCollection $pertes, array &$noms): array
     {
+        // Un acteur ephemere du serveur — pirates ou aliens d expedition, identifiants non positifs — n a pas de compte :
+        // declare PNJ par l appelant, il est calcule et jamais credite, sans que la bataille attende un proprietaire.
         return [
             'key' => $clef,
             'side' => $camp,
             'owner' => $proprietaire > 0 ? $proprietaire : null,
-            'npc' => $proprietaire > 0 && in_array($proprietaire, $npcOwners, true),
+            'npc' => in_array($proprietaire, $npcOwners, true),
             'start' => self::units($depart, $noms),
             'lost' => self::units($pertes, $noms),
         ];

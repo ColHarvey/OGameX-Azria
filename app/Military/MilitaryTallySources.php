@@ -30,11 +30,11 @@ final class MilitaryTallySources
         'demi-temps' => 'Tests\\Feature\\MilitaryTalliesBuildTest::testTheHalvingCreditsWhatItDeliversAndTheProgressionResumesWithoutRecounting',
         'bataille' => 'Tests\\Feature\\MilitaryTalliesBattleTest::testADurableGroupBattleCreditsEachRankedParticipantOnceFromItsRounds',
         'manoeuvre-de-hamill' => 'Tests\\Feature\\MilitaryTalliesHamillTest::testADurableBattleUnderTheManoeuvreCreditsTheStarOnceToTheGeneralConsulted',
-        'missile' => null,
-        'destruction-de-lune' => null,
-        'expedition' => null,
-        'contre-espionnage' => null,
-        'espace-libre' => null,
+        'missile' => 'Tests\\Feature\\MilitaryTalliesMissileTest::testAStrikeCreditsTheInterceptionToTheDefenderAndTheDestroyedDefencesToBoth',
+        'destruction-de-lune' => 'Tests\\Feature\\MilitaryTalliesMoonDestructionTest::testTheDeathstarsLostInACatastrophicAttemptAreLostWithoutADestroyerCredited',
+        'expedition' => 'Tests\\Feature\\MilitaryTalliesExpeditionTest::testAnExpeditionBattleCreditsThePlayerWithWhatHeLostAndWhatHeShotDown',
+        'contre-espionnage' => 'Tests\\Feature\\MilitaryTalliesEspionageTest::testACounterEspionageBattleCreditsTheSpyAndTheDefenderSymmetrically',
+        'espace-libre' => 'Tests\\Feature\\MilitaryTalliesSpatialTest::testABattleInFreeSpaceCreditsBothPlayersLikeAnyBattle',
     ];
 
     /**

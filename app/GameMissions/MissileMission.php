@@ -13,6 +13,7 @@ use OGame\GameMessages\MissileDefenseReport;
 use OGame\GameMissions\Abstracts\GameMission;
 use OGame\GameMissions\Models\MissionPossibleStatus;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Military\MilitaryMissileTally;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet\Coordinate;
@@ -259,7 +260,8 @@ class MissileMission extends GameMission
                 $parentPlanetAbmCount,
                 $defenderTarget,
                 $targetAbmCount,
-                $destroyedDefenses
+                $destroyedDefenses,
+                $mission
             ) {
                 // Remove intercepted ABMs - prioritize parent planet's ABMs first
                 if ($interceptedMissiles > 0) {
@@ -287,6 +289,11 @@ class MissileMission extends GameMission
                 }
 
                 $defenderTarget->save();
+
+                // **Les cumuls militaires lisent la frappe**, dans sa transaction, tout applique : l interception est
+                // un « detruit » du defenseur, les defenses detruites un « detruit » de l attaquant et un « perdu »
+                // du defenseur ; missiles tires et antimissiles consommes ne comptent jamais. L instant est l arrivee.
+                resolve(MilitaryMissileTally::class)->record($mission, $defenderTarget, $interceptedMissiles, $destroyedDefenses, (int)$mission->time_arrival);
             });
 
             // Get defense counts AFTER attack for reporting

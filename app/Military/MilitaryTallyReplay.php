@@ -47,16 +47,22 @@ final class MilitaryTallyReplay
     /** Une autre reprise l'a déjà traité entre sa sélection et sa relecture. */
     public const string ALREADY_HANDLED = 'deja repris';
 
+    /** @var list<GroupedTallyKind> */
+    private array $groups;
+
     /**
      * @param (Closure(string): void)|null $beforeCommit Couture d'essai : appelée avec la clef, dans la transaction
      *        d'un événement repris, juste avant la validation.
      * @param (Closure(string): void)|null $afterSelection Couture d'essai : appelée avec la clef, entre sa sélection et
      *        sa relecture verrouillée.
+     * @param list<GroupedTallyKind> $groups Les genres qui vivent en groupe ; vide, ceux du jeu.
      */
     public function __construct(
         private Closure|null $beforeCommit = null,
         private Closure|null $afterSelection = null,
+        array $groups = [],
     ) {
+        $this->groups = $groups === [] ? [new BattleTallyGroup(), new MissileTallyGroup(), new MoonDestructionTallyGroup()] : $groups;
     }
 
     /**
@@ -117,8 +123,10 @@ final class MilitaryTallyReplay
 
             $charge = json_decode((string)$ligne->payload, true);
 
-            if (is_array($charge) && in_array($charge['kind'] ?? null, [MilitaryBattleTally::KIND, MilitaryBattleTally::KIND_HAMILL], true)) {
-                return $this->replayTheBattleGroup($clef, (string)$ligne->weighting_version, $charge);
+            $genre = is_array($charge) && is_string($charge['kind'] ?? null) ? $this->groupFor($charge['kind']) : null;
+
+            if ($genre !== null && is_array($charge)) {
+                return $this->replayTheGroup($clef, (string)$ligne->weighting_version, $charge, $genre);
             }
 
             $valeurs = $this->evaluate((string)$ligne->weighting_version, $charge);
@@ -138,65 +146,59 @@ final class MilitaryTallyReplay
     }
 
     /**
-     * Une bataille et sa manoeuvre de Hamill se reprennent **d un bloc** : tous les evenements en attente du fait —
-     * un par participant classe, plus l evenement nomme de l auteur — sont verrouilles, evalues une fois sur les
-     * memes faits, et appliques ensemble ou pas du tout. Un membre sans credit, un membre dont le proprietaire ne
-     * repond pas au credit, un credit sans membre en attente, une forme de charge etrangere : rien n est ecrit.
-     * Ni credit partiel, ni doublon — les clefs sont celles du fait, et un membre applique ne l est jamais deux fois.
+     * Reprend un groupe entier — tout ou rien.
+     *
+     * Le genre relit les faits gardes et dit ce qu il attend ; ici, les membres en attente sous ses prefixes sont
+     * verrouilles, chacun doit porter les memes faits que le meneur, le genre, le proprietaire et la version de ce
+     * qui est attendu, et l ensemble des membres doit recouvrir exactement l ensemble des attendus. Un membre manquant,
+     * corrompu ou divergent laisse le groupe entier en attente. Puis tout s applique dans la transaction du meneur ;
+     * les autres membres, relus ensuite par la selection, sont deja clos.
      *
      * @param array<string, mixed> $charge
      */
-    private function replayTheBattleGroup(string $clef, string $version, array $charge): string
+    private function replayTheGroup(string $clef, string $version, array $charge, GroupedTallyKind $genre): string
     {
-        $faits = BattleTallyFacts::fromStorage($charge['facts'] ?? null);
+        $faits = $genre->readFacts($charge['facts'] ?? null);
 
         if ($faits === null) {
             return self::STILL_PENDING;
         }
 
+        $prefixes = $genre->memberPrefixes($faits);
+
+        if ($prefixes === []) {
+            return self::STILL_PENDING;
+        }
+
         $membres = DB::table('military_tally_events')
             ->where('status', MilitaryTallyRecorder::PENDING)
-            ->where(static function ($requete) use ($faits): void {
-                $requete->where('event_key', 'like', $faits->eventKeyPrefix() . '%')
-                    ->orWhere('event_key', 'like', $faits->hamillEventKeyPrefix() . '%');
+            ->where(static function ($requete) use ($prefixes): void {
+                foreach ($prefixes as $prefixe) {
+                    $requete->orWhere('event_key', 'like', $prefixe . '%');
+                }
             })
             ->orderBy('event_key')
             ->lockForUpdate()
             ->get(['event_key', 'player_id', 'weighting_version', 'payload']);
 
-        $issue = (new BattleTallyEvaluation())->evaluate($faits, $version);
+        $attendus = $genre->expectedEvents($faits, $version);
 
-        if ($issue->isPending()) {
+        if ($attendus === null) {
             return self::STILL_PENDING;
         }
 
-        $attendus = [];
-
-        foreach ($issue->credits() as $participant => $credit) {
-            $attendus[$faits->eventKeyFor($participant)] = ['kind' => MilitaryBattleTally::KIND, 'owner' => $credit['owner'], 'destroyed' => $credit['destroyed'], 'lost' => $credit['lost']];
-        }
-
-        $hamill = $issue->hamillCredit();
-
-        if ($hamill !== null) {
-            $attendus[$faits->hamillEventKeyFor($hamill['author'])] = ['kind' => MilitaryBattleTally::KIND_HAMILL, 'owner' => $hamill['owner'], 'destroyed' => $hamill['destroyed'], 'lost' => 0];
-        }
-
         $presents = [];
-        $reference = $faits->toStorage();
+        $reference = $genre->storageOf($faits);
 
         foreach ($membres as $membre) {
             $clefMembre = (string)$membre->event_key;
             $chargeMembre = json_decode((string)$membre->payload, true);
             $attendu = $attendus[$clefMembre] ?? null;
-
-            // Chaque membre porte les memes faits que le meneur, lisibles : un membre illisible ou qui raconte une
-            // autre bataille retient tout le groupe.
-            $faitsDuMembre = is_array($chargeMembre) ? BattleTallyFacts::fromStorage($chargeMembre['facts'] ?? null) : null;
+            $faitsDuMembre = is_array($chargeMembre) ? $genre->readFacts($chargeMembre['facts'] ?? null) : null;
 
             if ($attendu === null || (string)$membre->weighting_version !== $version || !is_array($chargeMembre)
                 || ($chargeMembre['kind'] ?? null) !== $attendu['kind'] || $attendu['owner'] !== (int)$membre->player_id
-                || $faitsDuMembre === null || $faitsDuMembre->toStorage() !== $reference) {
+                || $faitsDuMembre === null || $genre->storageOf($faitsDuMembre) !== $reference) {
                 return self::STILL_PENDING;
             }
 
@@ -210,7 +212,7 @@ final class MilitaryTallyReplay
         $valeurs = [];
 
         foreach (array_keys($presents) as $clefMembre) {
-            $valeurs[$clefMembre] = ['built' => 0, 'destroyed' => $attendus[$clefMembre]['destroyed'], 'lost' => $attendus[$clefMembre]['lost']];
+            $valeurs[$clefMembre] = ['built' => $attendus[$clefMembre]['built'], 'destroyed' => $attendus[$clefMembre]['destroyed'], 'lost' => $attendus[$clefMembre]['lost']];
         }
 
         $this->apply($valeurs);
@@ -220,6 +222,17 @@ final class MilitaryTallyReplay
         }
 
         return self::REPLAYED;
+    }
+
+    private function groupFor(string $kind): GroupedTallyKind|null
+    {
+        foreach ($this->groups as $groupe) {
+            if (in_array($kind, $groupe->kinds(), true)) {
+                return $groupe;
+            }
+        }
+
+        return null;
     }
 
     /**

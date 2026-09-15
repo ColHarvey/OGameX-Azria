@@ -50,11 +50,45 @@ final readonly class BattleTallyOutcome
      */
     public function hamillCredit(): array|null
     {
-        if ($this->hamill === null || $this->hamill['owner'] === null || $this->hamill['npc'] || $this->hamill['destroyed'] <= 0) {
+        $classe = $this->hamillClassed();
+
+        return $classe === null || $classe['destroyed'] <= 0 ? null : $classe;
+    }
+
+    /**
+     * La manoeuvre nommee dont l auteur est classe, quelle que soit sa valeur : ce que la reprise d un groupe attend.
+     *
+     * @return array{author: string, owner: int, destroyed: int}|null
+     */
+    public function hamillClassed(): array|null
+    {
+        if ($this->hamill === null || $this->hamill['owner'] === null || $this->hamill['npc']) {
             return null;
         }
 
         return ['author' => $this->hamill['author'], 'owner' => $this->hamill['owner'], 'destroyed' => $this->hamill['destroyed']];
+    }
+
+    /**
+     * Chaque participant classe avec ses valeurs, **zeros compris** : c est l ensemble que l attente a differe, et
+     * celui que la reprise doit retrouver entier. Un participant qui n a rien perdu ni rien detruit reste un
+     * participant ; `credits()` ne le nomme pas parce qu il n y a rien a ecrire en direct, la reprise doit le clore.
+     *
+     * @return array<string, array{owner: int, destroyed: int, lost: int}>
+     */
+    public function classedOutcomes(): array
+    {
+        $classes = [];
+
+        foreach ($this->computed as $clef => $valeurs) {
+            if ($valeurs['owner'] === null || $valeurs['npc']) {
+                continue;
+            }
+
+            $classes[$clef] = ['owner' => $valeurs['owner'], 'destroyed' => $valeurs['destroyed'], 'lost' => $valeurs['lost']];
+        }
+
+        return $classes;
     }
 
     public function isPending(): bool

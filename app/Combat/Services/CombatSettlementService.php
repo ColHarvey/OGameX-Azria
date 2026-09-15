@@ -353,7 +353,7 @@ final class CombatSettlementService
 
             // La lune ne se detruit qu'une fois la barriere levee : plus rien ne tient le corps.
             if ($planLune !== null) {
-                ($this->moonDestruction ??= new MoonDestructionSettlement(resolve(PlayerServiceFactory::class), resolve(PlanetServiceFactory::class)))->apply($planLune, $effectif->target);
+                ($this->moonDestruction ??= new MoonDestructionSettlement(resolve(PlayerServiceFactory::class), resolve(PlanetServiceFactory::class)))->apply($planLune, $effectif->target, $contexte->applicationInstant());
             }
 
             return CombatSettlementOutcome::settled(

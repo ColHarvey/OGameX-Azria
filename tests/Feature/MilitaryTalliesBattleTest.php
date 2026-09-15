@@ -462,4 +462,58 @@ final class MilitaryTalliesBattleTest extends FleetDispatchTestCase
         unset($table[$nom]);
         $poids->setValue(null, $table);
     }
+
+    /**
+     * **Un participant classe qui n a rien perdu ni rien detruit reste un membre du groupe.** L attente l a differe
+     * sans connaitre ses valeurs ; la reprise doit l attendre, le retrouver et le clore a zero — sinon le groupe
+     * entier reste en attente pour toujours, parce que les credits en direct ne le nomment pas.
+     */
+    public function testAPendingGroupWhoseClassedParticipantHasNothingToCreditIsReplayedWholeAndClosedAtZero(): void
+    {
+        $echeance = $this->maintenant();
+        $this->activer($echeance - 10);
+        $attaquant = $this->unCompte();
+        $garnison = $this->unCompte();
+        $allie = $this->unCompte();
+        $chasseur = ObjectService::getUnitObjectByMachineName('light_fighter');
+        $lanceur = ObjectService::getUnitObjectByMachineName('rocket_launcher');
+
+        $resultat = new BattleResult();
+        $resultat->hamillManoeuvreTriggered = false;
+        $resultat->repairedDefenses = new UnitCollection();
+        $flotte = new AttackerFleetResult(910_001, $attaquant, $this->collection([$chasseur, 10]));
+        $flotte->unitsLost = new UnitCollection();
+        $resultat->attackerFleetResults = [$flotte];
+        $corps = new DefenderFleetResult(0, $garnison, $this->collection([$lanceur, 20]));
+        $corps->unitsLost = $this->collection([$lanceur, 5]);
+        $renfort = new DefenderFleetResult(910_002, $allie, $this->collection([$chasseur, 5]));
+        $renfort->unitsLost = new UnitCollection();
+        $resultat->defenderFleetResults = [$corps, $renfort];
+        $clefCorps = CombatParticipantKey::forPlanet(7);
+        $round = new BattleResultRound();
+        $round->lossesInRoundByParticipant = [$clefCorps => $this->collection([$lanceur, 5])];
+        $round->attackerShipsPerFleet = [910_001 => $this->collection([$chasseur, 10])];
+        $resultat->rounds = [$round];
+
+        $faits = BattleTallyFacts::fromBattleResult($resultat, $clefCorps, BattleTallyFacts::SPACE_MISSION, 910_000, $echeance, []);
+        $registre = resolve(MilitaryTallyRecorder::class);
+
+        foreach ($faits->participants as $participant) {
+            $registre->defer($faits->eventKeyFor($participant['key']), (int)$participant['owner'], $echeance, BattleTallyEvaluation::UNKNOWN_UNIT_FAMILY, ['kind' => MilitaryBattleTally::KIND, 'participant' => $participant['key'], 'detail' => 'fabrique', 'facts' => $faits->toStorage()]);
+        }
+
+        $prefixe = 'battle:mission:910000:';
+        $this->assertCount(3, $this->evenements($prefixe), 'Premisse : trois membres en attente, dont un sans rien a crediter.');
+
+        $bilan = (new MilitaryTallyReplay())->replay();
+
+        $this->assertSame(['replayed' => 1, 'pending' => 0, 'skipped' => 2], $bilan, 'Le groupe n a pas ete repris entier.');
+        $evenements = $this->evenements($prefixe);
+        $clefRenfort = $prefixe . CombatParticipantKey::forFleet(910_002);
+        $this->assertSame(MilitaryTallyRecorder::APPLIED, $evenements[$clefRenfort]->status, 'Le renfort sans perte ni destruction n a pas ete clos.');
+        $this->assertSame(0, (int)$evenements[$clefRenfort]->destroyed_value);
+        $this->assertSame(0, (int)$evenements[$clefRenfort]->lost_value);
+        $this->assertSame(MilitaryValue::ofObject($lanceur, 5), (int)$evenements[$prefixe . CombatParticipantKey::forFleet(910_001)]->destroyed_value, 'L attaquante n a pas ete creditee des lanceurs abattus.');
+        $this->assertSame(MilitaryValue::ofObject($lanceur, 5), (int)$evenements[$prefixe . $clefCorps]->lost_value, 'La garnison n a pas ete debitee de ses lanceurs.');
+    }
 }

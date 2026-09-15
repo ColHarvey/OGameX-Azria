@@ -4,6 +4,7 @@ namespace OGame\GameMissions;
 
 use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Enums\NoLootReason;
+use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\Enums\FleetMissionStatus;
 use OGame\Enums\FleetSpeedType;
@@ -16,6 +17,8 @@ use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameMissions\Models\MissionPossibleStatus;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Military\BattleTallyFacts;
+use OGame\Military\MilitaryBattleTally;
 use OGame\Models\BattleReport;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\EspionageReport;
@@ -155,6 +158,17 @@ class EspionageMission extends GameMission
 
             // Set the attacker's origin planet ID on the battle result for the battle report.
             $battleResult->attackerPlanetId = $mission->planet_id_from;
+
+            // **Les cumuls militaires lisent cette bataille** : les sondes perdues en « perdus » pour l espion et en
+            // « detruits » pour le defenseur, les pertes du defenseur symetriques. L espion est l attaquante ephemere
+            // du moteur, son proprietaire vient du contexte ; le corps vise porte la clef de sa garnison.
+            resolve(MilitaryBattleTally::class)->recordFor(
+                $battleResult,
+                CombatParticipantKey::forBody($target_planet),
+                BattleTallyFacts::SPACE_ESPIONAGE,
+                (int)$mission->id,
+                (int)$mission->time_arrival,
+            );
 
             // Create or append debris field.
             // TODO: we could change this debris field append logic to do everything in a single query to
