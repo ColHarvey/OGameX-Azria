@@ -5,6 +5,7 @@ namespace OGame\Factories;
 use Cache;
 use Illuminate\Support\Facades\Date;
 use OGame\GameConstants\UniverseConstants;
+use OGame\Lifeforms\Services\LifeformInstallationService;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\Planet;
 use OGame\Models\Planet\Coordinate;
@@ -571,6 +572,10 @@ class PlanetServiceFactory
         }
 
         $planet->save();
+
+        // Formes de vie : une colonie neuve d un compte qui a choisi son espece est peuplee aussitot,
+        // a la population de base, sans rien d autre. Sans espece, sans effet.
+        resolve(LifeformInstallationService::class)->installOnNewPlanet($planet, (int)Date::now()->timestamp);
 
         return $this->makeForPlayer($player, $planet->id);
     }

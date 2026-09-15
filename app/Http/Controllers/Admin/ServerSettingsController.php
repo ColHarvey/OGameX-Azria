@@ -4,9 +4,12 @@ namespace OGame\Http\Controllers\Admin;
 
 use Cache;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Facades\Date;
 use Illuminate\View\View;
 use OGame\Enums\HighscoreTypeEnum;
 use OGame\Http\Controllers\OGameController;
+use OGame\Lifeforms\Rules\LifeformRuleRevisions;
+use OGame\Models\Lifeforms\LifeformRuleRevision;
 use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
 
@@ -60,6 +63,15 @@ class ServerSettingsController extends OGameController
             'expedition_reward_multiplier_ships' => $settingsService->expeditionRewardMultiplierShips(),
             'patrols_enabled' => $settingsService->patrolsEnabled(),
             'hull_damage_enabled' => $settingsService->hullDamageEnabled(),
+            // Formes de vie (journal §155) : l interrupteur, les coefficients, et les vitesses effectives
+            // qu ils composent avec celles du serveur, pour que la page dise ce qui s appliquera.
+            'lifeforms_enabled' => $settingsService->lifeformsEnabled(),
+            'lifeforms_build_speed_multiplier' => $settingsService->lifeformsBuildSpeedMultiplier(),
+            'lifeforms_research_speed_multiplier' => $settingsService->lifeformsResearchSpeedMultiplier(),
+            'lifeforms_discovery_speed_multiplier' => $settingsService->lifeformsDiscoverySpeedMultiplier(),
+            'lifeforms_effective_build_speed' => $settingsService->economySpeed() * $settingsService->lifeformsBuildSpeedMultiplier(),
+            'lifeforms_effective_research_speed' => $settingsService->economySpeed() * $settingsService->researchSpeed() * $settingsService->lifeformsResearchSpeedMultiplier(),
+            'lifeforms_revision_count' => LifeformRuleRevision::query()->count(),
             'newbie_protection_enabled' => $settingsService->newbieProtectionEnabled(),
             'alliance_offensive_protection_enabled' => $settingsService->allianceOffensiveProtectionEnabled(),
             'patrol_manoeuvre_delay_seconds' => $settingsService->patrolManoeuvreDelaySeconds(),
@@ -101,8 +113,20 @@ class ServerSettingsController extends OGameController
      * @param SettingsService $settingsService
      * @return RedirectResponse
      */
-    public function update(SettingsService $settingsService): RedirectResponse
+    public function update(SettingsService $settingsService, LifeformRuleRevisions $lifeformRevisions): RedirectResponse
     {
+        // Formes de vie : les coefficients sont valides au serveur avant toute ecriture — un nombre
+        // fini strictement positif, au plus 100 — et un refus ne change aucun reglage.
+        $formesDeVie = request()->validate([
+            'lifeforms_build_speed_multiplier' => ['nullable', 'numeric', 'gt:0', 'max:100'],
+            'lifeforms_research_speed_multiplier' => ['nullable', 'numeric', 'gt:0', 'max:100'],
+            'lifeforms_discovery_speed_multiplier' => ['nullable', 'numeric', 'gt:0', 'max:100'],
+        ], [
+            'numeric' => __('t_ingame.admin.lifeforms_invalid_multiplier'),
+            'gt' => __('t_ingame.admin.lifeforms_invalid_multiplier'),
+            'max' => __('t_ingame.admin.lifeforms_invalid_multiplier'),
+        ]);
+
         $settingsService->set('fleet_speed_war', request('fleet_speed_war'));
         $settingsService->set('fleet_speed_holding', request('fleet_speed_holding'));
         $settingsService->set('fleet_speed_peaceful', request('fleet_speed_peaceful'));
@@ -148,6 +172,15 @@ class ServerSettingsController extends OGameController
         // Chantier des degats de coque (journal §118) : son interrupteur vit ici comme celui des
         // patrouilles. Sans lui, l armer et le desarmer demandait `tinker` sur la production.
         $settingsService->set('hull_damage_enabled', request('hull_damage_enabled', 0));
+
+        // Formes de vie (journal §155) : l interrupteur et les trois coefficients, puis une revision
+        // datee si une vitesse a change — la demographie des comptes absents s en sert pour couper.
+        $settingsService->set('lifeforms_enabled', request('lifeforms_enabled', 0));
+        $settingsService->set('lifeforms_build_speed_multiplier', (string)($formesDeVie['lifeforms_build_speed_multiplier'] ?? 1));
+        $settingsService->set('lifeforms_research_speed_multiplier', (string)($formesDeVie['lifeforms_research_speed_multiplier'] ?? 1));
+        $settingsService->set('lifeforms_discovery_speed_multiplier', (string)($formesDeVie['lifeforms_discovery_speed_multiplier'] ?? 1));
+        $administrateur = auth()->id();
+        $lifeformRevisions->recordIfChanged((int)Date::now()->timestamp, is_int($administrateur) ? $administrateur : null, 'administration');
         $settingsService->set('newbie_protection_enabled', request('newbie_protection_enabled', 0));
         $settingsService->set('alliance_offensive_protection_enabled', request('alliance_offensive_protection_enabled', 0));
         $settingsService->set('patrol_manoeuvre_delay_seconds', request('patrol_manoeuvre_delay_seconds', 60));

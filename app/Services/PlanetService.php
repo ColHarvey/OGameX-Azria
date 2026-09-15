@@ -16,6 +16,7 @@ use OGame\GameObjects\Models\Abstracts\GameObject;
 use OGame\GameObjects\Models\Enums\GameObjectType;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Hull\DamagedHulls;
+use OGame\Lifeforms\Services\LifeformPlanetUpdater;
 use OGame\Military\MilitaryBuildTally;
 use OGame\Models\BuildingQueue;
 use OGame\Models\Enums\PlanetType;
@@ -1394,6 +1395,12 @@ class PlanetService
                 // 1. Update building queue (handles segmented resource calculation)
                 // ------
                 $this->updateBuildingQueue(false);
+
+                // ------
+                // 1b. Formes de vie : demographie et travaux echus, sous le meme verrou (journal §155).
+                //     Une planete sans etat de forme de vie coute une lecture et rien d autre.
+                // ------
+                resolve(LifeformPlanetUpdater::class)->update($this, (int)Date::now()->timestamp);
 
                 // ------
                 // 2. Update remaining resources after all buildings processed

@@ -921,6 +921,56 @@ class SettingsService
     }
 
     /**
+     * L interrupteur des formes de vie (journal §155). Ferme par defaut.
+     *
+     * Ferme, il refuse le choix d une espece, tout nouveau travail et tout ecran ; **il n efface
+     * rien et n arrete rien** : les files lancees se terminent et les bonus acquis restent
+     * (decision de Keven, 15 septembre 2026). Une planete deja peuplee continue d etre calculee.
+     */
+    public function lifeformsEnabled(): bool
+    {
+        return $this->get('lifeforms_enabled', '0') === '1';
+    }
+
+    /**
+     * Le coefficient propre aux constructions de formes de vie, applique **par-dessus** la vitesse
+     * economique (profil x1 : 1). Jamais un second `economy_speed`.
+     */
+    public function lifeformsBuildSpeedMultiplier(): float
+    {
+        return self::coefficient($this->get('lifeforms_build_speed_multiplier', '1'));
+    }
+
+    /**
+     * Le coefficient propre aux recherches de formes de vie, applique par-dessus economie × recherche.
+     */
+    public function lifeformsResearchSpeedMultiplier(): float
+    {
+        return self::coefficient($this->get('lifeforms_research_speed_multiplier', '1'));
+    }
+
+    /**
+     * Le coefficient propre aux vols de decouverte.
+     */
+    public function lifeformsDiscoverySpeedMultiplier(): float
+    {
+        return self::coefficient($this->get('lifeforms_discovery_speed_multiplier', '1'));
+    }
+
+    /**
+     * Un coefficient de vitesse est un nombre fini strictement positif ; tout le reste vaut 1.
+     */
+    private static function coefficient(string $valeur): float
+    {
+        if (!is_numeric($valeur)) {
+            return 1.0;
+        }
+        $nombre = (float)$valeur;
+
+        return is_finite($nombre) && $nombre > 0.0 ? $nombre : 1.0;
+    }
+
+    /**
      * Le plancher d une reparation de survivants, en minutes.
      *
      * Meme valeur par defaut que celle des epaves : le dock est un seul batiment, et deux planchers

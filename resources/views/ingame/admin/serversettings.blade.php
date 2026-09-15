@@ -501,6 +501,52 @@
                                 </div>
                                 <div class="smallFont">{{ __('t_ingame.admin.hull_damage_enabled_desc') }}</div>
                             </div>
+                            {{-- Formes de vie (journal §155) : l interrupteur et les trois coefficients propres,
+                                 appliques par-dessus les vitesses du serveur ; jamais un second economy_speed. --}}
+                            <p class="box_highlight textCenter no_buddies">{{ __('t_ingame.admin.section_lifeforms') }}</p>
+                            @if ($errors->any())
+                                <div class="fieldwrapper">
+                                    <div class="smallFont overmark">
+                                        @foreach ($errors->all() as $error)
+                                            {{ $error }}<br>
+                                        @endforeach
+                                    </div>
+                                </div>
+                            @endif
+                            <div class="fieldwrapper">
+                                <label class="styled textBeefy">{{ __('t_ingame.admin.lifeforms_enabled') }}</label>
+                                <div class="thefield">
+                                    <square-checkbox class="square-checkbox">
+                                        <input type="checkbox" id="square-checkBoxLifeformsEnabled" name="lifeforms_enabled" value="1" {{ $lifeforms_enabled ? 'checked' : '' }}>
+                                        <label for="square-checkBoxLifeformsEnabled"></label>
+                                    </square-checkbox>
+                                </div>
+                                <div class="smallFont">{{ __('t_ingame.admin.lifeforms_enabled_desc') }}</div>
+                            </div>
+                            <div class="fieldwrapper">
+                                <label class="styled textBeefy">{{ __('t_ingame.admin.lifeforms_build_speed_multiplier') }}</label>
+                                <div class="thefield">
+                                    <input type="text" pattern="[0-9.]*" class="textInput w50 textCenter textBeefy" value="{{ $lifeforms_build_speed_multiplier }}" size="5" maxlength="8" name="lifeforms_build_speed_multiplier">
+                                </div>
+                                <div class="smallFont">{{ __('t_ingame.admin.lifeforms_build_speed_multiplier_desc', ['economy' => $economy_speed, 'effective' => $lifeforms_effective_build_speed]) }}</div>
+                            </div>
+                            <div class="fieldwrapper">
+                                <label class="styled textBeefy">{{ __('t_ingame.admin.lifeforms_research_speed_multiplier') }}</label>
+                                <div class="thefield">
+                                    <input type="text" pattern="[0-9.]*" class="textInput w50 textCenter textBeefy" value="{{ $lifeforms_research_speed_multiplier }}" size="5" maxlength="8" name="lifeforms_research_speed_multiplier">
+                                </div>
+                                <div class="smallFont">{{ __('t_ingame.admin.lifeforms_research_speed_multiplier_desc', ['economy' => $economy_speed, 'research' => $research_speed, 'effective' => $lifeforms_effective_research_speed]) }}</div>
+                            </div>
+                            <div class="fieldwrapper">
+                                <label class="styled textBeefy">{{ __('t_ingame.admin.lifeforms_discovery_speed_multiplier') }}</label>
+                                <div class="thefield">
+                                    <input type="text" pattern="[0-9.]*" class="textInput w50 textCenter textBeefy" value="{{ $lifeforms_discovery_speed_multiplier }}" size="5" maxlength="8" name="lifeforms_discovery_speed_multiplier">
+                                </div>
+                                <div class="smallFont">{{ __('t_ingame.admin.lifeforms_discovery_speed_multiplier_desc') }}</div>
+                            </div>
+                            <div class="fieldwrapper">
+                                <div class="smallFont">{{ __('t_ingame.admin.lifeforms_revisions_desc', ['count' => $lifeforms_revision_count]) }}</div>
+                            </div>
                             {{-- La protection des debutants : son propre interrupteur, desarme par defaut. --}}
                             <div class="fieldwrapper">
                                 <label class="styled textBeefy">{{ __('t_ingame.admin.newbie_protection_enabled') }}</label>
