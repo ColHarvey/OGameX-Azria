@@ -165,22 +165,44 @@ class ClassHistoryTest extends TestCase
      */
     public function testAnAccountIsBornWithItsInitialLines(): void
     {
-        $instant = (int)Date::now()->timestamp;
-        $compte = (int)User::factory()->create()->id;
+        $this->atAFrozenInstant(function (int $instant): void {
+            $compte = (int)User::factory()->create()->id;
 
-        $classe = DB::table('character_class_history')->where('user_id', $compte)->where('cause', ClassHistoryRecorder::CAUSE_CREATION)->first();
-        $appartenance = DB::table('alliance_membership_history')->where('user_id', $compte)->where('cause', ClassHistoryRecorder::CAUSE_CREATION)->first();
+            $classe = DB::table('character_class_history')->where('user_id', $compte)->where('cause', ClassHistoryRecorder::CAUSE_CREATION)->first();
+            $appartenance = DB::table('alliance_membership_history')->where('user_id', $compte)->where('cause', ClassHistoryRecorder::CAUSE_CREATION)->first();
 
-        $this->assertNotNull($classe, 'An account was born without the line that says what its class was.');
-        $this->assertNotNull($appartenance, 'An account was born without the line that says which alliance it belonged to.');
-        $this->assertSame($instant, (int)$classe->changed_at);
-        $this->assertNull($classe->character_class);
-        $this->assertNull($appartenance->alliance_id);
+            $this->assertNotNull($classe, 'An account was born without the line that says what its class was.');
+            $this->assertNotNull($appartenance, 'An account was born without the line that says which alliance it belonged to.');
+            $this->assertSame($instant, (int)$classe->changed_at);
+            $this->assertNull($classe->character_class);
+            $this->assertNull($appartenance->alliance_id);
 
-        // Et l historique repond des la seconde suivante, sans rien affirmer d avant.
-        $lecteur = new ClassHistoryReader();
-        $this->assertNull($lecteur->personalClassAt($compte, $instant + 1)->value());
-        $this->assertFalse($lecteur->personalClassAt($compte, $instant)->isKnown(), 'A newborn account claimed to know what it was before it existed.');
+            // Et l historique repond des la seconde suivante, sans rien affirmer d avant.
+            $lecteur = new ClassHistoryReader();
+            $this->assertNull($lecteur->personalClassAt($compte, $instant + 1)->value());
+            $this->assertFalse($lecteur->personalClassAt($compte, $instant)->isKnown(), 'A newborn account claimed to know what it was before it existed.');
+        });
+    }
+
+    /**
+     * **Le temoin et l enregistreur lisent le meme instant.** L horloge est gelee a la seconde courante avant la
+     * premiere lecture, et rendue dans un `finally` : le demontage du cadre la rend aussi, mais un temoin qui echoue
+     * ne laisse pas une horloge gelee au suivant. Sans gel, le temoin lisait `Date::now()`, l enregistreur la
+     * relisait, et sous seize processus une frontiere de seconde passait entre les deux : « 1789446511 is identical
+     * to 1789446510 » (15 septembre 2026). La comparaison reste stricte, aucune tolerance n est ajoutee.
+     *
+     * @param callable(int): void $essai recoit l instant gele, en secondes
+     */
+    private function atAFrozenInstant(callable $essai): void
+    {
+        $instant = Date::now()->startOfSecond();
+        Date::setTestNow($instant);
+
+        try {
+            $essai((int)$instant->timestamp);
+        } finally {
+            Date::setTestNow();
+        }
     }
 
     /**
@@ -240,22 +262,23 @@ class ClassHistoryTest extends TestCase
      */
     public function testASelectedClassWritesItsLine(): void
     {
-        $compte = $this->anAccount();
-        $instant = (int)Date::now()->timestamp;
+        $this->atAFrozenInstant(function (int $instant): void {
+            $compte = $this->anAccount();
 
-        resolve(CharacterClassService::class)->selectClass(User::query()->findOrFail($compte), CharacterClass::GENERAL);
+            resolve(CharacterClassService::class)->selectClass(User::query()->findOrFail($compte), CharacterClass::GENERAL);
 
-        $ligne = DB::table('character_class_history')->where('user_id', $compte)->orderByDesc('id')->first();
+            $ligne = DB::table('character_class_history')->where('user_id', $compte)->orderByDesc('id')->first();
 
-        $this->assertNotNull($ligne, 'A class was selected without its history line.');
-        $this->assertSame(CharacterClass::GENERAL->value, (int)$ligne->character_class);
-        $this->assertSame($instant, (int)$ligne->changed_at);
-        $this->assertSame(ClassHistoryRecorder::CAUSE_SELECTION, $ligne->cause);
-        $this->assertSame(CharacterClass::GENERAL->value, (int)DB::table('users')->where('id', $compte)->value('character_class'));
+            $this->assertNotNull($ligne, 'A class was selected without its history line.');
+            $this->assertSame(CharacterClass::GENERAL->value, (int)$ligne->character_class);
+            $this->assertSame($instant, (int)$ligne->changed_at);
+            $this->assertSame(ClassHistoryRecorder::CAUSE_SELECTION, $ligne->cause);
+            $this->assertSame(CharacterClass::GENERAL->value, (int)DB::table('users')->where('id', $compte)->value('character_class'));
 
-        // Et l historique repond des la seconde suivante, jamais a la seconde meme.
-        $lecteur = new ClassHistoryReader();
-        $this->assertSame(CharacterClass::GENERAL->value, $lecteur->personalClassAt($compte, $instant + 1)->value());
+            // Et l historique repond des la seconde suivante, jamais a la seconde meme.
+            $lecteur = new ClassHistoryReader();
+            $this->assertSame(CharacterClass::GENERAL->value, $lecteur->personalClassAt($compte, $instant + 1)->value());
+        });
     }
 
     /**

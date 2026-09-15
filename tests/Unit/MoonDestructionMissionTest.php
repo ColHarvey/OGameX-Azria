@@ -2,6 +2,7 @@
 
 namespace Tests\Unit;
 
+use Illuminate\Support\Facades\DB;
 use OGame\Enums\FleetMissionStatus;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
@@ -10,6 +11,8 @@ use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\Planet;
 use OGame\Models\Planet\Coordinate;
+use OGame\Models\User;
+use OGame\Models\UserTech;
 use OGame\Services\FleetMissionService;
 use OGame\Services\MessageService;
 use OGame\Services\SettingsService;
@@ -19,6 +22,79 @@ use Tests\UnitTestCase;
 class MoonDestructionMissionTest extends UnitTestCase
 {
     private MoonDestructionMission $mission;
+
+    /** Le compte cree par l essai pour porter sa cible ; efface au demontage, et seulement lui. */
+    private int|null $itsOwnAccount = null;
+
+    /** @var list<int> Les corps crees par l essai ; effaces au demontage, et seulement eux. */
+    private array $itsOwnBodies = [];
+
+    protected function tearDown(): void
+    {
+        $this->cleanUpOnlyWhatTheTestCreated();
+
+        parent::tearDown();
+    }
+
+    /**
+     * **Une cible propre a l essai** : un compte neuf, une planete a lui sur des coordonnees etablies vides, et aucune
+     * lune a ces coordonnees — verifie par lecture, jamais obtenu en supprimant quoi que ce soit.
+     *
+     * L ancienne version visait 1:1:5 et **vidait** ces coordonnees de toute lune avant de mesurer. Or dans toute base
+     * de processus fraiche le premier compte de banc recoit sa planete mere a 1:1:5 ; une classe `MoonTestCase` y
+     * pose sa lune (memes coordonnees que la planete) et en fait la planete courante du compte, et la clef etrangere
+     * `users.planet_current` refusait la suppression (rouge intermittent du 15 septembre 2026). Un temoin n efface
+     * pas un corps partage : il monte le sien.
+     */
+    private function aTargetOfItsOwn(): Coordinate
+    {
+        $this->itsOwnAccount = (int)User::factory()->create()->id;
+        $player = resolve(PlayerServiceFactory::class)->make($this->itsOwnAccount);
+
+        $coordinate = $this->getSafeEmptyCoordinate(new Coordinate(1, 250, 1));
+        $planet = resolve(PlanetServiceFactory::class)->createAdditionalPlanetForPlayer($player, $coordinate);
+        $this->itsOwnBodies[] = $planet->getPlanetId();
+
+        // Les preconditions sont etablies par lecture, pas supposees.
+        $this->assertTrue($planet->getPlanetCoordinates()->equals($coordinate), 'Premise: the planet of the test is not where it was asked.');
+        $this->assertSame(1, Planet::query()->whereIn('id', $this->itsOwnBodies)->count(), 'Premise: the planet of the test is not in the database.');
+        $this->assertFalse($this->aMoonExistsAt($coordinate), 'Premise: a moon already exists at the coordinates of the test.');
+
+        return $coordinate;
+    }
+
+    private function aMoonExistsAt(Coordinate $coordinate): bool
+    {
+        return Planet::query()
+            ->where('galaxy', $coordinate->galaxy)
+            ->where('system', $coordinate->system)
+            ->where('planet', $coordinate->position)
+            ->where('planet_type', PlanetType::Moon->value)
+            ->exists();
+    }
+
+    /**
+     * Efface ce que l essai a cree — ses corps, la technologie et les lignes d historique de son compte, puis le
+     * compte — et rien d autre ; puis **etablit** que c est efface. Dans cet ordre, a cause des clefs etrangeres.
+     */
+    private function cleanUpOnlyWhatTheTestCreated(): void
+    {
+        if ($this->itsOwnBodies !== []) {
+            Planet::query()->whereIn('id', $this->itsOwnBodies)->delete();
+            $this->assertSame(0, Planet::query()->whereIn('id', $this->itsOwnBodies)->count(), 'The bodies of the test survived its teardown.');
+            $this->itsOwnBodies = [];
+        }
+
+        if ($this->itsOwnAccount !== null) {
+            $account = $this->itsOwnAccount;
+            UserTech::query()->where('user_id', $account)->delete();
+            DB::table('character_class_history')->where('user_id', $account)->delete();
+            DB::table('alliance_membership_history')->where('user_id', $account)->delete();
+            User::query()->whereKey($account)->first()?->delete();
+            $this->assertNull(User::query()->find($account), 'The account of the test survived its teardown.');
+            $this->itsOwnAccount = null;
+        }
+    }
 
     protected function setUp(): void
     {
@@ -178,18 +254,9 @@ class MoonDestructionMissionTest extends UnitTestCase
             'small_cargo' => 10,
         ]);
 
-        // Create a mock target moon
-        $targetCoordinate = new Coordinate(1, 1, 5);
-
-        // **Ces coordonnees doivent etre vides, et l'essai l'etablit au lieu de l'esperer.** Toute
-        // la suite du test repose sur l'absence de lune ici : un essai voisin qui en cree une rend
-        // la mission possible, et l'assertion « impossible car la lune n'existe pas » tombe pour une
-        // raison qui n'a rien a voir avec ce qu'elle mesure.
-        Planet::where('galaxy', $targetCoordinate->galaxy)
-            ->where('system', $targetCoordinate->system)
-            ->where('planet', $targetCoordinate->position)
-            ->where('planet_type', PlanetType::Moon->value)
-            ->delete();
+        // Toute la suite du test repose sur l absence de lune a la cible : la cible est donc propre a l essai, et
+        // l absence de lune y est etablie par lecture — jamais en supprimant un corps que d autres tiennent.
+        $targetCoordinate = $this->aTargetOfItsOwn();
 
         // Test 1: Fleet with Deathstars should be possible (if moon exists)
         $unitsWithDeathstar = new UnitCollection();
@@ -204,8 +271,9 @@ class MoonDestructionMissionTest extends UnitTestCase
             $unitsWithDeathstar
         );
 
-        // Should fail because moon doesn't exist, not because of missing Deathstar
+        // Should fail because moon doesn't exist, not because of missing Deathstar — and the reason says so.
         $this->assertFalse($result->possible, 'Mission should not be possible when moon does not exist');
+        $this->assertSame(__('No moon exists at the target coordinates.'), $result->error, 'The mission was refused for another reason than the absence of a moon.');
 
         // Test 2: Fleet without Deathstars should fail
         $unitsWithoutDeathstar = new UnitCollection();
@@ -231,7 +299,7 @@ class MoonDestructionMissionTest extends UnitTestCase
         $deathstar = $this->app->make(\OGame\Services\ObjectService::class)->getUnitObjectByMachineName('deathstar');
         $units->addUnit($deathstar, 1);
 
-        $targetCoordinate = new Coordinate(1, 1, 5);
+        $targetCoordinate = $this->aTargetOfItsOwn();
 
         // Test targeting a planet (should fail)
         $result = $this->mission->isMissionPossible(
