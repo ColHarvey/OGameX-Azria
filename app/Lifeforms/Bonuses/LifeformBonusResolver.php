@@ -6,6 +6,7 @@ use OGame\Lifeforms\Catalogue\LifeformBonus;
 use OGame\Lifeforms\Catalogue\LifeformCatalogue;
 use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Catalogue\LifeformFormulas;
+use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\Demography\PlanetLifeformProfile;
 use OGame\Lifeforms\Research\LifeformExperience;
 use OGame\Lifeforms\Rules\LifeformRuleRevisions;
@@ -15,7 +16,6 @@ use OGame\Lifeforms\Species;
 use OGame\Models\Lifeforms\LifeformPlanet;
 use OGame\Models\Lifeforms\LifeformSpeciesProgress;
 use OGame\Models\Planet;
-use OGame\Services\SettingsService;
 
 /**
  * Le resolveur des bonus de formes de vie : ce que les batiments d une planete et les technologies de
@@ -32,7 +32,20 @@ use OGame\Services\SettingsService;
  *   (1 + experience de son espece) × (1 + bonus « toutes les technologies » des batiments de sa planete).
  *
  * `forPlanet()` rend les deux ; `forPlayer()` les technologies seules (flottes, phalange, expeditions :
- * rien de planetaire n y entre). Interrupteur ferme, compte sans espece, lune : un jeu vide, neutre.
+ * rien de planetaire n y entre). Compte sans espece, lune, niveaux a zero : un jeu vide, neutre.
+ *
+ * ------------------------------------------------------------------------------------
+ * L INTERRUPTEUR N EST PAS CONSULTE ICI, ET C EST VOULU
+ *
+ * `lifeforms_enabled` **bloque les ordres nouveaux** — choisir une espece, inscrire un travail, choisir un
+ * emplacement, lancer un vol, ouvrir une page — et rien d autre. Ce qui est **acquis** continue de compter :
+ * une planete gardee de cette maniere ne voit pas sa production, ses entrepots ni ses vaisseaux changer parce
+ * que l administration a ferme le robinet. C est la regle du plan approuve le 15 septembre 2026, et une
+ * premiere version l avait enfreinte en rendant tout neutre — la revue de Codex l a relevee (journal §155.9).
+ *
+ * Consequence a connaitre : **fermer l interrupteur n est pas un arret d urgence des bonus**. Avant la
+ * premiere ouverture, il n existe aucun niveau, donc fermer et ouvrir ne change rien ; apres, fermer ne
+ * defait pas ce que les joueurs ont bati.
  *
  * ## Ce que le resolveur sert, et ce qu il ne sert pas
  *
@@ -119,7 +132,6 @@ final class LifeformBonusResolver
     ];
 
     public function __construct(
-        private readonly SettingsService $settings,
         private readonly LifeformLevels $levels,
         private readonly LifeformResearchService $research,
         private readonly LifeformRuleRevisions $revisions,
@@ -131,9 +143,6 @@ final class LifeformBonusResolver
      */
     public function forPlanet(int $planetId): LifeformBonusSet
     {
-        if (!$this->settings->lifeformsEnabled()) {
-            return LifeformBonusSet::none();
-        }
         $jeu = LifeformBonusCache::remember('lf-planete:' . $planetId, time(), function () use ($planetId): LifeformBonusSet|null {
             $etat = LifeformPlanet::query()->where('planet_id', $planetId)->first();
             if ($etat === null) {
@@ -151,13 +160,14 @@ final class LifeformBonusResolver
 
     /**
      * Les bonus des technologies du compte, sommes sur toutes ses planetes et plafonnes.
+     *
+     * `$asOf` ramene les niveaux **a cet instant** par la file des travaux : c est ce que le gel d un combat
+     * demande, un travailleur traitant une arrivee bien apres l avoir datee. Sans lui, la lecture est celle du
+     * monde courant.
      */
-    public function forPlayer(int $userId): LifeformBonusSet
+    public function forPlayer(int $userId, int|null $asOf = null): LifeformBonusSet
     {
-        if (!$this->settings->lifeformsEnabled()) {
-            return LifeformBonusSet::none();
-        }
-        $jeu = LifeformBonusCache::remember('lf-compte:' . $userId, time(), fn (): LifeformBonusSet|null => $this->technologyBonuses($userId));
+        $jeu = LifeformBonusCache::remember('lf-compte:' . $userId . ':' . ($asOf ?? 'vivant'), time(), fn (): LifeformBonusSet|null => $this->technologyBonuses($userId, $asOf));
 
         return $jeu instanceof LifeformBonusSet ? $jeu : LifeformBonusSet::none();
     }
@@ -167,9 +177,6 @@ final class LifeformBonusResolver
      */
     public function buildingEnergyOf(int $planetId): int
     {
-        if (!$this->settings->lifeformsEnabled()) {
-            return 0;
-        }
         $energie = LifeformBonusCache::remember('lf-energie:' . $planetId, time(), function () use ($planetId): int|null {
             $etat = LifeformPlanet::query()->where('planet_id', $planetId)->first();
             if ($etat === null) {
@@ -231,7 +238,7 @@ final class LifeformBonusResolver
      *
      * @return array<int, LifeformBonusContribution>|null null quand le compte n a aucune planete peuplee
      */
-    private function technologyContributions(int $userId): array|null
+    private function technologyContributions(int $userId, int|null $asOf = null): array|null
     {
         $planetes = Planet::query()->where('user_id', $userId)->where('destroyed', 0)->pluck('id');
         $etats = LifeformPlanet::query()->whereIn('planet_id', $planetes)->get();
@@ -244,16 +251,24 @@ final class LifeformBonusResolver
         foreach ($etats as $etat) {
             $planetId = (int)$etat->planet_id;
             $espece = Species::from((int)$etat->species);
-            $niveaux = $this->levels->buildingLevelsOf($planetId);
+            $niveaux = $asOf === null ? $this->levels->buildingLevelsOf($planetId) : $this->levels->levelsAt($planetId, LifeformKind::Building, $asOf);
             $profil = PlanetLifeformProfile::fromLevels($espece, $niveaux, $vitesse);
             $actifs = $this->research->activeTechnologyLevels($planetId, $etat, $profil, $espece, $niveaux);
             if ($actifs === []) {
                 continue;
             }
             $emplacements = [];
+            $poses = [];
             foreach ($this->research->slotsOf($planetId) as $rang => $ligne) {
                 if ($ligne->object_id !== null) {
                     $emplacements[(int)$ligne->object_id] = $rang;
+                    $poses[(int)$ligne->object_id] = (int)($ligne->selected_at ?? 0);
+                }
+            }
+            if ($asOf !== null) {
+                $actifs = self::rewound($actifs, $this->levels->levelsAt($planetId, LifeformKind::Technology, $asOf), $poses, $asOf);
+                if ($actifs === []) {
+                    continue;
                 }
             }
             $batiments = 0.0;
@@ -295,9 +310,9 @@ final class LifeformBonusResolver
     /**
      * Le total des technologies du compte : la somme des contributions, plafonnee.
      */
-    private function technologyBonuses(int $userId): LifeformBonusSet|null
+    private function technologyBonuses(int $userId, int|null $asOf = null): LifeformBonusSet|null
     {
-        $contributions = $this->technologyContributions($userId);
+        $contributions = $this->technologyContributions($userId, $asOf);
         if ($contributions === null) {
             return null;
         }
@@ -317,11 +332,36 @@ final class LifeformBonusResolver
      */
     public function contributionsOf(int $userId): array
     {
-        if (!$this->settings->lifeformsEnabled()) {
-            return [];
+        return $this->technologyContributions($userId) ?? [];
+    }
+
+    /**
+     * Les technologies actives **telles qu elles etaient** : niveaux ramenes par la file, et celles posees dans
+     * leur emplacement apres l instant retirees — une technologie choisie apres une arrivee n armait pas la flotte.
+     *
+     * **Ce qui n est pas remonte, et pourquoi** : la population de la planete, qui decide qu un emplacement est
+     * ouvert, n a pas d historique ; et l experience d une espece bouge par les decouvertes, dont le credit est
+     * lui-meme un effet date. Les deux sont dits au journal §155.9 plutot que devines.
+     *
+     * @param array<int, int> $actifs niveaux courants des technologies dans un emplacement ouvert
+     * @param array<int, int> $alors niveaux de la planete a l instant
+     * @param array<int, int> $poses instant ou chaque technologie a ete posee dans son emplacement
+     * @return array<int, int>
+     */
+    private static function rewound(array $actifs, array $alors, array $poses, int $at): array
+    {
+        $resultat = [];
+        foreach ($actifs as $objectId => $niveau) {
+            if (($poses[$objectId] ?? 0) > $at) {
+                continue;
+            }
+            $ramene = $alors[$objectId] ?? 0;
+            if ($ramene > 0) {
+                $resultat[$objectId] = min($niveau, $ramene);
+            }
         }
 
-        return $this->technologyContributions($userId) ?? [];
+        return $resultat;
     }
 
     private static function applies(LifeformBonus $bonus): bool

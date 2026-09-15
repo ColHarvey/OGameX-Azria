@@ -20,6 +20,9 @@ use OGame\GameMissions\BattleEngine\Draws\BattleDraws;
 use OGame\GameMissions\BattleEngine\Draws\SeededDraws;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Lifeforms\Bonuses\LifeformBonusCache;
+use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
+use OGame\Lifeforms\Catalogue\LifeformCatalogue;
+use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\Demography\DemographicRules;
 use OGame\Lifeforms\Services\LifeformInstallationService;
@@ -28,6 +31,7 @@ use OGame\Lifeforms\Species;
 use OGame\Models\CombatEntryCharacteristic;
 use OGame\Models\CombatInstance;
 use OGame\Models\Lifeforms\LifeformPlanet;
+use OGame\Models\Lifeforms\LifeformQueue;
 use OGame\Models\Lifeforms\LifeformSlot;
 use OGame\Models\Message;
 use OGame\Models\Resources;
@@ -292,6 +296,135 @@ final class LifeformCombatTest extends FleetDispatchTestCase
                 // La creation du retour n est pas l objet de cet essai.
             },
             (int)$combat->ends_at
+        );
+    }
+
+    /**
+     * **Une recherche achevée après l arrivée n arme pas la flotte qui vient d arriver** (revue de Codex).
+     *
+     * Le travailleur traite une arrivée quand il passe, pas à la seconde où elle a lieu. Entre les deux, une
+     * recherche de forme de vie peut s achever. Si le gel lisait le compte **au traitement**, cette flotte
+     * partirait au combat avec un niveau qu elle n avait pas en arrivant — un bonus rétroactif que rien ne
+     * justifie, et que le gel des recherches ordinaires interdit déjà.
+     */
+    public function testAResearchFinishedAfterTheArrivalDoesNotArmTheFleetThatJustArrived(): void
+    {
+        resolve(SettingsService::class)->set('lifeforms_enabled', '1');
+        $chasseur = ObjectService::getShipObjectByMachineName('light_fighter');
+
+        [$ouvreuse, $cibleId, $ouverture] = $this->aRallyAboutToOpen(0, [], null, function () use ($chasseur): void {
+            resolve(LifeformInstallationService::class)->chooseSpecies($this->currentUserId, Species::Mechas, (int)Date::now()->timestamp);
+            LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->update(['population' => 2000000.0, 'calculated_at' => (int)Date::now()->timestamp + 10 * 86400]);
+            LifeformSlot::query()->updateOrCreate(['planet_id' => $this->currentPlanetId, 'slot' => 5], ['object_id' => self::GENERAL_OVERHAUL_LIGHT_FIGHTER, 'chosen_via' => 'local', 'selected_at' => (int)Date::now()->timestamp]);
+            resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Technology, self::GENERAL_OVERHAUL_LIGHT_FIGHTER, 10);
+            $this->assertSame(3.0, resolve(PlayerServiceFactory::class)->make($this->currentUserId, true)->getLifeformUnitStatsPercent($chasseur), 'Premisse : la flotte part avec +3 %.');
+        });
+
+        [, $especeCible] = $this->populate($cibleId, 2000000.0);
+
+        // **Le defenseur aussi** : sa technologie passe au niveau 11 apres l ouverture, avant le traitement.
+        [$technologieCible, $vaisseauCible, $position] = self::UNIT_TECH[$especeCible->value];
+        $uniteCible = ObjectService::getShipObjectByMachineName($vaisseauCible);
+        LifeformSlot::query()->updateOrCreate(['planet_id' => $cibleId, 'slot' => $position], ['object_id' => $technologieCible, 'chosen_via' => 'local', 'selected_at' => $ouverture - 1000]);
+        resolve(LifeformLevels::class)->setLevel($cibleId, LifeformKind::Technology, $technologieCible, 10);
+        LifeformQueue::query()->create([
+            'planet_id' => $cibleId,
+            'user_id' => (int)DB::table('planets')->where('id', $cibleId)->value('user_id'),
+            'kind' => LifeformKind::Technology->value,
+            'object_id' => $technologieCible,
+            'target_level' => 11,
+            'metal' => 0,
+            'crystal' => 0,
+            'deuterium' => 0,
+            'energy' => 0,
+            'time_start' => $ouverture - 100,
+            'time_end' => $ouverture + 5,
+            'status' => 'done',
+            'catalogue_version' => LifeformCatalogue::VERSION,
+        ]);
+        resolve(LifeformLevels::class)->setLevel($cibleId, LifeformKind::Technology, $technologieCible, 11);
+
+        // **La recherche s achève cinq secondes après l arrivée**, et le monde l a déjà appliquée quand le
+        // travailleur passe : niveau 11, donc +3,3 % sur le compte vivant.
+        LifeformQueue::query()->create([
+            'planet_id' => $this->currentPlanetId,
+            'user_id' => $this->currentUserId,
+            'kind' => LifeformKind::Technology->value,
+            'object_id' => self::GENERAL_OVERHAUL_LIGHT_FIGHTER,
+            'target_level' => 11,
+            'metal' => 0,
+            'crystal' => 0,
+            'deuterium' => 0,
+            'energy' => 0,
+            'time_start' => $ouverture - 100,
+            'time_end' => $ouverture + 5,
+            'status' => 'done',
+            'catalogue_version' => LifeformCatalogue::VERSION,
+        ]);
+        resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Technology, self::GENERAL_OVERHAUL_LIGHT_FIGHTER, 11);
+
+        $vivant = resolve(PlayerServiceFactory::class)->make($this->currentUserId, true);
+        $this->assertSame(3.3, round($vivant->getLifeformUnitStatsPercent($chasseur), 4), 'Premisse : le compte vivant porte desormais +3,3 %.');
+
+        // **La borne exacte** : une echeance egale a l instant compte comme precedente, une seconde avant non.
+        $niveaux = resolve(LifeformLevels::class);
+        $this->assertSame(11, $niveaux->levelsAt($this->currentPlanetId, LifeformKind::Technology, $ouverture + 5)[self::GENERAL_OVERHAUL_LIGHT_FIGHTER] ?? 0);
+        $this->assertSame(10, $niveaux->levelsAt($this->currentPlanetId, LifeformKind::Technology, $ouverture + 4)[self::GENERAL_OVERHAUL_LIGHT_FIGHTER] ?? 0);
+        $this->assertSame(10, $niveaux->levelsAt($this->currentPlanetId, LifeformKind::Technology, $ouverture)[self::GENERAL_OVERHAUL_LIGHT_FIGHTER] ?? 0);
+
+        // **Le cas symetrique** : un travail **du** a l instant mais que le travailleur n a pas encore livre y
+        // etait quand meme. La ligne est posee, mesuree, puis retiree — la bataille qui suit n en depend pas.
+        $enRetard = LifeformQueue::query()->create([
+            'planet_id' => $this->currentPlanetId,
+            'user_id' => $this->currentUserId,
+            'kind' => LifeformKind::Technology->value,
+            'object_id' => self::GENERAL_OVERHAUL_LIGHT_FIGHTER,
+            'target_level' => 12,
+            'metal' => 0,
+            'crystal' => 0,
+            'deuterium' => 0,
+            'energy' => 0,
+            'time_start' => $ouverture - 200,
+            'time_end' => $ouverture - 10,
+            'status' => 'running',
+            'catalogue_version' => LifeformCatalogue::VERSION,
+        ]);
+        $this->assertSame(12, $niveaux->levelsAt($this->currentPlanetId, LifeformKind::Technology, $ouverture)[self::GENERAL_OVERHAUL_LIGHT_FIGHTER] ?? 0, 'Un travail echu avant l instant y etait, meme non livre.');
+        $enRetard->delete();
+
+        // **Une technologie posee dans son emplacement apres l instant n armait pas la flotte.**
+        $resolveur = resolve(LifeformBonusResolver::class);
+        $this->assertEqualsWithDelta(0.03, $resolveur->forPlayer($this->currentUserId, $ouverture)->fraction(LifeformEffect::SHIP_STATS, 'light_fighter'), 1e-9);
+        LifeformSlot::query()->where('planet_id', $this->currentPlanetId)->where('slot', 5)->update(['selected_at' => $ouverture + 50]);
+        LifeformBonusCache::invalidate();
+        $this->assertSame(0.0, $resolveur->forPlayer($this->currentUserId, $ouverture)->fraction(LifeformEffect::SHIP_STATS, 'light_fighter'), 'Un emplacement choisi apres l arrivee arme la flotte.');
+        LifeformSlot::query()->where('planet_id', $this->currentPlanetId)->where('slot', 5)->update(['selected_at' => $ouverture - 1000]);
+        LifeformBonusCache::invalidate();
+
+        // Le travailleur passe **deux minutes après** l arrivée logique.
+        $this->travelTo(Date::createFromTimestamp($ouverture + 120));
+        $this->get('/overview')->assertStatus(200);
+
+        $combat = $this->theCombatOf((int)$ouvreuse->id, $cibleId);
+        $this->assertNotNull($combat, 'The arrival did not open a combat.');
+
+        $ligne = CombatEntryCharacteristic::query()->where('combat_instance_id', $combat->id)->where('fleet_mission_id', $ouvreuse->id)->first();
+        $this->assertNotNull($ligne, 'L ouvreuse est inscrite avec ses caracteristiques.');
+        $this->assertSame($ouverture, (int)$ligne->entered_at, 'La flotte est gelee a son arrivee, pas au traitement.');
+
+        $gele = FrozenCombatCharacteristics::fromStorage($ligne->getAttributes());
+        $this->assertSame(
+            3.0,
+            round($gele->lifeformBonuses->unitStatsPercent($chasseur), 4),
+            'La recherche achevee apres l arrivee arme la flotte : le gel lit le compte au traitement au lieu de le ramener a l admission.'
+        );
+
+        // La garnison suit la meme regle, a l instant de l ouverture.
+        $defenseur = OpeningStateRecorder::openingDefenderOf($combat);
+        $this->assertSame(
+            3.0,
+            round($defenseur->lifeformBonuses->unitStatsPercent($uniteCible), 4),
+            'La recherche du defenseur achevee apres l ouverture arme sa garnison.'
         );
     }
 

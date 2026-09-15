@@ -130,7 +130,7 @@ final class OpeningStateRecorder
             // corps. La fermeture compte l'apport d'un lot depuis la, et un lot fini avant l'ouverture
             // apporte zero — ses unites sont deja dans l'effectif ci-dessus.
             'queue_progress' => self::queueProgressOf($targetBodyId),
-            'defender' => self::defenderFactsOf($corps),
+            'defender' => self::defenderFactsOf($corps, $openedAt),
             // **Les reglages sous lesquels cette bataille se calculera.** Lus une fois, ici, dans la
             // transaction d'ouverture : ce que l'administration changera pendant le ralliement ne
             // touchera que les combats ouverts apres.
@@ -285,7 +285,7 @@ final class OpeningStateRecorder
     /**
      * @return array<string, int|array<string, mixed>>
      */
-    private static function defenderFactsOf(PlanetService $corps): array
+    private static function defenderFactsOf(PlanetService $corps, int $openedAt): array
     {
         $proprietaire = $corps->getPlayer();
         if ($proprietaire === null) {
@@ -307,7 +307,7 @@ final class OpeningStateRecorder
             $chantier->getObjectLevel('space_dock'),
             // **Les formes de vie du corps et de son proprietaire, photographiees ici** : ce qu elles apportent
             // a la defense, a la population, a la lune et aux debris ne se relit plus (journal §155.6).
-            resolve(LifeformCombatPhotographer::class)->ofBody($corps),
+            resolve(LifeformCombatPhotographer::class)->ofBody($corps, $openedAt),
         ))->toFrozenFacts();
     }
 

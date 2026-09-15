@@ -366,7 +366,7 @@ final class CombatEntryCharacteristicsRegistry
             $this->classBonusAt($quoi, $playerId, $instant),
             // **Les bonus de formes de vie, lus a l admission et geles ensuite** : leurs niveaux n ont pas
             // d historique ramenable a un instant, et c est le gel qui protege la bataille (journal §155.6).
-            resolve(LifeformCombatPhotographer::class)->ofPlayer($compte),
+            resolve(LifeformCombatPhotographer::class)->ofPlayer($compte, $instant),
         );
     }
 

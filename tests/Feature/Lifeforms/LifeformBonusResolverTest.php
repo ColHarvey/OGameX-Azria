@@ -10,8 +10,11 @@ use OGame\Lifeforms\Catalogue\LifeformCatalogue;
 use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Catalogue\LifeformFormulas;
 use OGame\Lifeforms\Catalogue\LifeformKind;
+use OGame\Lifeforms\LifeformRefused;
 use OGame\Lifeforms\Services\LifeformInstallationService;
 use OGame\Lifeforms\Services\LifeformLevels;
+use OGame\Lifeforms\Services\LifeformQueueService;
+use OGame\Lifeforms\Services\LifeformResearchService;
 use OGame\Lifeforms\Species;
 use OGame\Models\Lifeforms\LifeformAccount;
 use OGame\Models\Lifeforms\LifeformBuildingLevel;
@@ -93,11 +96,44 @@ final class LifeformBonusResolverTest extends AccountTestCase
 
         $this->building($this->currentPlanetId, self::MAGMA_FORGE, 5);
         $this->assertEqualsWithDelta(0.10, $resolveur->forPlanet($this->currentPlanetId)->fraction(LifeformEffect::METAL_PRODUCTION), 1e-9, 'Forge de magma : 2 % par niveau.');
+    }
+
+    /**
+     * **L interrupteur ferme bloque les ordres nouveaux, il ne confisque pas ce qui est acquis** — la regle du
+     * plan approuve le 15 septembre 2026. Une premiere version rendait tout neutre ; la revue de Codex l a
+     * relevee (journal §155.9).
+     */
+    public function testAClosedSwitchBlocksNewOrdersButKeepsWhatIsAcquired(): void
+    {
+        $resolveur = resolve(LifeformBonusResolver::class);
+        $this->choose(Species::Rocktal);
+        $this->building($this->currentPlanetId, self::MAGMA_FORGE, 5);
+        $acquis = $resolveur->forPlanet($this->currentPlanetId)->fraction(LifeformEffect::METAL_PRODUCTION);
+        $energie = $resolveur->buildingEnergyOf($this->currentPlanetId);
+        $this->assertEqualsWithDelta(0.10, $acquis, 1e-9);
+        $this->assertGreaterThan(0, $energie);
 
         $this->pinSettings(['lifeforms_enabled' => 0]);
         LifeformBonusCache::invalidate();
-        $this->assertTrue($resolveur->forPlanet($this->currentPlanetId)->isEmpty(), 'Interrupteur ferme : neutre, meme avec des niveaux.');
-        $this->assertSame(0, $resolveur->buildingEnergyOf($this->currentPlanetId));
+
+        // Ce qui est acquis compte toujours : la production, l energie, et la page des bonus.
+        $this->assertEqualsWithDelta($acquis, $resolveur->forPlanet($this->currentPlanetId)->fraction(LifeformEffect::METAL_PRODUCTION), 1e-9, 'Fermer l interrupteur a retire un bonus deja construit.');
+        $this->assertSame($energie, $resolveur->buildingEnergyOf($this->currentPlanetId), 'Un batiment ferme cesserait de consommer : sa production resterait, pas sa facture.');
+
+        // Mais plus aucun ordre nouveau ne passe.
+        $this->assertRefused(fn () => resolve(LifeformQueueService::class)->add($this->planetService, self::MAGMA_FORGE, (int)Date::now()->timestamp));
+        $this->assertRefused(fn () => resolve(LifeformResearchService::class)->choose($this->currentPlanetId, $this->currentUserId, 1, 'local', (int)Date::now()->timestamp));
+        $this->assertRefused(fn () => resolve(LifeformInstallationService::class)->chooseSpecies($this->currentUserId + 500000, Species::Humans, (int)Date::now()->timestamp));
+    }
+
+    private function assertRefused(callable $action): void
+    {
+        try {
+            $action();
+            $this->fail('Un ordre a ete accepte alors que l interrupteur est ferme.');
+        } catch (LifeformRefused $refus) {
+            $this->assertSame(LifeformRefused::CLOSED, $refus->reason, $refus->getMessage());
+        }
     }
 
     public function testBuildingBonusesAreLinearCappedAndLocalToThePlanet(): void

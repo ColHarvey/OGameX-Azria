@@ -138,9 +138,14 @@ final class LifeformCombatEngineTest extends AccountTestCase
         $this->assertSame(['light_fighter' => 3.0], $flotte->unitStats);
         $this->assertNull($flotte->protectedShare, 'Une flotte ne porte rien du corps.');
 
+        // **L interrupteur ferme ne confisque pas ce qui est acquis** (journal §155.9) : une population qui
+        // vit continue de mourir au combat, et les unites gardent leurs bonus.
         $this->pinSettings(['lifeforms_enabled' => 0]);
         LifeformBonusCache::invalidate();
-        $this->assertTrue($photographe->ofBody($this->planetService)->isNone(), 'Interrupteur ferme : rien.');
+        $ferme = $photographe->ofBody($this->planetService);
+        $this->assertFalse($ferme->isNone(), 'Fermer l interrupteur a confisque ce qui etait acquis.');
+        $this->assertEqualsWithDelta(0.3, $ferme->protectedShare, 1e-9);
+        $this->assertSame(['light_fighter' => 3.0], $ferme->unitStats);
     }
 
     /**

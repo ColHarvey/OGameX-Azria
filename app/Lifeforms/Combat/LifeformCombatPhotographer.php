@@ -14,7 +14,6 @@ use OGame\Models\Lifeforms\LifeformPlanet;
 use OGame\Services\ObjectService;
 use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
-use OGame\Services\SettingsService;
 
 /**
  * Photographie ce que les formes de vie apportent a un combat, **au moment ou on le lui demande** :
@@ -30,27 +29,29 @@ final class LifeformCombatPhotographer
         private readonly LifeformBonusResolver $resolver,
         private readonly LifeformLevels $levels,
         private readonly LifeformRuleRevisions $revisions,
-        private readonly SettingsService $settings,
     ) {
     }
 
     /**
      * Ce qu une flotte de ce joueur apporte a ses tirs : ses unites, rien du corps.
+     *
+     * `$at` est l instant d admission : les niveaux y sont **ramenes par la file des travaux**, pour qu une
+     * recherche achevee entre l arrivee et son traitement n arme pas cette flotte (revue de Codex, §155.9).
      */
-    public function ofPlayer(PlayerService $player): FrozenLifeformCombatBonuses
+    public function ofPlayer(PlayerService $player, int|null $at = null): FrozenLifeformCombatBonuses
     {
-        return new FrozenLifeformCombatBonuses($this->unitStatsOf($this->resolver->forPlayer($player->getId())), null, 0.0, 0.0, 0.0);
+        return new FrozenLifeformCombatBonuses($this->unitStatsOf($this->resolver->forPlayer($player->getId(), $at)), null, 0.0, 0.0, 0.0);
     }
 
     /**
      * Ce qu un corps apporte a sa defense : les unites de son proprietaire, et — pour une planete qui
      * porte une forme de vie — la protection de sa population, la lune, les debris et les epaves.
      */
-    public function ofBody(PlanetService $body): FrozenLifeformCombatBonuses
+    public function ofBody(PlanetService $body, int|null $at = null): FrozenLifeformCombatBonuses
     {
         $proprietaire = $body->getPlayer();
-        $unites = $proprietaire === null ? [] : $this->unitStatsOf($this->resolver->forPlayer($proprietaire->getId()));
-        if (!$body->isPlanet() || !$this->settings->lifeformsEnabled()) {
+        $unites = $proprietaire === null ? [] : $this->unitStatsOf($this->resolver->forPlayer($proprietaire->getId(), $at));
+        if (!$body->isPlanet()) {
             return new FrozenLifeformCombatBonuses($unites, null, 0.0, 0.0, 0.0);
         }
         $etat = LifeformPlanet::query()->where('planet_id', $body->getPlanetId())->first();

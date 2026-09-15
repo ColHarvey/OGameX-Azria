@@ -64,9 +64,13 @@ final class LifeformEspionageTest extends AccountTestCase
         $this->assertSame(12345, $faits['population'], 'La population est arrondie vers le bas.');
         $this->assertSame(30, $faits['protected_percent'], 'Bouclier planetaire niveau 10 : 30 % proteges.');
 
+        // L interrupteur ferme bloque les ordres, pas la lecture : une population qui vit se voit (journal §155.9).
         $this->pinSettings(['lifeforms_enabled' => 0]);
         LifeformBonusCache::invalidate();
-        $this->assertNull($espionnage->factsOf($this->planetService), 'Interrupteur ferme : aucune section.');
+        $ferme = $espionnage->factsOf($this->planetService);
+        $this->assertNotNull($ferme);
+        $this->assertSame('humans', $ferme['species']);
+        $this->assertSame(30, $ferme['protected_percent']);
     }
 
     public function testTheFactsAreTranslatedOnlyWhenReadAndAbsenceIsKept(): void

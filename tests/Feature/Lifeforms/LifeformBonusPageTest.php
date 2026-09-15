@@ -155,7 +155,8 @@ final class LifeformBonusPageTest extends AccountTestCase
         $this->pinSettings(['lifeforms_enabled' => 0]);
         LifeformBonusCache::invalidate();
         $this->get(route('lifeforms.bonuses'))->assertStatus(404);
-        $this->assertSame([], resolve(LifeformBonusResolver::class)->contributionsOf($this->currentUserId), 'Interrupteur ferme : aucun detail, pas meme une lecture.');
+        // La page se ferme, mais le detail reste ce qu il est : l interrupteur bloque les ordres, pas l acquis.
+        $this->assertCount(1, resolve(LifeformBonusResolver::class)->contributionsOf($this->currentUserId), 'Interrupteur ferme : ce qui est acquis compte toujours.');
     }
 
     private function secondPlanet(): int

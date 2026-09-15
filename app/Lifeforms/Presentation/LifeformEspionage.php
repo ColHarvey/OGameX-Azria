@@ -6,7 +6,6 @@ use OGame\Lifeforms\Combat\LifeformCombatPhotographer;
 use OGame\Lifeforms\Species;
 use OGame\Models\Lifeforms\LifeformPlanet;
 use OGame\Services\PlanetService;
-use OGame\Services\SettingsService;
 
 /**
  * Ce qu une sonde rapporte des formes de vie d un corps (journal §155.7).
@@ -18,23 +17,25 @@ use OGame\Services\SettingsService;
  * **Ce que l attaquant y gagne** : de quoi prevoir les pertes civiles d une attaque reussie, exactement
  * ce que la tranche 6 a mis en jeu. Une section absente veut dire « la sonde n en a pas vu assez » ; une
  * section presente sans espece veut dire « il n y a rien ici ». Les deux ne se confondent pas.
+ *
+ * L interrupteur n est pas consulte : il bloque les ordres nouveaux, pas la lecture de ce qui existe. Une
+ * population qui vit et qui meurt au combat se voit depuis l orbite, meme le robinet ferme (journal §155.9).
  */
 final class LifeformEspionage
 {
-    public function __construct(
-        private readonly SettingsService $settings,
-        private readonly LifeformCombatPhotographer $photographer,
-    ) {
+    public function __construct(private readonly LifeformCombatPhotographer $photographer)
+    {
     }
 
     /**
-     * @return array{species: string, population: int, protected_percent: int}|null null quand l interrupteur est ferme
+     * Les faits du corps, toujours presents : c est la **sonde** qui decide de les rapporter ou non, par son
+     * seuil, et l absence de section veut alors dire « pas assez vu ». Un corps sans forme de vie rend une
+     * section sans espece — « il n y a rien ici », qui n est pas la meme chose.
+     *
+     * @return array{species: string, population: int, protected_percent: int}
      */
-    public function factsOf(PlanetService $planet): array|null
+    public function factsOf(PlanetService $planet): array
     {
-        if (!$this->settings->lifeformsEnabled()) {
-            return null;
-        }
         $etat = $planet->isPlanet() ? LifeformPlanet::query()->where('planet_id', $planet->getPlanetId())->first() : null;
         if ($etat === null) {
             return ['species' => '', 'population' => 0, 'protected_percent' => 0];
