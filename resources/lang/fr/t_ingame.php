@@ -1113,6 +1113,8 @@ return [
         'res_dark_matter' => 'Matière noire',
         'menu_overview' => 'Vue générale',
         'menu_resources' => 'Ressources',
+        'menu_lifeforms' => 'Formes de vie',
+        'menu_lifeforms_buildings_title' => 'Bâtiments de formes de vie',
         'menu_facilities' => 'Installations',
         'menu_merchant' => 'Marchand',
         'menu_research' => 'Recherche',

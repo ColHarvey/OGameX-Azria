@@ -1376,6 +1376,8 @@ return [
         // Menu sidebar — item labels
         'menu_overview'             => 'Overview',
         'menu_resources'            => 'Resources',
+        'menu_lifeforms'            => 'Lifeforms',
+        'menu_lifeforms_buildings_title' => 'Lifeform buildings',
         'menu_facilities'           => 'Facilities',
         'menu_merchant'             => 'Merchant',
         'menu_research'             => 'Research',

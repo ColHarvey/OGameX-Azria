@@ -7,6 +7,9 @@ use Exception;
 use Illuminate\Support\Facades\Date;
 use Illuminate\View\View;
 use OGame\Facades\AppUtil;
+use OGame\Lifeforms\Catalogue\LifeformKind;
+use OGame\Lifeforms\Presentation\LifeformBanner;
+use OGame\Lifeforms\Services\LifeformQueueService;
 use OGame\Models\Highscore;
 use OGame\Services\BuildingQueueService;
 use OGame\Services\FleetMissionService;
@@ -31,7 +34,7 @@ class OverviewController extends OGameController
      * @return View
      * @throws Exception
      */
-    public function index(PlayerService $player, BuildingQueueService $building_queue, ResearchQueueService $research_queue, UnitQueueService $unit_queue, WreckFieldService $wreckFieldService, PlanetMoveService $planetMoveService, FleetMissionService $fleetMissionService): View
+    public function index(PlayerService $player, BuildingQueueService $building_queue, ResearchQueueService $research_queue, UnitQueueService $unit_queue, WreckFieldService $wreckFieldService, PlanetMoveService $planetMoveService, FleetMissionService $fleetMissionService, LifeformBanner $lifeformBanner, LifeformQueueService $lifeformQueue): View
     {
         $this->setBodyId('overview');
 
@@ -107,7 +110,20 @@ class OverviewController extends OGameController
             ? $planetMoveService->getCooldownSecondsForPlanet($planet)
             : 0;
 
+        $lifeforms = $lifeformBanner->for($player, $planet);
+        $lifeformQueues = null;
+        if ($lifeforms['species'] !== null && $planet->isPlanet()) {
+            $lifeformQueues = [
+                'buildings_active' => $lifeformQueue->running($planet->getPlanetId(), LifeformKind::Building),
+                'buildings_queue' => $lifeformQueue->queued($planet->getPlanetId(), LifeformKind::Building)->where('status', 'waiting')->values()->all(),
+                'research_active' => $lifeformQueue->running($planet->getPlanetId(), LifeformKind::Technology),
+            ];
+        }
+
         return view('ingame.overview.index')->with([
+            // Formes de vie (journal §155) : l invitation d accueil et les files de la planete courante.
+            'lifeforms' => $lifeforms,
+            'lifeform_queues' => $lifeformQueues,
             // Rien n'est cache au joueur : il doit pouvoir relier sa jauge a ce qu'il a
             // fait et savoir quand elle redescendra. La vue generale est la seule page
             // qu'il ouvre a chaque visite, donc la seule ou l'information le touche

@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Date;
+use OGame\Lifeforms\Presentation\LifeformBanner;
 use OGame\Models\Alliance;
 use OGame\Models\AllianceMember;
 use OGame\Models\User;
@@ -43,7 +44,7 @@ class IngameMainComposer
      * @param HighscoreService $highscoreService
      * @param BuddyService $buddyService
      */
-    public function __construct(private Request $request, private PlayerService $player, private MessageService $messageService, private SettingsService $settingsService, private FleetMissionService $fleetMissionService, private HighscoreService $highscoreService, private BuddyService $buddyService, private ChatService $chatService, private EventMissionService $eventMissionService)
+    public function __construct(private Request $request, private PlayerService $player, private MessageService $messageService, private SettingsService $settingsService, private FleetMissionService $fleetMissionService, private HighscoreService $highscoreService, private BuddyService $buddyService, private ChatService $chatService, private EventMissionService $eventMissionService, private LifeformBanner $lifeformBanner)
     {
     }
 
@@ -89,6 +90,9 @@ class IngameMainComposer
         $view->with([
             'underAttack' => $this->fleetMissionService->currentPlayerUnderAttack(),
             'eventRunning' => $this->eventMissionService->isRunning(),
+            // Formes de vie (journal §155) : l entree du menu, le portrait de l espece, population et
+            // nourriture de la planete courante. Tout est lu ; l etat a ete avance par le middleware.
+            'lifeforms' => $this->lifeformBanner->for($this->player, $this->player->planets->current()),
             'unreadMessagesCount' => $this->messageService->getUnreadMessagesCount(),
             'buddyRequestCount' => $this->buddyService->getUnreadRequestsCount((int) auth()->id()),
             'onlineBuddiesCount' => $this->getOnlineContactsCount(),

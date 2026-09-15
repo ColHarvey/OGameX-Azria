@@ -9,6 +9,10 @@
         </div>
     @endif
 
+    @if (!empty($lifeforms['welcome']))
+        @include('ingame.lifeforms.partials.welcome')
+    @endif
+
     <!-- JAVASCRIPT -->
     <script type="text/javascript">
         var textContent = [];
@@ -291,37 +295,12 @@
                         <div class="footer"></div>
                     </div>
                 </div>
-                <!--<div id="productionboxlfbuildingcomponent" class="productionboxlfbuilding injectedComponent parent overview"><div class="content-box-s">
-                        <div class="header">
-                            <h3>Lifeform Buildings
-                            </h3>
-                        </div>
-                        <div class="content">
-                            <table cellspacing="0" cellpadding="0" class="construction active">
-                                <tbody>
-                                <tr>
-                                    <td colspan="2" class="idle">
-                                        <a class="tooltip js_hideTipOnMobile " title="The lifeforms are not currently constructing any buildings. Click here to view buildings.
-" href="#TODO_=ingame&amp;component=lfbuildings">
-                                            No buildings in construction.
-                                            <br>
-                                            (View Buildings
-                                            )
-                                        </a>
-                                    </td>
-                                </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                        <div class="footer"></div>
-                    </div>
-                    <script type="text/javascript">
-                        var scheduleBuildListEntryUrl = '#TODOpage=componentOnly&component=buildlistactions&action=scheduleEntry&asJson=1';
-                        var LOCA_ERROR_INQUIRY_NOT_WORKED_TRYAGAIN = 'Your last action could not be processed. Please try again.';
-                        redirectPremiumLink = '#TODOpage=premium&showDarkMatter=1'
-                    </script>
+                @if (!empty($lifeforms['species']) && !empty($lifeform_queues))
+                {{-- Formes de vie (journal §155) : la file des batiments de la planete courante. --}}
+                <div id="productionboxlfbuildingcomponent" class="productionboxlfbuilding injectedComponent parent overview">
+                    @include('ingame.lifeforms.partials.queue', ['queue_active' => $lifeform_queues['buildings_active'], 'queue_waiting' => $lifeform_queues['buildings_queue'], 'kind' => 'building'])
                 </div>
-            </div>-->
+                @endif
             </div>
             <div class="productionBoxResearch boxColumn research">
                 <div id="productionboxresearchcomponent" class="productionboxresearch injectedComponent parent overview">
@@ -336,30 +315,12 @@
                         <div class="footer"></div>
                     </div>
                 </div>
-                <!--<div id="productionboxlfresearchcomponent" class="productionboxlfresearch injectedComponent parent overview"><div class="content-box-s">
-                        <div class="header">
-                            <h3>Lifeform Research
-                            </h3>
-                        </div>
-                        <div class="content">
-                            <table cellspacing="0" cellpadding="0" class="construction active">
-                                <tbody>
-                                <tr>
-                                    <td colspan="2" class="idle">
-                                        <a class="tooltip js_hideTipOnMobile " title="There is currently no research in progress. Click here to view lifeform techs.
-" href="#TODOpage=ingame&amp;component=lfresearch">
-                                            There is no research in progress at the moment.
-                                            <br>
-                                            (View Lifeform Development
-                                            )
-                                        </a>
-                                    </td>
-                                </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                        <div class="footer"></div>
-                    </div>-->
+                @if (!empty($lifeforms['species']) && !empty($lifeform_queues))
+                {{-- Formes de vie : la recherche en cours de la planete courante (emplacements : tranche 3). --}}
+                <div id="productionboxlfresearchcomponent" class="productionboxlfresearch injectedComponent parent overview">
+                    @include('ingame.lifeforms.partials.queue', ['queue_active' => $lifeform_queues['research_active'], 'queue_waiting' => [], 'kind' => 'technology'])
+                </div>
+                @endif
                 <script type="text/javascript">
                     var scheduleBuildListEntryUrl = '#TODOpage=componentOnly&component=buildlistactions&action=scheduleEntry&asJson=1';
                     var LOCA_ERROR_INQUIRY_NOT_WORKED_TRYAGAIN = 'Your last action could not be processed. Please try again.';

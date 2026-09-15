@@ -120,6 +120,18 @@ final class LifeformInstallationService
         $this->populate($planet, $espece, $now);
     }
 
+    /**
+     * Peuple une planete deja existante par son identifiant, si son compte a une espece. Sans effet sinon.
+     */
+    public function installOnExistingPlanet(int $planetId, int $now): void
+    {
+        $planete = Planet::query()->whereKey($planetId)->first();
+        if ($planete === null || (int)$planete->destroyed > 0) {
+            return;
+        }
+        $this->installOnNewPlanet($planete, $now);
+    }
+
     private function populate(Planet $planet, Species $species, int $now): void
     {
         $base = PlanetLifeformProfile::fromLevels($species, [], 1.0)->basePopulation;

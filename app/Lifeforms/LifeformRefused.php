@@ -32,6 +32,6 @@ final class LifeformRefused extends RuntimeException
 
     public function translationKey(): string
     {
-        return 't_lifeforms.refused.' . $this->reason;
+        return 't_lifeforms_ui.refused.' . $this->reason;
     }
 }

@@ -24,6 +24,7 @@ use OGame\Http\Controllers\GalaxyFleetsController;
 use OGame\Http\Controllers\HighscoreController;
 use OGame\Http\Controllers\JumpGateController;
 use OGame\Http\Controllers\LanguageController;
+use OGame\Http\Controllers\LifeformsController;
 use OGame\Http\Controllers\MerchantController;
 use OGame\Http\Controllers\MessagesController;
 use OGame\Http\Controllers\NotesController;
@@ -94,6 +95,16 @@ Route::middleware(['auth', 'banned', 'globalgame', 'locale', 'firstlogin'])->gro
     Route::post('/resources/add-buildrequest', [ResourcesController::class, 'addBuildRequest'])->name('resources.addbuildrequest.post');
     Route::post('/resources/downgrade', [ResourcesController::class, 'downgradeBuildRequest'])->name('resources.downgrade');
     Route::post('/resources/cancel-buildrequest', [ResourcesController::class, 'cancelBuildRequest'])->name('resources.cancelbuildrequest');
+
+    // Formes de vie (journal §155) : le choix de l espece et les batiments de la planete courante.
+    // Toute page repond 404 quand l interrupteur est ferme.
+    Route::get('/lifeforms', [LifeformsController::class, 'index'])->name('lifeforms.index');
+    Route::post('/lifeforms/select', [LifeformsController::class, 'select'])->name('lifeforms.select');
+    Route::post('/lifeforms/welcome/later', [LifeformsController::class, 'dismissWelcome'])->name('lifeforms.welcome.later');
+    Route::get('/lifeforms/buildings', [LifeformsController::class, 'buildings'])->name('lifeforms.buildings');
+    Route::get('/ajax/lifeforms/buildings', [LifeformsController::class, 'buildingsAjax'])->name('lifeforms.buildings.ajax');
+    Route::post('/lifeforms/buildings/add-buildrequest', [LifeformsController::class, 'addBuildRequest'])->name('lifeforms.buildings.addbuildrequest.post');
+    Route::post('/lifeforms/buildings/cancel-buildrequest', [LifeformsController::class, 'cancelBuildRequest'])->name('lifeforms.buildings.cancelbuildrequest');
 
     // Facilities
     Route::get('/facilities', [FacilitiesController::class, 'index'])->name('facilities.index');

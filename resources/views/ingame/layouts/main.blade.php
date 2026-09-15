@@ -281,27 +281,31 @@
                     </span>
                     </div>
                 </div>
-                <!-- <div class="resource_tile population">
+                @if (!empty($lifeforms['planet']))
+                @php $lf = $lifeforms['planet']; @endphp
+                {{-- Formes de vie (journal §155) : population et nourriture de la planete courante, avec
+                     l infobulle du jeu officiel. Les nombres viennent du serveur ; rien n est estime ici. --}}
+                <div class="resource_tile population">
                     <div id="population_box" class="population tooltipHTML resource ipiHintable tpd-hideOnClickOutside"
-                         title="Population|<table class=&quot;resourceTooltip&quot;><tr><th>Available:</th><td><span class=&quot;overmark&quot;>100</span></td></tr><tr><th>Living Space
-</th><td><span class=&quot;overmark&quot;>0</span></td></tr><tr><th>Satisfied</th><td><span class=&quot;undermark&quot;>0</span></td></tr><tr><th>Hungry</th><td><span class=&quot;overmark&quot;>0</span></td></tr><tr><th>Growth rate</th><td><span class=&quot;&quot;>±0</span></td></tr><tr><th>Bunker Space
-</th><td><span class=&quot;middlemark&quot;>100</span></td></tr></table>" data-ipi-hint="ipiResourcepopulation">
-                        <div class="resourceIcon population"></div>
+                         title="{{ __('t_lifeforms_ui.banner.population') }}|<table class=&quot;resourceTooltip&quot;><tr><th>{{ __('t_lifeforms_ui.banner.available') }}</th><td><span class=&quot;&quot;>{{ $lf['population_formatted'] }}</span></td></tr><tr><th>{{ __('t_lifeforms_ui.banner.tier2') }}</th><td><span class=&quot;&quot;>{{ $lf['tier2_formatted'] }}</span></td></tr><tr><th>{{ __('t_lifeforms_ui.banner.tier3') }}</th><td><span class=&quot;&quot;>{{ $lf['tier3_formatted'] }}</span></td></tr><tr><th>{{ __('t_lifeforms_ui.banner.living_space') }}</th><td><span class=&quot;{{ $lf['full'] ? 'overmark' : '' }}&quot;>{{ $lf['living_space_formatted'] }}</span></td></tr><tr><th>{{ __('t_lifeforms_ui.banner.satisfied') }}</th><td><span class=&quot;undermark&quot;>{{ $lf['satisfied_formatted'] }}</span></td></tr><tr><th>{{ __('t_lifeforms_ui.banner.hungry') }}</th><td><span class=&quot;{{ $lf['hungry'] > 0 ? 'overmark' : '' }}&quot;>{{ $lf['hungry_formatted'] }}</span></td></tr><tr><th>{{ __('t_lifeforms_ui.banner.growth') }}</th><td><span class=&quot;&quot;>{{ $lf['growth_hour_formatted'] }}/h</span></td></tr><tr><th>{{ __('t_lifeforms_ui.banner.sheltered') }}</th><td><span class=&quot;middlemark&quot;>{{ $lf['sheltered_formatted'] }}</span></td></tr></table>"
+                         data-ipi-hint="ipiResourcepopulation">
+                        <a href="{{ route('lifeforms.buildings') }}"><div class="resourceIcon population"></div></a>
                         <span class="value">
-                        <span id="resources_population" data-raw="100" class="overmark">100</span>
+                        <span id="resources_population" data-raw="{{ (int)floor($lf['population']) }}" class="{{ $lf['full'] ? 'overmark' : '' }}">{{ $lf['population_formatted'] }}</span>
                     </span>
                     </div>
                 </div>
                 <div class="resource_tile food">
                     <div id="food_box" class="food tooltipHTML resource ipiHintable tpd-hideOnClickOutside"
-                         title="Food|<table class=&quot;resourceTooltip&quot;><tr><th>Available:</th><td><span class=&quot;overmark&quot;>0</span></td></tr><tr><th>Storage capacity</th><td><span class=&quot;overmark&quot;>0</span></td></tr><tr><th>Overproduction</th><td><span class=&quot;undermark&quot;>0</span></td></tr><tr><th>Consumption</th><td><span class=&quot;overmark&quot;>0</span></td></tr><tr><th>Consumed in</th><td><span class=&quot;overmark timeTillFoodRunsOut&quot;>~</span></td></tr></table>"
+                         title="{{ __('t_lifeforms_ui.banner.food') }}|<table class=&quot;resourceTooltip&quot;><tr><th>{{ __('t_lifeforms_ui.banner.available') }}</th><td><span class=&quot;&quot;>{{ $lf['food_formatted'] }}</span></td></tr><tr><th>{{ __('t_lifeforms_ui.banner.storage') }}</th><td><span class=&quot;&quot;>{{ $lf['food_storage_formatted'] }}</span></td></tr><tr><th>{{ __('t_lifeforms_ui.banner.production') }}</th><td><span class=&quot;undermark&quot;>{{ $lf['food_production_hour_formatted'] }}/h</span></td></tr><tr><th>{{ __('t_lifeforms_ui.banner.consumption') }}</th><td><span class=&quot;overmark&quot;>{{ $lf['food_consumption_hour_formatted'] }}/h</span></td></tr><tr><th>{{ __('t_lifeforms_ui.banner.consumed_in') }}</th><td><span class=&quot;{{ $lf['food_runs_out_in'] === null ? '' : 'overmark' }} timeTillFoodRunsOut&quot;>{{ $lf['food_runs_out_formatted'] }}</span></td></tr></table>"
                          data-ipi-hint="ipiResourcefood">
-                        <div class="resourceIcon food"></div>
+                        <a href="{{ route('lifeforms.buildings') }}"><div class="resourceIcon food"></div></a>
                         <span class="value">
-                        <span id="resources_food" data-raw="0" class="overmark">0</span>
+                        <span id="resources_food" data-raw="{{ (int)floor($lf['food']) }}" class="{{ $lf['food_balance_hour'] < 0 ? 'overmark' : '' }}">{{ $lf['food_formatted'] }}</span>
                     </span>
                     </div>
-                </div> -->
+                </div>
+                @endif
                 <div class="resource_tile darkmatter">
                     <div id="darkmatter_box" class="darkmatter tooltipHTML resource ipiHintable tpd-hideOnClickOutside"
                          title="{{ __('t_ingame.layout.res_dark_matter') }}|<table class=&quot;resourceTooltip&quot;><tr><th>{{ __('t_ingame.layout.res_available') }}:</th><td><span class=&quot;&quot;>{!! $resources['darkmatter']['amount_formatted'] !!}</span></td></tr></table>"
@@ -318,13 +322,19 @@
             </div>
         </div>
         <div id="commandercomponent" class="">
-            <!-- <div id="lifeform" class="fleft">
-                <a href="#TODO_page=ingame&amp;component=lfsettings" class="tooltipHTML js_hideTipOnMobile ipiHintable"
-                   title="Lifeform|No lifeforms
-" data-ipi-hint="ipiLifeformSettings">
-                    <div class="resourceIcon population"></div>
+            @if (!empty($lifeforms['enabled']) || !empty($lifeforms['species']))
+            {{-- Formes de vie : le portrait de l espece du compte, a cote des officiers, comme dans le jeu officiel. --}}
+            <div id="lifeform" class="fleft">
+                <a href="{{ route('lifeforms.index') }}" class="tooltipHTML js_hideTipOnMobile ipiHintable"
+                   title="{{ __('t_lifeforms_ui.page.title') }}|{{ $lifeforms['species_name'] ?? __('t_lifeforms_ui.banner.no_species') }}" data-ipi-hint="ipiLifeformSettings">
+                    @if (!empty($lifeforms['species']))
+                        <div class="lifeform-item-icon lifeform{{ $lifeforms['species']->value }}" style="background: url('{{ asset('img/lifeform/lifeformtype_sprite.png') }}') no-repeat;"></div>
+                    @else
+                        <div class="resourceIcon population"></div>
+                    @endif
                 </a>
-            </div> -->
+            </div>
+            @endif
             <div id="characterclass" class="fleft">
                 @php
                     $userClass = $currentPlayer->getUser()->getCharacterClassEnum();
@@ -589,6 +599,34 @@
                             <span class="textlabel">{{ __('t_ingame.layout.menu_resources') }}</span>
                         </a>
                     </li>
+
+                    @if (!empty($lifeforms['enabled']))
+                    {{-- Formes de vie (journal §155) : entre Ressources et Installations, comme dans le jeu officiel.
+                         L icone du menu vit dans la feuille heritee non servie ; ses coordonnees sont reprises ici,
+                         en ligne, pour ne pas dependre d une reconstruction des assets. --}}
+                    <style>
+                        .menu_icon .menuImage.lifeform { background-position: -405px 0; }
+                        .menu_icon .menuImage.lifeform.highlighted { background-position: -405px -27px; }
+                        .menu_icon a:hover .menuImage.lifeform, .menu_icon a:active .menuImage.lifeform { background-position: -405px -54px; }
+                    </style>
+                    <li id="menu-lifeforms">
+                        <span class="menu_icon">
+                            <a href="{{ route('lifeforms.buildings') }}"
+                               class="tooltipRight js_hideTipOnMobile "
+                               target="_self"
+                               title="{{ __('t_ingame.layout.menu_lifeforms_buildings_title') }}">
+                                <div class="menuImage lifeform {{(Request::is('lifeforms*') ? 'highlighted' : '') }}"></div>
+                            </a>
+                        </span>
+                        <a class="menubutton {{(Request::is('lifeforms*') ? 'selected' : '') }}"
+                           href="{{ route('lifeforms.index') }}"
+                           accesskey=""
+                           target="_self"
+                        >
+                            <span class="textlabel">{{ __('t_ingame.layout.menu_lifeforms') }}</span>
+                        </a>
+                    </li>
+                    @endif
 
                     <li>
                         <span class="menu_icon">
