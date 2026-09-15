@@ -23,6 +23,7 @@ use OGame\GameMissions\AcsDefendMission;
 use OGame\GameMissions\ExpeditionMission;
 use OGame\GameMissions\PatrolMission;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet\Coordinate;
@@ -95,8 +96,21 @@ class FleetMissionService
             $this->calculateFleetMissionDistance($fromPlanet, $to),
             $mission,
             $speed_percent,
-            $this->allianceFlightSpeedBonus($player, $to, $mission, $targetType)
+            $this->allianceFlightSpeedBonus($player, $to, $mission, $targetType) * $this->lifeformFlightSpeedBonus($player, $mission)
         );
+    }
+
+    /**
+     * Le multiplicateur de vitesse que les formes de vie ajoutent a **ce vol-ci** : la Propulsion
+     * telekinetique des Kaelesh, vers une expedition seulement (journal §155.5).
+     */
+    private function lifeformFlightSpeedBonus(PlayerService $player, GameMission|null $mission): float
+    {
+        if ($mission === null || $mission::getTypeId() !== ExpeditionMission::getTypeId()) {
+            return 1.0;
+        }
+
+        return $player->lifeformBonuses()->multiplier(LifeformEffect::EXPEDITION_SPEED);
     }
 
     /**
@@ -375,6 +389,12 @@ class FleetMissionService
         $characterClassService = app(CharacterClassService::class);
         $consumptionMultiplier = $characterClassService->getDeuteriumConsumptionMultiplier($player->getUser());
         $consumption = (int)($consumption * $consumptionMultiplier);
+
+        // Formes de vie : Recuperation de chaleur, Module d efficacite (plafonnes a 30 % chacun).
+        $reductionFormesDeVie = $player->lifeformBonuses()->reduction(LifeformEffect::FUEL_CONSUMPTION_REDUCTION);
+        if ($reductionFormesDeVie > 0) {
+            $consumption = (int)floor($consumption * (1 - $reductionFormesDeVie));
+        }
 
         return $consumption;
     }

@@ -2,6 +2,9 @@
 
 namespace OGame\Services;
 
+use OGame\GameObjects\Models\Abstracts\GameObject;
+use OGame\Lifeforms\Bonuses\LifeformBonusSet;
+
 /**
  * NPCPlayerService - A minimal PlayerService for NPC players used in expedition battles.
  *
@@ -40,6 +43,19 @@ class NPCPlayerService extends PlayerService
             'armor_technology' => $this->armorTech,
             default => 0,
         };
+    }
+
+    /**
+     * Un PNJ n a pas de forme de vie : aucun bonus, et aucune lecture en base pour le dire.
+     */
+    public function lifeformBonuses(): LifeformBonusSet
+    {
+        return LifeformBonusSet::none();
+    }
+
+    public function getLifeformUnitStatsPercent(GameObject $object): float
+    {
+        return 0.0;
     }
 
     /**

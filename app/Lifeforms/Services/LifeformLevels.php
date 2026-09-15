@@ -2,6 +2,7 @@
 
 namespace OGame\Lifeforms\Services;
 
+use OGame\Lifeforms\Bonuses\LifeformBonusCache;
 use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Models\Lifeforms\LifeformBuildingLevel;
 use OGame\Models\Lifeforms\LifeformTechnologyLevel;
@@ -45,5 +46,6 @@ final class LifeformLevels
     {
         $modele = $kind === LifeformKind::Building ? LifeformBuildingLevel::query() : LifeformTechnologyLevel::query();
         $modele->updateOrCreate(['planet_id' => $planetId, 'object_id' => $objectId], ['level' => max(0, $level)]);
+        LifeformBonusCache::invalidate();
     }
 }

@@ -8,6 +8,8 @@ use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use OGame\GameObjects\Models\Enums\GameObjectType;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
+use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\Planet;
 use OGame\Models\Planet\Coordinate;
@@ -237,9 +239,9 @@ class WreckFieldService
      * @param int $spaceDockLevel
      * @return array
      */
-    public function calculateShipsForWreckField(UnitCollection $destroyedShips, int $spaceDockLevel = 1): array
+    public function calculateShipsForWreckField(UnitCollection $destroyedShips, int $spaceDockLevel = 1, int|null $planetId = null): array
     {
-        $wreckFieldPercentage = $this->getRecoverableWreckFieldPercentage($spaceDockLevel) / 100;
+        $wreckFieldPercentage = $this->getRecoverableWreckFieldPercentage($spaceDockLevel, $planetId) / 100;
         $shipData = [];
 
         foreach ($destroyedShips->units as $unit) {
@@ -787,7 +789,7 @@ class WreckFieldService
     public function getMaxRecoverablePercentage(): float
     {
         $spaceDockLevel = $this->wreckField->space_dock_level ?? 1;
-        return $this->getRecoverableWreckFieldPercentage($spaceDockLevel);
+        return $this->getRecoverableWreckFieldPercentage($spaceDockLevel, $this->wreckFieldPlanetId());
     }
 
     /**
@@ -959,13 +961,41 @@ class WreckFieldService
     /**
      * Get the percentage of destroyed ships that become repairable wreckage for a Space Dock level.
      */
-    public function getRecoverableWreckFieldPercentage(int $spaceDockLevel): float
+    public function getRecoverableWreckFieldPercentage(int $spaceDockLevel, int|null $planetId = null): float
     {
         $nonDebrisShare = max(0.0, 100.0 - $this->debrisFieldFromShips());
         $normalizedLevel = max(1, min(15, $spaceDockLevel));
         $multiplier = self::SPACE_DOCK_WRECKAGE_MULTIPLIERS[$normalizedLevel] ?? self::SPACE_DOCK_WRECKAGE_MULTIPLIERS[1];
+        $part = round($nonDebrisShare * $multiplier, 1);
 
-        return round($nonDebrisShare * $multiplier, 1);
+        // Formes de vie : les Nano-robots de reparation de la planete (plafonnes a 50 %) rendent plus d epaves
+        // reparables, jamais plus de 100 % (journal §155.5).
+        if ($planetId !== null) {
+            $bonus = app(LifeformBonusResolver::class)->forPlanet($planetId)->fraction(LifeformEffect::WRECK_RECOVERY);
+            if ($bonus > 0) {
+                $part = round(min(100.0, $part * (1 + $bonus)), 1);
+            }
+        }
+
+        return $part;
+    }
+
+    /**
+     * La planete d un champ d epaves : celle qui porte ses coordonnees, ou rien.
+     */
+    private function wreckFieldPlanetId(): int|null
+    {
+        if ($this->wreckField === null) {
+            return null;
+        }
+        $id = Planet::query()
+            ->where('galaxy', (int)$this->wreckField->galaxy)
+            ->where('system', (int)$this->wreckField->system)
+            ->where('planet', (int)$this->wreckField->planet)
+            ->where('planet_type', PlanetType::Planet->value)
+            ->value('id');
+
+        return is_int($id) ? $id : null;
     }
 
     /**

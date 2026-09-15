@@ -1154,6 +1154,7 @@ return [
         'tooltip_class_bonus'                   => 'Class bonus',
         'tooltip_character_class_bonus'         => 'Character class bonus',
         'tooltip_alliance_class_bonus'          => 'Alliance class bonus',
+        'tooltip_lifeform_bonus'                => 'Lifeform bonus',
 
         // Rapidfire
         'rapidfire_from'                        => 'Rapidfire from',

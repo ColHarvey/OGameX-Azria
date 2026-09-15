@@ -7,6 +7,8 @@ use OGame\GameObjects\Models\Enums\GameObjectType;
 use OGame\GameObjects\Models\Fields\GameObjectPropertyDetails;
 use OGame\GameObjects\Models\Fields\GameObjectSpeedUpgrade;
 use OGame\GameObjects\Services\Properties\Abstracts\ObjectPropertyService;
+use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
+use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Services\AllianceClassService;
 use OGame\Services\CharacterClassService;
 use OGame\Services\PlayerService;
@@ -78,6 +80,25 @@ class SpeedPropertyService extends ObjectPropertyService
                 'type' => 't_ingame.techtree.tooltip_character_class_bonus',
                 'value' => $classBonusValue,
                 'percentage' => $classBonus,
+            ];
+            $breakdown['totalValue'] = $totalValue;
+        }
+
+        // Formes de vie : la vitesse de tous les vaisseaux (Propulsion a plasma) et celle des civils
+        // (Propulsion a fusion), sur la vitesse de base, sur leur propre ligne (journal §155.5).
+        $lifeformBonuses = $player->lifeformBonuses();
+        $lifeformPercentage = $lifeformBonuses->fraction(LifeformEffect::SHIP_SPEED) * 100;
+        if (LifeformBonusResolver::isCivilShip($this->parent_object->machine_name)) {
+            $lifeformPercentage += $lifeformBonuses->fraction(LifeformEffect::CIVIL_SHIP_SPEED) * 100;
+        }
+        if ($lifeformPercentage > 0) {
+            $lifeformValue = floor(($effectiveBase / 100) * $lifeformPercentage);
+            $totalValue += $lifeformValue;
+
+            $breakdown['bonuses'][] = [
+                'type' => 't_ingame.techtree.tooltip_lifeform_bonus',
+                'value' => $lifeformValue,
+                'percentage' => $lifeformPercentage,
             ];
             $breakdown['totalValue'] = $totalValue;
         }

@@ -949,6 +949,7 @@ return [
         'tooltip_class_bonus' => 'Bonus de classe',
         'tooltip_character_class_bonus' => 'Bonus de classe de personnage',
         'tooltip_alliance_class_bonus' => 'Bonus de classe d’alliance',
+        'tooltip_lifeform_bonus' => 'Bonus de forme de vie',
         'rapidfire_from' => 'Tir rapide de',
         'rapidfire_against' => 'Tir rapide contre',
         'storage_capacity' => 'Bouchon de rangement.',

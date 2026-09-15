@@ -32,6 +32,7 @@ use OGame\GameMissions\Models\ExpeditionOutcomeType;
 use OGame\GameMissions\Models\MissionPossibleStatus;
 use OGame\GameObjects\Models\ShipObject;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Military\BattleTallyFacts;
 use OGame\Military\MilitaryBattleTally;
 use OGame\Models\BattleReport;
@@ -98,6 +99,9 @@ class ExpeditionMission extends GameMission
             $weights['pirates'] *= $combatMultiplier;
             $weights['aliens'] *= $combatMultiplier;
         }
+
+        // Formes de vie : le Reseau psionique reduit la chance de perdre la flotte (trou noir), plafonne a 50 %.
+        $weights['black_hole'] *= 1 - $player->lifeformBonuses()->reduction(LifeformEffect::EXPEDITION_FLEET_LOSS_REDUCTION);
 
         return $weights;
     }
@@ -618,6 +622,9 @@ class ExpeditionMission extends GameMission
         $darkMatterMultiplier = $settingsService->expeditionRewardMultiplierDarkMatter();
         $darkMatterAmount = (int)($darkMatterAmount * $darkMatterMultiplier);
 
+        // Formes de vie : Capteurs gravitationnels (journal §155.5).
+        $darkMatterAmount = (int)($darkMatterAmount * $this->playerServiceFactory->make($mission->user_id, true)->lifeformBonuses()->multiplier(LifeformEffect::EXPEDITION_DARK_MATTER));
+
         // Credit Dark Matter to player
         $user = User::find($mission->user_id);
         if ($user === null) {
@@ -1118,6 +1125,9 @@ class ExpeditionMission extends GameMission
         $expeditionMultiplier = $characterClassService->getExpeditionResourceMultiplier($player->getUser(), $economySpeed);
         $resourceAmount = (int)($resourceAmount * $expeditionMultiplier);
 
+        // Formes de vie : Technologie de capteurs amelioree, Sixieme sens (journal §155.5).
+        $resourceAmount = (int)($resourceAmount * $player->lifeformBonuses()->multiplier(LifeformEffect::EXPEDITION_RESOURCES));
+
         // If the fleet contains a Pathfinder, double the max resource find
         $fleetUnits = $this->fleetMissionService->getFleetUnits(mission: $mission);
         $objectService = app(ObjectService::class);
@@ -1154,6 +1164,9 @@ class ExpeditionMission extends GameMission
         $economySpeed = $this->settings->economySpeed();
         $expeditionMultiplier = $characterClassService->getExpeditionResourceMultiplier($player->getUser(), $economySpeed);
         $resourceAmount = (int)($resourceAmount * $expeditionMultiplier);
+
+        // Formes de vie : Rayon tracteur telekinetique (journal §155.5).
+        $resourceAmount = (int)($resourceAmount * $player->lifeformBonuses()->multiplier(LifeformEffect::EXPEDITION_SHIPS));
 
         // If the fleet contains a Pathfinder, double the max ship find
         $fleetUnits = $this->fleetMissionService->getFleetUnits(mission: $mission);

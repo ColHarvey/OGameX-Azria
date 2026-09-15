@@ -3,6 +3,8 @@
 namespace OGame\GameObjects\Models\Fields;
 
 use Closure;
+use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
+use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Models\{
     ProductionIndex,
 };
@@ -92,6 +94,11 @@ class GameObjectProduction
     public ?AllianceClassService $allianceClassService = null;
 
     /**
+     * Le resolveur des bonus de formes de vie ; absent, aucun bonus (journal §155.5).
+     */
+    public LifeformBonusResolver|null $lifeformBonusResolver = null;
+
+    /**
      * The Universe speed, set by a server admin.
      *
      * @var int
@@ -134,6 +141,7 @@ class GameObjectProduction
         $this->calculateGeologist($productionIndex);
         $this->calculateCharacterClass($productionIndex);
         $this->calculateAllianceClass($productionIndex);
+        $this->calculateLifeform($productionIndex);
         $this->calculateCrawlerProduction($productionIndex);
         $this->calculateCommandingStaff($productionIndex);
         $this->calculateItems($productionIndex);
@@ -426,6 +434,52 @@ class GameObjectProduction
     }
 
     /**
+     * Les bonus de production des formes de vie (journal §155.5).
+     *
+     * **Meme assiette que les classes** : la production de la mine augmentee de la case de planete,
+     * arrondie vers le bas — sinon deux bonus annonces au meme pourcentage rapporteraient des montants
+     * differents. La part « toute production » s ajoute a la part propre a chaque ressource ; l energie
+     * suit le producteur d energie ; une mine (energie negative) voit sa consommation reduite par la
+     * Chambre de perturbation, ce qui s ecrit ici comme une energie positive.
+     *
+     * @param ProductionIndex $productionIndex
+     * @return void
+     */
+    private function calculateLifeform(ProductionIndex $productionIndex): void
+    {
+        if ($this->lifeformBonusResolver === null || !$this->planetService->isPlanet()) {
+            return;
+        }
+        $bonus = $this->lifeformBonusResolver->forPlanet($this->planetService->getPlanetId());
+        if ($bonus->isEmpty()) {
+            return;
+        }
+        $toute = $bonus->fraction(LifeformEffect::ALL_PRODUCTION);
+
+        $metal = $toute + $bonus->fraction(LifeformEffect::METAL_PRODUCTION);
+        if ($metal > 0 && $productionIndex->mine->metal->get() > 0) {
+            $productionIndex->lifeform->metal->set(floor(($productionIndex->mine->metal->get() + $productionIndex->planet_slot->metal->get()) * $metal));
+        }
+        $cristal = $toute + $bonus->fraction(LifeformEffect::CRYSTAL_PRODUCTION);
+        if ($cristal > 0 && $productionIndex->mine->crystal->get() > 0) {
+            $productionIndex->lifeform->crystal->set(floor(($productionIndex->mine->crystal->get() + $productionIndex->planet_slot->crystal->get()) * $cristal));
+        }
+        $deuterium = $toute + $bonus->fraction(LifeformEffect::DEUTERIUM_PRODUCTION);
+        if ($deuterium > 0 && $productionIndex->mine->deuterium->get() > 0) {
+            $productionIndex->lifeform->deuterium->set(floor(($productionIndex->mine->deuterium->get() + $productionIndex->planet_slot->deuterium->get()) * $deuterium));
+        }
+
+        $energie = $bonus->fraction(LifeformEffect::ENERGY_PRODUCTION);
+        if ($energie > 0 && $productionIndex->mine->energy->get() > 0) {
+            $productionIndex->lifeform->energy->set(floor($productionIndex->mine->energy->get() * $energie));
+        }
+        $economie = $bonus->reduction(LifeformEffect::ENERGY_CONSUMPTION_REDUCTION);
+        if ($economie > 0 && $productionIndex->mine->energy->get() < 0) {
+            $productionIndex->lifeform->energy->set(floor(abs($productionIndex->mine->energy->get()) * $economie));
+        }
+    }
+
+    /**
      * Calculates Crawler production bonus (resources only, not energy consumption)
      * Crawlers provide production bonus based on:
      * - Number of crawlers on planet
@@ -469,6 +523,11 @@ class GameObjectProduction
             $user = $this->playerService->getUser();
             $crawlerMultiplier = $this->characterClassService->getCrawlerBonusMultiplier($user);
             $crawlerBaseBonus *= $crawlerMultiplier;
+        }
+
+        // Formes de vie : les Modules de cristal ionique rendent chaque foreuse plus efficace.
+        if ($this->lifeformBonusResolver !== null && $this->planetService->isPlanet()) {
+            $crawlerBaseBonus *= $this->lifeformBonusResolver->forPlanet($this->planetService->getPlanetId())->multiplier(LifeformEffect::CRAWLER_EFFICIENCY);
         }
 
         // Apply crawler bonus to mine production
@@ -540,7 +599,13 @@ class GameObjectProduction
             $energyConsumption += $baseEnergy * ($crawlerPercentage - 1.0);
         }
 
-        return -((int)floor($effectiveCrawlers * $energyConsumption));
+        // Formes de vie : la reduction d energie des foreuses (Modules de cristal ionique, plafonnee).
+        $reduction = 0.0;
+        if ($this->lifeformBonusResolver !== null && $this->planetService->isPlanet()) {
+            $reduction = $this->lifeformBonusResolver->forPlanet($this->planetService->getPlanetId())->reduction(LifeformEffect::CRAWLER_ENERGY_REDUCTION);
+        }
+
+        return -((int)floor($effectiveCrawlers * $energyConsumption * (1 - $reduction)));
     }
 
     /**
@@ -634,6 +699,7 @@ class GameObjectProduction
         $productionIndex->total->add($productionIndex->character_class);
         $productionIndex->total->add($productionIndex->alliance_class);
         $productionIndex->total->add($productionIndex->crawler);
+        $productionIndex->total->add($productionIndex->lifeform);
         $productionIndex->total->add($productionIndex->commanding_staff);
         $productionIndex->total->add($productionIndex->items);
     }

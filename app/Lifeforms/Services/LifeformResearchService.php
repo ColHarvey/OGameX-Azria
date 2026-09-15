@@ -3,6 +3,7 @@
 namespace OGame\Lifeforms\Services;
 
 use Illuminate\Support\Facades\DB;
+use OGame\Lifeforms\Bonuses\LifeformBonusCache;
 use OGame\Lifeforms\Catalogue\LifeformCatalogue;
 use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Catalogue\LifeformFormulas;
@@ -247,6 +248,8 @@ final class LifeformResearchService
             $ligne->chosen_via = $via;
             $ligne->save();
 
+            LifeformBonusCache::invalidate();
+
             return $ligne;
         });
     }
@@ -287,6 +290,7 @@ final class LifeformResearchService
                 $emplacement->save();
             }
         });
+        LifeformBonusCache::invalidate();
     }
 
     /**
@@ -318,6 +322,7 @@ final class LifeformResearchService
                 $emplacement->save();
             }
         });
+        LifeformBonusCache::invalidate();
     }
 
     /**

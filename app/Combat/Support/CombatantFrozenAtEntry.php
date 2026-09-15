@@ -3,6 +3,7 @@
 namespace OGame\Combat\Support;
 
 use OGame\Enums\CharacterClass;
+use OGame\GameObjects\Models\Abstracts\GameObject;
 use OGame\Models\User;
 use OGame\Services\PlayerService;
 use RuntimeException;
@@ -61,6 +62,15 @@ final class CombatantFrozenAtEntry extends PlayerService
     public function getCombatResearchBonusLevels(): int
     {
         return $this->characteristics->classCombatBonus;
+    }
+
+    /**
+     * Les bonus de formes de vie ne sont pas encore dans la photographie (tranche 6) : zero, jamais une
+     * lecture vivante pendant la bataille.
+     */
+    public function getLifeformUnitStatsPercent(GameObject $object): float
+    {
+        return 0.0;
     }
 
     /**

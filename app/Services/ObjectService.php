@@ -18,6 +18,8 @@ use OGame\GameObjects\Models\StationObject;
 use OGame\GameObjects\Models\UnitObject;
 use OGame\GameObjects\ResearchObjects;
 use OGame\GameObjects\StationObjects;
+use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
+use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Models\Resources;
 use OGame\Models\UnitQueue;
 use RuntimeException;
@@ -583,6 +585,7 @@ class ObjectService
             }
 
             $price = self::getObjectRawPrice($machine_name, $current_level + 1);
+            $price = self::lifeformDiscount($object, $price, $planet);
         }
         // Price calculation for fleet or defense (regular price per unit)
         else {
@@ -590,6 +593,39 @@ class ObjectService
         }
 
         return $price;
+    }
+
+    /**
+     * La remise des formes de vie sur un prix de batiment ou de recherche (journal §155.5).
+     *
+     * Recherche : la part generale et la part qui vise cette recherche s additionnent. Batiment : la part
+     * qui vise ce batiment, plus la remise des mines pour les trois mines. Arrondi vers le bas, ressource par
+     * ressource, jamais au-dela de 99 %. Le temps derive du prix remise : une recherche moins chere est
+     * aussi plus courte, comme la formule du jeu le veut.
+     */
+    private static function lifeformDiscount(GameObject $object, Resources $price, PlanetService $planet): Resources
+    {
+        $bonus = app(LifeformBonusResolver::class)->forPlanet($planet->getPlanetId());
+        if ($bonus->isEmpty()) {
+            return $price;
+        }
+        if ($object->type === GameObjectType::Research) {
+            $reduction = $bonus->reduction(LifeformEffect::RESEARCH_COST_REDUCTION, $object->machine_name);
+        } else {
+            $reduction = $bonus->fraction(LifeformEffect::BUILDING_COST_REDUCTION, $object->machine_name)
+                + (LifeformBonusResolver::isMine($object->machine_name) ? $bonus->fraction(LifeformEffect::MINE_COST_REDUCTION) : 0.0);
+            $reduction = min(0.99, max(0.0, $reduction));
+        }
+        if ($reduction <= 0) {
+            return $price;
+        }
+
+        return new Resources(
+            floor($price->metal->get() * (1 - $reduction)),
+            floor($price->crystal->get() * (1 - $reduction)),
+            floor($price->deuterium->get() * (1 - $reduction)),
+            floor($price->energy->get() * (1 - $reduction))
+        );
     }
 
     /**

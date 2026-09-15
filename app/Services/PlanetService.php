@@ -16,6 +16,8 @@ use OGame\GameObjects\Models\Abstracts\GameObject;
 use OGame\GameObjects\Models\Enums\GameObjectType;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Hull\DamagedHulls;
+use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
+use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Services\LifeformPlanetUpdater;
 use OGame\Military\MilitaryBuildTally;
 use OGame\Models\BuildingQueue;
@@ -1107,6 +1109,12 @@ class PlanetService
 
         $time_seconds = (int)($time_hours * 3600);
 
+        // Formes de vie : les technologies qui visent ce batiment (Terraformeur, Silo, Depot) abregent sa construction.
+        $reductionFormesDeVie = app(LifeformBonusResolver::class)->forPlanet($this->getPlanetId())->reduction(LifeformEffect::BUILDING_TIME_REDUCTION, $machine_name);
+        if ($reductionFormesDeVie > 0) {
+            $time_seconds = (int)floor($time_seconds * (1 - $reductionFormesDeVie));
+        }
+
         // Minimum time is always 1 second for all objects/units.
         if ($time_seconds < 1) {
             $time_seconds = 1;
@@ -1228,6 +1236,14 @@ class PlanetService
 
         $time_seconds = (int)($time_hours * 3600);
 
+        // Formes de vie : le Hall de construction navale et le Centre d assemblage automatise abregent les vaisseaux (pas les defenses).
+        if ($object->type === GameObjectType::Ship) {
+            $reductionFormesDeVie = app(LifeformBonusResolver::class)->forPlanet($this->getPlanetId())->reduction(LifeformEffect::SHIP_BUILD_TIME_REDUCTION);
+            if ($reductionFormesDeVie > 0) {
+                $time_seconds = (int)floor($time_seconds * (1 - $reductionFormesDeVie));
+            }
+        }
+
         // Minimum time is always 1 second for all objects/units.
         if ($time_seconds < 1) {
             $time_seconds = 1;
@@ -1277,6 +1293,12 @@ class PlanetService
         // de la classe Explorateur comme dans le jeu d'origine.
         if ($this->player->hasTechnocrat()) {
             $time_seconds = (int)($time_seconds * 0.75);
+        }
+
+        // Formes de vie : les technologies de recherche (generales, ou visant cette recherche) s ajoutent (journal §155.5).
+        $reductionFormesDeVie = app(LifeformBonusResolver::class)->forPlanet($this->getPlanetId())->reduction(LifeformEffect::RESEARCH_TIME_REDUCTION, $machine_name);
+        if ($reductionFormesDeVie > 0) {
+            $time_seconds = (int)floor($time_seconds * (1 - $reductionFormesDeVie));
         }
 
         // Minimum time is always 1 second for all objects/units.
@@ -2882,6 +2904,15 @@ class PlanetService
             $energy_consumption_total += $crawler_energy_consumption;
         }
 
+        // Formes de vie : leurs batiments consomment l energie de la planete, comme les mines (journal §155.5).
+        if ($this->isPlanet()) {
+            $energieFormesDeVie = app(LifeformBonusResolver::class)->buildingEnergyOf($this->getPlanetId());
+            if ($energieFormesDeVie > 0) {
+                $building_production_total->energy->add(new Resource($energieFormesDeVie));
+                $energy_consumption_total += $energieFormesDeVie;
+            }
+        }
+
         // After all production values are calculated, we need to calculate the actual fusion plant energy production.
         // This is done by comparing deuterium consumption with deuterium production. If consumption is higher
         // than production and there is no deuterium in storage, we need to set the energy production to 0.
@@ -2958,6 +2989,7 @@ class PlanetService
         $object->production->playerService = $this->player;
         $object->production->characterClassService = app(CharacterClassService::class);
         $object->production->allianceClassService = app(AllianceClassService::class);
+        $object->production->lifeformBonusResolver = app(LifeformBonusResolver::class);
         $object->production->universe_speed = $this->settingsService->economySpeed();
 
         return $object->production->calculate($object_level, $resource_production_factor * $building_percentage);
@@ -3014,6 +3046,7 @@ class PlanetService
         $metalMine->production->playerService = $this->player;
         $metalMine->production->characterClassService = app(CharacterClassService::class);
         $metalMine->production->allianceClassService = app(AllianceClassService::class);
+        $metalMine->production->lifeformBonusResolver = app(LifeformBonusResolver::class);
         $metalMine->production->universe_speed = $this->settingsService->economySpeed();
 
         return $metalMine->production->getCrawlerEnergyConsumption();
@@ -3241,6 +3274,19 @@ class PlanetService
                     floor($storage_sum->metal->get() * $multiplicateur),
                     floor($storage_sum->crystal->get() * $multiplicateur),
                     floor($storage_sum->deuterium->get() * $multiplicateur),
+                    0
+                );
+            }
+        }
+
+        // Formes de vie : le Repaire orbital agrandit les entrepots de la planete (arrondi vers le bas, meme regle).
+        if ($this->isPlanet()) {
+            $entrepotsFormesDeVie = app(LifeformBonusResolver::class)->forPlanet($this->getPlanetId())->fraction(LifeformEffect::STORAGE_CAPACITY);
+            if ($entrepotsFormesDeVie > 0) {
+                $storage_sum = new Resources(
+                    floor($storage_sum->metal->get() * (1 + $entrepotsFormesDeVie)),
+                    floor($storage_sum->crystal->get() * (1 + $entrepotsFormesDeVie)),
+                    floor($storage_sum->deuterium->get() * (1 + $entrepotsFormesDeVie)),
                     0
                 );
             }

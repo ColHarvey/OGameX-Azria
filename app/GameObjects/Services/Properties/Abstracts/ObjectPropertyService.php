@@ -89,6 +89,24 @@ abstract class ObjectPropertyService
             ];
         }
 
-        return new GameObjectPropertyDetails($this->base_value, $bonusValue, $totalValue, $breakdown);
+        // Formes de vie : les « Mk II » et les renforts de defense, en pour cent de la valeur de base, sur
+        // les trois caracteristiques de combat seulement ; arrondi a part, sur sa propre ligne, comme les
+        // lignes de classe des services de vitesse et de fret (journal §155.5).
+        $lifeformValue = 0;
+        if (in_array($this->propertyName, ['attack', 'shield', 'structural_integrity'], true)) {
+            $lifeformPercentage = $player->getLifeformUnitStatsPercent($this->parent_object);
+            if ($lifeformPercentage > 0) {
+                $lifeformValue = (int)floor($this->base_value * $lifeformPercentage / 100);
+                $totalValue += $lifeformValue;
+                $breakdown['bonuses'][] = [
+                    'type' => 't_ingame.techtree.tooltip_lifeform_bonus',
+                    'value' => $lifeformValue,
+                    'percentage' => $lifeformPercentage,
+                ];
+                $breakdown['totalValue'] = $totalValue;
+            }
+        }
+
+        return new GameObjectPropertyDetails($this->base_value, $bonusValue + $lifeformValue, $totalValue, $breakdown);
     }
 }

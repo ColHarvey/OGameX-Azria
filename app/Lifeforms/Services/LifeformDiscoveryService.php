@@ -5,6 +5,7 @@ namespace OGame\Lifeforms\Services;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use OGame\GameMessages\LifeformDiscoveryReport;
+use OGame\Lifeforms\Bonuses\LifeformBonusCache;
 use OGame\Lifeforms\Catalogue\LifeformCatalogue;
 use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Catalogue\LifeformFormulas;
@@ -259,6 +260,7 @@ final class LifeformDiscoveryService
                 }
                 $progres->experience = (int)$progres->experience + $issue->experience;
                 $progres->save();
+                LifeformBonusCache::invalidate();
 
                 return $issue;
             default:

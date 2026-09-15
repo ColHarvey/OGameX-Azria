@@ -1107,8 +1107,8 @@ abstract class BattleEngine
             $this->settings,
             $this->photographedUniverse !== null ? $this->photographedUniverse->debrisFieldFromShips : null
         );
-        $wreckFieldPercentage = $wreckFieldService->getRecoverableWreckFieldPercentage($spaceDockLevel) / 100;
-        $wreckFieldData = $wreckFieldService->calculateShipsForWreckField($defenderUnitsLost, $spaceDockLevel);
+        $wreckFieldPercentage = $wreckFieldService->getRecoverableWreckFieldPercentage($spaceDockLevel, $spaceDockPlanet->getPlanetId()) / 100;
+        $wreckFieldData = $wreckFieldService->calculateShipsForWreckField($defenderUnitsLost, $spaceDockLevel, $spaceDockPlanet->getPlanetId());
 
         // Check if wreck field conditions are met
         $totalLostValue = $defenderUnitsLost->toResources()->metal->get() +

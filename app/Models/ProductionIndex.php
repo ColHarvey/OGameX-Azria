@@ -95,6 +95,13 @@ class ProductionIndex
      */
     public Resources $crawler;
 
+    /**
+     * Formes de vie : batiments de la planete et technologies du compte (journal §155.5).
+     *
+     * @var Resources
+     */
+    public Resources $lifeform;
+
     public function __construct()
     {
         $this->basic = new Resources();
@@ -109,6 +116,7 @@ class ProductionIndex
         $this->character_class = new Resources();
         $this->alliance_class = new Resources();
         $this->crawler = new Resources();
+        $this->lifeform = new Resources();
     }
 
     /**
@@ -131,5 +139,6 @@ class ProductionIndex
         $this->character_class->add($productionIndex->character_class);
         $this->alliance_class->add($productionIndex->alliance_class);
         $this->crawler->add($productionIndex->crawler);
+        $this->lifeform->add($productionIndex->lifeform);
     }
 }

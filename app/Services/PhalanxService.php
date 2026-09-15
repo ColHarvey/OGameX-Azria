@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\DB;
 use OGame\Factories\GameMissionFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet;
@@ -62,7 +63,8 @@ class PhalanxService
             $characterClassService = app(CharacterClassService::class);
             $rangeMultiplier = $characterClassService->getPhalanxRangeBonus($player->getUser());
 
-            return (int)($base_range * $rangeMultiplier);
+            // Formes de vie : Reseau d analyse interplanetaire (journal §155.5).
+            return (int)($base_range * $rangeMultiplier * $player->lifeformBonuses()->multiplier(LifeformEffect::PHALANX_RANGE));
         }
 
         return $base_range;

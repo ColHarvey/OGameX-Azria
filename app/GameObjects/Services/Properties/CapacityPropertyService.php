@@ -4,6 +4,8 @@ namespace OGame\GameObjects\Services\Properties;
 
 use OGame\GameObjects\Models\Fields\GameObjectPropertyDetails;
 use OGame\GameObjects\Services\Properties\Abstracts\ObjectPropertyService;
+use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
+use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Services\CharacterClassService;
 use OGame\Services\PlayerService;
 
@@ -55,6 +57,22 @@ class CapacityPropertyService extends ObjectPropertyService
                 'percentage' => $classBonus,
             ];
             $breakdown['totalValue'] = $totalValue;
+        }
+
+        // Formes de vie : le fret des vaisseaux civils (Extension des soutes, Compresseur neuromodal), sur la
+        // valeur de base, arrondi vers le bas, sur sa propre ligne (journal §155.5).
+        if (LifeformBonusResolver::isCivilShip($this->parent_object->machine_name)) {
+            $lifeformPercentage = $player->lifeformBonuses()->fraction(LifeformEffect::CIVIL_SHIP_CARGO) * 100;
+            if ($lifeformPercentage > 0) {
+                $lifeformValue = (int)floor($this->base_value * $lifeformPercentage / 100);
+                $totalValue += $lifeformValue;
+                $breakdown['bonuses'][] = [
+                    'type' => 't_ingame.techtree.tooltip_lifeform_bonus',
+                    'value' => $lifeformValue,
+                    'percentage' => $lifeformPercentage,
+                ];
+                $breakdown['totalValue'] = $totalValue;
+            }
         }
 
         return new GameObjectPropertyDetails($this->base_value, $bonusValue, $totalValue, $breakdown);

@@ -16,7 +16,12 @@ use OGame\Combat\Exceptions\MovementLocksOutdated;
 use OGame\Combat\Services\AccountCombatWithdrawal;
 use OGame\Combat\Services\FleetMovementGate;
 use OGame\Enums\AccountDeletionState;
+use OGame\GameObjects\Models\Abstracts\GameObject;
 use OGame\GameObjects\Models\Calculations\CalculationType;
+use OGame\GameObjects\Models\Enums\GameObjectType;
+use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
+use OGame\Lifeforms\Bonuses\LifeformBonusSet;
+use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Services\LifeformDiscoveryService;
 use OGame\Models\BuildingQueue;
 use OGame\Models\FleetMission;
@@ -495,6 +500,30 @@ class PlayerService
         } else {
             return 0;
         }
+    }
+
+    /**
+     * Les bonus de formes de vie du compte : les technologies actives de toutes ses planetes (journal §155.5).
+     */
+    public function lifeformBonuses(): LifeformBonusSet
+    {
+        return app(LifeformBonusResolver::class)->forPlayer($this->getId());
+    }
+
+    /**
+     * Le bonus de formes de vie sur les trois caracteristiques de combat d une unite, en pour cent : les
+     * « Mk II » d un vaisseau, le Renforcement des boucliers d obsidienne pour les defenses.
+     *
+     * **Un combattant gele repond zero** tant que sa photographie ne le porte pas (tranche 6) : absent
+     * plutot que relu vivant pendant une bataille.
+     */
+    public function getLifeformUnitStatsPercent(GameObject $object): float
+    {
+        return match ($object->type) {
+            GameObjectType::Ship => $this->lifeformBonuses()->fraction(LifeformEffect::SHIP_STATS, $object->machine_name) * 100,
+            GameObjectType::Defense => $this->lifeformBonuses()->fraction(LifeformEffect::DEFENCE_STATS) * 100,
+            default => 0.0,
+        };
     }
 
     /**

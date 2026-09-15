@@ -7,6 +7,8 @@ use Illuminate\Support\Facades\DB;
 use OGame\Enums\CharacterClass;
 use OGame\Enums\DarkMatterTransactionType;
 use OGame\History\ClassHistoryRecorder;
+use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
+use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Models\FleetMission;
 use OGame\Models\Planet;
 use OGame\Models\User;
@@ -232,6 +234,28 @@ class CharacterClassService
     }
 
     /**
+     * Le bonus d une classe, amplifie par la technologie de formes de vie qui la vise (journal §155.5).
+     *
+     * Rock'tal, Mechas et Kaelesh ont chacun une technologie de palier 3 « +x % aux bonus de la classe » :
+     * un gain (1,25 → +25 %) voit sa part multipliee par (1 + x), une reduction (0,5 → −50 %) aussi,
+     * sans jamais passer sous zero. Sans technologie, le multiplicateur rendu est exactement celui du jeu.
+     */
+    private function amplified(User $user, string $class, float $multiplier): float
+    {
+        if ($multiplier === 1.0) {
+            return 1.0;
+        }
+        $part = app(LifeformBonusResolver::class)->forPlayer((int)$user->id)->fraction(LifeformEffect::CLASS_BONUS, $class);
+        if ($part <= 0) {
+            return $multiplier;
+        }
+
+        return $multiplier > 1.0
+            ? 1.0 + ($multiplier - 1.0) * (1 + $part)
+            : max(0.0, 1.0 - (1.0 - $multiplier) * (1 + $part));
+    }
+
+    /**
      * Get mine production bonus (Collector only).
      * Returns multiplier (e.g., 1.25 for +25%).
      *
@@ -241,7 +265,7 @@ class CharacterClassService
     public function getMineProductionBonus(User $user): float
     {
         if ($this->isCollector($user)) {
-            return 1.25; // +25%
+            return $this->amplified($user, 'collector', 1.25); // +25%, amplifie par les formes de vie
         }
 
         return 1.0;
@@ -257,7 +281,7 @@ class CharacterClassService
     public function getEnergyProductionBonus(User $user): float
     {
         if ($this->isCollector($user)) {
-            return 1.10; // +10%
+            return $this->amplified($user, 'collector', 1.10); // +10%, amplifie par les formes de vie
         }
 
         return 1.0;
@@ -273,7 +297,7 @@ class CharacterClassService
     public function getTransporterSpeedBonus(User $user): float
     {
         if ($this->isCollector($user)) {
-            return 2.0; // +100%
+            return $this->amplified($user, 'collector', 2.0); // +100%, amplifie par les formes de vie
         }
 
         return 1.0;
@@ -289,7 +313,7 @@ class CharacterClassService
     public function getTransporterCargoBonus(User $user): float
     {
         if ($this->isCollector($user)) {
-            return 1.25; // +25%
+            return $this->amplified($user, 'collector', 1.25); // +25%, amplifie par les formes de vie
         }
 
         return 1.0;
@@ -305,7 +329,7 @@ class CharacterClassService
     public function getCrawlerBonusMultiplier(User $user): float
     {
         if ($this->isCollector($user)) {
-            return 1.5; // +50%
+            return $this->amplified($user, 'collector', 1.5); // +50%, amplifie par les formes de vie
         }
 
         return 1.0;
@@ -390,7 +414,7 @@ class CharacterClassService
     public function getDeuteriumConsumptionMultiplier(User $user): float
     {
         if ($this->isGeneral($user)) {
-            return 0.5; // -50% consumption
+            return $this->amplified($user, 'general', 0.5); // -50% consumption, amplifie par les formes de vie
         }
 
         return 1.0;
@@ -406,7 +430,7 @@ class CharacterClassService
     public function getRecyclerPathfinderCargoBonus(User $user): float
     {
         if ($this->isGeneral($user)) {
-            return 1.20; // +20%
+            return $this->amplified($user, 'general', 1.20); // +20%, amplifie par les formes de vie
         }
 
         return 1.0;
@@ -503,7 +527,7 @@ class CharacterClassService
     public function getResearchTimeMultiplier(User $user): float
     {
         if ($this->isDiscoverer($user)) {
-            return 0.75; // -25% research time
+            return $this->amplified($user, 'discoverer', 0.75); // -25% research time, amplifie par les formes de vie
         }
 
         return 1.0;
@@ -520,7 +544,7 @@ class CharacterClassService
     public function getExpeditionResourceMultiplier(User $user, float $universeEconomicSpeed): float
     {
         if ($this->isDiscoverer($user)) {
-            return 1.5 * $universeEconomicSpeed;
+            return $this->amplified($user, 'discoverer', 1.5) * $universeEconomicSpeed;
         }
 
         return 1.0;
@@ -536,7 +560,7 @@ class CharacterClassService
     public function getPlanetSizeBonus(User $user): float
     {
         if ($this->isDiscoverer($user)) {
-            return 1.10; // +10% planet size
+            return $this->amplified($user, 'discoverer', 1.10); // +10% planet size, amplifie par les formes de vie
         }
 
         return 1.0;
@@ -567,7 +591,7 @@ class CharacterClassService
     public function getExpeditionEnemyChanceMultiplier(User $user): float
     {
         if ($this->isDiscoverer($user)) {
-            return 0.5; // -50% chance
+            return $this->amplified($user, 'discoverer', 0.5); // -50% chance, amplifie par les formes de vie
         }
 
         return 1.0;
@@ -583,7 +607,7 @@ class CharacterClassService
     public function getPhalanxRangeBonus(User $user): float
     {
         if ($this->isDiscoverer($user)) {
-            return 1.20; // +20%
+            return $this->amplified($user, 'discoverer', 1.20); // +20%, amplifie par les formes de vie
         }
 
         return 1.0;
