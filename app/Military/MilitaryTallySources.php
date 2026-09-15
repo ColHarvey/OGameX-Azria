@@ -28,7 +28,7 @@ final class MilitaryTallySources
     public const array WITNESSES = [
         'construction' => 'Tests\\Feature\\MilitaryTalliesBuildTest::testEachDeliveredSliceIsOneEventAndTheSlicesCoverTheProgressExactly',
         'demi-temps' => 'Tests\\Feature\\MilitaryTalliesBuildTest::testTheHalvingCreditsWhatItDeliversAndTheProgressionResumesWithoutRecounting',
-        'bataille' => null,
+        'bataille' => 'Tests\\Feature\\MilitaryTalliesBattleTest::testADurableGroupBattleCreditsEachRankedParticipantOnceFromItsRounds',
         'manoeuvre-de-hamill' => null,
         'missile' => null,
         'destruction-de-lune' => null,

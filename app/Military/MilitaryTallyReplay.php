@@ -147,7 +147,15 @@ final class MilitaryTallyReplay
      */
     private function evaluate(string $version, mixed $charge): array|null
     {
-        if (!is_array($charge) || ($charge['kind'] ?? null) !== MilitaryBuildTally::KIND) {
+        if (!is_array($charge)) {
+            return null;
+        }
+
+        if (($charge['kind'] ?? null) === MilitaryBattleTally::KIND) {
+            return $this->evaluateBattle($version, $charge);
+        }
+
+        if (($charge['kind'] ?? null) !== MilitaryBuildTally::KIND) {
             return null;
         }
 
@@ -167,5 +175,37 @@ final class MilitaryTallyReplay
         }
 
         return ['built' => $prix * ($a - $de) * $poids, 'destroyed' => 0, 'lost' => 0];
+    }
+
+    /**
+     * Une bataille en attente se reevalue sur ses faits gardes — memes prix, version de l evenement — et ne rend ses
+     * valeurs que pour le participant que l evenement nomme, s il est classe. Une attente qui subsiste (Hamill, unite
+     * toujours inconnue, incoherence, faits illisibles) reste une attente.
+     *
+     * @param array<string, mixed> $charge
+     * @return array{built: int, destroyed: int, lost: int}|null
+     */
+    private function evaluateBattle(string $version, array $charge): array|null
+    {
+        $faits = BattleTallyFacts::fromStorage($charge['facts'] ?? null);
+        $participant = $charge['participant'] ?? null;
+
+        if ($faits === null || !is_string($participant)) {
+            return null;
+        }
+
+        $issue = (new BattleTallyEvaluation())->evaluate($faits, $version);
+
+        if ($issue->isPending()) {
+            return null;
+        }
+
+        $credit = $issue->credits()[$participant] ?? null;
+
+        if ($credit === null) {
+            return null;
+        }
+
+        return ['built' => 0, 'destroyed' => $credit['destroyed'], 'lost' => $credit['lost']];
     }
 }

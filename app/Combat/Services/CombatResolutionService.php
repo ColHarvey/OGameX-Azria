@@ -23,6 +23,7 @@ use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
 use OGame\GameMissions\BattleEngine\Services\LootService;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Hull\HullRepairService;
+use OGame\Military\MilitaryBattleTally;
 use OGame\Models\BattleReport;
 use OGame\Models\FleetMission;
 use OGame\Models\HullRepairOrder;
@@ -582,6 +583,12 @@ class CombatResolutionService
         // attaquante (union ACS comprise) et tout proprietaire d'une flotte en defense
         // (le maitre de la planete, plus les allies venus en ACS Defend). Un joueur ayant
         // engage plusieurs flottes n'est prevenu qu'une seule fois.
+        // **Les cumuls militaires lisent la bataille ici, toutes les pertes definitives appliquees**, dans la transaction
+        // de l appelant : le registre est la derniere ecriture, et l instant du fait est l echeance logique que le
+        // contexte porte — l echeance du combat durable, l arrivee sur le chemin instantane —, jamais l heure du
+        // traitement. Le chemin est unique pour les deux moteurs.
+        resolve(MilitaryBattleTally::class)->record($battleResult, CombatParticipantKey::forBody($defenderPlanet), $mission, $context->applicationInstant());
+
         $reportId = $this->createBattleReport($attackerPlayer, $defenderPlanet, $battleResult, $collectedDebris, $attackerCollectedDebris, $defenderCollectedDebris, $context);
 
         // Le recit d'un raid de faction se depose ici, dans le rapport, et jamais avant
