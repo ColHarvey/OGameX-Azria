@@ -6,10 +6,12 @@ use Illuminate\Support\Facades\Date;
 use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\Demography\DemographicClock;
 use OGame\Lifeforms\Demography\DemographicState;
+use OGame\Lifeforms\Demography\LifeformDemography;
 use OGame\Lifeforms\Demography\PlanetLifeformProfile;
 use OGame\Lifeforms\Rules\LifeformRuleRevisions;
 use OGame\Lifeforms\Services\LifeformInstallationService;
 use OGame\Lifeforms\Services\LifeformLevels;
+use OGame\Lifeforms\Services\LifeformPlanetUpdater;
 use OGame\Lifeforms\Services\LifeformQueueService;
 use OGame\Lifeforms\Species;
 use OGame\Models\Lifeforms\LifeformAccount;
@@ -194,6 +196,57 @@ final class LifeformPlanetUpdaterTest extends AccountTestCase
         $etat = LifeformPlanet::query()->where('planet_id', $planetId)->firstOrFail();
         $this->assertEqualsWithDelta($attendu->population, $etat->population, 1e-6, 'La population n a pas ete integree avec la seconde ferme.');
         $this->assertEqualsWithDelta($attendu->food, $etat->food, 1e-6);
+    }
+
+    /**
+     * **La borne conserve la derniere echeance reellement traitee** (relance de Codex).
+     *
+     * Si un passage s arrete avant d avoir tout traite, il ne doit pas ecrire « calcule jusqu a maintenant » :
+     * la croissance du reste de la periode et les livraisons qui restaient auraient disparu ensemble. Il
+     * s arrete ou il en est, et le passage suivant reprend exactement la — **deux passages valent un**.
+     *
+     * La borne du jeu se derive des donnees et reste hors d atteinte ; le banc la baisse a un tour pour voir
+     * la garde tomber, sur le vrai code et le vrai algorithme.
+     */
+    public function testAStoppedPassKeepsItsClockOnTheLastDeadlineItProcessed(): void
+    {
+        $debut = (int)Date::now()->timestamp;
+        $planetId = $this->planetService->getPlanetId();
+        resolve(LifeformLevels::class)->setLevel($planetId, LifeformKind::Building, self::RESIDENTIAL, 2);
+        $file = resolve(LifeformQueueService::class);
+        $premiere = $file->add($this->planetService, self::FARM, $debut);
+        $seconde = $file->add($this->planetService, self::FARM, $debut);
+        $this->travelTo(Date::createFromTimestamp($debut + 3606));
+
+        // Un passage borne a un seul tour : il livre la premiere ferme et s arrete.
+        $borne = new LifeformPlanetUpdater(
+            resolve(LifeformQueueService::class),
+            resolve(LifeformRuleRevisions::class),
+            resolve(LifeformDemography::class),
+            1
+        );
+        $borne->update($this->planetService, $debut + 3606);
+
+        $finPremiere = (int)$premiere->refresh()->time_end;
+        $etat = LifeformPlanet::query()->where('planet_id', $planetId)->firstOrFail();
+        $this->assertSame('done', $premiere->status, 'Le tour unique a livre la premiere ferme.');
+        $this->assertSame('running', $seconde->refresh()->status, 'La seconde reste echue : c est le cas que la garde protege.');
+        $this->assertSame($finPremiere, (int)$etat->calculated_at, 'L horloge a saute jusqu a maintenant en laissant un travail echu derriere elle.');
+
+        // **Le passage suivant reprend, et rien n est perdu** : meme etat qu un passage unique et complet.
+        resolve(LifeformPlanetUpdater::class)->update($this->planetService, $debut + 3606);
+        $reprise = LifeformPlanet::query()->where('planet_id', $planetId)->firstOrFail();
+        $this->assertSame('done', $seconde->refresh()->status, 'La reprise a livre ce qui restait.');
+        $this->assertSame($debut + 3606, (int)$reprise->calculated_at);
+        $this->assertSame(2, resolve(LifeformLevels::class)->levelOf($planetId, LifeformKind::Building, self::FARM));
+
+        $horloge = new DemographicClock();
+        $finSeconde = (int)$seconde->time_end;
+        $etape = $horloge->advance(new DemographicState(210.0, 0.0, $debut), PlanetLifeformProfile::fromLevels(Species::Humans, [self::RESIDENTIAL => 2], 8.0), $finPremiere);
+        $etape = $horloge->advance($etape, PlanetLifeformProfile::fromLevels(Species::Humans, [self::RESIDENTIAL => 2, self::FARM => 1], 8.0), $finSeconde);
+        $attendu = $horloge->advance($etape, PlanetLifeformProfile::fromLevels(Species::Humans, [self::RESIDENTIAL => 2, self::FARM => 2], 8.0), $debut + 3606);
+        $this->assertEqualsWithDelta($attendu->population, $reprise->population, 1e-6, 'Deux passages ne valent pas un : de la croissance a ete perdue en chemin.');
+        $this->assertEqualsWithDelta($attendu->food, $reprise->food, 1e-6);
     }
 
     public function testAnUnpopulatedPlanetIsLeftAlone(): void

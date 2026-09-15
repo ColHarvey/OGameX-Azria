@@ -8,13 +8,12 @@ use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Catalogue\LifeformFormulas;
 use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\Demography\PlanetLifeformProfile;
-use OGame\Lifeforms\Research\LifeformExperience;
+use OGame\Lifeforms\Research\LifeformExperienceLedger;
 use OGame\Lifeforms\Rules\LifeformRuleRevisions;
 use OGame\Lifeforms\Services\LifeformLevels;
 use OGame\Lifeforms\Services\LifeformResearchService;
 use OGame\Lifeforms\Species;
 use OGame\Models\Lifeforms\LifeformPlanet;
-use OGame\Models\Lifeforms\LifeformSpeciesProgress;
 use OGame\Models\Planet;
 
 /**
@@ -135,6 +134,7 @@ final class LifeformBonusResolver
         private readonly LifeformLevels $levels,
         private readonly LifeformResearchService $research,
         private readonly LifeformRuleRevisions $revisions,
+        private readonly LifeformExperienceLedger $ledger,
     ) {
     }
 
@@ -252,7 +252,9 @@ final class LifeformBonusResolver
             return null;
         }
         $vitesse = $this->revisions->live()->demography();
-        $experiences = [];
+        // **L experience se rembobine elle aussi** : une decouverte reglee apres l instant a credite des
+        // points que la flotte n avait pas (relance de Codex, journal §155.11).
+        $experiences = $asOf === null ? $this->ledger->pointsOf($userId) : $this->ledger->pointsAt($userId, $asOf);
         $contributions = [];
         foreach ($etats as $etat) {
             $planetId = (int)$etat->planet_id;
@@ -278,12 +280,7 @@ final class LifeformBonusResolver
             }
             foreach ($actifs as $objectId => $niveau) {
                 $technologie = LifeformCatalogue::byId($objectId);
-                $especeTech = $technologie->species->value;
-                if (!isset($experiences[$especeTech])) {
-                    $progres = LifeformSpeciesProgress::query()->where('user_id', $userId)->where('species', $especeTech)->first();
-                    $experiences[$especeTech] = LifeformExperience::bonusFraction(LifeformExperience::levelOf($progres === null ? 0 : (int)$progres->experience));
-                }
-                $multiplicateur = (1 + $experiences[$especeTech]) * (1 + $batiments);
+                $multiplicateur = (1 + LifeformExperienceLedger::bonusOf($experiences, $technologie->species)) * (1 + $batiments);
                 foreach ($technologie->bonuses as $bonus) {
                     if (!self::applies($bonus)) {
                         continue;

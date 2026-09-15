@@ -3,12 +3,14 @@
 namespace OGame\Lifeforms\Services;
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use OGame\Lifeforms\Bonuses\LifeformBonusCache;
 use OGame\Lifeforms\Catalogue\LifeformCatalogue;
 use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Catalogue\LifeformFormulas;
 use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\Catalogue\LifeformObject;
+use OGame\Lifeforms\Demography\LifeformDemography;
 use OGame\Lifeforms\Demography\PlanetLifeformProfile;
 use OGame\Lifeforms\LifeformRefused;
 use OGame\Lifeforms\Research\LifeformExperience;
@@ -56,6 +58,7 @@ final class LifeformResearchService
         private readonly LifeformLevels $levels,
         private readonly LifeformRuleRevisions $revisions,
         private readonly LifeformSlotHistory $history,
+        private readonly LifeformDemography $demography,
     ) {
     }
 
@@ -102,8 +105,14 @@ final class LifeformResearchService
      */
     public function tierPopulationOf(int $slot, LifeformPlanet $state, PlanetLifeformProfile $profile): float
     {
-        $population = (float)$state->population;
+        return $this->tierPopulationAmong($slot, (float)$state->population, $profile);
+    }
 
+    /**
+     * La meme, sur une population donnee — celle d aujourd hui, ou celle d un instant rejoue.
+     */
+    public function tierPopulationAmong(int $slot, float $population, PlanetLifeformProfile $profile): float
+    {
         return match (LifeformSlotRules::tierOf($slot)) {
             1 => $population,
             2 => $profile->tier2Of($population),
@@ -113,7 +122,15 @@ final class LifeformResearchService
 
     public function isUnlocked(int $slot, LifeformPlanet $state, PlanetLifeformProfile $profile, float $reduction): bool
     {
-        return $this->tierPopulationOf($slot, $state, $profile) + 1e-9 >= LifeformSlotRules::populationRequired($slot, $reduction);
+        return $this->isUnlockedWith($slot, (float)$state->population, $profile, $reduction);
+    }
+
+    /**
+     * L ouverture jugee sur une population donnee, pour pouvoir la juger **a un instant passe**.
+     */
+    public function isUnlockedWith(int $slot, float $population, PlanetLifeformProfile $profile, float $reduction): bool
+    {
+        return $this->tierPopulationAmong($slot, $population, $profile) + 1e-9 >= LifeformSlotRules::populationRequired($slot, $reduction);
     }
 
     /**
@@ -337,7 +354,7 @@ final class LifeformResearchService
      */
     public function activeTechnologyLevels(int $planetId, LifeformPlanet $state, PlanetLifeformProfile $profile, Species $species, array $buildingLevels): array
     {
-        return $this->activeAmong($this->occupancyOf($planetId), $this->levels->technologyLevelsOf($planetId), $state, $profile, $species, $buildingLevels);
+        return $this->activeAmong($this->occupancyOf($planetId), $this->levels->technologyLevelsOf($planetId), (float)$state->population, $profile, $species, $buildingLevels);
     }
 
     /**
@@ -365,20 +382,35 @@ final class LifeformResearchService
 
     /**
      * Les memes, **telles qu elles etaient a un instant** : l occupation vient de l historique des
-     * emplacements, les niveaux de la file des travaux.
+     * emplacements, les niveaux de la file des travaux, et **l ouverture de la population rejouee** —
+     * un emplacement ouvert par une population franchie apres l instant n armait pas la flotte
+     * (relance de Codex, journal §155.11).
      *
-     * L ouverture d un emplacement se juge en revanche sur la population **courante** : l horloge
-     * demographique ne se remonte pas, et l inventer serait pire que l avouer (journal §155.10).
+     * Quand la population de cet instant n est pas reconstituable — l horloge de la planete l a depassee
+     * lors d un passage plus ancien que celui dont l instantane est garde —, la lecture retombe sur la
+     * colonne et **le dit au journal du serveur**. Ne pas deviner, ne pas desarmer la flotte en silence,
+     * alerter : c est la conduite arretee pour un historique inconnu.
      *
      * @param array<int, int> $buildingLevels niveaux de batiments **a cet instant**
      * @return array<int, int> niveau par identifiant de technologie
      */
     public function activeTechnologyLevelsAt(int $planetId, LifeformPlanet $state, PlanetLifeformProfile $profile, Species $species, array $buildingLevels, int $at): array
     {
+        $population = $this->demography->populationAt($planetId, $at);
+        if ($population === null) {
+            $population = (float)$state->population;
+            Log::warning('Formes de vie : population non reconstituable pour un gel de combat.', [
+                'planet_id' => $planetId,
+                'instant' => $at,
+                'calculated_at' => (int)$state->calculated_at,
+                'previous_calculated_at' => $state->previous_calculated_at,
+            ]);
+        }
+
         return $this->activeAmong(
             $this->occupancyOf($planetId, $at),
             $this->levels->levelsAt($planetId, LifeformKind::Technology, $at),
-            $state,
+            $population,
             $profile,
             $species,
             $buildingLevels
@@ -391,13 +423,13 @@ final class LifeformResearchService
      * @param array<int, int> $buildingLevels
      * @return array<int, int>
      */
-    private function activeAmong(array $occupation, array $technologyLevels, LifeformPlanet $state, PlanetLifeformProfile $profile, Species $species, array $buildingLevels): array
+    private function activeAmong(array $occupation, array $technologyLevels, float $population, PlanetLifeformProfile $profile, Species $species, array $buildingLevels): array
     {
         $reduction = $this->requirementReduction($species, $buildingLevels);
         $actifs = [];
         foreach ($occupation as $slot => $objectId) {
             $niveau = $technologyLevels[$objectId] ?? 0;
-            if ($niveau > 0 && $this->isUnlocked($slot, $state, $profile, $reduction)) {
+            if ($niveau > 0 && $this->isUnlockedWith($slot, $population, $profile, $reduction)) {
                 $actifs[$objectId] = $niveau;
             }
         }

@@ -2,12 +2,12 @@
 
 namespace OGame\Lifeforms\Services;
 
-use OGame\Lifeforms\Demography\DemographicClock;
 use OGame\Lifeforms\Demography\DemographicState;
-use OGame\Lifeforms\Demography\PlanetLifeformProfile;
+use OGame\Lifeforms\Demography\LifeformDemography;
 use OGame\Lifeforms\Rules\LifeformRuleRevisions;
 use OGame\Lifeforms\Species;
 use OGame\Models\Lifeforms\LifeformPlanet;
+use OGame\Models\Lifeforms\LifeformQueue;
 use OGame\Services\PlanetService;
 
 /**
@@ -29,21 +29,19 @@ use OGame\Services\PlanetService;
  */
 final class LifeformPlanetUpdater
 {
-    /**
-     * Le nombre de coupes qu un passage traite au plus.
-     *
-     * Chaque tour livre un travail ou consomme une revision de vitesse, et les deux sont bornes : la file
-     * porte cinq elements en attente par genre, les revisions d une absence se comptent. Ce plafond n est
-     * donc pas une regle de jeu mais un garde-fou contre une boucle sur une page du joueur. Il **ne leve
-     * rien** : une exception ici condamnerait toutes les pages du compte (journal §120).
-     */
-    private const int MAX_CUTS = 512;
-
     public function __construct(
         private readonly LifeformQueueService $queue,
         private readonly LifeformRuleRevisions $revisions,
-        private readonly LifeformLevels $levels,
-        private readonly DemographicClock $clock,
+        private readonly LifeformDemography $demography,
+        /**
+         * La couture qui rend la borne temoignable.
+         *
+         * En jeu elle vaut null et la borne se derive des donnees (`boundOf()`), ou elle est **hors
+         * d atteinte par construction**. Un banc la baisse pour eprouver ce qui se passe quand elle est
+         * atteinte : le passage s arrete la, l horloge ne depasse pas ce qu il a traite, et le passage
+         * suivant reprend. Une garde qu on ne peut pas voir tomber n est pas une garde.
+         */
+        private readonly int|null $tourLimit = null,
     ) {
     }
 
@@ -71,36 +69,66 @@ final class LifeformPlanetUpdater
         $etat = new DemographicState((float)$ligne->population, (float)$ligne->food, (int)$ligne->calculated_at);
         $depart = $etat->calculatedAt;
         $revisions = $this->revisions->changesBetween($depart, $now);
-        $niveaux = $this->levels->buildingLevelsOf($planetId);
+
+        // **L etat d ou ce passage part est garde** : il rend tout instant qu il traverse rejouable, et
+        // c est ce qui permet a un combat de savoir quelle population la planete portait a l arrivee d une
+        // flotte (journal §155.11). Ecrit avant la premiere avance, jamais apres.
+        $ligne->previous_population = $etat->population;
+        $ligne->previous_food = $etat->food;
+        $ligne->previous_calculated_at = $depart;
 
         // La file est **relue a chaque tour** : livrer un travail en demarre un autre, qui peut etre
         // echu a son tour dans le meme passage. Une liste de coupes calculee une fois pour toutes ne
         // verrait jamais ces echeances-la, et une absence laisserait des travaux en retard derriere elle.
-        for ($tour = 0; $tour < self::MAX_CUTS; $tour++) {
+        $tours = $this->boundOf($planetId, $revisions);
+        for ($tour = 0; $tour < $tours; $tour++) {
             $coupe = $this->nextCut($planetId, $depart, $now, $etat->calculatedAt, $revisions);
             if ($coupe === null) {
                 break;
             }
-            $etat = $this->advanceTo($etat, $espece, $niveaux, $coupe);
+            $etat = $this->demography->advanceTo($etat, $espece, $planetId, $coupe);
 
-            $livre = false;
             foreach ($this->queue->dueItems($planetId, $now) as $element) {
                 if (max((int)$element->time_end, $depart) === $coupe) {
                     $this->queue->deliver($planet, $element);
-                    $livre = true;
                 }
-            }
-            if ($livre) {
-                $niveaux = $this->levels->buildingLevelsOf($planetId);
             }
         }
 
-        $etat = $this->advanceTo($etat, $espece, $niveaux, $now);
+        // **L horloge ne depasse jamais ce que le passage a reellement traite.** Si une coupe reste — ce que
+        // la borne ci-dessus rend impossible en pratique, et que rien ne garantit pour autant —, l etat
+        // s arrete la : le passage suivant reprend exactement ou celui-ci s est arrete, sans perdre ni
+        // croissance ni livraison. Avancer jusqu a maintenant en laissant un travail echu derriere aurait
+        // fait disparaitre les deux.
+        $reste = $this->nextCut($planetId, $depart, $now, $etat->calculatedAt, $revisions) !== null;
+        if (!$reste) {
+            $etat = $this->demography->advanceTo($etat, $espece, $planetId, $now);
+        }
 
         $ligne->population = $etat->population;
         $ligne->food = $etat->food;
-        $ligne->calculated_at = $now;
+        $ligne->calculated_at = $etat->calculatedAt;
         $ligne->save();
+    }
+
+    /**
+     * Le nombre de tours qu un passage peut avoir a faire, **derive de ce qu il a devant lui**.
+     *
+     * Chaque tour livre un travail ou consomme une revision de vitesse : les travaux de la planete et les
+     * revisions de la periode bornent donc la boucle, et la borne est une preuve, pas un chiffre choisi. Les
+     * deux tours de marge couvrent la coupe finale et un arrondi. Elle **ne leve rien** — une exception ici
+     * condamnerait toutes les pages du compte (journal §120) — et l horloge s arrete d elle-meme si elle
+     * etait atteinte.
+     *
+     * @param array<int, int> $revisions
+     */
+    private function boundOf(int $planetId, array $revisions): int
+    {
+        if ($this->tourLimit !== null) {
+            return $this->tourLimit;
+        }
+
+        return LifeformQueue::query()->where('planet_id', $planetId)->count() + count($revisions) + 2;
     }
 
     /**
@@ -129,20 +157,5 @@ final class LifeformPlanetUpdater
         }
 
         return $prochaine === null || $prochaine > $now ? null : $prochaine;
-    }
-
-    /**
-     * Avance l etat jusqu a cet instant sous les taux en vigueur au **debut** du morceau.
-     *
-     * @param array<int, int> $levels
-     */
-    private function advanceTo(DemographicState $state, Species $species, array $levels, int $until): DemographicState
-    {
-        if ($until <= $state->calculatedAt) {
-            return $state;
-        }
-        $vitesses = $this->revisions->at($state->calculatedAt);
-
-        return $this->clock->advance($state, PlanetLifeformProfile::fromLevels($species, $levels, $vitesses->demography()), $until);
     }
 }

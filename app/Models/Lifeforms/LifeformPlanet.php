@@ -17,6 +17,9 @@ use Illuminate\Support\Carbon;
  * @property float $population
  * @property float $food
  * @property int $calculated_at
+ * @property float|null $previous_population
+ * @property float|null $previous_food
+ * @property int|null $previous_calculated_at
  * @property int $installed_at
  * @property int $rules_version
  * @property Carbon|null $created_at
@@ -26,7 +29,7 @@ use Illuminate\Support\Carbon;
  * @method static Builder|LifeformPlanet query()
  * @mixin \Eloquent
  */
-#[Fillable(['planet_id', 'species', 'population', 'food', 'calculated_at', 'installed_at', 'rules_version'])]
+#[Fillable(['planet_id', 'species', 'population', 'food', 'calculated_at', 'previous_population', 'previous_food', 'previous_calculated_at', 'installed_at', 'rules_version'])]
 #[Table(name: 'lifeform_planets')]
 class LifeformPlanet extends Model
 {
@@ -39,6 +42,9 @@ class LifeformPlanet extends Model
         'population' => 'float',
         'food' => 'float',
         'calculated_at' => 'integer',
+        'previous_population' => 'float',
+        'previous_food' => 'float',
+        'previous_calculated_at' => 'integer',
         'installed_at' => 'integer',
         'rules_version' => 'integer',
     ];

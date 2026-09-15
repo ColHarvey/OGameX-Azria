@@ -10,7 +10,10 @@ use OGame\Lifeforms\Catalogue\LifeformCatalogue;
 use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Catalogue\LifeformFormulas;
 use OGame\Lifeforms\Catalogue\LifeformKind;
+use OGame\Lifeforms\Discovery\LifeformDiscoveryOutcome;
+use OGame\Lifeforms\Discovery\LifeformDiscoveryRules;
 use OGame\Lifeforms\LifeformRefused;
+use OGame\Lifeforms\Research\LifeformExperience;
 use OGame\Lifeforms\Services\LifeformInstallationService;
 use OGame\Lifeforms\Services\LifeformLevels;
 use OGame\Lifeforms\Services\LifeformQueueService;
@@ -18,6 +21,7 @@ use OGame\Lifeforms\Services\LifeformResearchService;
 use OGame\Lifeforms\Species;
 use OGame\Models\Lifeforms\LifeformAccount;
 use OGame\Models\Lifeforms\LifeformBuildingLevel;
+use OGame\Models\Lifeforms\LifeformDiscovery;
 use OGame\Models\Lifeforms\LifeformPlanet;
 use OGame\Models\Lifeforms\LifeformSlot;
 use OGame\Models\Lifeforms\LifeformSlotChange;
@@ -222,6 +226,115 @@ final class LifeformBonusResolverTest extends AccountTestCase
     {
         resolve(LifeformInstallationService::class)->chooseSpecies($this->currentUserId, $species, (int)Date::now()->timestamp);
         LifeformBonusCache::invalidate();
+    }
+
+    /**
+     * **Un emplacement ouvert par la population APRES l arrivee n arme pas la flotte** (relance de Codex).
+     *
+     * Le bonus d une technologie ne compte que si son emplacement est ouvert, et c est la population qui
+     * l ouvre. Si le gel juge l ouverture sur la population **courante**, une planete qui franchit le seuil
+     * entre l arrivee et le traitement arme retroactivement une flotte deja partie.
+     */
+    public function testASlotOpenedByPopulationAfterTheInstantDoesNotArmTheFleet(): void
+    {
+        $planetId = $this->currentPlanetId;
+        $this->choose(Species::Rocktal);
+        $instant = (int)Date::now()->timestamp;
+
+        // L emplacement 1 exige 200 000 habitants. La planete n en a que la moitie a l instant.
+        $this->placeLifeformSlot($planetId, 1, self::VOLCANIC_BATTERIES, $instant - 1000);
+        resolve(LifeformLevels::class)->setLevel($planetId, LifeformKind::Technology, self::VOLCANIC_BATTERIES, 10);
+        LifeformPlanet::query()->where('planet_id', $planetId)->update(['population' => 100000.0, 'calculated_at' => $instant]);
+        LifeformBonusCache::invalidate();
+        $ferme = resolve(LifeformBonusResolver::class)->forPlayer($this->currentUserId, $instant)->fraction(LifeformEffect::ENERGY_PRODUCTION);
+        $this->assertSame(0.0, $ferme, 'Premisse : sous le seuil, l emplacement se tait.');
+
+        // **La population franchit le seuil apres l instant**, et le passage l a deja integree jusqu a
+        // maintenant. Il a garde l etat d ou il est parti : c est ce qui rend l instant rejouable.
+        LifeformPlanet::query()->where('planet_id', $planetId)->update([
+            'population' => 300000.0,
+            'calculated_at' => $instant + 600,
+            'previous_population' => 100000.0,
+            'previous_food' => 0.0,
+            'previous_calculated_at' => $instant - 600,
+        ]);
+        LifeformBonusCache::invalidate();
+        $this->assertGreaterThan(0.0, resolve(LifeformBonusResolver::class)->forPlayer($this->currentUserId)->fraction(LifeformEffect::ENERGY_PRODUCTION), 'Premisse : au present, l emplacement compte.');
+
+        $this->assertSame(
+            0.0,
+            resolve(LifeformBonusResolver::class)->forPlayer($this->currentUserId, $instant)->fraction(LifeformEffect::ENERGY_PRODUCTION),
+            'Une population franchie apres l instant ouvre retroactivement l emplacement et arme la flotte.'
+        );
+    }
+
+    /**
+     * **Une decouverte reglee APRES l arrivee n augmente pas le bonus de cette flotte** (relance de Codex).
+     *
+     * La part d une technologie est multipliee par (1 + experience de son espece). L experience monte par
+     * les decouvertes, dont le reglement est un effet **date** : `PlayerService::update()` les credite avant
+     * meme que les flottes ne soient traitees, dans la meme requete.
+     */
+    public function testADiscoverySettledAfterTheInstantDoesNotRaiseTheFrozenBonus(): void
+    {
+        $planetId = $this->currentPlanetId;
+        $this->choose(Species::Rocktal);
+        $instant = (int)Date::now()->timestamp;
+        $this->technology($planetId, 1, self::VOLCANIC_BATTERIES, 10);
+        LifeformBonusCache::invalidate();
+
+        $avant = resolve(LifeformBonusResolver::class)->forPlayer($this->currentUserId, $instant)->fraction(LifeformEffect::ENERGY_PRODUCTION);
+        $this->assertGreaterThan(0.0, $avant, 'Premisse : la technologie compte deja.');
+
+        // **Un vol de decouverte se regle dix secondes apres l instant** et credite 9 000 points : niveau 4.
+        LifeformDiscovery::query()->create([
+            'user_id' => $this->currentUserId,
+            'planet_id' => $planetId,
+            'galaxy' => 1, 'system' => 1, 'position' => 1,
+            'started_at' => $instant - 3600,
+            'ends_at' => $instant + 10,
+            'outcome' => (new LifeformDiscoveryOutcome(LifeformDiscoveryOutcome::EXPERIENCE, Species::Rocktal, 0, 9000))->toStorage(),
+            'status' => 'settled',
+            'settled_at' => $instant + 10,
+            'rules_version' => LifeformDiscoveryRules::VERSION,
+        ]);
+        LifeformSpeciesProgress::query()->updateOrCreate(
+            ['user_id' => $this->currentUserId, 'species' => Species::Rocktal->value],
+            ['experience' => 9000, 'discovered_at' => $instant - 100000]
+        );
+        LifeformBonusCache::invalidate();
+
+        $maintenant = resolve(LifeformBonusResolver::class)->forPlayer($this->currentUserId)->fraction(LifeformEffect::ENERGY_PRODUCTION);
+        $this->assertGreaterThan($avant, $maintenant, 'Premisse : au present, l experience a fait monter la part.');
+        $this->assertSame(4, LifeformExperience::levelOf(9000), 'Premisse : 9 000 points valent le niveau 4, soit +0,4 %.');
+
+        $this->assertEqualsWithDelta(
+            $avant,
+            resolve(LifeformBonusResolver::class)->forPlayer($this->currentUserId, $instant)->fraction(LifeformEffect::ENERGY_PRODUCTION),
+            1e-12,
+            'Une decouverte reglee apres l instant augmente retroactivement le bonus de la flotte.'
+        );
+
+        // **Un vol encore en vol n a rien credite** : son issue est scellee, mais elle n a pas encore ete
+        // versee. La retirer du total reviendrait a desarmer la flotte avec des points jamais recus.
+        LifeformDiscovery::query()->create([
+            'user_id' => $this->currentUserId,
+            'planet_id' => $planetId,
+            'galaxy' => 1, 'system' => 1, 'position' => 2,
+            'started_at' => $instant - 50,
+            'ends_at' => $instant + 100000,
+            'outcome' => (new LifeformDiscoveryOutcome(LifeformDiscoveryOutcome::EXPERIENCE, Species::Rocktal, 0, 9000))->toStorage(),
+            'status' => 'running',
+            'settled_at' => null,
+            'rules_version' => LifeformDiscoveryRules::VERSION,
+        ]);
+        LifeformBonusCache::invalidate();
+        $this->assertEqualsWithDelta(
+            $avant,
+            resolve(LifeformBonusResolver::class)->forPlayer($this->currentUserId, $instant)->fraction(LifeformEffect::ENERGY_PRODUCTION),
+            1e-12,
+            'Un vol encore en cours a ete compte comme credite, et la flotte y perd des points qu elle avait.'
+        );
     }
 
     private function secondPlanet(): int
