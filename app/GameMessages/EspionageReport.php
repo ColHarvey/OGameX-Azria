@@ -3,6 +3,7 @@
 namespace OGame\GameMessages;
 
 use OGame\GameMessages\Abstracts\GameMessage;
+use OGame\Lifeforms\Presentation\LifeformEspionage;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
@@ -228,6 +229,7 @@ class EspionageReport extends GameMessage
             'defense' => $defense,
             'buildings' => $buildings,
             'research' => $research,
+            'lifeform' => LifeformEspionage::presented($espionageReportModel->lifeform),
             'counter_espionage_chance' => $espionageReportModel->counter_espionage_chance ?? 0,
             'galaxy' => $espionageReportModel->planet_galaxy,
             'system' => $espionageReportModel->planet_system,

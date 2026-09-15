@@ -66,6 +66,7 @@
                                     <a class="btn_blue" href="{{ route('lifeforms.buildings') }}">{{ __('t_lifeforms_ui.selection.go_to_buildings') }}</a>
                                     <a class="btn_blue" href="{{ route('lifeforms.research') }}">{{ __('t_lifeforms_ui.selection.go_to_research') }}</a>
                                     <a class="btn_blue" href="{{ route('lifeforms.discoveries') }}">{{ __('t_lifeforms_ui.discoveries.go_to_discoveries') }}</a>
+                                    <a class="btn_blue" href="{{ route('lifeforms.bonuses') }}">{{ __('t_lifeforms_ui.bonuses.go_to_bonuses') }}</a>
                                 @else
                                     <p class="smallFont" style="margin: 0;">{{ __('t_lifeforms_ui.selection.other_species') }}</p>
                                 @endif

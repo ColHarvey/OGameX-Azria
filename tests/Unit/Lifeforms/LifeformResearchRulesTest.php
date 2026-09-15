@@ -38,17 +38,21 @@ final class LifeformResearchRulesTest extends UnitTestCase
 
     public function testExperienceLevelsCostAThousandTimesTheLevelAndGiveATenthOfAPercentEach(): void
     {
+        // **Le bareme est celui de la page reelle** : le niveau N coute 900 × N points (journal §155.7).
         $this->assertSame(0, LifeformExperience::levelOf(0));
-        $this->assertSame(0, LifeformExperience::levelOf(999));
-        $this->assertSame(1, LifeformExperience::levelOf(1000));
-        $this->assertSame(1, LifeformExperience::levelOf(2999));
-        $this->assertSame(2, LifeformExperience::levelOf(3000));
-        $this->assertSame(100, LifeformExperience::levelOf(5050000));
+        $this->assertSame(0, LifeformExperience::levelOf(899));
+        $this->assertSame(1, LifeformExperience::levelOf(900));
+        $this->assertSame(1, LifeformExperience::levelOf(2699), '900 + 1 800 = 2 700 pour le niveau 2.');
+        $this->assertSame(2, LifeformExperience::levelOf(2700));
+        $this->assertSame(4, LifeformExperience::levelOf(9000), '900 + 1 800 + 2 700 + 3 600 = 9 000.');
+        $this->assertSame(100, LifeformExperience::levelOf(4545000), '900 × 5 050.');
         $this->assertSame(100, LifeformExperience::levelOf(99999999), 'Le niveau 100 est le dernier.');
-        $this->assertSame([500, 1000], LifeformExperience::progressOf(500));
-        $this->assertSame([0, 2000], LifeformExperience::progressOf(1000));
-        $this->assertSame([1500, 3000], LifeformExperience::progressOf(4500));
-        $this->assertSame([0, 0], LifeformExperience::progressOf(5050000));
+        $this->assertSame([500, 900], LifeformExperience::progressOf(500));
+        $this->assertSame([0, 1800], LifeformExperience::progressOf(900));
+        // La page reelle : une espece de niveau 4 affichait « 2173/4500 XP ».
+        $this->assertSame([2173, 4500], LifeformExperience::progressOf(9000 + 2173), 'Page reelle : 2173/4500 au niveau 4.');
+        $this->assertSame([591, 4500], LifeformExperience::progressOf(9000 + 591), 'Page reelle : 591/4500 au niveau 4.');
+        $this->assertSame([0, 0], LifeformExperience::progressOf(4545000));
         $this->assertEqualsWithDelta(0.004, LifeformExperience::bonusFraction(4), 1e-12, 'Page reelle : niveau 4, bonus 0,4 %.');
         $this->assertEqualsWithDelta(0.1, LifeformExperience::bonusFraction(100), 1e-12);
         $this->assertEqualsWithDelta(0.1, LifeformExperience::bonusFraction(250), 1e-12, 'Plafonne a 10 %.');

@@ -55,6 +55,7 @@ class EspionageReport extends Model
         'debris' => 'array',
         'buildings' => 'array',
         'research' => 'array',
+        'lifeform' => 'array',
         'ships' => 'array',
         'defense' => 'array',
     ];

@@ -112,6 +112,7 @@ Route::middleware(['auth', 'banned', 'globalgame', 'locale', 'firstlogin'])->gro
     Route::post('/lifeforms/research/restore', [LifeformsController::class, 'restoreTier'])->name('lifeforms.research.restore');
     Route::get('/lifeforms/discoveries', [LifeformsController::class, 'discoveries'])->name('lifeforms.discoveries');
     Route::post('/lifeforms/discoveries/launch', [LifeformsController::class, 'launchDiscovery'])->name('lifeforms.discoveries.launch');
+    Route::get('/lifeforms/bonuses', [LifeformsController::class, 'bonuses'])->name('lifeforms.bonuses');
 
     // Facilities
     Route::get('/facilities', [FacilitiesController::class, 'index'])->name('facilities.index');

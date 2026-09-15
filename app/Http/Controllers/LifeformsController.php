@@ -17,6 +17,7 @@ use OGame\Lifeforms\Discovery\LifeformDiscoveryOutcome;
 use OGame\Lifeforms\Discovery\LifeformDiscoveryRules;
 use OGame\Lifeforms\LifeformRefused;
 use OGame\Lifeforms\Presentation\LifeformBanner;
+use OGame\Lifeforms\Presentation\LifeformBonusPage;
 use OGame\Lifeforms\Presentation\LifeformEffectPresenter;
 use OGame\Lifeforms\Research\LifeformExperience;
 use OGame\Lifeforms\Research\LifeformSlotRules;
@@ -56,6 +57,7 @@ final class LifeformsController extends OGameController
         private readonly LifeformEffectPresenter $effects,
         private readonly LifeformResearchService $research,
         private readonly LifeformDiscoveryService $discoveries,
+        private readonly LifeformBonusPage $bonusPage,
     ) {
     }
 
@@ -603,6 +605,23 @@ final class LifeformsController extends OGameController
     {
         // Le bandeau d image des pages de ressources (biome de la planete), faute d illustration propre.
         return $planet->getPlanetBiomeType();
+    }
+
+    /**
+     * La page des bonus : l experience de chaque espece, puis chaque effet avec le detail qui le compose.
+     */
+    public function bonuses(PlayerService $player): View|RedirectResponse
+    {
+        $this->requireOpen();
+        $this->setBodyId('lifeforms');
+        if ($this->installation->speciesOf($player->getId()) === null) {
+            return redirect()->route('lifeforms.index')->with('status', __('t_lifeforms_ui.buildings.choose_first'));
+        }
+
+        return view('ingame.lifeforms.bonuses', [
+            'experience' => $this->bonusPage->experienceOf($player),
+            'effets' => $this->bonusPage->effectsOf($player),
+        ]);
     }
 
     /**

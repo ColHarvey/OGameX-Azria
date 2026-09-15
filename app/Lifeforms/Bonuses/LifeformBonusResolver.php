@@ -223,7 +223,15 @@ final class LifeformBonusResolver
         return self::capped($sommes, $plafonds);
     }
 
-    private function technologyBonuses(int $userId): LifeformBonusSet|null
+    /**
+     * Les contributions des technologies du compte, planete par planete, **avant** toute somme et tout plafond.
+     *
+     * C est la promenade unique : `technologyBonuses()` en fait le total, `contributionsOf()` les rend telles
+     * quelles a la page des bonus. Deux calculs separes auraient pu diverger ; il n y en a qu un.
+     *
+     * @return array<int, LifeformBonusContribution>|null null quand le compte n a aucune planete peuplee
+     */
+    private function technologyContributions(int $userId): array|null
     {
         $planetes = Planet::query()->where('user_id', $userId)->where('destroyed', 0)->pluck('id');
         $etats = LifeformPlanet::query()->whereIn('planet_id', $planetes)->get();
@@ -232,8 +240,7 @@ final class LifeformBonusResolver
         }
         $vitesse = $this->revisions->live()->demography();
         $experiences = [];
-        $sommes = [];
-        $plafonds = [];
+        $contributions = [];
         foreach ($etats as $etat) {
             $planetId = (int)$etat->planet_id;
             $espece = Species::from((int)$etat->species);
@@ -242,6 +249,12 @@ final class LifeformBonusResolver
             $actifs = $this->research->activeTechnologyLevels($planetId, $etat, $profil, $espece, $niveaux);
             if ($actifs === []) {
                 continue;
+            }
+            $emplacements = [];
+            foreach ($this->research->slotsOf($planetId) as $rang => $ligne) {
+                if ($ligne->object_id !== null) {
+                    $emplacements[(int)$ligne->object_id] = $rang;
+                }
             }
             $batiments = 0.0;
             foreach (LifeformCatalogue::buildingsOf($espece) as $batiment) {
@@ -263,12 +276,52 @@ final class LifeformBonusResolver
                         continue;
                     }
                     $brut = $bonus->base * $niveau * $bonus->factor ** ($niveau - 1) / 100;
-                    self::accumulate($sommes, $plafonds, $bonus, $brut * $multiplicateur);
+                    $contributions[] = new LifeformBonusContribution(
+                        $planetId,
+                        $emplacements[$objectId] ?? 0,
+                        $objectId,
+                        $niveau,
+                        $bonus->code,
+                        $bonus->target,
+                        $brut * $multiplicateur
+                    );
                 }
             }
         }
 
+        return $contributions;
+    }
+
+    /**
+     * Le total des technologies du compte : la somme des contributions, plafonnee.
+     */
+    private function technologyBonuses(int $userId): LifeformBonusSet|null
+    {
+        $contributions = $this->technologyContributions($userId);
+        if ($contributions === null) {
+            return null;
+        }
+        $sommes = [];
+        $plafonds = [];
+        foreach ($contributions as $contribution) {
+            self::accumulate($sommes, $plafonds, LifeformCatalogue::byId($contribution->objectId)->bonus($contribution->code, $contribution->target) ?? new LifeformBonus($contribution->code, $contribution->target, 0.0, 1.0, null), $contribution->fraction);
+        }
+
         return self::capped($sommes, $plafonds);
+    }
+
+    /**
+     * Le detail des bonus de technologies du compte, pour la page des bonus.
+     *
+     * @return array<int, LifeformBonusContribution>
+     */
+    public function contributionsOf(int $userId): array
+    {
+        if (!$this->settings->lifeformsEnabled()) {
+            return [];
+        }
+
+        return $this->technologyContributions($userId) ?? [];
     }
 
     private static function applies(LifeformBonus $bonus): bool

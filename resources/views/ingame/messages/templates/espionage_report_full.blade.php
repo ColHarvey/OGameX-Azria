@@ -88,6 +88,31 @@
         </li>
     </ul>
     -->
+    @if ($lifeform !== null)
+    <div class="section_title">
+        <div class="c-left"></div>
+        <div class="c-right"></div>
+        <span class="title_txt">{{ __('t_ingame.messages.spy_lifeform') }}</span>
+    </div>
+    <ul class="detail_list clearfix" data-type="lifeform">
+        @if ($lifeform['has_species'])
+            <li class="detail_list_el">
+                <span class="detail_list_label">{{ __('t_ingame.messages.spy_lifeform_species') }}</span>
+                <span class="detail_list_value">{{ $lifeform['species'] }}</span>
+            </li>
+            <li class="detail_list_el">
+                <span class="detail_list_label">{{ __('t_ingame.messages.spy_lifeform_population') }}</span>
+                <span class="detail_list_value">{{ \OGame\Facades\AppUtil::formatNumber($lifeform['population']) }}</span>
+            </li>
+            <li class="detail_list_el">
+                <span class="detail_list_label">{{ __('t_ingame.messages.spy_lifeform_protected') }}</span>
+                <span class="detail_list_value">{{ $lifeform['protected_percent'] }} %</span>
+            </li>
+        @else
+            <li class="detail_list_el"><span class="detail_list_value">{{ __('t_ingame.messages.spy_lifeform_none') }}</span></li>
+        @endif
+    </ul>
+    @endif
     @if ($debris->any())
     <div class="section_title">
         <div class="c-left"></div>

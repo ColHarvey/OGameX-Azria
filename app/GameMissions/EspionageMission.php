@@ -17,6 +17,7 @@ use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameMissions\Models\MissionPossibleStatus;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Lifeforms\Presentation\LifeformEspionage;
 use OGame\Military\BattleTallyFacts;
 use OGame\Military\MilitaryBattleTally;
 use OGame\Models\BattleReport;
@@ -577,6 +578,15 @@ class EspionageMission extends GameMission
         // Research
         if ($this->canRevealData($remainingProbes, $attackerEspionageLevel, $defenderEspionageLevel, 7, 4)) {
             $report->research = $targetPlayer->getResearchArray();
+        }
+
+        // **Les formes de vie du corps vise** (journal §155.7). Le seuil est celui des batiments — **regle
+        // Azria**, que rien ne publie : ce que la section montre (espece, population, part que le Bouclier
+        // protege) se voit depuis l orbite comme des batiments, et c est exactement ce qu il faut savoir
+        // avant une attaque qui tuera des civils. Absente quand la sonde n en a pas assez vu, presente mais
+        // sans espece quand le corps ne porte aucune forme de vie : « pas vu » et « rien » ne se confondent pas.
+        if ($this->canRevealData($remainingProbes, $attackerEspionageLevel, $defenderEspionageLevel, 5, 3)) {
+            $report->lifeform = resolve(LifeformEspionage::class)->factsOf($targetPlanet);
         }
 
         // Store counter-espionage chance

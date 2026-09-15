@@ -7,19 +7,28 @@ namespace OGame\Lifeforms\Research;
  * espece.
  *
  * Officiel (FAQ et annonce) : 0,1 % par niveau, jusqu au niveau 100, soit 10 % au plus ; l experience
- * se gagne par les decouvertes. **Regle Azria** pour le bareme, que rien ne publie : le niveau N
- * coute 1 000 × N points au-dela du niveau N − 1 (1 000 pour le premier, 2 000 pour le deuxieme...),
- * soit 5 050 000 points pour le niveau 100.
+ * se gagne par les decouvertes.
+ *
+ * **Le bareme est officiel lui aussi**, releve sur la page des bonus capturee (`lfbonuses.html`) : la barre
+ * d experience y affiche « Level 0: 0/900 XP » et, pour deux especes de niveau 4, « 2173/4500 XP » et
+ * « 591/4500 XP ». Le denominateur est donc le cout du **niveau suivant**, et il vaut 900 × N : 900 pour le
+ * premier niveau, 4 500 pour le cinquieme. Soit 4 545 000 points pour le niveau 100.
+ *
+ * Ce bareme remplace la regle Azria de la tranche 3, qui comptait 1 000 × N faute d avoir lu ce chiffre
+ * (journal §155.7). La forme n a pas change, seule la constante.
  */
 final class LifeformExperience
 {
-    public const int VERSION = 1;
+    public const int VERSION = 2;
 
     public const int MAX_LEVEL = 100;
 
     public const float BONUS_PER_LEVEL = 0.001;
 
-    private const int POINTS_PER_STEP = 1000;
+    /**
+     * Les points que coute le passage au niveau N, divises par N : 900, releves sur la page reelle.
+     */
+    public const int POINTS_PER_STEP = 900;
 
     public static function levelOf(int $experience): int
     {
