@@ -143,6 +143,8 @@ class HighscoreController extends OGameController
             'highscoreAdminVisible' => $highscoreService->isAdminVisibleInHighscore(),
             'currentPlayerIsAdmin' => $player->isAdmin(),
             'militaryTallyNote' => $this->militaryTallyNoteFor($type),
+            // La ligne que la page recentre : le joueur cherche, sinon moi. Elle recentrait toujours sur moi.
+            'highscoreFocusPlayerId' => $searchRelId ? (int)$searchRelId : $player->getId(),
         ]);
     }
 
@@ -222,6 +224,8 @@ class HighscoreController extends OGameController
             'currentUserAllianceId' => $userAllianceId,
             'player' => $player,
             'militaryTallyNote' => $this->militaryTallyNoteFor($type),
+            // La ligne que la page recentre : l alliance cherchee, sinon la mienne, sinon aucune.
+            'highscoreFocusAllianceId' => $searchRelId ? (int)$searchRelId : (int)($userAllianceId ?? 0),
         ]);
     }
 
@@ -262,7 +266,10 @@ class HighscoreController extends OGameController
      * Nul pour tout autre classement, et nul tant que les cumuls ne sont pas servis — la page ne sert alors pas ces
      * classements du tout.
      *
-     * @return array{since: string, refreshed: string, pending: int}|null
+     * Les instants sont rendus deux fois : formates en heure du serveur, pour qui lit sans script, et bruts, pour que
+     * la page les affiche a l heure du navigateur comme l horloge du bandeau.
+     *
+     * @return array{since: string, since_at: int, refreshed: string, refreshed_at: int, pending: int}|null
      */
     private function militaryTallyNoteFor(int $type): array|null
     {
@@ -282,7 +289,9 @@ class HighscoreController extends OGameController
 
         return [
             'since' => Date::createFromTimestamp($depuis)->format('d.m.Y'),
+            'since_at' => $depuis,
             'refreshed' => Date::createFromTimestamp($publie)->format('d.m.Y H:i:s'),
+            'refreshed_at' => $publie,
             'pending' => $registre->pendingCount(),
         ];
     }

@@ -1225,6 +1225,7 @@ return [
         'refreshed_at' => 'Actualisé le :date',
         'alliance_sum_current_members' => 'Somme des membres actuels : elle peut diminuer lorsqu’un membre quitte l’alliance.',
         'data_temporarily_incomplete' => 'Données temporairement incomplètes : des événements attendent encore d’être comptés.',
+        'military_tally_label' => 'Cumul militaire',
         'position' => 'Position',
         'player_name_honour' => 'Nom du joueur (points d\'honneur)',
         'badge_admin' => 'Administrateur',

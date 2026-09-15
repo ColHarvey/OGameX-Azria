@@ -3,11 +3,12 @@
         <script type="text/javascript">
             var currentCategory = 1;
             var currentType = {{ $highscoreCurrentType }};
-            var searchPosition = {{ $player->getId() }};
+            {{-- La ligne a recentrer : le joueur cherche (lien « voir dans le classement »), sinon moi. --}}
+            var searchPosition = {{ $highscoreFocusPlayerId }};
             var site = {{ $highscoreCurrentPage }};
             var searchSite = {{ $highscoreCurrentPage }};
             var resultsPerPage = 100;
-            var searchRelId = {{ $player->getId() }};
+            var searchRelId = {{ $highscoreFocusPlayerId }};
         </script>
 
         <div class="pagebar">
@@ -24,8 +25,10 @@
                 @endif
                 &nbsp;
             @endfor
-            @if ($highscoreCurrentPage < floor($highscorePlayerAmount / 100))
-                <a href="javascript:void(0);" class="" onclick="ajaxCall('{{ route('highscore.ajax', ['page' => floor($highscorePlayerAmount / 100) + 1, 'type' => $highscoreCurrentType]) }}', '#stat_list_content'); return false;">»</a>
+            {{-- La derniere page est la derniere : `ceil`, comme la boucle des pages. Un `floor + 1` visait une page vide
+                 quand le nombre de joueurs etait un multiple de cent, et n offrait pas la derniere page sinon. --}}
+            @if ($highscoreCurrentPage < ceil($highscorePlayerAmount / 100))
+                <a href="javascript:void(0);" class="" onclick="ajaxCall('{{ route('highscore.ajax', ['page' => (int)ceil($highscorePlayerAmount / 100), 'type' => $highscoreCurrentType]) }}', '#stat_list_content'); return false;">»</a>
             @endif
         </div>
         <select class="changeSite fright">
@@ -43,7 +46,24 @@
             @endfor
         </select>
         <div class="fleft" id="highscoreHeadline">
-            {{ __('t_ingame.highscore.points') }}
+            {{-- Le titre dit le classement affiche, comme celui des alliances : il disait toujours « Points ». --}}
+            @if($highscoreCurrentType == 1)
+                {{ __('t_ingame.highscore.economy') }}
+            @elseif($highscoreCurrentType == 2)
+                {{ __('t_ingame.highscore.research') }}
+            @elseif($highscoreCurrentType == 3)
+                {{ __('t_ingame.highscore.military') }}
+            @elseif($highscoreCurrentType == 4)
+                {{ __('t_ingame.highscore.honour_points') }}
+            @elseif($highscoreCurrentType == 5)
+                {{ __('t_ingame.highscore.military_built') }}
+            @elseif($highscoreCurrentType == 6)
+                {{ __('t_ingame.highscore.military_destroyed') }}
+            @elseif($highscoreCurrentType == 7)
+                {{ __('t_ingame.highscore.military_lost') }}
+            @else
+                {{ __('t_ingame.highscore.points') }}
+            @endif
         </div>
         @include('ingame.highscore.partials.military-tally-note', ['isAllianceRanking' => false])
 
@@ -338,8 +358,33 @@
             };
 
             $(document).ready(function(){
+                // **Un seul jeu d ecouteurs, une seule initialisation par fragment.** `initHighscore()` pose ses ecouteurs
+                // de clic sur les boutons de type et de categorie, qui vivent hors du fragment, sans retirer les
+                // precedents : rappele a chaque chargement, il les doublait, et un clic finissait par declencher une
+                // cascade de chargements. Le chargeur (`ajaxSubmit`, `ajaxCall`) rappelle en outre `initHighscoreContent()`
+                // apres avoir insere un fragment dont le script l a deja appelee : la seconde entree ne fait rien.
+                if (!window.highscoreInitialised) {
+                    var initialiserLeContenu = initHighscoreContent;
+                    initHighscoreContent = function () {
+                        if (window.highscoreContentInitialised) {
+                            return;
+                        }
+                        window.highscoreContentInitialised = true;
+                        initialiserLeContenu();
+                    };
+                    initHighscore();
+                    window.highscoreInitialised = true;
+                }
+                window.highscoreContentInitialised = false;
+
+                // **Le recentrage sur ma ligne anime le defilement pendant une seconde** et ramene la fenetre a chaque image :
+                // le premier chargement seul le fait, et le choix « Ma position » dans le selecteur ; tout autre
+                // chargement — un type, une page — respecte mon defilement.
+                $('.changeSite').on('change', function () {
+                    userWantsFocus = this.selectedIndex === 0;
+                });
                 initHighscoreContent();
-                initHighscore();
+                userWantsFocus = false;
 
                 // Handle buddy request button clicks
                 $(document).on('click', '.sendBuddyRequest, .sendBuddyRequestLink', function(e) {
@@ -406,8 +451,10 @@
                 @endif
                 &nbsp;
             @endfor
-            @if ($highscoreCurrentPage < floor($highscorePlayerAmount / 100))
-                <a href="javascript:void(0);" class="" onclick="ajaxCall('{{ route('highscore.ajax', ['page' => floor($highscorePlayerAmount / 100) + 1, 'type' => $highscoreCurrentType]) }}', '#stat_list_content'); return false;">»</a>
+            {{-- La derniere page est la derniere : `ceil`, comme la boucle des pages. Un `floor + 1` visait une page vide
+                 quand le nombre de joueurs etait un multiple de cent, et n offrait pas la derniere page sinon. --}}
+            @if ($highscoreCurrentPage < ceil($highscorePlayerAmount / 100))
+                <a href="javascript:void(0);" class="" onclick="ajaxCall('{{ route('highscore.ajax', ['page' => (int)ceil($highscorePlayerAmount / 100), 'type' => $highscoreCurrentType]) }}', '#stat_list_content'); return false;">»</a>
             @endif
         </div>
     </div>

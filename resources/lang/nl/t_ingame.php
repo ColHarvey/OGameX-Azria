@@ -1261,6 +1261,7 @@ return [
         'refreshed_at' => 'Bijgewerkt op :date',
         'alliance_sum_current_members' => 'Som van de huidige leden: kan dalen wanneer een lid de alliantie verlaat.',
         'data_temporarily_incomplete' => 'Gegevens tijdelijk onvolledig: sommige gebeurtenissen wachten nog op verwerking.',
+        'military_tally_label' => 'Militair totaal',
         'position'              => 'Positie',
         'player_name_honour'    => 'Spelernaam (Eerepunten)',
         'action'                => 'Actie',

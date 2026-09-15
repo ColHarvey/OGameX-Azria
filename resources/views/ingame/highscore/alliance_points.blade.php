@@ -3,9 +3,12 @@
         <script type="text/javascript">
             var currentCategory = 2;
             var currentType = {{ $highscoreCurrentType }};
+            {{-- La ligne a recentrer : l alliance cherchee, sinon la mienne, sinon aucune (0 ne designe aucune ligne). --}}
+            var searchPosition = {{ $highscoreFocusAllianceId }};
             var site = {{ $highscoreCurrentPage }};
             var searchSite = {{ $highscoreCurrentPage }};
             var resultsPerPage = 100;
+            var searchRelId = {{ $highscoreFocusAllianceId }};
         </script>
 
         <div class="pagebar">
@@ -113,8 +116,26 @@
 
         <script type="text/javascript">
             $(document).ready(function(){
+                // Memes regles que le classement des joueurs : un seul jeu d ecouteurs sur les boutons, une seule
+                // initialisation par fragment, et le recentrage au premier chargement ou sur « Ma position » seulement.
+                if (!window.highscoreInitialised) {
+                    var initialiserLeContenu = initHighscoreContent;
+                    initHighscoreContent = function () {
+                        if (window.highscoreContentInitialised) {
+                            return;
+                        }
+                        window.highscoreContentInitialised = true;
+                        initialiserLeContenu();
+                    };
+                    initHighscore();
+                    window.highscoreInitialised = true;
+                }
+                window.highscoreContentInitialised = false;
+                $('.changeSite').on('change', function () {
+                    userWantsFocus = this.selectedIndex === 0;
+                });
                 initHighscoreContent();
-                initHighscore();
+                userWantsFocus = false;
             });
         </script>
         <div class="pagebar">

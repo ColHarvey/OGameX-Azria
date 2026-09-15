@@ -1120,6 +1120,7 @@ return [
         'refreshed_at' => '更新於 :date',
         'alliance_sum_current_members' => '目前成員總和：成員離開聯盟時可能下降。',
         'data_temporarily_incomplete' => '資料暫時不完整：仍有事件等待計入。',
+        'military_tally_label' => '軍事累計',
         'position'              => '排名',
         'player_name_honour'    => '玩家名稱（榮譽點數）',
         'action'                => '操作',

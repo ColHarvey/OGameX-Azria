@@ -1514,6 +1514,7 @@ return [
         'refreshed_at' => 'Updated :date',
         'alliance_sum_current_members' => 'Sum of current members: it can decrease when a member leaves the alliance.',
         'data_temporarily_incomplete' => 'Data temporarily incomplete: some events are still waiting to be counted.',
+        'military_tally_label' => 'Military tally',
         'position'              => 'Position',
         'player_name_honour'    => "Player's Name (Honour points)",
         'badge_admin'           => 'Administrator',

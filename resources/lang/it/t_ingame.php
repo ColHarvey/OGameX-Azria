@@ -1261,6 +1261,7 @@ return [
         'refreshed_at' => 'Aggiornato il :date',
         'alliance_sum_current_members' => 'Somma dei membri attuali: può diminuire quando un membro lascia l’alleanza.',
         'data_temporarily_incomplete' => 'Dati temporaneamente incompleti: alcuni eventi attendono ancora di essere contati.',
+        'military_tally_label' => 'Cumulo militare',
         'position'              => 'Posizione',
         'player_name_honour'    => 'Nome giocatore (Punti onore)',
         'action'                => 'Azione',
