@@ -29,6 +29,16 @@ use OGame\Services\PlanetService;
  */
 final class LifeformPlanetUpdater
 {
+    /**
+     * Le nombre de coupes qu un passage traite au plus.
+     *
+     * Chaque tour livre un travail ou consomme une revision de vitesse, et les deux sont bornes : la file
+     * porte cinq elements en attente par genre, les revisions d une absence se comptent. Ce plafond n est
+     * donc pas une regle de jeu mais un garde-fou contre une boucle sur une page du joueur. Il **ne leve
+     * rien** : une exception ici condamnerait toutes les pages du compte (journal §120).
+     */
+    private const int MAX_CUTS = 512;
+
     public function __construct(
         private readonly LifeformQueueService $queue,
         private readonly LifeformRuleRevisions $revisions,
@@ -56,53 +66,83 @@ final class LifeformPlanetUpdater
             return;
         }
 
+        $planetId = $planet->getPlanetId();
         $espece = Species::from((int)$ligne->species);
         $etat = new DemographicState((float)$ligne->population, (float)$ligne->food, (int)$ligne->calculated_at);
+        $depart = $etat->calculatedAt;
+        $revisions = $this->revisions->changesBetween($depart, $now);
+        $niveaux = $this->levels->buildingLevelsOf($planetId);
 
-        // Les coupes : les echeances des travaux echus et les revisions de vitesse, dans l ordre.
-        $echus = $this->queue->dueItems($planet->getPlanetId(), $now);
-        $coupes = [];
-        foreach ($echus as $element) {
-            $coupes[] = max((int)$element->time_end, $etat->calculatedAt);
-        }
-        foreach ($this->revisions->changesBetween($etat->calculatedAt, $now) as $instant) {
-            $coupes[] = $instant;
-        }
-        $coupes[] = $now;
-        $coupes = array_values(array_unique($coupes));
-        sort($coupes);
+        // La file est **relue a chaque tour** : livrer un travail en demarre un autre, qui peut etre
+        // echu a son tour dans le meme passage. Une liste de coupes calculee une fois pour toutes ne
+        // verrait jamais ces echeances-la, et une absence laisserait des travaux en retard derriere elle.
+        for ($tour = 0; $tour < self::MAX_CUTS; $tour++) {
+            $coupe = $this->nextCut($planetId, $depart, $now, $etat->calculatedAt, $revisions);
+            if ($coupe === null) {
+                break;
+            }
+            $etat = $this->advanceTo($etat, $espece, $niveaux, $coupe);
 
-        $niveaux = $this->levels->buildingLevelsOf($planet->getPlanetId());
-        foreach ($coupes as $instant) {
-            $vitesses = $this->revisions->at($etat->calculatedAt);
-            $profil = PlanetLifeformProfile::fromLevels($espece, $niveaux, $vitesses->demography());
-            $etat = $this->clock->advance($etat, $profil, $instant);
-
-            // Les travaux echus a cet instant : le niveau s ecrit, les taux changent pour la suite.
             $livre = false;
-            foreach ($echus as $element) {
-                if ($element->status === 'running' && max((int)$element->time_end, (int)$ligne->calculated_at) === $instant) {
+            foreach ($this->queue->dueItems($planetId, $now) as $element) {
+                if (max((int)$element->time_end, $depart) === $coupe) {
                     $this->queue->deliver($planet, $element);
                     $livre = true;
                 }
             }
             if ($livre) {
-                $niveaux = $this->levels->buildingLevelsOf($planet->getPlanetId());
-                // Un travail demarre a l echeance peut deja etre echu lui aussi (duree d une seconde).
-                foreach ($this->queue->dueItems($planet->getPlanetId(), $now) as $nouveau) {
-                    if ($echus->doesntContain('id', $nouveau->id)) {
-                        $echus->push($nouveau);
-                        $coupes[] = max((int)$nouveau->time_end, $instant);
-                    }
-                }
-                $coupes = array_values(array_unique($coupes));
-                sort($coupes);
+                $niveaux = $this->levels->buildingLevelsOf($planetId);
             }
         }
+
+        $etat = $this->advanceTo($etat, $espece, $niveaux, $now);
 
         $ligne->population = $etat->population;
         $ligne->food = $etat->food;
         $ligne->calculated_at = $now;
         $ligne->save();
+    }
+
+    /**
+     * La prochaine coupe strictement apres l instant deja integre, ou null s il n en reste aucune avant
+     * la fin du passage.
+     *
+     * Deux sortes : l echeance d un travail **en cours** que la file porte encore — relue a chaque tour,
+     * donc les enchainements comptent —, et une revision de vitesse. Une echeance anterieure au depart du
+     * passage est ramenee au depart : le travail a beau etre en retard, il ne fait rien avant.
+     *
+     * @param array<int, int> $revisions instants ou la vitesse du serveur a change
+     */
+    private function nextCut(int $planetId, int $depart, int $now, int $integre, array $revisions): int|null
+    {
+        $prochaine = null;
+        foreach ($this->queue->dueItems($planetId, $now) as $element) {
+            $echeance = max((int)$element->time_end, $depart);
+            if ($echeance >= $integre && ($prochaine === null || $echeance < $prochaine)) {
+                $prochaine = $echeance;
+            }
+        }
+        foreach ($revisions as $instant) {
+            if ($instant > $integre && $instant <= $now && ($prochaine === null || $instant < $prochaine)) {
+                $prochaine = $instant;
+            }
+        }
+
+        return $prochaine === null || $prochaine > $now ? null : $prochaine;
+    }
+
+    /**
+     * Avance l etat jusqu a cet instant sous les taux en vigueur au **debut** du morceau.
+     *
+     * @param array<int, int> $levels
+     */
+    private function advanceTo(DemographicState $state, Species $species, array $levels, int $until): DemographicState
+    {
+        if ($until <= $state->calculatedAt) {
+            return $state;
+        }
+        $vitesses = $this->revisions->at($state->calculatedAt);
+
+        return $this->clock->advance($state, PlanetLifeformProfile::fromLevels($species, $levels, $vitesses->demography()), $until);
     }
 }

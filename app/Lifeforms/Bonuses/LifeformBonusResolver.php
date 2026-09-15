@@ -140,19 +140,25 @@ final class LifeformBonusResolver
 
     /**
      * Les bonus qui s appliquent sur cette planete : ses batiments, plus les technologies du compte.
+     *
+     * `$asOf` ramene les deux **a cet instant** — niveaux de batiments par la file des travaux, technologies
+     * par l historique des emplacements. C est ce que la photographie d un combat demande : une usine de
+     * recyclage achevee entre l ouverture et le traitement du travailleur ne doit pas rendre plus de debris
+     * a une bataille deja ouverte (revue de Codex, journal §155.10).
      */
-    public function forPlanet(int $planetId): LifeformBonusSet
+    public function forPlanet(int $planetId, int|null $asOf = null): LifeformBonusSet
     {
-        $jeu = LifeformBonusCache::remember('lf-planete:' . $planetId, time(), function () use ($planetId): LifeformBonusSet|null {
+        $jeu = LifeformBonusCache::remember('lf-planete:' . $planetId . ':' . ($asOf ?? 'vivant'), time(), function () use ($planetId, $asOf): LifeformBonusSet|null {
             $etat = LifeformPlanet::query()->where('planet_id', $planetId)->first();
             if ($etat === null) {
                 return null;
             }
             $proprietaire = Planet::query()->whereKey($planetId)->value('user_id');
             $espece = Species::from((int)$etat->species);
-            $batiments = $this->buildingBonuses($espece, $this->levels->buildingLevelsOf($planetId));
+            $niveaux = $asOf === null ? $this->levels->buildingLevelsOf($planetId) : $this->levels->levelsAt($planetId, LifeformKind::Building, $asOf);
+            $batiments = $this->buildingBonuses($espece, $niveaux);
 
-            return $batiments->merge($this->forPlayer((int)$proprietaire));
+            return $batiments->merge($this->forPlayer((int)$proprietaire, $asOf));
         });
 
         return $jeu instanceof LifeformBonusSet ? $jeu : LifeformBonusSet::none();
@@ -253,23 +259,15 @@ final class LifeformBonusResolver
             $espece = Species::from((int)$etat->species);
             $niveaux = $asOf === null ? $this->levels->buildingLevelsOf($planetId) : $this->levels->levelsAt($planetId, LifeformKind::Building, $asOf);
             $profil = PlanetLifeformProfile::fromLevels($espece, $niveaux, $vitesse);
-            $actifs = $this->research->activeTechnologyLevels($planetId, $etat, $profil, $espece, $niveaux);
+            $actifs = $asOf === null
+                ? $this->research->activeTechnologyLevels($planetId, $etat, $profil, $espece, $niveaux)
+                : $this->research->activeTechnologyLevelsAt($planetId, $etat, $profil, $espece, $niveaux, $asOf);
             if ($actifs === []) {
                 continue;
             }
             $emplacements = [];
-            $poses = [];
-            foreach ($this->research->slotsOf($planetId) as $rang => $ligne) {
-                if ($ligne->object_id !== null) {
-                    $emplacements[(int)$ligne->object_id] = $rang;
-                    $poses[(int)$ligne->object_id] = (int)($ligne->selected_at ?? 0);
-                }
-            }
-            if ($asOf !== null) {
-                $actifs = self::rewound($actifs, $this->levels->levelsAt($planetId, LifeformKind::Technology, $asOf), $poses, $asOf);
-                if ($actifs === []) {
-                    continue;
-                }
+            foreach ($this->research->occupancyOf($planetId, $asOf) as $rang => $objetPose) {
+                $emplacements[$objetPose] = $rang;
             }
             $batiments = 0.0;
             foreach (LifeformCatalogue::buildingsOf($espece) as $batiment) {
@@ -333,35 +331,6 @@ final class LifeformBonusResolver
     public function contributionsOf(int $userId): array
     {
         return $this->technologyContributions($userId) ?? [];
-    }
-
-    /**
-     * Les technologies actives **telles qu elles etaient** : niveaux ramenes par la file, et celles posees dans
-     * leur emplacement apres l instant retirees — une technologie choisie apres une arrivee n armait pas la flotte.
-     *
-     * **Ce qui n est pas remonte, et pourquoi** : la population de la planete, qui decide qu un emplacement est
-     * ouvert, n a pas d historique ; et l experience d une espece bouge par les decouvertes, dont le credit est
-     * lui-meme un effet date. Les deux sont dits au journal §155.9 plutot que devines.
-     *
-     * @param array<int, int> $actifs niveaux courants des technologies dans un emplacement ouvert
-     * @param array<int, int> $alors niveaux de la planete a l instant
-     * @param array<int, int> $poses instant ou chaque technologie a ete posee dans son emplacement
-     * @return array<int, int>
-     */
-    private static function rewound(array $actifs, array $alors, array $poses, int $at): array
-    {
-        $resultat = [];
-        foreach ($actifs as $objectId => $niveau) {
-            if (($poses[$objectId] ?? 0) > $at) {
-                continue;
-            }
-            $ramene = $alors[$objectId] ?? 0;
-            if ($ramene > 0) {
-                $resultat[$objectId] = min($niveau, $ramene);
-            }
-        }
-
-        return $resultat;
     }
 
     private static function applies(LifeformBonus $bonus): bool

@@ -117,6 +117,85 @@ final class LifeformPlanetUpdaterTest extends AccountTestCase
         $this->assertEqualsWithDelta($attendu->food, $etat->food, 1e-6);
     }
 
+    /**
+     * **Un travail dont l heure est passee avant meme le debut du passage est livre, sans effet retroactif.**
+     *
+     * Les vacances avancent `calculated_at` sans rien livrer : au retour, la file porte un travail dont
+     * l echeance precede le depart du passage. Il doit etre livre — sinon il reste en file pour toujours —
+     * mais il ne peut pas nourrir une population deja integree : son apport ne compte qu a partir du depart.
+     */
+    public function testAWorkAlreadyOverdueWhenThePassBeginsIsDeliveredWithoutActingOnThePast(): void
+    {
+        $debut = (int)Date::now()->timestamp;
+        $planetId = $this->planetService->getPlanetId();
+        resolve(LifeformLevels::class)->setLevel($planetId, LifeformKind::Building, self::RESIDENTIAL, 2);
+        $ferme = resolve(LifeformQueueService::class)->add($this->planetService, self::FARM, $debut);
+        $this->assertSame($debut + 6, (int)$ferme->time_end, 'Premisse : la ferme s acheve six secondes apres.');
+
+        // Le compte revient de vacances : l horloge a ete avancee d une heure sans rien livrer.
+        LifeformPlanet::query()->where('planet_id', $planetId)->update([
+            'population' => 210.0,
+            'food' => 0.0,
+            'calculated_at' => $debut + 3600,
+        ]);
+        $this->assertSame('running', $ferme->refresh()->status, 'Premisse : la ferme est echue et toujours en file.');
+
+        $this->travelTo(Date::createFromTimestamp($debut + 7200));
+        $this->planetService->update();
+
+        $this->assertSame('done', $ferme->refresh()->status, 'Un travail echu avant le depart du passage n a jamais ete livre.');
+        $this->assertSame(1, resolve(LifeformLevels::class)->levelOf($planetId, LifeformKind::Building, self::FARM));
+
+        $attendu = (new DemographicClock())->advance(
+            new DemographicState(210.0, 0.0, $debut + 3600),
+            PlanetLifeformProfile::fromLevels(Species::Humans, [self::RESIDENTIAL => 2, self::FARM => 1], 8.0),
+            $debut + 7200
+        );
+        $etat = LifeformPlanet::query()->where('planet_id', $planetId)->firstOrFail();
+        $this->assertEqualsWithDelta($attendu->population, $etat->population, 1e-6, 'La ferme en retard n apporte rien avant le depart du passage, et tout apres.');
+        $this->assertEqualsWithDelta($attendu->food, $etat->food, 1e-6);
+    }
+
+    /**
+     * **Un rattrapage ne laisse aucun travail echu derriere lui** (revue de Codex).
+     *
+     * Le joueur s absente ; deux fermes s enchainent pendant ce temps. La premiere, livree a son echeance,
+     * demarre la seconde **a cette echeance** — qui devient echue a son tour dans le meme passage. Si la
+     * boucle des coupes ne consomme pas les echeances ajoutees en cours de route, la seconde reste en file
+     * alors que son heure est passee, et la demographie a ete integree sans la nourriture qu elle apportait.
+     */
+    public function testACatchUpDeliversEveryWorkChainedDuringTheAbsence(): void
+    {
+        $debut = (int)Date::now()->timestamp;
+        $planetId = $this->planetService->getPlanetId();
+        resolve(LifeformLevels::class)->setLevel($planetId, LifeformKind::Building, self::RESIDENTIAL, 2);
+        $file = resolve(LifeformQueueService::class);
+        $premiere = $file->add($this->planetService, self::FARM, $debut);
+        $seconde = $file->add($this->planetService, self::FARM, $debut);
+        $this->assertSame('running', $premiere->status, 'Premisse : la premiere ferme court.');
+        $this->assertSame('waiting', $seconde->status, 'Premisse : la seconde attend derriere elle.');
+
+        // Le joueur revient une heure plus tard : les deux fermes ont eu le temps de se construire.
+        $this->travelTo(Date::createFromTimestamp($debut + 3606));
+        $this->planetService->update();
+
+        $this->assertSame('done', $seconde->refresh()->status, 'La seconde ferme est restee en file alors que son heure etait passee.');
+        $this->assertCount(0, $file->dueItems($planetId, $debut + 3606), 'Un travail echu est reste derriere le rattrapage.');
+        $this->assertSame(2, resolve(LifeformLevels::class)->levelOf($planetId, LifeformKind::Building, self::FARM), 'Les deux niveaux devaient etre portes.');
+
+        // Et la demographie a bien ete integree en trois morceaux, chacun avec les taux de son moment.
+        $horloge = new DemographicClock();
+        $finPremiere = (int)$premiere->refresh()->time_end;
+        $finSeconde = (int)$seconde->time_end;
+        $etape = $horloge->advance(new DemographicState(210.0, 0.0, $debut), PlanetLifeformProfile::fromLevels(Species::Humans, [self::RESIDENTIAL => 2], 8.0), $finPremiere);
+        $etape = $horloge->advance($etape, PlanetLifeformProfile::fromLevels(Species::Humans, [self::RESIDENTIAL => 2, self::FARM => 1], 8.0), $finSeconde);
+        $attendu = $horloge->advance($etape, PlanetLifeformProfile::fromLevels(Species::Humans, [self::RESIDENTIAL => 2, self::FARM => 2], 8.0), $debut + 3606);
+
+        $etat = LifeformPlanet::query()->where('planet_id', $planetId)->firstOrFail();
+        $this->assertEqualsWithDelta($attendu->population, $etat->population, 1e-6, 'La population n a pas ete integree avec la seconde ferme.');
+        $this->assertEqualsWithDelta($attendu->food, $etat->food, 1e-6);
+    }
+
     public function testAnUnpopulatedPlanetIsLeftAlone(): void
     {
         LifeformPlanet::query()->where('planet_id', $this->planetService->getPlanetId())->delete();

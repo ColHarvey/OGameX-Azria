@@ -20,11 +20,13 @@ use OGame\Models\Lifeforms\LifeformAccount;
 use OGame\Models\Lifeforms\LifeformBuildingLevel;
 use OGame\Models\Lifeforms\LifeformPlanet;
 use OGame\Models\Lifeforms\LifeformSlot;
+use OGame\Models\Lifeforms\LifeformSlotChange;
 use OGame\Models\Lifeforms\LifeformSpeciesProgress;
 use OGame\Models\Lifeforms\LifeformTechnologyLevel;
 use OGame\Models\Planet;
 use Tests\AccountTestCase;
 use Tests\Support\PinsSettings;
+use Tests\Support\PlacesLifeformSlots;
 
 /**
  * Le resolveur des bonus (tranche 5) : neutre a zero, batiments locaux et lineaires, technologies
@@ -33,6 +35,7 @@ use Tests\Support\PinsSettings;
 final class LifeformBonusResolverTest extends AccountTestCase
 {
     use PinsSettings;
+    use PlacesLifeformSlots;
 
     private const int MAGMA_FORGE = 12106;
 
@@ -53,6 +56,7 @@ final class LifeformBonusResolverTest extends AccountTestCase
     {
         $planetes = Planet::query()->where('user_id', $this->currentUserId)->pluck('id');
         LifeformSlot::query()->whereIn('planet_id', $planetes)->delete();
+        LifeformSlotChange::query()->whereIn('planet_id', $planetes)->delete();
         LifeformTechnologyLevel::query()->whereIn('planet_id', $planetes)->delete();
         LifeformBuildingLevel::query()->whereIn('planet_id', $planetes)->delete();
         LifeformPlanet::query()->whereIn('planet_id', $planetes)->delete();
@@ -237,7 +241,7 @@ final class LifeformBonusResolverTest extends AccountTestCase
     private function technology(int $planetId, int $slot, int $objectId, int $level): void
     {
         LifeformPlanet::query()->where('planet_id', $planetId)->update(['population' => 2000000.0]);
-        LifeformSlot::query()->updateOrCreate(['planet_id' => $planetId, 'slot' => $slot], ['object_id' => $objectId, 'chosen_via' => 'local', 'selected_at' => (int)Date::now()->timestamp]);
+        $this->placeLifeformSlot($planetId, $slot, $objectId, (int)Date::now()->timestamp);
         resolve(LifeformLevels::class)->setLevel($planetId, LifeformKind::Technology, $objectId, $level);
     }
 }

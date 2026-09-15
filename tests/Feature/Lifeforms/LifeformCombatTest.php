@@ -27,12 +27,13 @@ use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\Demography\DemographicRules;
 use OGame\Lifeforms\Services\LifeformInstallationService;
 use OGame\Lifeforms\Services\LifeformLevels;
+use OGame\Lifeforms\Services\LifeformResearchService;
 use OGame\Lifeforms\Species;
 use OGame\Models\CombatEntryCharacteristic;
 use OGame\Models\CombatInstance;
 use OGame\Models\Lifeforms\LifeformPlanet;
 use OGame\Models\Lifeforms\LifeformQueue;
-use OGame\Models\Lifeforms\LifeformSlot;
+use OGame\Models\Lifeforms\LifeformSlotChange;
 use OGame\Models\Message;
 use OGame\Models\Resources;
 use OGame\Services\FleetMissionService;
@@ -40,6 +41,7 @@ use OGame\Services\ObjectService;
 use OGame\Services\SettingsService;
 use Tests\Feature\Combat\OpensARallyWithAWindow;
 use Tests\FleetDispatchTestCase;
+use Tests\Support\PlacesLifeformSlots;
 
 /**
  * Les formes de vie dans un combat reel (journal §155.6) : les habitants non proteges perissent quand
@@ -53,6 +55,7 @@ use Tests\FleetDispatchTestCase;
 final class LifeformCombatTest extends FleetDispatchTestCase
 {
     use OpensARallyWithAWindow;
+    use PlacesLifeformSlots;
 
     protected int $missionType = 1;
 
@@ -156,7 +159,7 @@ final class LifeformCombatTest extends FleetDispatchTestCase
             // La population est figee : l horloge demographique, qui tourne a chaque page, ramenerait sinon une population
             // posee au-dessus de l espace de vie sous le seuil de l emplacement avant meme l ouverture.
             LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->update(['population' => 2000000.0, 'calculated_at' => (int)Date::now()->timestamp + 10 * 86400]);
-            LifeformSlot::query()->updateOrCreate(['planet_id' => $this->currentPlanetId, 'slot' => 5], ['object_id' => self::GENERAL_OVERHAUL_LIGHT_FIGHTER, 'chosen_via' => 'local', 'selected_at' => (int)Date::now()->timestamp]);
+            $this->placeLifeformSlot($this->currentPlanetId, 5, self::GENERAL_OVERHAUL_LIGHT_FIGHTER, (int)Date::now()->timestamp);
             resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Technology, self::GENERAL_OVERHAUL_LIGHT_FIGHTER, 10);
             $this->assertSame(3.0, resolve(PlayerServiceFactory::class)->make($this->currentUserId, true)->getLifeformUnitStatsPercent($chasseur), 'Premisse : l attaquant part avec +3 %.');
         });
@@ -165,7 +168,7 @@ final class LifeformCombatTest extends FleetDispatchTestCase
         [, $especeCible] = $this->populate($cibleId, 2000000.0);
         [$technologie, $vaisseauCible, $position] = self::UNIT_TECH[$especeCible->value];
         $unite = ObjectService::getShipObjectByMachineName($vaisseauCible);
-        LifeformSlot::query()->updateOrCreate(['planet_id' => $cibleId, 'slot' => $position], ['object_id' => $technologie, 'chosen_via' => 'local', 'selected_at' => (int)Date::now()->timestamp]);
+        $this->placeLifeformSlot($cibleId, $position, $technologie, (int)Date::now()->timestamp);
         resolve(LifeformLevels::class)->setLevel($cibleId, LifeformKind::Technology, $technologie, 10);
 
         $combat = $this->theOpeningProcessedAt($ouvreuse, $ouverture);
@@ -315,7 +318,7 @@ final class LifeformCombatTest extends FleetDispatchTestCase
         [$ouvreuse, $cibleId, $ouverture] = $this->aRallyAboutToOpen(0, [], null, function () use ($chasseur): void {
             resolve(LifeformInstallationService::class)->chooseSpecies($this->currentUserId, Species::Mechas, (int)Date::now()->timestamp);
             LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->update(['population' => 2000000.0, 'calculated_at' => (int)Date::now()->timestamp + 10 * 86400]);
-            LifeformSlot::query()->updateOrCreate(['planet_id' => $this->currentPlanetId, 'slot' => 5], ['object_id' => self::GENERAL_OVERHAUL_LIGHT_FIGHTER, 'chosen_via' => 'local', 'selected_at' => (int)Date::now()->timestamp]);
+            $this->placeLifeformSlot($this->currentPlanetId, 5, self::GENERAL_OVERHAUL_LIGHT_FIGHTER, (int)Date::now()->timestamp);
             resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Technology, self::GENERAL_OVERHAUL_LIGHT_FIGHTER, 10);
             $this->assertSame(3.0, resolve(PlayerServiceFactory::class)->make($this->currentUserId, true)->getLifeformUnitStatsPercent($chasseur), 'Premisse : la flotte part avec +3 %.');
         });
@@ -325,7 +328,7 @@ final class LifeformCombatTest extends FleetDispatchTestCase
         // **Le defenseur aussi** : sa technologie passe au niveau 11 apres l ouverture, avant le traitement.
         [$technologieCible, $vaisseauCible, $position] = self::UNIT_TECH[$especeCible->value];
         $uniteCible = ObjectService::getShipObjectByMachineName($vaisseauCible);
-        LifeformSlot::query()->updateOrCreate(['planet_id' => $cibleId, 'slot' => $position], ['object_id' => $technologieCible, 'chosen_via' => 'local', 'selected_at' => $ouverture - 1000]);
+        $this->placeLifeformSlot($cibleId, $position, $technologieCible, $ouverture - 1000);
         resolve(LifeformLevels::class)->setLevel($cibleId, LifeformKind::Technology, $technologieCible, 10);
         LifeformQueue::query()->create([
             'planet_id' => $cibleId,
@@ -395,10 +398,10 @@ final class LifeformCombatTest extends FleetDispatchTestCase
         // **Une technologie posee dans son emplacement apres l instant n armait pas la flotte.**
         $resolveur = resolve(LifeformBonusResolver::class);
         $this->assertEqualsWithDelta(0.03, $resolveur->forPlayer($this->currentUserId, $ouverture)->fraction(LifeformEffect::SHIP_STATS, 'light_fighter'), 1e-9);
-        LifeformSlot::query()->where('planet_id', $this->currentPlanetId)->where('slot', 5)->update(['selected_at' => $ouverture + 50]);
+        LifeformSlotChange::query()->where('planet_id', $this->currentPlanetId)->where('slot', 5)->update(['from_at' => $ouverture + 50]);
         LifeformBonusCache::invalidate();
         $this->assertSame(0.0, $resolveur->forPlayer($this->currentUserId, $ouverture)->fraction(LifeformEffect::SHIP_STATS, 'light_fighter'), 'Un emplacement choisi apres l arrivee arme la flotte.');
-        LifeformSlot::query()->where('planet_id', $this->currentPlanetId)->where('slot', 5)->update(['selected_at' => $ouverture - 1000]);
+        LifeformSlotChange::query()->where('planet_id', $this->currentPlanetId)->where('slot', 5)->update(['from_at' => $ouverture - 1000]);
         LifeformBonusCache::invalidate();
 
         // Le travailleur passe **deux minutes après** l arrivée logique.
@@ -426,6 +429,50 @@ final class LifeformCombatTest extends FleetDispatchTestCase
             round($defenseur->lifeformBonuses->unitStatsPercent($uniteCible), 4),
             'La recherche du defenseur achevee apres l ouverture arme sa garnison.'
         );
+    }
+
+    /**
+     * **Une remise a zero du palier faite apres l arrivee ne desarme pas la flotte** (revue de Codex).
+     *
+     * La flotte arrive avec son bonus ; avant que le travailleur ne traite l arrivee, le joueur vide le
+     * palier. La reconstruction lisait l occupation **courante** des emplacements : la technologie avait
+     * disparu, et la flotte etait gelee sans son bonus. Deux traitements de la meme arrivee ne donnaient
+     * alors pas la meme bataille — c est exactement ce que le gel existe pour interdire.
+     */
+    public function testATierResetAfterTheArrivalDoesNotDisarmTheFleet(): void
+    {
+        resolve(SettingsService::class)->set('lifeforms_enabled', '1');
+        $chasseur = ObjectService::getShipObjectByMachineName('light_fighter');
+
+        [$ouvreuse, $cibleId, $ouverture] = $this->aRallyAboutToOpen(0, [], null, function () use ($chasseur): void {
+            resolve(LifeformInstallationService::class)->chooseSpecies($this->currentUserId, Species::Mechas, (int)Date::now()->timestamp);
+            LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->update(['population' => 2000000.0, 'calculated_at' => (int)Date::now()->timestamp + 10 * 86400]);
+            $this->placeLifeformSlot($this->currentPlanetId, 5, self::GENERAL_OVERHAUL_LIGHT_FIGHTER, (int)Date::now()->timestamp);
+            resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Technology, self::GENERAL_OVERHAUL_LIGHT_FIGHTER, 10);
+            $this->assertSame(3.0, resolve(PlayerServiceFactory::class)->make($this->currentUserId, true)->getLifeformUnitStatsPercent($chasseur), 'Premisse : la flotte part avec +3 %.');
+        });
+
+        $this->populate($cibleId, 2000000.0);
+
+        // **Le joueur vide le palier une seconde apres l arrivee**, avant que le travailleur ne passe.
+        resolve(LifeformResearchService::class)->resetTier($this->currentPlanetId, 1, $ouverture + 1);
+        $this->assertSame(0.0, resolve(PlayerServiceFactory::class)->make($this->currentUserId, true)->getLifeformUnitStatsPercent($chasseur), 'Premisse : le compte vivant n a plus le bonus.');
+        $this->assertEqualsWithDelta(
+            0.03,
+            resolve(LifeformBonusResolver::class)->forPlayer($this->currentUserId, $ouverture)->fraction(LifeformEffect::SHIP_STATS, 'light_fighter'),
+            1e-9,
+            'La remise a zero faite apres l arrivee efface le bonus de l instant : l occupation des emplacements est lue au present.'
+        );
+
+        $this->travelTo(Date::createFromTimestamp($ouverture + 120));
+        $this->get('/overview')->assertStatus(200);
+
+        $combat = $this->theCombatOf((int)$ouvreuse->id, $cibleId);
+        $this->assertNotNull($combat, 'The arrival did not open a combat.');
+        $ligne = CombatEntryCharacteristic::query()->where('combat_instance_id', $combat->id)->where('fleet_mission_id', $ouvreuse->id)->first();
+        $this->assertNotNull($ligne);
+        $gele = FrozenCombatCharacteristics::fromStorage($ligne->getAttributes());
+        $this->assertSame(3.0, round($gele->lifeformBonuses->unitStatsPercent($chasseur), 4), 'La flotte a ete gelee sans le bonus qu elle portait en arrivant.');
     }
 
     /**

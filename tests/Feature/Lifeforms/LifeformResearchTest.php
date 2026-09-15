@@ -5,6 +5,7 @@ namespace Tests\Feature\Lifeforms;
 use Illuminate\Support\Facades\Date;
 use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\LifeformRefused;
+use OGame\Lifeforms\Research\LifeformSlotHistory;
 use OGame\Lifeforms\Services\LifeformInstallationService;
 use OGame\Lifeforms\Services\LifeformLevels;
 use OGame\Lifeforms\Services\LifeformQueueService;
@@ -15,6 +16,7 @@ use OGame\Models\Lifeforms\LifeformBuildingLevel;
 use OGame\Models\Lifeforms\LifeformPlanet;
 use OGame\Models\Lifeforms\LifeformQueue;
 use OGame\Models\Lifeforms\LifeformSlot;
+use OGame\Models\Lifeforms\LifeformSlotChange;
 use OGame\Models\Lifeforms\LifeformSpeciesProgress;
 use OGame\Models\Lifeforms\LifeformTechnologyLevel;
 use OGame\Models\Planet;
@@ -49,6 +51,7 @@ final class LifeformResearchTest extends AccountTestCase
         $planetes = Planet::query()->where('user_id', $this->currentUserId)->pluck('id');
         LifeformQueue::query()->whereIn('planet_id', $planetes)->delete();
         LifeformSlot::query()->whereIn('planet_id', $planetes)->delete();
+        LifeformSlotChange::query()->whereIn('planet_id', $planetes)->delete();
         LifeformTechnologyLevel::query()->whereIn('planet_id', $planetes)->delete();
         LifeformBuildingLevel::query()->whereIn('planet_id', $planetes)->delete();
         LifeformPlanet::query()->whereIn('planet_id', $planetes)->delete();
@@ -194,6 +197,72 @@ final class LifeformResearchTest extends AccountTestCase
         $service->resetTier($planetId, 1, $debut + 86401);
         $this->travelTo(Date::createFromTimestamp($debut + 86401 + 3601));
         $this->assertRefused(fn () => $service->restoreTier($planetId, 1, $debut + 86401 + 3601), LifeformRefused::RESTORE_EXPIRED);
+    }
+
+    /**
+     * **L occupation d un emplacement se relit a n importe quel instant** (revue de Codex, journal §155.10).
+     *
+     * Le gel d un combat en depend : un travailleur traite une arrivee bien apres l avoir datee, et ce que
+     * le joueur change entre les deux ne doit ni armer ni desarmer cette flotte. Les colonnes de
+     * `lifeform_slots` ne suffisaient pas — apres une remise a zero suivie d un nouveau choix, l instant du
+     * choix de l ancienne technologie est perdu. C est le dernier cas ci-dessous, et il tombe en une minute
+     * de jeu reel.
+     */
+    public function testTheSlotOccupancyIsReadableAtAnyInstant(): void
+    {
+        $planetId = $this->currentPlanetId;
+        $service = resolve(LifeformResearchService::class);
+        $historique = resolve(LifeformSlotHistory::class);
+        $debut = (int)Date::now()->timestamp;
+        $this->populate(400000.0);
+
+        $this->assertSame([], $historique->occupantsAt($planetId, $debut), 'Rien n a jamais ete pose : rien a lire.');
+
+        $service->choose($planetId, $this->currentUserId, 1, 'local', $debut);
+        $this->assertSame([], $historique->occupantsAt($planetId, $debut - 1), 'Avant le choix, l emplacement etait vide.');
+        $this->assertSame([1 => self::ENVOYS], $historique->occupantsAt($planetId, $debut), 'A la seconde du choix, il porte la technologie.');
+        $this->assertSame([1 => self::ENVOYS], $historique->occupantsAt($planetId, $debut + 10000));
+
+        // **La remise a zero ne remonte pas le temps** : avant elle, l emplacement portait encore.
+        $remise = $debut + 100;
+        $service->resetTier($planetId, 1, $remise);
+        $this->assertSame([1 => self::ENVOYS], $historique->occupantsAt($planetId, $remise - 1), 'La remise a zero a efface le passe.');
+        $this->assertSame([], $historique->occupantsAt($planetId, $remise), 'A la seconde de la remise a zero, l emplacement est vide.');
+
+        // **La restauration non plus** : entre les deux, l emplacement etait bien vide.
+        $restauration = $remise + 60;
+        $service->restoreTier($planetId, 1, $restauration);
+        $this->assertSame([1 => self::ENVOYS], $historique->occupantsAt($planetId, $remise - 1));
+        $this->assertSame([], $historique->occupantsAt($planetId, $restauration - 1), 'La restauration a rempli une periode ou l emplacement etait vide.');
+        $this->assertSame([1 => self::ENVOYS], $historique->occupantsAt($planetId, $restauration));
+
+        // **Le cas que les colonnes ne savaient pas dire** : remise a zero puis choix d une autre technologie.
+        // `selected_at` decrit alors la nouvelle, et l instant du choix de l ancienne n existe plus nulle part.
+        $secondeRemise = $remise + 86401;
+        $this->travelTo(Date::createFromTimestamp($secondeRemise));
+        $service->resetTier($planetId, 1, $secondeRemise);
+        $rechoix = $secondeRemise + 30;
+        $service->choose($planetId, $this->currentUserId, 2, 'local', $rechoix);
+
+        $this->assertSame([1 => self::ENVOYS], $historique->occupantsAt($planetId, $restauration), 'Le rechoix a efface ce que l emplacement 1 portait avant.');
+        $this->assertSame([], $historique->occupantsAt($planetId, $secondeRemise));
+        $this->assertSame([2 => self::EXTRACTORS], $historique->occupantsAt($planetId, $rechoix));
+        $this->assertSame((int)LifeformSlot::query()->where('planet_id', $planetId)->where('slot', 2)->value('selected_at'), $rechoix, 'Premisse : la colonne ne decrit plus que la nouvelle.');
+
+        // Rejouer exactement la meme decision au meme instant n ajoute pas de ligne.
+        $lignes = LifeformSlotChange::query()->where('planet_id', $planetId)->count();
+        $historique->record($planetId, 2, self::EXTRACTORS, $rechoix);
+        $this->assertSame($lignes, LifeformSlotChange::query()->where('planet_id', $planetId)->count());
+
+        // **Deux decisions differentes a la meme seconde** : la seconde gagne, et la premiere ne l efface pas.
+        // Vider un palier puis rechoisir dans la foulee tient dans une seconde ; garder la premiere ligne
+        // laisserait l emplacement vide pour toujours.
+        $meme = $secondeRemise + 86401;
+        $this->travelTo(Date::createFromTimestamp($meme));
+        $service->resetTier($planetId, 1, $meme);
+        $service->choose($planetId, $this->currentUserId, 1, 'local', $meme);
+        $this->assertSame([2 => self::EXTRACTORS], $historique->occupantsAt($planetId, $meme - 1), 'Une seconde avant, le palier etait encore celui d avant.');
+        $this->assertSame([1 => self::ENVOYS], $historique->occupantsAt($planetId, $meme), 'Un choix fait a la seconde de la remise a zero est perdu.');
     }
 
     private function populate(float $population): void

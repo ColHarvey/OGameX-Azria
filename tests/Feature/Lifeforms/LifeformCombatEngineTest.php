@@ -13,6 +13,7 @@ use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
 use OGame\GameMissions\BattleEngine\PhpBattleEngine;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Lifeforms\Bonuses\LifeformBonusCache;
+use OGame\Lifeforms\Catalogue\LifeformCatalogue;
 use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\Combat\LifeformCombatLosses;
 use OGame\Lifeforms\Combat\LifeformCombatPhotographer;
@@ -22,7 +23,9 @@ use OGame\Lifeforms\Species;
 use OGame\Models\Lifeforms\LifeformAccount;
 use OGame\Models\Lifeforms\LifeformBuildingLevel;
 use OGame\Models\Lifeforms\LifeformPlanet;
+use OGame\Models\Lifeforms\LifeformQueue;
 use OGame\Models\Lifeforms\LifeformSlot;
+use OGame\Models\Lifeforms\LifeformSlotChange;
 use OGame\Models\Lifeforms\LifeformSpeciesProgress;
 use OGame\Models\Lifeforms\LifeformTechnologyLevel;
 use OGame\Models\Message;
@@ -32,6 +35,7 @@ use OGame\Services\ObjectService;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
 use Tests\Support\PinsSettings;
+use Tests\Support\PlacesLifeformSlots;
 
 /**
  * Ce que le moteur partage lit des formes de vie du corps defendu : les debris (Usine de recyclage avancee),
@@ -40,10 +44,13 @@ use Tests\Support\PinsSettings;
 final class LifeformCombatEngineTest extends AccountTestCase
 {
     use PinsSettings;
+    use PlacesLifeformSlots;
 
     private const int ADVANCED_RECYCLING_PLANT = 12112;
 
     private const int SUPRA_REFRACTOR = 14112;
+
+    private const int PLANETARY_SHIELD = 11112;
 
     protected function setUp(): void
     {
@@ -56,8 +63,10 @@ final class LifeformCombatEngineTest extends AccountTestCase
     {
         $planetes = Planet::query()->where('user_id', $this->currentUserId)->pluck('id');
         LifeformSlot::query()->whereIn('planet_id', $planetes)->delete();
+        LifeformSlotChange::query()->whereIn('planet_id', $planetes)->delete();
         LifeformTechnologyLevel::query()->whereIn('planet_id', $planetes)->delete();
         LifeformBuildingLevel::query()->whereIn('planet_id', $planetes)->delete();
+        LifeformQueue::query()->whereIn('planet_id', $planetes)->delete();
         LifeformPlanet::query()->whereIn('planet_id', $planetes)->delete();
         LifeformAccount::query()->where('user_id', $this->currentUserId)->delete();
         LifeformSpeciesProgress::query()->where('user_id', $this->currentUserId)->delete();
@@ -128,7 +137,7 @@ final class LifeformCombatEngineTest extends AccountTestCase
         $this->assertEqualsWithDelta(0.3, $photographe->ofBody($this->planetService)->protectedShare, 1e-9, 'Bouclier planetaire niveau 10 : 30 %.');
 
         LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->update(['population' => 2000000.0]);
-        LifeformSlot::query()->updateOrCreate(['planet_id' => $this->currentPlanetId, 'slot' => 1], ['object_id' => 11209, 'chosen_via' => 'local', 'selected_at' => (int)Date::now()->timestamp]);
+        $this->placeLifeformSlot($this->currentPlanetId, 1, 11209, (int)Date::now()->timestamp);
         resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Technology, 11209, 10);
         $corps = $photographe->ofBody($this->planetService);
         $this->assertSame(['light_fighter' => 3.0], $corps->unitStats, 'Chasseur leger Mk II niveau 10 : +3 %.');
@@ -194,6 +203,78 @@ final class LifeformCombatEngineTest extends AccountTestCase
         $aneanti->defenderUnitsResult = new UnitCollection();
         $this->assertSame(0, $pertes->applyIfAttackerWon($aneanti, $this->planetService, 0.3, $instant), 'Les deux camps aneantis : pas une victoire.');
         $this->assertEqualsWithDelta(10000.0, (float)LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->value('population'), 0.001);
+    }
+
+    /**
+     * **Ce que le corps acquiert apres l instant ne protege ni ne rend rien retroactivement** (revue de Codex).
+     *
+     * `ofBody()` recoit un instant — l ouverture d un ralliement, l arrivee d une attaque — et lisait
+     * pourtant les niveaux et les bonus **courants** : un Bouclier planetaire acheve entre l ouverture et le
+     * traitement du travailleur sauvait une population qu il ne couvrait pas encore.
+     */
+    public function testWhatTheBodyGainsAfterTheInstantDoesNotCountForThatInstant(): void
+    {
+        $photographe = resolve(LifeformCombatPhotographer::class);
+        $this->choose(Species::Humans);
+        $instant = (int)Date::now()->timestamp;
+
+        // Le dixieme niveau du Bouclier planetaire s acheve cinq secondes apres l instant, et le monde l a
+        // deja applique quand on photographie : le corps porte 10, il n en portait que 9.
+        $this->aFinishedWork(self::PLANETARY_SHIELD, 10, $instant + 5);
+        resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Building, self::PLANETARY_SHIELD, 10);
+        LifeformBonusCache::invalidate();
+
+        $this->assertEqualsWithDelta(0.3, $photographe->ofBody($this->planetService)->protectedShare, 1e-9, 'Premisse : le corps porte desormais 30 %.');
+        $this->assertEqualsWithDelta(0.27, $photographe->ofBody($this->planetService, $instant)->protectedShare, 1e-9, 'Le niveau acheve apres l instant protege la population retroactivement.');
+        $this->assertEqualsWithDelta(0.3, $photographe->ofBody($this->planetService, $instant + 5)->protectedShare, 1e-9, 'A son echeance, il protege : une echeance egale compte comme precedente.');
+
+        // Et un Bouclier dont le **premier** niveau s acheve apres l instant ne protegeait rien du tout.
+        LifeformQueue::query()->where('planet_id', $this->currentPlanetId)->delete();
+        $this->aFinishedWork(self::PLANETARY_SHIELD, 1, $instant + 5);
+        resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Building, self::PLANETARY_SHIELD, 1);
+        LifeformBonusCache::invalidate();
+        $this->assertSame(0.0, $photographe->ofBody($this->planetService, $instant)->protectedShare, 'Un Bouclier qui n existait pas encore protege la population.');
+    }
+
+    /**
+     * **La lune, les debris et les epaves suivent le meme instant** (revue de Codex).
+     */
+    public function testTheBodyBonusesFollowTheInstantToo(): void
+    {
+        $photographe = resolve(LifeformCombatPhotographer::class);
+        $this->choose(Species::Rocktal);
+        $instant = (int)Date::now()->timestamp;
+
+        // Le premier niveau de l usine s acheve apres l instant : a l instant, la planete n en avait aucun.
+        $this->aFinishedWork(self::ADVANCED_RECYCLING_PLANT, 1, $instant + 5);
+        resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Building, self::ADVANCED_RECYCLING_PLANT, 1);
+        LifeformBonusCache::invalidate();
+
+        $this->assertEqualsWithDelta(0.006, $photographe->ofBody($this->planetService)->debrisRecovery, 1e-9, 'Premisse : le corps rend desormais +0,6 % de debris.');
+        $this->assertSame(0.0, $photographe->ofBody($this->planetService, $instant)->debrisRecovery, 'L usine achevee apres l instant rend plus de debris retroactivement.');
+        $this->assertEqualsWithDelta(0.006, $photographe->ofBody($this->planetService, $instant + 5)->debrisRecovery, 1e-9, 'A son echeance, elle rend.');
+    }
+
+    /**
+     * Un travail de batiment deja livre par le monde, dont l echeance est celle-ci.
+     */
+    private function aFinishedWork(int $objectId, int $targetLevel, int $timeEnd): void
+    {
+        LifeformQueue::query()->create([
+            'planet_id' => $this->currentPlanetId,
+            'user_id' => $this->currentUserId,
+            'kind' => LifeformKind::Building->value,
+            'object_id' => $objectId,
+            'target_level' => $targetLevel,
+            'metal' => 0,
+            'crystal' => 0,
+            'deuterium' => 0,
+            'energy' => 0,
+            'time_start' => $timeEnd - 100,
+            'time_end' => $timeEnd,
+            'status' => 'done',
+            'catalogue_version' => LifeformCatalogue::VERSION,
+        ]);
     }
 
     private function choose(Species $species): void

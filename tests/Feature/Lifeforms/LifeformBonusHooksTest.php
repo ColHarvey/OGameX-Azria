@@ -20,6 +20,7 @@ use OGame\Models\Lifeforms\LifeformAccount;
 use OGame\Models\Lifeforms\LifeformBuildingLevel;
 use OGame\Models\Lifeforms\LifeformPlanet;
 use OGame\Models\Lifeforms\LifeformSlot;
+use OGame\Models\Lifeforms\LifeformSlotChange;
 use OGame\Models\Lifeforms\LifeformSpeciesProgress;
 use OGame\Models\Lifeforms\LifeformTechnologyLevel;
 use OGame\Models\Planet;
@@ -37,6 +38,7 @@ use ReflectionMethod;
 use Tests\AccountTestCase;
 use Tests\RecordsClassHistory;
 use Tests\Support\PinsSettings;
+use Tests\Support\PlacesLifeformSlots;
 
 /**
  * Les points d application des bonus (tranche 5) : production, energie, entrepots, prix et temps, unites,
@@ -45,6 +47,7 @@ use Tests\Support\PinsSettings;
 final class LifeformBonusHooksTest extends AccountTestCase
 {
     use PinsSettings;
+    use PlacesLifeformSlots;
     use RecordsClassHistory;
 
     private const int MAGMA_FORGE = 12106;
@@ -94,6 +97,7 @@ final class LifeformBonusHooksTest extends AccountTestCase
     {
         $planetes = Planet::query()->where('user_id', $this->currentUserId)->pluck('id');
         LifeformSlot::query()->whereIn('planet_id', $planetes)->delete();
+        LifeformSlotChange::query()->whereIn('planet_id', $planetes)->delete();
         LifeformTechnologyLevel::query()->whereIn('planet_id', $planetes)->delete();
         LifeformBuildingLevel::query()->whereIn('planet_id', $planetes)->delete();
         LifeformPlanet::query()->whereIn('planet_id', $planetes)->delete();
@@ -333,7 +337,7 @@ final class LifeformBonusHooksTest extends AccountTestCase
     private function technology(int $slot, int $objectId, int $level): void
     {
         LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->update(['population' => 2000000.0]);
-        LifeformSlot::query()->updateOrCreate(['planet_id' => $this->currentPlanetId, 'slot' => $slot], ['object_id' => $objectId, 'chosen_via' => 'local', 'selected_at' => (int)Date::now()->timestamp]);
+        $this->placeLifeformSlot($this->currentPlanetId, $slot, $objectId, (int)Date::now()->timestamp);
         resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Technology, $objectId, $level);
     }
 

@@ -12,6 +12,7 @@ use OGame\Lifeforms\Catalogue\LifeformObject;
 use OGame\Lifeforms\Demography\PlanetLifeformProfile;
 use OGame\Lifeforms\LifeformRefused;
 use OGame\Lifeforms\Research\LifeformExperience;
+use OGame\Lifeforms\Research\LifeformSlotHistory;
 use OGame\Lifeforms\Research\LifeformSlotRules;
 use OGame\Lifeforms\Rules\LifeformRuleRevisions;
 use OGame\Lifeforms\Species;
@@ -54,6 +55,7 @@ final class LifeformResearchService
         private readonly SettingsService $settings,
         private readonly LifeformLevels $levels,
         private readonly LifeformRuleRevisions $revisions,
+        private readonly LifeformSlotHistory $history,
     ) {
     }
 
@@ -247,6 +249,7 @@ final class LifeformResearchService
             $ligne->selected_at = $now;
             $ligne->chosen_via = $via;
             $ligne->save();
+            $this->history->record($planetId, $slot, $objet->id, $now);
 
             LifeformBonusCache::invalidate();
 
@@ -288,6 +291,7 @@ final class LifeformResearchService
                 $emplacement->object_id = null;
                 $emplacement->reset_at = $now;
                 $emplacement->save();
+                $this->history->record($planetId, (int)$emplacement->slot, null, $now);
             }
         });
         LifeformBonusCache::invalidate();
@@ -320,6 +324,7 @@ final class LifeformResearchService
                 $emplacement->object_id = $emplacement->previous_object_id;
                 $emplacement->previous_object_id = null;
                 $emplacement->save();
+                $this->history->record($planetId, (int)$emplacement->slot, (int)$emplacement->object_id, $now);
             }
         });
         LifeformBonusCache::invalidate();
@@ -332,16 +337,68 @@ final class LifeformResearchService
      */
     public function activeTechnologyLevels(int $planetId, LifeformPlanet $state, PlanetLifeformProfile $profile, Species $species, array $buildingLevels): array
     {
-        $reduction = $this->requirementReduction($species, $buildingLevels);
-        $niveaux = $this->levels->technologyLevelsOf($planetId);
-        $actifs = [];
+        return $this->activeAmong($this->occupancyOf($planetId), $this->levels->technologyLevelsOf($planetId), $state, $profile, $species, $buildingLevels);
+    }
+
+    /**
+     * L occupation des emplacements de la planete : au present, ou **telle qu elle etait** a un instant.
+     *
+     * C est la lecture unique — le resolveur s en sert pour nommer l emplacement de chaque contribution,
+     * et les technologies actives en sortent. Deux lectures separees auraient pu diverger.
+     *
+     * @return array<int, int> identifiant de technologie par numero d emplacement, les vides omis
+     */
+    public function occupancyOf(int $planetId, int|null $at = null): array
+    {
+        if ($at !== null) {
+            return $this->history->occupantsAt($planetId, $at);
+        }
+        $occupation = [];
         foreach ($this->slotsOf($planetId) as $slot => $ligne) {
-            if ($ligne->object_id === null) {
-                continue;
+            if ($ligne->object_id !== null) {
+                $occupation[$slot] = (int)$ligne->object_id;
             }
-            $niveau = $niveaux[(int)$ligne->object_id] ?? 0;
+        }
+
+        return $occupation;
+    }
+
+    /**
+     * Les memes, **telles qu elles etaient a un instant** : l occupation vient de l historique des
+     * emplacements, les niveaux de la file des travaux.
+     *
+     * L ouverture d un emplacement se juge en revanche sur la population **courante** : l horloge
+     * demographique ne se remonte pas, et l inventer serait pire que l avouer (journal §155.10).
+     *
+     * @param array<int, int> $buildingLevels niveaux de batiments **a cet instant**
+     * @return array<int, int> niveau par identifiant de technologie
+     */
+    public function activeTechnologyLevelsAt(int $planetId, LifeformPlanet $state, PlanetLifeformProfile $profile, Species $species, array $buildingLevels, int $at): array
+    {
+        return $this->activeAmong(
+            $this->occupancyOf($planetId, $at),
+            $this->levels->levelsAt($planetId, LifeformKind::Technology, $at),
+            $state,
+            $profile,
+            $species,
+            $buildingLevels
+        );
+    }
+
+    /**
+     * @param array<int, int> $occupation identifiant de technologie par emplacement
+     * @param array<int, int> $technologyLevels
+     * @param array<int, int> $buildingLevels
+     * @return array<int, int>
+     */
+    private function activeAmong(array $occupation, array $technologyLevels, LifeformPlanet $state, PlanetLifeformProfile $profile, Species $species, array $buildingLevels): array
+    {
+        $reduction = $this->requirementReduction($species, $buildingLevels);
+        $actifs = [];
+        foreach ($occupation as $slot => $objectId) {
+            $niveau = $technologyLevels[$objectId] ?? 0;
             if ($niveau > 0 && $this->isUnlocked($slot, $state, $profile, $reduction)) {
-                $actifs[(int)$ligne->object_id] = $niveau;
+                $actifs[$objectId] = $niveau;
             }
         }
 
