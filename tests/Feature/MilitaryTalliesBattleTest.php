@@ -250,8 +250,10 @@ final class MilitaryTalliesBattleTest extends FleetDispatchTestCase
 
         // Le catalogue retrouve l unite : la reprise applique ce que l evaluation donne sur les faits gardes.
         (new ReflectionProperty(MilitaryValue::class, 'poids'))->setValue(null, null);
+        // Le groupe se reprend d un bloc : le premier membre rencontre entraine les autres, que le passage retrouve
+        // deja repris.
         $bilan = (new MilitaryTallyReplay())->replay();
-        $this->assertSame(3, $bilan['replayed'], 'La reprise n a pas repris les trois attentes.');
+        $this->assertSame([1, 0, 2], [$bilan['replayed'], $bilan['pending'], $bilan['skipped']], 'La reprise n a pas repris les trois attentes d un bloc.');
 
         $faits = BattleTallyFacts::fromStorage(json_decode((string)array_values($enAttente)[0]->payload, true)['facts']);
         $this->assertNotNull($faits);

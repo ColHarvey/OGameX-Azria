@@ -193,6 +193,87 @@ final class BattleTallyEvaluationTest extends TestCase
         }
     }
 
+    /**
+     * **La manoeuvre nommee** : l Etoile est une perte anterieure au premier round de la victime — hors des forces du
+     * round 1, hors du partage des rounds —, comptee **une fois** en perdus, et sa valeur va a l auteur **en un
+     * evenement nomme**, jamais dans les detruits de la bataille.
+     */
+    public function testANamedManoeuvreCreditsTheStarOnceToTheAuthorAndNeverThroughTheRounds(): void
+    {
+        $faits = $this->faitsSousHamill();
+
+        $issue = (new BattleTallyEvaluation())->evaluate($faits, MilitaryValue::WEIGHTING_VERSION);
+
+        $this->assertFalse($issue->isPending(), (string)$issue->detail);
+        // Prix des faits : Etoile 1000, poids 2 → 2000. Perdus de la garnison : 15 lance-missiles − 5 repares = 140, plus l Etoile.
+        $this->assertSame(10 * 14 + 2000, $issue->computed[self::garnison()]['lost'], 'L Etoile n est pas comptee exactement une fois en perdus.');
+        $this->assertSame(14 + 17, $issue->computed[self::fleet(1)]['destroyed'], 'Les detruits de la bataille portent une part de l Etoile.');
+        $this->assertSame(42 + 67, $issue->computed[self::fleet(2)]['destroyed']);
+        $this->assertSame(['author' => self::fleet(1), 'owner' => 11, 'npc' => false, 'destroyed' => 2000], $issue->hamill);
+        $this->assertSame(['author' => self::fleet(1), 'owner' => 11, 'destroyed' => 2000], $issue->hamillCredit());
+        // Conservation avec l evenement nomme : detruits des rounds + Etoile nommee = perdus de la garnison.
+        $this->assertSame($issue->computed[self::garnison()]['lost'], 31 + 109 + 2000);
+        $this->assertConservation($issue->computed, $faits);
+    }
+
+    public function testANamedManoeuvreOfAnNpcAuthorIsComputedButNotCredited(): void
+    {
+        $faits = $this->faitsSousHamill(auteurNpc: true);
+
+        $issue = (new BattleTallyEvaluation())->evaluate($faits, MilitaryValue::WEIGHTING_VERSION);
+
+        $this->assertFalse($issue->isPending(), (string)$issue->detail);
+        $this->assertNotNull($issue->hamill);
+        $this->assertTrue($issue->hamill['npc']);
+        $this->assertNull($issue->hamillCredit(), 'Un auteur PNJ a ete credite de la manoeuvre.');
+    }
+
+    public function testANamedManoeuvreThatDoesNotFitTheFactsLeavesTheBattlePending(): void
+    {
+        $evaluation = new BattleTallyEvaluation();
+
+        foreach ([
+            'victime qui n est pas un defenseur' => [$this->faitsSousHamill(victime: self::fleet(2)), 'n est pas une flotte defensive'],
+            'auteur qui n est pas un attaquant' => [$this->faitsSousHamill(auteur: self::garnison()), 'n est pas une flotte attaquante'],
+            'pertes anterieures qui ne sont pas une Etoile' => [$this->faitsSousHamill(anterieures: [self::garnison() => ['rocket_launcher' => 1]]), 'exactement une Etoile'],
+            'nommee sans etre declenchee' => [$this->faitsSousHamill(declenchee: false), 'sans manoeuvre declenchee'],
+        ] as $nom => [$faits, $extrait]) {
+            $issue = $evaluation->evaluate($faits, MilitaryValue::WEIGHTING_VERSION);
+
+            $this->assertTrue($issue->isPending(), "Le cas « $nom » a ete evalue.");
+            $this->assertSame(BattleTallyEvaluation::INCOHERENT_BATTLE, $issue->reason, "Le cas « $nom » n attend pas pour la bonne raison.");
+            $this->assertStringContainsString($extrait, $issue->detail);
+        }
+    }
+
+    public function testTheFactsOfTheSecondSchemaSurviveTheirStorageAndTheFirstSchemaStillReads(): void
+    {
+        $faits = $this->faitsSousHamill();
+        $document = $faits->toStorage();
+        $this->assertSame(2, $document['schema']);
+
+        $relus = BattleTallyFacts::fromStorage(json_decode((string)json_encode($document), true));
+        $this->assertNotNull($relus);
+        $this->assertEquals($faits, $relus);
+
+        $ancien = $this->deuxAttaquantesEtUneGarnison(hamill: true)->toStorage();
+        $ancien['schema'] = 1;
+        unset($ancien['hamill']);
+        $relu = BattleTallyFacts::fromStorage($ancien);
+        $this->assertNotNull($relu, 'Un document du schema 1 ne se relit plus.');
+        $this->assertNull($relu->hamill);
+        $this->assertTrue($relu->hamillTriggered);
+        $this->assertSame(BattleTallyEvaluation::HAMILL_VICTIM_UNNAMED, (new BattleTallyEvaluation())->evaluate($relu, MilitaryValue::WEIGHTING_VERSION)->reason);
+
+        foreach ([
+            'schema 2 sans le champ hamill' => array_diff_key($document, ['hamill' => true]),
+            'manoeuvre sans regle' => ['hamill' => ['victim' => self::garnison(), 'author' => self::fleet(1)]] + $document,
+            'regle inconnue' => ['hamill' => ['victim' => self::garnison(), 'author' => self::fleet(1), 'rule' => 'v9']] + $document,
+        ] as $nom => $deforme) {
+            $this->assertNull(BattleTallyFacts::fromStorage($deforme), "Un document deforme (« $nom ») a ete relu.");
+        }
+    }
+
     public function testLossesWithoutAnyOpposingForceAreAnIncoherence(): void
     {
         // Les deux attaquantes tombent au round 1 ; au round 2 la garnison perd encore : personne n a pu tirer.
@@ -226,7 +307,7 @@ final class BattleTallyEvaluationTest extends TestCase
         $this->assertSame('battle:combat:12:' . self::fleet(1), $faits->eventKeyFor(self::fleet(1)));
 
         foreach ([
-            'schema inconnu' => ['schema' => 2] + $document,
+            'schema inconnu' => ['schema' => 3] + $document,
             'espace inconnu' => ['space' => 'ailleurs'] + $document,
             'proprietaire zero' => ['participants' => [['owner' => 0] + $document['participants'][0]]] + $document,
             'quantite negative' => ['repaired' => ['rocket_launcher' => -1]] + $document,
@@ -362,6 +443,43 @@ final class BattleTallyEvaluationTest extends TestCase
             reparees: $reparees,
             hamill: $hamill,
             prix: $prix,
+        );
+    }
+
+    /**
+     * La bataille de base, la manoeuvre nommee : la garnison portait une Etoile, prise avant le round 1 par la
+     * flotte 1. Ses pertes definitives la comptent ; aucun round ne la porte.
+     *
+     * @param array<string, array<string, int>>|null $anterieures
+     */
+    private function faitsSousHamill(string|null $victime = null, string|null $auteur = null, array|null $anterieures = null, bool $declenchee = true, bool $auteurNpc = false): BattleTallyFacts
+    {
+        $victime ??= self::garnison();
+        $auteur ??= self::fleet(1);
+
+        return new BattleTallyFacts(
+            BattleTallyFacts::SPACE_COMBAT,
+            12,
+            self::garnison(),
+            1_704_000_000,
+            $declenchee,
+            [
+                $this->participant(self::fleet(1), BattleTallyFacts::SIDE_ATTACKER, 11, ['light_fighter' => 10], ['light_fighter' => 10], $auteurNpc),
+                $this->participant(self::fleet(2), BattleTallyFacts::SIDE_ATTACKER, 12, ['light_fighter' => 30], ['light_fighter' => 10]),
+                $this->participant(self::garnison(), BattleTallyFacts::SIDE_DEFENDER, 21, ['rocket_launcher' => 20, 'deathstar' => 1], ['rocket_launcher' => 15, 'deathstar' => 1]),
+            ],
+            ['rocket_launcher' => 5],
+            [
+                [self::fleet(1) => ['light_fighter' => 4], self::fleet(2) => ['light_fighter' => 6], self::garnison() => ['rocket_launcher' => 6]],
+                [self::fleet(1) => ['light_fighter' => 6], self::fleet(2) => ['light_fighter' => 4], self::garnison() => ['rocket_launcher' => 9]],
+            ],
+            [
+                [self::fleet(1) => ['light_fighter' => 6], self::fleet(2) => ['light_fighter' => 24]],
+                [self::fleet(1) => [], self::fleet(2) => ['light_fighter' => 20]],
+            ],
+            $anterieures ?? [self::garnison() => ['deathstar' => 1]],
+            self::PRIX + ['deathstar' => 1000],
+            ['victim' => $victime, 'author' => $auteur, 'rule' => 'v3'],
         );
     }
 

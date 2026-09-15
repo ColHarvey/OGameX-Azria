@@ -247,6 +247,22 @@ abstract class BattleEngine
     }
 
     /**
+     * La clef de participant d une flotte defensive : la garnison (identifiant zero) est le corps.
+     */
+    protected function defenderParticipantKey(int $fleetMissionId): string
+    {
+        return $fleetMissionId === 0 ? CombatParticipantKey::forBody($this->defenderPlanet) : CombatParticipantKey::forFleet($fleetMissionId);
+    }
+
+    /**
+     * La clef de participant d une flotte attaquante : sans mission, l attaquante ephemere.
+     */
+    protected function attackerParticipantKey(int $fleetMissionId): string
+    {
+        return $fleetMissionId === 0 ? CombatParticipantKey::EPHEMERAL_ATTACKER : CombatParticipantKey::forFleet($fleetMissionId);
+    }
+
+    /**
      * Get the combined attacker fleet (for backward compatibility).
      *
      * @return UnitCollection

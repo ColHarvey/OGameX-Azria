@@ -141,7 +141,15 @@ class BattleResult
     public function __construct()
     {
         $this->resourceDiagnostics = ResourceNormalizationDiagnostics::none();
+        $this->hamill = HamillManoeuvre::none();
     }
+
+    /**
+     * @var HamillManoeuvre Ce que la manoeuvre de Hamill a fait : aucune, nommee (victime, auteur, regle) ou non
+     *                      nommee. `$hamillManoeuvreTriggered` reste le drapeau que le rapport et le codec lisent ;
+     *                      les deux sont poses ensemble par les deux moteurs.
+     */
+    public HamillManoeuvre $hamill;
 
     /**
      * @var UnitCollection The units of attacker player at the start of the battle.

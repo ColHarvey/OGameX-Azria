@@ -58,8 +58,29 @@ final class BattleTallyEvaluation
             }
         }
 
-        if ($facts->hamillTriggered) {
+        if ($facts->hamillTriggered && $facts->hamill === null) {
             return BattleTallyOutcome::pending(self::HAMILL_VICTIM_UNNAMED, 'la manoeuvre de Hamill a retire une Etoile de la Mort que le moteur n attribue a aucun participant');
+        }
+
+        if ($facts->hamill !== null) {
+            $victime = $facts->hamill['victim'];
+            $auteur = $facts->hamill['author'];
+
+            if (!$facts->hamillTriggered) {
+                return BattleTallyOutcome::pending(self::INCOHERENT_BATTLE, 'une manoeuvre de Hamill nommee sans manoeuvre declenchee');
+            }
+
+            if (!isset($participants[$victime]) || $participants[$victime]['side'] !== BattleTallyFacts::SIDE_DEFENDER) {
+                return BattleTallyOutcome::pending(self::INCOHERENT_BATTLE, 'la victime de la manoeuvre de Hamill (' . $victime . ') n est pas une flotte defensive de la bataille');
+            }
+
+            if (!isset($participants[$auteur]) || $participants[$auteur]['side'] !== BattleTallyFacts::SIDE_ATTACKER) {
+                return BattleTallyOutcome::pending(self::INCOHERENT_BATTLE, 'l auteur de la manoeuvre de Hamill (' . $auteur . ') n est pas une flotte attaquante de la bataille');
+            }
+
+            if (self::normalise($facts->preRoundLosses[$victime] ?? []) !== ['deathstar' => 1]) {
+                return BattleTallyOutcome::pending(self::INCOHERENT_BATTLE, 'les pertes anterieures au premier round de la victime de Hamill ne sont pas exactement une Etoile de la Mort');
+            }
         }
 
         $inconnues = $this->unknownUnits($facts, $version);
@@ -179,7 +200,21 @@ final class BattleTallyEvaluation
             ];
         }
 
-        return BattleTallyOutcome::computed($valeurs);
+        // **L Etoile prise par la manoeuvre est un evenement nomme** : sa valeur va a l auteur, en « detruits », et
+        // nulle part ailleurs — elle n a fait partie d aucun round, et la victime la compte une fois en « perdus ».
+        $hamill = null;
+
+        if ($facts->hamill !== null) {
+            $auteur = $participants[$facts->hamill['author']];
+            $hamill = [
+                'author' => $facts->hamill['author'],
+                'owner' => $auteur['owner'],
+                'npc' => $auteur['npc'],
+                'destroyed' => $this->valueOf(['deathstar' => 1], $facts->prices, $version),
+            ];
+        }
+
+        return BattleTallyOutcome::computed($valeurs, $hamill);
     }
 
     /**

@@ -29,7 +29,7 @@ final class MilitaryTallySources
         'construction' => 'Tests\\Feature\\MilitaryTalliesBuildTest::testEachDeliveredSliceIsOneEventAndTheSlicesCoverTheProgressExactly',
         'demi-temps' => 'Tests\\Feature\\MilitaryTalliesBuildTest::testTheHalvingCreditsWhatItDeliversAndTheProgressionResumesWithoutRecounting',
         'bataille' => 'Tests\\Feature\\MilitaryTalliesBattleTest::testADurableGroupBattleCreditsEachRankedParticipantOnceFromItsRounds',
-        'manoeuvre-de-hamill' => null,
+        'manoeuvre-de-hamill' => 'Tests\\Feature\\MilitaryTalliesHamillTest::testADurableBattleUnderTheManoeuvreCreditsTheStarOnceToTheGeneralConsulted',
         'missile' => null,
         'destruction-de-lune' => null,
         'expedition' => null,

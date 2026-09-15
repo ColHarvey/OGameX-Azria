@@ -15,27 +15,46 @@ final readonly class BattleTallyOutcome
 {
     /**
      * @param array<string, array{owner: int|null, npc: bool, destroyed: int, lost: int}> $computed
+     * @param array{author: string, owner: int|null, npc: bool, destroyed: int}|null $hamill L evenement nomme de la
+     *        manoeuvre de Hamill : l Etoile prise, creditee en « detruits » a l auteur, **et nulle part ailleurs** —
+     *        elle ne fait partie d aucun round, et la victime la compte une seule fois en « perdus ».
      */
     private function __construct(
         public string|null $reason,
         public string $detail,
         public array $computed,
+        public array|null $hamill,
     ) {
     }
 
     public static function pending(string $reason, string $detail): self
     {
-        return new self($reason, $detail, []);
+        return new self($reason, $detail, [], null);
     }
 
     /**
      * @param array<string, array{owner: int|null, npc: bool, destroyed: int, lost: int}> $computed
+     * @param array{author: string, owner: int|null, npc: bool, destroyed: int}|null $hamill
      */
-    public static function computed(array $computed): self
+    public static function computed(array $computed, array|null $hamill = null): self
     {
         ksort($computed);
 
-        return new self(null, '', $computed);
+        return new self(null, '', $computed, $hamill);
+    }
+
+    /**
+     * Le credit de la manoeuvre de Hamill, s il s inscrit : un auteur classe, et une Etoile a compter.
+     *
+     * @return array{author: string, owner: int, destroyed: int}|null
+     */
+    public function hamillCredit(): array|null
+    {
+        if ($this->hamill === null || $this->hamill['owner'] === null || $this->hamill['npc'] || $this->hamill['destroyed'] <= 0) {
+            return null;
+        }
+
+        return ['author' => $this->hamill['author'], 'owner' => $this->hamill['owner'], 'destroyed' => $this->hamill['destroyed']];
     }
 
     public function isPending(): bool

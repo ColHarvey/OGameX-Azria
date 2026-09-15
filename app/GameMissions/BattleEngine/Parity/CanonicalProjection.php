@@ -109,6 +109,18 @@ final class CanonicalProjection
     }
 
     /**
+     * La manoeuvre de Hamill telle que le moteur l a enregistree — **a part de `of()`**, comme les coques : les
+     * vecteurs de reference epinglent l empreinte de `of()`, et une clef ajoutee la changerait sans qu aucune
+     * bataille ait change. Le banc de parite la compare separement.
+     *
+     * @return array{triggered: bool, victim: string|null, author: string|null, rule: string|null}
+     */
+    public static function hamillOf(BattleResult $result): array
+    {
+        return $result->hamill->toStorage();
+    }
+
+    /**
      * Les degats des survivants, flotte par flotte — **a part de `of()`, et c est voulu**.
      *
      * ## Pourquoi pas dans la projection canonique

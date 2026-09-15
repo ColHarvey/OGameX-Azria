@@ -8,6 +8,7 @@ use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameMissions\BattleEngine\Models\BattleResultRound;
 use OGame\GameMissions\BattleEngine\Models\BattleUnit;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
+use OGame\GameMissions\BattleEngine\Models\HamillManoeuvre;
 use OGame\GameMissions\BattleEngine\State\BattleFieldState;
 use OGame\GameObjects\Models\Enums\GameObjectType;
 use OGame\GameObjects\Models\Units\UnitCollection;
@@ -634,6 +635,19 @@ class PhpBattleEngine extends BattleEngine
         if ($this->draws->chanceOutOf($probability) === 1) {
             // Hamill Manoeuvre triggered! Destroy one Deathstar
             $result->hamillManoeuvreTriggered = true;
+
+            // **La victime et l auteur, enregistres a l instant du retrait — jamais reconstruits apres coup.**
+            // La victime est la flotte de l unite retiree (la premiere Etoile dans l ordre canonique) ; l auteur
+            // est la flotte dont le General a ete consulte ci-dessus, `attackers[0]` — convention Azria : le
+            // moteur ne designe pas la flotte dont les chasseurs « ont vole ». Sous la regle telle que livree,
+            // qui ne retire l Etoile d aucune flotte, la manoeuvre reste non nommee.
+            $result->hamill = $this->hamillRule->theManoeuvreLeavesTheBattle()
+                ? HamillManoeuvre::named(
+                    $this->defenderParticipantKey($defenderUnits[$deathstarKey]->fleetMissionId),
+                    $this->attackerParticipantKey($this->attackers[0]->fleetMissionId),
+                    $this->hamillRule
+                )
+                : HamillManoeuvre::unnamed($this->hamillRule);
 
             // Remove the Deathstar from defender units array (battle simulation)
             // This prevents it from participating in battle rounds

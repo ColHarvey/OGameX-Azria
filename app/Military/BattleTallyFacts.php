@@ -2,6 +2,7 @@
 
 namespace OGame\Military;
 
+use OGame\Combat\Enums\HamillManoeuvreRule;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameObjects\Models\Units\UnitCollection;
@@ -30,7 +31,16 @@ use OGame\Services\ObjectService;
  */
 final readonly class BattleTallyFacts
 {
-    public const int SCHEMA = 1;
+    public const int SCHEMA = 2;
+
+    /**
+     * Le schema 2 ajoute la manoeuvre de Hamill nommee (`hamill` : victime, auteur, regle) et remplit
+     * `preRoundLosses` de l Etoile prise. Un document du schema 1 se relit sans elle : sa manoeuvre, si elle
+     * est declenchee, reste non nommee, et l evaluation attend.
+     *
+     * @var array<int, int>
+     */
+    private const array READABLE_SCHEMAS = [1, 2];
 
     public const string SPACE_COMBAT = 'combat';
 
@@ -52,6 +62,7 @@ final readonly class BattleTallyFacts
      * @param list<array<string, array<string, int>>> $attackerShipsPerRound Les restants en fin de chaque round, par flotte attaquante.
      * @param array<string, array<string, int>> $preRoundLosses Les pertes anterieures au premier round, par participant.
      * @param array<string, int> $prices Le prix brut de chaque unite nommee, au moment du fait.
+     * @param array{victim: string, author: string, rule: string}|null $hamill La manoeuvre nommee, ou rien.
      */
     public function __construct(
         public string $space,
@@ -65,6 +76,7 @@ final readonly class BattleTallyFacts
         public array $attackerShipsPerRound,
         public array $preRoundLosses,
         public array $prices,
+        public array|null $hamill = null,
     ) {
     }
 
@@ -111,6 +123,17 @@ final readonly class BattleTallyFacts
 
         $reparees = self::units($result->repairedDefenses, $noms);
 
+        // **La manoeuvre nommee par le moteur** : l Etoile prise est une perte anterieure au premier round de la
+        // victime — hors des forces du round 1, hors du partage des rounds — et un evenement nomme pour l auteur.
+        $hamill = null;
+        $anterieures = [];
+
+        if ($result->hamill->isNamed()) {
+            $hamill = ['victim' => (string)$result->hamill->victim, 'author' => (string)$result->hamill->author, 'rule' => (string)$result->hamill->rule];
+            $anterieures[(string)$result->hamill->victim] = ['deathstar' => 1];
+            $noms['deathstar'] = true;
+        }
+
         $prix = [];
 
         foreach (array_keys($noms) as $nom) {
@@ -119,7 +142,57 @@ final readonly class BattleTallyFacts
 
         ksort($prix);
 
-        return new self($space, $id, $bodyKey, $echeance, $result->hamillManoeuvreTriggered, $participants, $reparees, $rounds, $restants, [], $prix);
+        return new self($space, $id, $bodyKey, $echeance, $result->hamillManoeuvreTriggered, $participants, $reparees, $rounds, $restants, $anterieures, $prix, $hamill);
+    }
+
+    /**
+     * Les memes faits, la manoeuvre nommee : ce qu une conversion explicite ecrit quand des faits conserves
+     * l etablissent exactement. L Etoile entre dans les pertes anterieures de la victime.
+     *
+     * @param array{victim: string, author: string, rule: string} $hamill
+     */
+    public function withHamillNamed(array $hamill): self
+    {
+        $anterieures = $this->preRoundLosses;
+        $anterieures[$hamill['victim']] = ['deathstar' => 1];
+
+        return new self($this->space, $this->id, $this->bodyKey, $this->echeance, true, $this->participants, $this->repaired, $this->rounds, $this->attackerShipsPerRound, $anterieures, $this->prices, $hamill);
+    }
+
+    /**
+     * Le prefixe des clefs d evenement de bataille de ce fait : le groupe qu une reprise reprend d un bloc.
+     */
+    public function eventKeyPrefix(): string
+    {
+        return 'battle:' . $this->space . ':' . $this->id . ':';
+    }
+
+    public function hamillEventKeyPrefix(): string
+    {
+        return 'hamill:' . $this->space . ':' . $this->id . ':';
+    }
+
+    /**
+     * La clef de l evenement nomme de la manoeuvre de Hamill, credite a son auteur.
+     */
+    public function hamillEventKeyFor(string $author): string
+    {
+        return $this->hamillEventKeyPrefix() . $author;
+    }
+
+    /**
+     * La premiere flotte attaquante des faits, dans l ordre ou le moteur les a ecrites — celle dont le General est
+     * consulte pour la manoeuvre.
+     */
+    public function firstAttackerKey(): string|null
+    {
+        foreach ($this->participants as $participant) {
+            if ($participant['side'] === self::SIDE_ATTACKER) {
+                return $participant['key'];
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -148,6 +221,7 @@ final readonly class BattleTallyFacts
             'attacker_ships_per_round' => $this->attackerShipsPerRound,
             'pre_round_losses' => $this->preRoundLosses,
             'prices' => $this->prices,
+            'hamill' => $this->hamill,
         ];
     }
 
@@ -157,10 +231,11 @@ final readonly class BattleTallyFacts
      */
     public static function fromStorage(mixed $document): self|null
     {
-        if (!is_array($document) || ($document['schema'] ?? null) !== self::SCHEMA) {
+        if (!is_array($document) || !in_array($document['schema'] ?? null, self::READABLE_SCHEMAS, true)) {
             return null;
         }
 
+        $schema = (int)$document['schema'];
         $space = $document['space'] ?? null;
         $id = $document['id'] ?? null;
         $corps = $document['body_key'] ?? null;
@@ -183,7 +258,48 @@ final readonly class BattleTallyFacts
             return null;
         }
 
-        return new self($space, $id, $corps, $echeance, $hamill, $participants, $reparees, $rounds, $restants, $anterieures, $prix);
+        $manoeuvre = null;
+
+        if ($schema >= 2) {
+            if (!array_key_exists('hamill', $document)) {
+                return null;
+            }
+
+            $manoeuvre = self::hamillFrom($document['hamill']);
+
+            if ($manoeuvre === false) {
+                return null;
+            }
+        }
+
+        return new self($space, $id, $corps, $echeance, $hamill, $participants, $reparees, $rounds, $restants, $anterieures, $prix, $manoeuvre);
+    }
+
+    /**
+     * @return array{victim: string, author: string, rule: string}|null|false `false` si la forme est refusee.
+     */
+    private static function hamillFrom(mixed $document): array|null|false
+    {
+        if ($document === null) {
+            return null;
+        }
+
+        if (!is_array($document)) {
+            return false;
+        }
+
+        $victime = $document['victim'] ?? null;
+        $auteur = $document['author'] ?? null;
+        $regle = $document['rule'] ?? null;
+
+        if (count($document) !== 3
+            || !is_string($victime) || !CombatParticipantKey::isWellFormed($victime)
+            || !is_string($auteur) || !CombatParticipantKey::isWellFormed($auteur)
+            || !is_string($regle) || HamillManoeuvreRule::tryFrom($regle) === null) {
+            return false;
+        }
+
+        return ['victim' => $victime, 'author' => $auteur, 'rule' => $regle];
     }
 
     /**

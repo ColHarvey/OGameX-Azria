@@ -33,6 +33,13 @@ final class MilitaryBattleTally
 {
     public const string KIND = 'battle';
 
+    /**
+     * L evenement nomme de la manoeuvre de Hamill : l Etoile prise, creditee en « detruits » a l auteur. Il vit dans
+     * le meme groupe que les evenements de bataille de son fait — ecrits ensemble, en attente ensemble, repris
+     * ensemble, jamais l un sans l autre.
+     */
+    public const string KIND_HAMILL = 'hamill';
+
     public function __construct(
         private MilitaryTallyRecorder $recorder,
         private BattleTallyEvaluation $evaluation,
@@ -59,17 +66,21 @@ final class MilitaryBattleTally
         $issue = $this->evaluation->evaluate($faits, MilitaryValue::WEIGHTING_VERSION);
 
         if ($issue->isPending()) {
+            $charge = ['kind' => self::KIND, 'participant' => '', 'detail' => $issue->detail, 'facts' => $faits->toStorage()];
+
             foreach ($faits->participants as $participant) {
                 if ($participant['owner'] === null || $participant['npc']) {
                     continue;
                 }
 
-                $this->recorder->defer($faits->eventKeyFor($participant['key']), $participant['owner'], $echeance, (string)$issue->reason, [
-                    'kind' => self::KIND,
-                    'participant' => $participant['key'],
-                    'detail' => $issue->detail,
-                    'facts' => $faits->toStorage(),
-                ]);
+                $this->recorder->defer($faits->eventKeyFor($participant['key']), $participant['owner'], $echeance, (string)$issue->reason, ['participant' => $participant['key']] + $charge);
+            }
+
+            // L evenement nomme attend avec la bataille, quand la manoeuvre est nommee et son auteur classe.
+            $auteur = $this->classedAuthorOf($faits);
+
+            if ($auteur !== null) {
+                $this->recorder->defer($faits->hamillEventKeyFor($auteur['key']), $auteur['owner'], $echeance, (string)$issue->reason, ['kind' => self::KIND_HAMILL, 'participant' => $auteur['key']] + $charge);
             }
 
             return $issue;
@@ -79,7 +90,33 @@ final class MilitaryBattleTally
             $this->recorder->credit($faits->eventKeyFor($clef), $credit['owner'], $echeance, 0, $credit['destroyed'], $credit['lost']);
         }
 
+        $hamill = $issue->hamillCredit();
+
+        if ($hamill !== null) {
+            $this->recorder->credit($faits->hamillEventKeyFor($hamill['author']), $hamill['owner'], $echeance, 0, $hamill['destroyed'], 0);
+        }
+
         return $issue;
+    }
+
+    /**
+     * L auteur de la manoeuvre nommee, s il est un compte classe.
+     *
+     * @return array{key: string, owner: int}|null
+     */
+    private function classedAuthorOf(BattleTallyFacts $faits): array|null
+    {
+        if ($faits->hamill === null) {
+            return null;
+        }
+
+        foreach ($faits->participants as $participant) {
+            if ($participant['key'] === $faits->hamill['author'] && $participant['owner'] !== null && !$participant['npc']) {
+                return ['key' => $participant['key'], 'owner' => $participant['owner']];
+            }
+        }
+
+        return null;
     }
 
     /**

@@ -3,6 +3,7 @@
 namespace Tests\Unit\BattleEngine;
 
 use OGame\Combat\Enums\HamillManoeuvreRule;
+use OGame\Combat\Support\CombatParticipantKey;
 use OGame\GameMissions\BattleEngine\Draws\SeededDraws;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleetResult;
@@ -214,6 +215,35 @@ final class RustHamillManoeuvreTest extends UnitTestCase
         $garnison = $this->laFlotteDefensive($resultat, 0);
         $this->assertSame(1, $garnison->unitsResult->getAmountByMachineName('deathstar'), 'La correction a ete appliquee a un combat ouvert sous la regle livree.');
         $this->assertSame(0, $garnison->unitsLost->getAmountByMachineName('deathstar'), 'La garnison a perdu une Etoile sous la regle livree.');
+    }
+
+    /**
+     * **L enveloppe Rust nomme la victime et l auteur au meme point que le moteur PHP** : la garnison, premiere dans
+     * l ordre canonique, et la premiere flotte attaquante ; sous la regle telle que livree, rien n est nomme.
+     */
+    public function testTheManoeuvreIsRecordedWithItsVictimAndAuthorLikeThePhpEngine(): void
+    {
+        $bataille = $this->aGeneralWhoseHamillManoeuvreSucceeds();
+        $this->settingsService->set('hamill_manoeuvre_chance', 1);
+
+        $rust = $this->surLaBibliotheque($bataille, HamillManoeuvreRule::OutOfTheSurvivors);
+
+        $this->assertTrue($rust->hamillManoeuvreTriggered, 'Premisse : la manoeuvre a eu lieu.');
+        $this->assertTrue($rust->hamill->isNamed(), 'L enveloppe Rust n a pas nomme la manoeuvre.');
+        $this->assertSame(CombatParticipantKey::forPlanet($bataille['cible']->getPlanetId()), $rust->hamill->victim);
+        $this->assertSame(CombatParticipantKey::forFleet(1_000), $rust->hamill->author);
+        $this->assertSame(HamillManoeuvreRule::OutOfTheSurvivors->value, $rust->hamill->rule);
+
+        $php = (new PhpBattleEngine($bataille['attaquantes'], $bataille['cible'], $bataille['defenseurs'], $this->settingsService, $bataille['contexte']))
+            ->withDraws(new SeededDraws(20260913))
+            ->withHamillManoeuvreRule(HamillManoeuvreRule::OutOfTheSurvivors)
+            ->simulateBattle();
+
+        $this->assertSame(CanonicalProjection::hamillOf($php), CanonicalProjection::hamillOf($rust), 'Les deux moteurs n enregistrent pas la meme manoeuvre.');
+
+        $livree = $this->surLaBibliotheque($this->aGeneralWhoseHamillManoeuvreSucceeds(), HamillManoeuvreRule::AsDelivered);
+        $this->assertTrue($livree->hamillManoeuvreTriggered);
+        $this->assertFalse($livree->hamill->isNamed(), 'Sous la regle telle que livree, une flotte a ete nommee alors qu aucune ne perd l Etoile.');
     }
 
     private function laBatailleSous(HamillManoeuvreRule $regle): BattleResult

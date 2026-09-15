@@ -10,6 +10,7 @@ use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameMissions\BattleEngine\Models\BattleResultRound;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
+use OGame\GameMissions\BattleEngine\Models\HamillManoeuvre;
 use OGame\GameObjects\Models\Enums\GameObjectType;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Hull\DamagedHulls;
@@ -577,7 +578,20 @@ class RustBattleEngine extends BattleEngine
                 // (`prepareBattleInput()`) et le moteur inscrit ensuite ce que la bibliotheque ne
                 // pouvait pas savoir (`bookTheManoeuvre()`).
                 $this->hamillTakesTheDeathstarOf = $this->fleetTheManoeuvreTakesFrom();
+
+                // **La victime et l auteur, enregistres a l instant du retrait** — la flotte designee ici, et
+                // la flotte dont le General a ete consulte (`attackers[0]`, convention Azria) ; le moteur PHP
+                // ecrit exactement la meme chose au meme point, et le banc de parite les compare.
+                $result->hamill = $this->hamillTakesTheDeathstarOf === null
+                    ? HamillManoeuvre::unnamed($this->hamillRule)
+                    : HamillManoeuvre::named(
+                        $this->defenderParticipantKey($this->hamillTakesTheDeathstarOf),
+                        $this->attackerParticipantKey($this->attackers[0]->fleetMissionId),
+                        $this->hamillRule
+                    );
             } else {
+                // Sous la regle telle que livree, aucune flotte ne perd l Etoile : la manoeuvre reste non nommee.
+                $result->hamill = HamillManoeuvre::unnamed($this->hamillRule);
                 // **La regle telle qu elle a ete livree**, gardee pour les combats ouverts avant la
                 // correction : l Etoile disparait du depart annonce et continue de tirer. Aucun combat
                 // neuf ne l emploie.

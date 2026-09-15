@@ -317,6 +317,7 @@ class RustParityBenchTest extends UnitTestCase
         );
 
         $this->assertNull($divergenceDesCoques, "Scenario « " . $nom . " » : les deux moteurs ne rendent pas le meme etat de coque — " . $divergenceDesCoques);
+        $this->assertSame(CanonicalProjection::hamillOf($php), CanonicalProjection::hamillOf($rust), 'Scenario « ' . $nom . ' » : les deux moteurs n enregistrent pas la meme manoeuvre de Hamill (victime, auteur, regle).');
 
         // **La bande a ete consommee entierement et a l'identique** : memes tirages semantiques,
         // memes tirages bruts — rejets compris —, meme empreinte de genre, borne et valeur.

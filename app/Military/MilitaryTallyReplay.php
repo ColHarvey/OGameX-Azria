@@ -115,22 +115,19 @@ final class MilitaryTallyReplay
                 return self::ALREADY_HANDLED;
             }
 
-            $valeurs = $this->evaluate((string)$ligne->weighting_version, json_decode((string)$ligne->payload, true));
+            $charge = json_decode((string)$ligne->payload, true);
+
+            if (is_array($charge) && in_array($charge['kind'] ?? null, [MilitaryBattleTally::KIND, MilitaryBattleTally::KIND_HAMILL], true)) {
+                return $this->replayTheBattleGroup($clef, (string)$ligne->weighting_version, $charge);
+            }
+
+            $valeurs = $this->evaluate((string)$ligne->weighting_version, $charge);
 
             if ($valeurs === null) {
                 return self::STILL_PENDING;
             }
 
-            $maintenant = Date::now();
-
-            DB::table('military_tally_events')->where('event_key', $clef)->update([
-                'status' => MilitaryTallyRecorder::APPLIED,
-                'built_value' => $valeurs['built'],
-                'destroyed_value' => $valeurs['destroyed'],
-                'lost_value' => $valeurs['lost'],
-                'resolved_at' => (int)$maintenant->timestamp,
-                'updated_at' => $maintenant,
-            ]);
+            $this->apply([$clef => $valeurs]);
 
             if ($this->beforeCommit !== null) {
                 ($this->beforeCommit)($clef);
@@ -141,21 +138,117 @@ final class MilitaryTallyReplay
     }
 
     /**
+     * Une bataille et sa manoeuvre de Hamill se reprennent **d un bloc** : tous les evenements en attente du fait —
+     * un par participant classe, plus l evenement nomme de l auteur — sont verrouilles, evalues une fois sur les
+     * memes faits, et appliques ensemble ou pas du tout. Un membre sans credit, un membre dont le proprietaire ne
+     * repond pas au credit, un credit sans membre en attente, une forme de charge etrangere : rien n est ecrit.
+     * Ni credit partiel, ni doublon — les clefs sont celles du fait, et un membre applique ne l est jamais deux fois.
+     *
+     * @param array<string, mixed> $charge
+     */
+    private function replayTheBattleGroup(string $clef, string $version, array $charge): string
+    {
+        $faits = BattleTallyFacts::fromStorage($charge['facts'] ?? null);
+
+        if ($faits === null) {
+            return self::STILL_PENDING;
+        }
+
+        $membres = DB::table('military_tally_events')
+            ->where('status', MilitaryTallyRecorder::PENDING)
+            ->where(static function ($requete) use ($faits): void {
+                $requete->where('event_key', 'like', $faits->eventKeyPrefix() . '%')
+                    ->orWhere('event_key', 'like', $faits->hamillEventKeyPrefix() . '%');
+            })
+            ->orderBy('event_key')
+            ->lockForUpdate()
+            ->get(['event_key', 'player_id', 'weighting_version', 'payload']);
+
+        $issue = (new BattleTallyEvaluation())->evaluate($faits, $version);
+
+        if ($issue->isPending()) {
+            return self::STILL_PENDING;
+        }
+
+        $attendus = [];
+
+        foreach ($issue->credits() as $participant => $credit) {
+            $attendus[$faits->eventKeyFor($participant)] = ['kind' => MilitaryBattleTally::KIND, 'owner' => $credit['owner'], 'destroyed' => $credit['destroyed'], 'lost' => $credit['lost']];
+        }
+
+        $hamill = $issue->hamillCredit();
+
+        if ($hamill !== null) {
+            $attendus[$faits->hamillEventKeyFor($hamill['author'])] = ['kind' => MilitaryBattleTally::KIND_HAMILL, 'owner' => $hamill['owner'], 'destroyed' => $hamill['destroyed'], 'lost' => 0];
+        }
+
+        $presents = [];
+        $reference = $faits->toStorage();
+
+        foreach ($membres as $membre) {
+            $clefMembre = (string)$membre->event_key;
+            $chargeMembre = json_decode((string)$membre->payload, true);
+            $attendu = $attendus[$clefMembre] ?? null;
+
+            // Chaque membre porte les memes faits que le meneur, lisibles : un membre illisible ou qui raconte une
+            // autre bataille retient tout le groupe.
+            $faitsDuMembre = is_array($chargeMembre) ? BattleTallyFacts::fromStorage($chargeMembre['facts'] ?? null) : null;
+
+            if ($attendu === null || (string)$membre->weighting_version !== $version || !is_array($chargeMembre)
+                || ($chargeMembre['kind'] ?? null) !== $attendu['kind'] || $attendu['owner'] !== (int)$membre->player_id
+                || $faitsDuMembre === null || $faitsDuMembre->toStorage() !== $reference) {
+                return self::STILL_PENDING;
+            }
+
+            $presents[$clefMembre] = true;
+        }
+
+        if (!isset($presents[$clef]) || array_diff_key($attendus, $presents) !== []) {
+            return self::STILL_PENDING;
+        }
+
+        $valeurs = [];
+
+        foreach (array_keys($presents) as $clefMembre) {
+            $valeurs[$clefMembre] = ['built' => 0, 'destroyed' => $attendus[$clefMembre]['destroyed'], 'lost' => $attendus[$clefMembre]['lost']];
+        }
+
+        $this->apply($valeurs);
+
+        if ($this->beforeCommit !== null) {
+            ($this->beforeCommit)($clef);
+        }
+
+        return self::REPLAYED;
+    }
+
+    /**
+     * @param array<string, array{built: int, destroyed: int, lost: int}> $valeurs
+     */
+    private function apply(array $valeurs): void
+    {
+        $maintenant = Date::now();
+
+        foreach ($valeurs as $clef => $valeur) {
+            DB::table('military_tally_events')->where('event_key', $clef)->update([
+                'status' => MilitaryTallyRecorder::APPLIED,
+                'built_value' => $valeur['built'],
+                'destroyed_value' => $valeur['destroyed'],
+                'lost_value' => $valeur['lost'],
+                'resolved_at' => (int)$maintenant->timestamp,
+                'updated_at' => $maintenant,
+            ]);
+        }
+    }
+
+    /**
      * La valeur d'un événement évalué avec sa version, ou `null` s'il ne peut pas encore l'être entier.
      *
      * @return array{built: int, destroyed: int, lost: int}|null
      */
     private function evaluate(string $version, mixed $charge): array|null
     {
-        if (!is_array($charge)) {
-            return null;
-        }
-
-        if (($charge['kind'] ?? null) === MilitaryBattleTally::KIND) {
-            return $this->evaluateBattle($version, $charge);
-        }
-
-        if (($charge['kind'] ?? null) !== MilitaryBuildTally::KIND) {
+        if (!is_array($charge) || ($charge['kind'] ?? null) !== MilitaryBuildTally::KIND) {
             return null;
         }
 
@@ -175,37 +268,5 @@ final class MilitaryTallyReplay
         }
 
         return ['built' => $prix * ($a - $de) * $poids, 'destroyed' => 0, 'lost' => 0];
-    }
-
-    /**
-     * Une bataille en attente se reevalue sur ses faits gardes — memes prix, version de l evenement — et ne rend ses
-     * valeurs que pour le participant que l evenement nomme, s il est classe. Une attente qui subsiste (Hamill, unite
-     * toujours inconnue, incoherence, faits illisibles) reste une attente.
-     *
-     * @param array<string, mixed> $charge
-     * @return array{built: int, destroyed: int, lost: int}|null
-     */
-    private function evaluateBattle(string $version, array $charge): array|null
-    {
-        $faits = BattleTallyFacts::fromStorage($charge['facts'] ?? null);
-        $participant = $charge['participant'] ?? null;
-
-        if ($faits === null || !is_string($participant)) {
-            return null;
-        }
-
-        $issue = (new BattleTallyEvaluation())->evaluate($faits, $version);
-
-        if ($issue->isPending()) {
-            return null;
-        }
-
-        $credit = $issue->credits()[$participant] ?? null;
-
-        if ($credit === null) {
-            return null;
-        }
-
-        return ['built' => 0, 'destroyed' => $credit['destroyed'], 'lost' => $credit['lost']];
     }
 }

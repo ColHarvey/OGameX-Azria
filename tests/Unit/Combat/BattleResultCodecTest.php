@@ -3,6 +3,7 @@
 namespace Tests\Unit\Combat;
 
 use OGame\Combat\Allocation\ExactLootAllocationV1;
+use OGame\Combat\Enums\HamillManoeuvreRule;
 use OGame\Combat\Exceptions\CorruptedBattleResult;
 use OGame\Combat\Policies\CargoWeightedV1;
 use OGame\Combat\Replay\BattleResultCodec;
@@ -14,6 +15,7 @@ use OGame\GameMissions\BattleEngine\Models\AttackerFleetResult;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameMissions\BattleEngine\Models\BattleResultRound;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleetResult;
+use OGame\GameMissions\BattleEngine\Models\HamillManoeuvre;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\Resources;
 use OGame\Services\ObjectService;
@@ -285,6 +287,77 @@ class BattleResultCodecTest extends UnitTestCase
         $document['identity']['frozen_facts_fingerprint'] = '';
 
         $this->assertRefused($document, 'frozen_facts_fingerprint');
+    }
+
+    /**
+     * **Le schema 6 porte la manoeuvre de Hamill nommee**, et elle revient telle quelle.
+     */
+    public function testANamedHamillManoeuvreSurvivesTheRoundTrip(): void
+    {
+        $resultat = $this->aSyntheticResult();
+        $resultat->hamillManoeuvreTriggered = true;
+        $resultat->hamill = HamillManoeuvre::named(CombatParticipantKey::forPlanet(7), CombatParticipantKey::forFleet(41), HamillManoeuvreRule::OutOfTheSurvivors);
+
+        $document = $this->throughJson(BattleResultCodec::toStorage($resultat, $this->anIdentity()));
+        $this->assertSame(BattleResultCodec::SCHEMA, $document['schema']);
+
+        $relu = BattleResultCodec::fromStorage($document);
+
+        $this->assertTrue($relu->hamillManoeuvreTriggered);
+        $this->assertTrue($relu->hamill->isNamed(), 'La manoeuvre nommee est revenue non nommee.');
+        $this->assertSame(['triggered' => true, 'victim' => CombatParticipantKey::forPlanet(7), 'author' => CombatParticipantKey::forFleet(41), 'rule' => 'v3'], $relu->hamill->toStorage());
+    }
+
+    /**
+     * **Un document du schema 5 se relit, sa manoeuvre non nommee** : lisible pour le reglement, dit insuffisant pour
+     * les cumuls — rien ne devine la victime.
+     */
+    public function testASchemaFiveDocumentReadsItsManoeuvreAsUnnamed(): void
+    {
+        $resultat = $this->aSyntheticResult();
+        $resultat->hamillManoeuvreTriggered = true;
+
+        $document = $this->throughJson(BattleResultCodec::toStorage($resultat, $this->anIdentity()));
+        $document['schema'] = 5;
+        unset($document['hamill']);
+
+        $relu = BattleResultCodec::fromStorage($document);
+
+        $this->assertTrue($relu->hamillManoeuvreTriggered);
+        $this->assertTrue($relu->hamill->triggered);
+        $this->assertFalse($relu->hamill->isNamed(), 'Un document anterieur au schema 6 a nomme une victime.');
+        $this->assertNull($relu->hamill->rule);
+    }
+
+    public function testAMalformedHamillManoeuvreIsRefused(): void
+    {
+        $base = $this->aDocument();
+
+        $nommee = ['triggered' => true, 'victim' => CombatParticipantKey::forPlanet(7), 'author' => CombatParticipantKey::forFleet(41), 'rule' => 'v3'];
+
+        foreach ([
+            'absente au schema 6' => [array_diff_key($base, ['hamill' => true]), 'hamill'],
+            'clef inconnue' => [['hamill' => ['extra' => 1] + (array)$base['hamill']] + $base, 'exactement les champs'],
+            'victime sans auteur' => [self::underTheManoeuvre($base, ['author' => null] + $nommee), 'sans l auteur'],
+            'nommee sans regle' => [self::underTheManoeuvre($base, ['rule' => null] + $nommee), 'sans sa regle'],
+            'regle inconnue' => [self::underTheManoeuvre($base, ['rule' => 'v9'] + $nommee), 'regle de manoeuvre connue'],
+            'victime qui ne nomme personne' => [self::underTheManoeuvre($base, ['victim' => 'nimporte'] + $nommee), 'ne nomme aucun participant'],
+            'drapeau contredit' => [self::underTheManoeuvre($base, ['victim' => null, 'author' => null] + $nommee, triggered: false), 'contredit'],
+        ] as $document) {
+            $this->assertRefused($document[0], $document[1]);
+        }
+    }
+
+    /**
+     * Le document `$base`, dont le bloc de la manoeuvre et le drapeau sont remplaces.
+     *
+     * @param array<string, mixed> $base
+     * @param array<string, mixed> $hamill
+     * @return array<string, mixed>
+     */
+    private static function underTheManoeuvre(array $base, array $hamill, bool $triggered = true): array
+    {
+        return ['hamill' => $hamill, 'hamill_manoeuvre_triggered' => $triggered] + $base;
     }
 
     private function assertRefused(mixed $document, string $attendu): void

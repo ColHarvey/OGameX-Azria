@@ -10,6 +10,7 @@ use OGame\GameMissions\BattleEngine\Models\AttackerFleetResult;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameMissions\BattleEngine\Models\BattleResultRound;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleetResult;
+use OGame\GameMissions\BattleEngine\Models\HamillManoeuvre;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Hull\DamagedHulls;
 use OGame\Models\Resources;
@@ -71,7 +72,7 @@ final class BattleResultCodec
      * echouerait cinq fois avant d'etre mis de cote. C'est la strategie de transition explicite que
      * le cahier des charges exige, plutot qu'une remise a zero.
      */
-    public const int SCHEMA = 5;
+    public const int SCHEMA = 6;
 
     /**
      * Les schemas qu'une relecture accepte.
@@ -82,7 +83,15 @@ final class BattleResultCodec
      *
      * @var array<int, int>
      */
-    private const array READABLE_SCHEMAS = [4, 5];
+    private const array READABLE_SCHEMAS = [4, 5, 6];
+
+    /**
+     * Le schema 6 ajoute la manoeuvre de Hamill **nommee** — victime, auteur, regle — enregistree par les deux
+     * moteurs a l instant du retrait de l Etoile. Les schemas 4 et 5 se relisent : leur manoeuvre est
+     * « declenchee, non nommee » (`HamillManoeuvre::legacy()`), lisible pour le reglement et **insuffisante
+     * pour les cumuls**, qui la laissent en attente au lieu de deviner la victime.
+     */
+    private const string HAMILL = 'hamill';
 
     private const array KEYS = [
         'schema',
@@ -301,6 +310,7 @@ final class BattleResultCodec
             'repaired_defenses' => $result->repairedDefenses->toArray(),
             'attacker_planet_id' => $result->attackerPlanetId,
             'hamill_manoeuvre_triggered' => $result->hamillManoeuvreTriggered,
+            self::HAMILL => $result->hamill->toStorage(),
             'tactical_retreat_ratio' => $result->tacticalRetreatRatio,
             'tactical_retreat_attacker_points' => $result->tacticalRetreatAttackerPoints,
             'tactical_retreat_defender_points' => $result->tacticalRetreatDefenderPoints,
@@ -336,7 +346,7 @@ final class BattleResultCodec
             throw new CorruptedBattleResult('le document est un ' . get_debug_type($stored) . ' et non une structure', $stored);
         }
 
-        self::shape($stored, self::KEYS, 'resultat');
+        self::shape($stored, [...self::KEYS, self::HAMILL], 'resultat');
 
         $schema = self::int($stored, 'schema', 'resultat');
 
@@ -404,6 +414,17 @@ final class BattleResultCodec
         $result->repairedDefenses = self::units($stored, 'repaired_defenses', 'resultat');
         $result->attackerPlanetId = self::int($stored, 'attacker_planet_id', 'resultat');
         $result->hamillManoeuvreTriggered = self::bool($stored, 'hamill_manoeuvre_triggered', 'resultat');
+        // **Optionnel avant le schema 6, et c est la transition.** Un document fige avant que la manoeuvre soit
+        // nommee ne porte que le drapeau : sa manoeuvre est « declenchee, non nommee », valeur juste et non repli,
+        // que les cumuls refusent d evaluer. Un document du schema 6 la porte toujours.
+        $result->hamill = $schema >= 6 || array_key_exists(self::HAMILL, $stored)
+            ? HamillManoeuvre::fromStorage(self::present($stored, self::HAMILL, 'resultat'), 'resultat.' . self::HAMILL)
+            : HamillManoeuvre::legacy($result->hamillManoeuvreTriggered);
+
+        if ($result->hamill->triggered !== $result->hamillManoeuvreTriggered) {
+            throw new CorruptedBattleResult('resultat.' . self::HAMILL . '.triggered contredit resultat.hamill_manoeuvre_triggered', $stored);
+        }
+
         $result->tacticalRetreatRatio = self::int($stored, 'tactical_retreat_ratio', 'resultat');
         $result->tacticalRetreatAttackerPoints = self::int($stored, 'tactical_retreat_attacker_points', 'resultat');
         $result->tacticalRetreatDefenderPoints = self::int($stored, 'tactical_retreat_defender_points', 'resultat');
