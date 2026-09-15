@@ -138,6 +138,19 @@ Your fleets are returning to base. Incident reference: :reference',
             'inconsistent_snapshot' => 'the combat snapshot turned out to be inconsistent',
         ],
     ],
+    'lifeform_discovery_report' => [
+        'from' => 'Explorer Corps',
+        'subject' => 'Discovery report',
+        'body' => 'Your discovery flight to :coordinates is over.
+:outcome',
+        'outcomes' => [
+            'nothing' => 'The explorers found nothing of interest.',
+            'artifacts' => 'The explorers found :artifacts artifacts.',
+            'experience' => 'The explorers met :species and brought back :experience experience points for that species.',
+            'species' => 'The explorers discovered a new species: the :species! Its technologies can now join your research slots. Experience gained: :experience points.',
+            'artifacts_full' => 'The explorers found artifacts, but your reserve is full: nothing was kept.',
+        ],
+    ],
     'acs_defend_arrival_host' => [
         'from' => 'Space Monitoring',
         'subject' => 'Fleet is stopping',

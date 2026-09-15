@@ -17,6 +17,7 @@ use OGame\Combat\Services\AccountCombatWithdrawal;
 use OGame\Combat\Services\FleetMovementGate;
 use OGame\Enums\AccountDeletionState;
 use OGame\GameObjects\Models\Calculations\CalculationType;
+use OGame\Lifeforms\Services\LifeformDiscoveryService;
 use OGame\Models\BuildingQueue;
 use OGame\Models\FleetMission;
 use OGame\Models\Highscore;
@@ -762,6 +763,12 @@ class PlayerService
                 // 1. Update research queue
                 // ------
                 $this->updateResearchQueue(false);
+
+                // ------
+                // 1b. Formes de vie : les vols de decouverte echus sont regles sous le verrou du compte
+                //     (journal §155). Un compte sans vol coute une lecture et rien d autre.
+                // ------
+                resolve(LifeformDiscoveryService::class)->settleDue($this, (int)Date::now()->timestamp);
 
                 // ------
                 // 2. Update last_ip and time properties.

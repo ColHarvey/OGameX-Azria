@@ -9,15 +9,19 @@ use Illuminate\Support\Facades\Date;
 use Illuminate\View\View;
 use OGame\Facades\AppUtil;
 use OGame\Lifeforms\Catalogue\LifeformCatalogue;
+use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Catalogue\LifeformFormulas;
 use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\Demography\PlanetLifeformProfile;
+use OGame\Lifeforms\Discovery\LifeformDiscoveryOutcome;
+use OGame\Lifeforms\Discovery\LifeformDiscoveryRules;
 use OGame\Lifeforms\LifeformRefused;
 use OGame\Lifeforms\Presentation\LifeformBanner;
 use OGame\Lifeforms\Presentation\LifeformEffectPresenter;
 use OGame\Lifeforms\Research\LifeformExperience;
 use OGame\Lifeforms\Research\LifeformSlotRules;
 use OGame\Lifeforms\Rules\LifeformRuleRevisions;
+use OGame\Lifeforms\Services\LifeformDiscoveryService;
 use OGame\Lifeforms\Services\LifeformInstallationService;
 use OGame\Lifeforms\Services\LifeformLevels;
 use OGame\Lifeforms\Services\LifeformQueueService;
@@ -28,6 +32,7 @@ use OGame\Models\Lifeforms\LifeformPlanet;
 use OGame\Models\Lifeforms\LifeformQueue;
 use OGame\Models\Lifeforms\LifeformSpeciesProgress;
 use OGame\Models\Lifeforms\LifeformWelcome;
+use OGame\Models\Planet\Coordinate;
 use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
@@ -50,6 +55,7 @@ final class LifeformsController extends OGameController
         private readonly LifeformBanner $banner,
         private readonly LifeformEffectPresenter $effects,
         private readonly LifeformResearchService $research,
+        private readonly LifeformDiscoveryService $discoveries,
     ) {
     }
 
@@ -597,6 +603,109 @@ final class LifeformsController extends OGameController
     {
         // Le bandeau d image des pages de ressources (biome de la planete), faute d illustration propre.
         return $planet->getPlanetBiomeType();
+    }
+
+    /**
+     * La page des decouvertes : quota, artefacts, lancement d un vol, vols en cours et derniers vols.
+     */
+    public function discoveries(PlayerService $player): View|RedirectResponse
+    {
+        $this->requireOpen();
+        $this->setBodyId('lifeforms');
+        $planet = $player->planets->current();
+        $espece = $this->installation->speciesOf($player->getId());
+        if ($espece === null) {
+            return redirect()->route('lifeforms.index')->with('status', __('t_lifeforms_ui.buildings.choose_first'));
+        }
+        if (!$planet->isPlanet()) {
+            return redirect()->route('overview.index')->with('status', __('t_lifeforms_ui.buildings.not_on_a_moon'));
+        }
+        if ($this->stateOf($planet) === null) {
+            return redirect()->route('lifeforms.index')->with('status', __('t_lifeforms_ui.buildings.choose_first'));
+        }
+
+        $maintenant = (int)Date::now()->timestamp;
+        $compte = $this->discoveries->accrueQuota($player->getId(), $maintenant);
+        $niveaux = $this->levels->buildingLevelsOf($planet->getPlanetId());
+        $centre = LifeformCatalogue::buildingWithEffect($espece, LifeformEffect::LF_RESEARCH_TIME_REDUCTION);
+        $centreOuvert = $centre !== null && ($niveaux[$centre->id] ?? 0) >= 1;
+        $reduction = $this->discoveries->envoysReduction($player->getId(), $planet->getPlanetId());
+        $coefficient = $this->revisions->live()->discovery();
+        $cout = LifeformDiscoveryRules::cost();
+        $prochaineRecharge = $compte === null ? 0 : max(0, (int)($compte->discoveries_credited_until ?? $maintenant) + 86400 - $maintenant);
+        $vitesse = fn (int $distance): string => AppUtil::formatTimeDuration(LifeformDiscoveryRules::duration($distance, $reduction, $coefficient));
+
+        $enCours = [];
+        foreach ($this->discoveries->runningOf($player->getId()) as $vol) {
+            $enCours[] = [
+                'coordinates' => (new Coordinate((int)$vol->galaxy, (int)$vol->system, (int)$vol->position))->asString(),
+                'remaining' => max(0, (int)$vol->ends_at - $maintenant),
+            ];
+        }
+        $termines = [];
+        foreach ($this->discoveries->historyOf($player->getId()) as $vol) {
+            $termines[] = [
+                'coordinates' => (new Coordinate((int)$vol->galaxy, (int)$vol->system, (int)$vol->position))->asString(),
+                'settled_at' => (int)($vol->settled_at ?? 0),
+                'outcome' => $this->outcomeLabel(LifeformDiscoveryOutcome::fromStorage($vol->outcome)),
+            ];
+        }
+
+        return view('ingame.lifeforms.discoveries', [
+            'planet_name' => $planet->getPlanetName(),
+            'header_filename' => $this->headerOf($planet),
+            'species_name' => __('t_lifeforms.species.' . $espece->machineName()),
+            'lifeforms_error' => session('lifeforms_error'),
+            'centre_open' => $centreOuvert,
+            'available' => $compte === null ? 0 : (int)$compte->discoveries_available,
+            'per_day' => LifeformDiscoveryRules::QUOTA_PER_DAY,
+            'next_refill' => AppUtil::formatTimeDuration($prochaineRecharge),
+            'artifacts' => $compte === null ? 0 : (int)$compte->artifacts,
+            'artifact_cap' => LifeformDiscoveryRules::ARTIFACT_CAP,
+            'cost' => $cout,
+            'durations' => ['same_system' => $vitesse(1000), 'same_galaxy' => $vitesse(2795), 'other_galaxy' => $vitesse(20000)],
+            'reduction_percent' => rtrim(rtrim(number_format($reduction * 100, 2, '.', ''), '0'), '.'),
+            'current' => $planet->getPlanetCoordinates(),
+            'galaxies' => $this->settings->numberOfGalaxies(),
+            'running' => $enCours,
+            'history' => $termines,
+            'vacation' => $player->isInVacationMode(),
+        ]);
+    }
+
+    public function launchDiscovery(Request $request, PlayerService $player): RedirectResponse
+    {
+        $this->requireOpen();
+        $valide = $request->validate([
+            'galaxy' => ['required', 'integer', 'min:1', 'max:' . $this->settings->numberOfGalaxies()],
+            'system' => ['required', 'integer', 'min:1', 'max:499'],
+            'position' => ['required', 'integer', 'min:1', 'max:15'],
+        ]);
+        $cible = new Coordinate((int)$valide['galaxy'], (int)$valide['system'], (int)$valide['position']);
+        $maintenant = (int)Date::now()->timestamp;
+        try {
+            $vol = $this->discoveries->launch($player->planets->current(), $cible, $maintenant);
+        } catch (LifeformRefused $refus) {
+            return redirect()->route('lifeforms.discoveries')->with('lifeforms_error', __($refus->translationKey()));
+        }
+
+        return redirect()->route('lifeforms.discoveries')->with('status', __('t_lifeforms_ui.discoveries.launched', [
+            'coordinates' => $cible->asString(),
+            'duration' => AppUtil::formatTimeDuration((int)$vol->ends_at - $maintenant),
+        ]));
+    }
+
+    private function outcomeLabel(LifeformDiscoveryOutcome $issue): string
+    {
+        $espece = $issue->species === null ? '' : __('t_lifeforms.species.' . $issue->species->machineName());
+        $espece = is_string($espece) ? $espece : '';
+        $clef = match (true) {
+            $issue->kind === LifeformDiscoveryOutcome::ARTIFACTS && $issue->artifacts === 0 => 'outcome_artifacts_full',
+            default => 'outcome_' . $issue->kind,
+        };
+        $texte = __('t_lifeforms_ui.discoveries.' . $clef, ['artifacts' => $issue->artifacts, 'experience' => $issue->experience, 'species' => $espece]);
+
+        return is_string($texte) ? $texte : '';
     }
 
     /**

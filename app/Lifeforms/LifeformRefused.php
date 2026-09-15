@@ -33,6 +33,10 @@ final class LifeformRefused extends RuntimeException
     public const string NOTHING_TO_RESET = 'nothing_to_reset';
     public const string RESEARCH_IN_PROGRESS = 'research_in_progress';
     public const string RESTORE_EXPIRED = 'restore_expired';
+    public const string DISCOVERY_LOCKED = 'discovery_locked';
+    public const string QUOTA_EXHAUSTED = 'quota_exhausted';
+    public const string RECENTLY_EXPLORED = 'recently_explored';
+    public const string BAD_COORDINATES = 'bad_coordinates';
 
     public function __construct(public readonly string $reason, string $detail = '')
     {

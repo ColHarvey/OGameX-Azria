@@ -116,6 +116,19 @@ Vos flottes rentrent à leur base. Référence de l\'incident : :reference',
             'inconsistent_snapshot' => 'la photographie du combat s\'est révélée incohérente',
         ],
     ],
+    'lifeform_discovery_report' => [
+        'from' => 'Corps des explorateurs',
+        'subject' => 'Rapport de découverte',
+        'body' => 'Votre vol de découverte vers :coordinates est terminé.
+:outcome',
+        'outcomes' => [
+            'nothing' => 'Les explorateurs n’ont rien trouvé d’intéressant.',
+            'artifacts' => 'Les explorateurs ont trouvé :artifacts artefacts.',
+            'experience' => 'Les explorateurs ont rencontré des :species et rapporté :experience points d’expérience pour cette espèce.',
+            'species' => 'Les explorateurs ont découvert une nouvelle espèce : les :species ! Ses technologies peuvent rejoindre vos emplacements de recherche. Expérience rapportée : :experience points.',
+            'artifacts_full' => 'Les explorateurs ont trouvé des artefacts, mais votre réserve est pleine : rien n’a été conservé.',
+        ],
+    ],
     'acs_defend_arrival_host' => [
         'from' => 'Surveillance de l\'espace',
         'subject' => 'La flotte s\'arrête',
