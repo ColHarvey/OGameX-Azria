@@ -1,17 +1,24 @@
 @extends('ingame.layouts.main')
 
+{{--
+    Les bonus des formes de vie du compte, sur les boites « RS » de la page officielle des bonus (`#lfbonusescomponent`,
+    `.headerRS` / `.mainRS` / `.footerRS`, 670 px) : les boites `.content-box-s` du premier gabarit sont les boites
+    laterales de 220 px, et la page se lisait dans une colonne etroite (journal §155.22).
+--}}
+
 @section('content')
 
     <div id="lfbonusescomponent" class="maincontent">
         <div id="lifeforms">
-            <header id="planet" data-anchor="technologyDetails">
+            <header id="planet" class="shortHeader" data-anchor="technologyDetails">
                 <h2>{{ __('t_lifeforms_ui.bonuses.title') }}</h2>
             </header>
 
             <div id="technologies">
-                <div class="content-box-s" id="lifeform-experience-bonuses">
-                    <div class="header"><h3>{{ __('t_lifeforms_ui.bonuses.experience_title') }}</h3></div>
-                    <div class="content" style="padding: 12px;">
+                <div class="headerRS"></div>
+                <div class="mainRS" id="lifeform-experience-bonuses">
+                    <h3 class="textBeefy" style="color: #6f9fc8; text-align: center; margin: 0 0 8px 0;">{{ __('t_lifeforms_ui.bonuses.experience_title') }}</h3>
+                    <div class="content" style="padding: 0 12px 12px 12px;">
                         <p class="smallFont" style="margin: 0 0 10px 0;">{{ __('t_lifeforms_ui.bonuses.experience_intro') }}</p>
                         <div style="display: flex; gap: 18px; flex-wrap: wrap; justify-content: center;">
                             @foreach ($experience as $espece)
@@ -34,12 +41,13 @@
                             @endforeach
                         </div>
                     </div>
-                    <div class="footer"></div>
                 </div>
+                <div class="footerRS"></div>
 
-                <div class="content-box-s" id="lifeform-effect-bonuses" style="margin-top: 12px;">
-                    <div class="header"><h3>{{ __('t_lifeforms_ui.bonuses.effects_title') }}</h3></div>
-                    <div class="content" style="padding: 12px;">
+                <div class="headerRS" style="margin-top: 12px;"></div>
+                <div class="mainRS" id="lifeform-effect-bonuses">
+                    <h3 class="textBeefy" style="color: #6f9fc8; text-align: center; margin: 0 0 8px 0;">{{ __('t_lifeforms_ui.bonuses.effects_title') }}</h3>
+                    <div class="content" style="padding: 0 12px 12px 12px;">
                         @if (count($effets) === 0)
                             <p class="smallFont" style="margin: 0;">{{ __('t_lifeforms_ui.bonuses.none') }}</p>
                         @else
@@ -82,8 +90,8 @@
                             @endforeach
                         @endif
                     </div>
-                    <div class="footer"></div>
                 </div>
+                <div class="footerRS"></div>
             </div>
         </div>
     </div>

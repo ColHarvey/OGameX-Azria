@@ -180,4 +180,46 @@ final class LifeformPagesTest extends AccountTestCase
         $annulation->assertJsonPath('status', 'success');
         $this->assertSame('canceled', $element->refresh()->status);
     }
+
+    /**
+     * **Les pages des formes de vie vivent dans les conteneurs larges que la feuille de style du jeu connait**
+     * (previsualisation locale, journal §155.22). Le premier gabarit posait leurs panneaux dans `.content-box-s`,
+     * la boite laterale de 220 px, sous des identifiants que la feuille ignore : la page se lisait dans une colonne
+     * etroite, ici comme en production. L essai vise la forme de code — la classe de la boite etroite comme
+     * conteneur —, pas un mot.
+     */
+    public function testTheLifeformPagesUseTheWideContainersTheStylesheetKnows(): void
+    {
+        $this->pinSettings(['lifeforms_enabled' => 1]);
+
+        $sansEspece = $this->get(route('lifeforms.index'));
+        $sansEspece->assertStatus(200);
+        $sansEspece->assertSee('id="lfsettingscomponent"', false);
+        $sansEspece->assertSee('class="lfsettingsContentWrapper"', false);
+        $sansEspece->assertSee('class="lifeform-item lifeform-species lifeform-species-humans lifeformcanclaim"', false);
+        $sansEspece->assertSee('class="select-button"', false);
+        $sansEspece->assertDontSee('class="content-box-s"', false);
+
+        resolve(LifeformInstallationService::class)->chooseSpecies($this->currentUserId, Species::Rocktal, (int)Date::now()->timestamp);
+
+        $avecEspece = $this->get(route('lifeforms.index'));
+        $avecEspece->assertStatus(200);
+        $avecEspece->assertSee('class="lifeform-item lifeform-species lifeform-species-rocktal lifeformclaimed"', false);
+        $avecEspece->assertSee('class="lifeform-item lifeform-species lifeform-species-humans lifeformnotclaim"', false);
+        $avecEspece->assertDontSee('class="select-button"', false);
+        $avecEspece->assertDontSee('class="content-box-s"', false);
+
+        $decouvertes = $this->get(route('lifeforms.discoveries'));
+        $decouvertes->assertStatus(200);
+        $decouvertes->assertSee('id="lfsettingscomponent"', false);
+        $decouvertes->assertSee('id="lifeform-discoveries-quota"', false);
+        $decouvertes->assertDontSee('class="content-box-s"', false);
+
+        $bonus = $this->get(route('lifeforms.bonuses'));
+        $bonus->assertStatus(200);
+        $bonus->assertSee('id="lfbonusescomponent"', false);
+        $bonus->assertSee('class="mainRS" id="lifeform-experience-bonuses"', false);
+        $bonus->assertSee('class="mainRS" id="lifeform-effect-bonuses"', false);
+        $bonus->assertDontSee('class="content-box-s"', false);
+    }
 }
