@@ -3,7 +3,10 @@
 namespace Tests\Feature\Lifeforms;
 
 use Illuminate\Support\Facades\Date;
+use OGame\GameMissions\BattleEngine\Models\BattleResult;
+use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Lifeforms\Catalogue\LifeformKind;
+use OGame\Lifeforms\Combat\LifeformCombatLosses;
 use OGame\Lifeforms\Demography\DemographicClock;
 use OGame\Lifeforms\Demography\DemographicState;
 use OGame\Lifeforms\Demography\LifeformDemography;
@@ -21,6 +24,7 @@ use OGame\Models\Lifeforms\LifeformRuleRevision;
 use OGame\Models\Lifeforms\LifeformSpeciesProgress;
 use OGame\Models\Planet;
 use OGame\Models\Resources;
+use OGame\Services\ObjectService;
 use Tests\AccountTestCase;
 use Tests\Support\PinsSettings;
 
@@ -181,10 +185,108 @@ final class LifeformDemographyTest extends AccountTestCase
     }
 
     /**
-     * **Un instant que l horloge n a pas encore atteint rend la colonne**, en retard et jamais en avance ;
+     * **Une population d avant l instant demande n est pas la population de cet instant** (relance de Codex).
+     *
+     * Quand l horloge de la planete est en retard sur l instant, rendre la colonne telle quelle revient a dater
+     * la reponse de la derniere actualisation, pas de l instant demande. Une colonie qui a franchi son seuil
+     * entre les deux n apporterait alors pas son bonus — et le resultat dependrait de la date a laquelle
+     * quelqu un a charge une page. **Une valeur ancienne n est pas forcement la bonne valeur.**
+     */
+    public function testAPopulationOlderThanTheInstantIsNotThePopulationOfThatInstant(): void
+    {
+        $debut = (int)Date::now()->timestamp;
+        $planetId = $this->planetService->getPlanetId();
+        $niveaux = resolve(LifeformLevels::class);
+        $niveaux->setLevel($planetId, LifeformKind::Building, self::RESIDENTIAL, 45);
+        $niveaux->setLevel($planetId, LifeformKind::Building, self::FARM, 48);
+        resolve(LifeformRuleRevisions::class)->recordIfChanged($debut, null, 'banc');
+
+        $profil = PlanetLifeformProfile::fromLevels(Species::Humans, $niveaux->buildingLevelsOf($planetId), 8.0);
+        LifeformPlanet::query()->where('planet_id', $planetId)->update([
+            'population' => 1000000.0,
+            'food' => $profil->foodStorage,
+            'calculated_at' => $debut,
+            'previous_population' => 1000000.0,
+            'previous_food' => $profil->foodStorage,
+            'previous_calculated_at' => $debut,
+        ]);
+
+        $attendu = (new DemographicClock())->advance(
+            new DemographicState(1000000.0, $profil->foodStorage, $debut),
+            $profil,
+            $debut + 600
+        );
+        $this->assertGreaterThan(1000000.0, $attendu->population, 'Premisse : la population croit sur ces dix minutes.');
+
+        $this->assertEqualsWithDelta(
+            $attendu->population,
+            (float)resolve(LifeformDemography::class)->populationAt($planetId, $debut + 600),
+            1e-6,
+            'La relecture rend la population de la derniere actualisation au lieu de celle de l instant demande.'
+        );
+    }
+
+    /**
+     * **Des habitants morts au combat ne reviennent pas par la relecture** (relance de Codex).
+     *
+     * Les pertes civiles diminuent la population sans etre un evenement que l horloge connait : la relecture
+     * depuis l ancre ne rejoue que les travaux et les revisions de vitesse. Pour un instant posterieur a une
+     * attaque meurtriere, elle retrouverait donc des habitants morts, et rendrait leurs bonus.
+     */
+    public function testTheDeadOfABattleDoNotComeBackThroughTheReplay(): void
+    {
+        $debut = (int)Date::now()->timestamp;
+        $planetId = $this->planetService->getPlanetId();
+        $niveaux = resolve(LifeformLevels::class);
+        $niveaux->setLevel($planetId, LifeformKind::Building, self::RESIDENTIAL, 45);
+        $niveaux->setLevel($planetId, LifeformKind::Building, self::FARM, 48);
+        resolve(LifeformRuleRevisions::class)->recordIfChanged($debut, null, 'banc');
+
+        $profil = PlanetLifeformProfile::fromLevels(Species::Humans, $niveaux->buildingLevelsOf($planetId), 8.0);
+        LifeformPlanet::query()->where('planet_id', $planetId)->update([
+            'population' => 1000000.0,
+            'food' => $profil->foodStorage,
+            'calculated_at' => $debut,
+            'previous_population' => 1000000.0,
+            'previous_food' => $profil->foodStorage,
+            'previous_calculated_at' => $debut,
+        ]);
+
+        // **Le monde a d abord avance jusqu a la fin de la fenetre** : l ancre reste au depart, l horloge est
+        // loin devant. C est l etat ordinaire d une planete dont quelqu un a charge une page.
+        $fin = $debut + 1200;
+        $this->travelTo(Date::createFromTimestamp($fin));
+        $this->planetService->update();
+        $ligne = LifeformPlanet::query()->where('planet_id', $planetId)->firstOrFail();
+        $this->assertSame($debut, (int)$ligne->previous_calculated_at, 'Premisse : l ancre precede la bataille.');
+        $this->assertSame($fin, (int)$ligne->calculated_at);
+
+        // **Une attaque reussie a un instant deja depasse par l horloge** — un combat durable se regle a son
+        // echeance, que la planete a pu franchir entre-temps. Sans Bouclier, seul l abri survit.
+        $chasseur = ObjectService::getShipObjectByMachineName('light_fighter');
+        $victoire = new BattleResult();
+        $victoire->attackerUnitsResult = new UnitCollection();
+        $victoire->attackerUnitsResult->addUnit($chasseur, 10);
+        $victoire->defenderUnitsResult = new UnitCollection();
+        $mort = $debut + 600;
+        $perdus = resolve(LifeformCombatLosses::class)->applyIfAttackerWon($victoire, $this->planetService, 0.0, $mort);
+        $this->assertGreaterThan(0, $perdus, 'Premisse : l attaque a bien tue des habitants.');
+        $this->assertLessThan(1000.0, (float)LifeformPlanet::query()->where('planet_id', $planetId)->value('population'), 'Premisse : il ne reste que l abri.');
+
+        // **La question qui doit ne jamais ressusciter personne** : un instant posterieur a l attaque, mais
+        // anterieur a l horloge — donc rejoue depuis l ancre, qui ne connait pas la bataille.
+        $apres = resolve(LifeformDemography::class)->populationAt($planetId, $mort + 60);
+        $this->assertTrue(
+            $apres === null || $apres < 10000.0,
+            'La relecture a ressuscite les habitants tues : elle rejoue la croissance depuis une ancre d avant la bataille. Rendu : ' . var_export($apres, true)
+        );
+    }
+
+    /**
+     * **Un instant que l horloge n a pas encore atteint est rejoue en avant** — la colonne n est pas la reponse ;
      * **un instant saute sans instantane rend null**, et l appelant le dit au lieu de deviner.
      */
-    public function testAnInstantTheClockHasNotReachedReadsTheColumnAndAnUnreachableOneSaysSo(): void
+    public function testAnInstantTheClockHasNotReachedIsReplayedAndAnUnreachableOneSaysSo(): void
     {
         $debut = (int)Date::now()->timestamp;
         $planetId = $this->planetService->getPlanetId();
@@ -197,8 +299,18 @@ final class LifeformDemographyTest extends AccountTestCase
             'previous_food' => null,
             'previous_calculated_at' => null,
         ]);
-        $this->assertSame(4242.0, $lecture->populationAt($planetId, $debut + 500), 'L horloge est en retard sur l instant : la colonne suffit, elle ne peut pas etre en avance.');
         $this->assertSame(4242.0, $lecture->populationAt($planetId, $debut), 'A l instant exact du calcul, c est la colonne.');
+
+        // **Cinq cents secondes plus loin, la colonne n est plus la reponse** : l horloge est rejouee jusque la.
+        // Sur une planete sans logement ni ferme, quatre mille habitants ne tiennent pas — ils redescendent a la
+        // population de base, et c est bien ce que la planete portait a cet instant.
+        $attendu = (new DemographicClock())->advance(
+            new DemographicState(4242.0, 0.0, $debut),
+            PlanetLifeformProfile::fromLevels(Species::Humans, resolve(LifeformLevels::class)->buildingLevelsOf($planetId), 8.0),
+            $debut + 500
+        );
+        $this->assertNotEqualsWithDelta(4242.0, $attendu->population, 1.0, 'Premisse : la population de cet instant differe de celle de la colonne.');
+        $this->assertEqualsWithDelta($attendu->population, (float)$lecture->populationAt($planetId, $debut + 500), 1e-9, 'La colonne a ete rendue telle quelle au lieu d etre rejouee.');
 
         // L horloge a depasse l instant, et l instantane du dernier passage ne le couvre pas.
         LifeformPlanet::query()->where('planet_id', $planetId)->update([

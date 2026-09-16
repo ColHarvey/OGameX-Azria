@@ -63,10 +63,16 @@ final class LifeformDemography
      */
     public function stateAt(LifeformPlanet $row, int $at): DemographicState|null
     {
+        $planetId = (int)$row->planet_id;
+        $espece = Species::from((int)$row->species);
         $calcule = (int)$row->calculated_at;
+
+        // **Une population d avant l instant demande n est pas la population de cet instant.** L horloge en
+        // retard se rejoue en avant jusqu a lui : rendre la colonne telle quelle daterait la reponse de la
+        // derniere actualisation, et une colonie ayant franchi son seuil entre les deux perdrait son bonus
+        // selon la date a laquelle quelqu un a charge une page (relance de Codex, journal §155.13).
         if ($at >= $calcule) {
-            // L horloge n a pas encore depasse l instant : la colonne est en retard, jamais en avance.
-            return new DemographicState((float)$row->population, (float)$row->food, $calcule);
+            return $this->replay($planetId, $espece, new DemographicState((float)$row->population, (float)$row->food, $calcule), $at);
         }
 
         $depart = $row->previous_calculated_at;
@@ -76,7 +82,7 @@ final class LifeformDemography
 
         $etat = new DemographicState((float)$row->previous_population, (float)$row->previous_food, (int)$depart);
 
-        return $this->replay((int)$row->planet_id, Species::from((int)$row->species), $etat, $at);
+        return $this->replay($planetId, $espece, $etat, $at);
     }
 
     /**

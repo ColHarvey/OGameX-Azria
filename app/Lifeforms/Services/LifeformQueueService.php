@@ -117,7 +117,7 @@ final class LifeformQueueService
      * Demarre le premier element en attente d un genre si rien ne court. Sous le verrou de la
      * planete, tenu par l appelant.
      */
-    public function start(PlanetService $planet, LifeformKind $kind, int $timeStart): void
+    public function start(PlanetService $planet, LifeformKind $kind, int $timeStart, float|null $populationAtStart = null): void
     {
         $planetId = $planet->getPlanetId();
         if ($this->running($planetId, $kind) !== null) {
@@ -127,6 +127,11 @@ final class LifeformQueueService
         if ($etat === null) {
             return;
         }
+        // **La population de l instant du demarrage, pas celle de la colonne.** Un rattrapage avance la
+        // population en memoire et ne l ecrit qu a la fin : un travail demarre a une echeance intermediaire
+        // lisait donc celle d avant l absence, et pouvait etre annule pour un seuil qui etait franchi — ou
+        // accepte sur un seuil qui ne l etait plus (relance de Codex, journal §155.13).
+        $population = $populationAtStart ?? (float)$etat->population;
         $vitesses = $this->revisions->at($timeStart);
 
         foreach ($this->queued($planetId, $kind)->where('status', 'waiting')->sortBy('id') as $element) {
@@ -136,8 +141,8 @@ final class LifeformQueueService
 
             $incoherent = (int)$element->target_level !== $niveauCourant + 1
                 || !$this->requirementsMet($objet, $niveauxBatiments)
-                || !$this->populationMet($objet, (int)$element->target_level, $etat)
-                || !$this->researchable($objet, $planetId, $etat, $niveauxBatiments);
+                || !$this->populationMetWith($objet, (int)$element->target_level, $population)
+                || !$this->researchable($objet, $planetId, $etat, $niveauxBatiments, $population);
             if ($incoherent) {
                 $this->markCanceled($element);
                 continue;
@@ -231,7 +236,7 @@ final class LifeformQueueService
     /**
      * Livre un travail echu : le niveau s ecrit, l element est clos, le suivant demarre a l echeance.
      */
-    public function deliver(PlanetService $planet, LifeformQueue $element): void
+    public function deliver(PlanetService $planet, LifeformQueue $element, float|null $populationAtDeadline = null): void
     {
         if ($element->status !== 'running') {
             return;
@@ -240,7 +245,7 @@ final class LifeformQueueService
         $this->levels->setLevel($planet->getPlanetId(), $genre, (int)$element->object_id, (int)$element->target_level);
         $element->status = 'done';
         $element->save();
-        $this->start($planet, $genre, (int)$element->time_end);
+        $this->start($planet, $genre, (int)$element->time_end, $populationAtDeadline);
     }
 
     /**
@@ -290,7 +295,15 @@ final class LifeformQueueService
 
     public function populationMet(LifeformObject $object, int $targetLevel, LifeformPlanet $state): bool
     {
-        return (float)$state->population + 1e-9 >= LifeformFormulas::populationRequired($object, $targetLevel);
+        return $this->populationMetWith($object, $targetLevel, (float)$state->population);
+    }
+
+    /**
+     * Le meme controle, sur une population donnee — celle de l instant ou le travail demarre.
+     */
+    public function populationMetWith(LifeformObject $object, int $targetLevel, float $population): bool
+    {
+        return $population + 1e-9 >= LifeformFormulas::populationRequired($object, $targetLevel);
     }
 
     /**
@@ -299,7 +312,7 @@ final class LifeformQueueService
      *
      * @param array<int, int> $buildingLevels
      */
-    public function researchable(LifeformObject $object, int $planetId, LifeformPlanet $state, array $buildingLevels): bool
+    public function researchable(LifeformObject $object, int $planetId, LifeformPlanet $state, array $buildingLevels, float|null $population = null): bool
     {
         if ($object->kind !== LifeformKind::Technology) {
             return true;
@@ -307,7 +320,7 @@ final class LifeformQueueService
         $espece = Species::from((int)$state->species);
         $profil = PlanetLifeformProfile::fromLevels($espece, $buildingLevels, $this->revisions->live()->demography());
 
-        return $this->research->mayResearch($object, $planetId, $state, $profil, $espece, $buildingLevels);
+        return $this->research->mayResearch($object, $planetId, $state, $profil, $espece, $buildingLevels, $population);
     }
 
     /**

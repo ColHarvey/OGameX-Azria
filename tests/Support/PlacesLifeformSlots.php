@@ -53,6 +53,13 @@ trait PlacesLifeformSlots
     private static array $mondesSoutenus = [];
 
     /**
+     * Les planetes dont l horloge a ete arretee pour une lecture vivante, a effacer au demontage.
+     *
+     * @var array<int, bool>
+     */
+    private static array $horlogesTenues = [];
+
+    /**
      * @param int $at instant du choix ; il date aussi la ligne d historique
      */
     protected function placeLifeformSlot(int $planetId, int $slot, int $objectId, int $at): void
@@ -99,6 +106,40 @@ trait PlacesLifeformSlots
         LifeformBonusCache::invalidate();
 
         return $population;
+    }
+
+    /**
+     * Fige la population d une planete en arretant son horloge, **pour une lecture vivante seulement**.
+     *
+     * Certains essais mesurent un nombre exact affiche — un rapport d espionnage, une page de bonus — et lisent
+     * la colonne, jamais un instant passe. Une horloge posee dans le futur leur convient, mais elle ne doit
+     * **jamais survivre a l essai** : le gel d un combat lit toutes les planetes d un proprietaire, et le
+     * proprietaire de la planete etrangere voisine est partage par tout le processus. Une horloge oubliee sur
+     * une de ses planetes faisait suspendre le ralliement d une classe voisine, loin de la (journal §155.13).
+     *
+     * `forgetHeldLifeformPlanets()`, appele au demontage, efface donc la ligne posee ici : la planete redevient
+     * ce qu elle etait, sans forme de vie. `LifeformBenchClockGuardTest` refuse tout autre ecrivain.
+     */
+    protected function holdLifeformPopulationForLiveRead(int $planetId, float $population, int $now): void
+    {
+        LifeformPlanet::query()->where('planet_id', $planetId)->update([
+            'population' => $population,
+            'calculated_at' => $now + 10 * 86400,
+        ]);
+        self::$horlogesTenues[$planetId] = true;
+        LifeformBonusCache::invalidate();
+    }
+
+    /**
+     * Efface les lignes posees par `holdLifeformPopulationForLiveRead()`. **A appeler au demontage.**
+     */
+    protected function forgetHeldLifeformPlanets(): void
+    {
+        if (self::$horlogesTenues !== []) {
+            LifeformPlanet::query()->whereIn('planet_id', array_keys(self::$horlogesTenues))->delete();
+            self::$horlogesTenues = [];
+            LifeformBonusCache::invalidate();
+        }
     }
 
     /**

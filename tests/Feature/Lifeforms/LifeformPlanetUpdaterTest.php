@@ -3,6 +3,7 @@
 namespace Tests\Feature\Lifeforms;
 
 use Illuminate\Support\Facades\Date;
+use OGame\Lifeforms\Catalogue\LifeformCatalogue;
 use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\Demography\DemographicClock;
 use OGame\Lifeforms\Demography\DemographicState;
@@ -19,11 +20,15 @@ use OGame\Models\Lifeforms\LifeformBuildingLevel;
 use OGame\Models\Lifeforms\LifeformPlanet;
 use OGame\Models\Lifeforms\LifeformQueue;
 use OGame\Models\Lifeforms\LifeformRuleRevision;
+use OGame\Models\Lifeforms\LifeformSlot;
+use OGame\Models\Lifeforms\LifeformSlotChange;
 use OGame\Models\Lifeforms\LifeformSpeciesProgress;
+use OGame\Models\Lifeforms\LifeformTechnologyLevel;
 use OGame\Models\Planet;
 use OGame\Models\Resources;
 use Tests\AccountTestCase;
 use Tests\Support\PinsSettings;
+use Tests\Support\PlacesLifeformSlots;
 
 /**
  * La mise a jour d une planete peuplee, par `PlanetService::update()` : l horloge coupe aux
@@ -32,10 +37,17 @@ use Tests\Support\PinsSettings;
 final class LifeformPlanetUpdaterTest extends AccountTestCase
 {
     use PinsSettings;
+    use PlacesLifeformSlots;
 
     private const int RESIDENTIAL = 11101;
 
     private const int FARM = 11102;
+
+    private const int RESEARCH_CENTRE = 11103;
+
+    private const int ACADEMY = 11104;
+
+    private const int ENVOYS = 11201;
 
     private int $revisionsAvant = 0;
 
@@ -52,6 +64,9 @@ final class LifeformPlanetUpdaterTest extends AccountTestCase
     {
         $planetes = Planet::query()->where('user_id', $this->currentUserId)->pluck('id');
         LifeformQueue::query()->whereIn('planet_id', $planetes)->delete();
+        LifeformSlot::query()->whereIn('planet_id', $planetes)->delete();
+        LifeformSlotChange::query()->whereIn('planet_id', $planetes)->delete();
+        LifeformTechnologyLevel::query()->whereIn('planet_id', $planetes)->delete();
         LifeformBuildingLevel::query()->whereIn('planet_id', $planetes)->delete();
         LifeformPlanet::query()->whereIn('planet_id', $planetes)->delete();
         LifeformAccount::query()->where('user_id', $this->currentUserId)->delete();
@@ -247,6 +262,124 @@ final class LifeformPlanetUpdaterTest extends AccountTestCase
         $attendu = $horloge->advance($etape, PlanetLifeformProfile::fromLevels(Species::Humans, [self::RESIDENTIAL => 2, self::FARM => 2], 8.0), $debut + 3606);
         $this->assertEqualsWithDelta($attendu->population, $reprise->population, 1e-6, 'Deux passages ne valent pas un : de la croissance a ete perdue en chemin.');
         $this->assertEqualsWithDelta($attendu->food, $reprise->food, 1e-6);
+    }
+
+    /**
+     * **Un travail demarre pendant le rattrapage voit la population de son echeance** (relance de Codex).
+     *
+     * Le passage avance la population **en memoire** et ne l ecrit qu a la fin. Entre-temps, une livraison
+     * demarre le travail suivant, dont les prerequis se lisaient en base — donc sur la population d **avant**
+     * l absence. Un travail pouvait etre annule pour population insuffisante alors que le seuil avait ete
+     * franchi pendant l absence, et l inverse etait vrai aussi.
+     */
+    public function testAWorkStartedDuringTheCatchUpSeesThePopulationOfItsDeadline(): void
+    {
+        $debut = (int)Date::now()->timestamp;
+        $planetId = $this->planetService->getPlanetId();
+        $niveaux = resolve(LifeformLevels::class);
+        $niveaux->setLevel($planetId, LifeformKind::Building, self::RESIDENTIAL, 45);
+        $niveaux->setLevel($planetId, LifeformKind::Building, self::FARM, 52);
+        $niveaux->setLevel($planetId, LifeformKind::Building, self::RESEARCH_CENTRE, 1);
+
+        $profil = PlanetLifeformProfile::fromLevels(Species::Humans, $niveaux->buildingLevelsOf($planetId), 8.0);
+        LifeformPlanet::query()->where('planet_id', $planetId)->update([
+            'population' => 21000000.0,
+            'food' => $profil->foodStorage,
+            'calculated_at' => $debut,
+            'previous_population' => 21000000.0,
+            'previous_food' => $profil->foodStorage,
+            'previous_calculated_at' => $debut,
+        ]);
+        $this->planetAddResources(new Resources(100000000, 100000000, 100000000, 0));
+
+        // **L Academie des sciences** : vingt millions d habitants au premier niveau, vingt-deux au second. Les
+        // deux travaux ont ete inscrits quand ils etaient admissibles ; c est leur demarrage pendant le
+        // rattrapage qui est en cause.
+        LifeformQueue::query()->create([
+            'planet_id' => $planetId, 'user_id' => $this->currentUserId, 'kind' => LifeformKind::Building->value,
+            'object_id' => self::ACADEMY, 'target_level' => 1, 'metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'energy' => 0,
+            'time_start' => $debut, 'time_end' => $debut + 60, 'status' => 'running',
+            'catalogue_version' => LifeformCatalogue::VERSION,
+        ]);
+        $second = LifeformQueue::query()->create([
+            'planet_id' => $planetId, 'user_id' => $this->currentUserId, 'kind' => LifeformKind::Building->value,
+            'object_id' => self::ACADEMY, 'target_level' => 2, 'metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'energy' => 0,
+            'time_start' => null, 'time_end' => null, 'status' => 'waiting',
+            'catalogue_version' => LifeformCatalogue::VERSION,
+        ]);
+        // **A l echeance du premier travail la population a depasse le seuil**, alors que la colonne, elle,
+        // porte encore les vingt et un millions d avant l absence.
+        $aLEcheance = (new DemographicClock())->advance(
+            new DemographicState(21000000.0, $profil->foodStorage, $debut),
+            PlanetLifeformProfile::fromLevels(Species::Humans, $niveaux->buildingLevelsOf($planetId), 8.0),
+            $debut + 60
+        );
+        $this->assertGreaterThan(22000000.0, $aLEcheance->population, 'Premisse : le seuil du second niveau est franchi a l echeance du premier.');
+        $this->assertSame(21000000, (int)LifeformPlanet::query()->where('planet_id', $planetId)->value('population'), 'Premisse : la colonne est restee en arriere.');
+
+        // Le joueur revient une heure plus tard : la population a largement passe les vingt-deux millions.
+        $this->travelTo(Date::createFromTimestamp($debut + 3600));
+        $this->planetService->update();
+
+        $this->assertSame(
+            'running',
+            $second->refresh()->status,
+            'Le second niveau a ete annule pour population insuffisante alors que le seuil etait franchi a son echeance.'
+        );
+    }
+
+    /**
+     * **Une technologie demarree pendant le rattrapage voit l ouverture de son emplacement a l echeance.**
+     *
+     * Le meme trou que pour un batiment, par l autre porte : une technologie ne se recherche que depuis un
+     * emplacement **ouvert**, et c est la population qui l ouvre. Une mutation qui faisait ignorer la
+     * population transmise a l ouverture de l emplacement survivait au temoin du batiment ; celui-ci la tue.
+     */
+    public function testATechnologyStartedDuringTheCatchUpSeesItsSlotOpenAtTheDeadline(): void
+    {
+        $debut = (int)Date::now()->timestamp;
+        $planetId = $this->planetService->getPlanetId();
+        $niveaux = resolve(LifeformLevels::class);
+        $niveaux->setLevel($planetId, LifeformKind::Building, self::RESIDENTIAL, 30);
+        $niveaux->setLevel($planetId, LifeformKind::Building, self::FARM, 35);
+        $niveaux->setLevel($planetId, LifeformKind::Building, self::RESEARCH_CENTRE, 1);
+        $this->placeLifeformSlot($planetId, 1, self::ENVOYS, $debut - 10);
+
+        // L emplacement 1 exige deux cent mille habitants ; la planete en a cent quatre-vingt-quinze mille au depart.
+        $profil = PlanetLifeformProfile::fromLevels(Species::Humans, $niveaux->buildingLevelsOf($planetId), 8.0);
+        LifeformPlanet::query()->where('planet_id', $planetId)->update([
+            'population' => 195000.0,
+            'food' => $profil->foodStorage,
+            'calculated_at' => $debut,
+            'previous_population' => 195000.0,
+            'previous_food' => $profil->foodStorage,
+            'previous_calculated_at' => $debut,
+        ]);
+        $this->planetAddResources(new Resources(100000000, 100000000, 100000000, 0));
+
+        LifeformQueue::query()->create([
+            'planet_id' => $planetId, 'user_id' => $this->currentUserId, 'kind' => LifeformKind::Technology->value,
+            'object_id' => self::ENVOYS, 'target_level' => 1, 'metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'energy' => 0,
+            'time_start' => $debut, 'time_end' => $debut + 60, 'status' => 'running',
+            'catalogue_version' => LifeformCatalogue::VERSION,
+        ]);
+        $second = LifeformQueue::query()->create([
+            'planet_id' => $planetId, 'user_id' => $this->currentUserId, 'kind' => LifeformKind::Technology->value,
+            'object_id' => self::ENVOYS, 'target_level' => 2, 'metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'energy' => 0,
+            'time_start' => null, 'time_end' => null, 'status' => 'waiting',
+            'catalogue_version' => LifeformCatalogue::VERSION,
+        ]);
+
+        $aLEcheance = (new DemographicClock())->advance(new DemographicState(195000.0, $profil->foodStorage, $debut), $profil, $debut + 60);
+        $this->assertGreaterThan(200000.0, $aLEcheance->population, 'Premisse : l emplacement s ouvre avant l echeance de la premiere recherche.');
+
+        $this->travelTo(Date::createFromTimestamp($debut + 3600));
+        $this->planetService->update();
+
+        // Une recherche de second niveau est courte a x8 : demarree a l echeance de la premiere, elle a pu
+        // finir elle aussi pendant l absence. Ce qui est interdit, c est l annulation.
+        $this->assertContains($second->refresh()->status, ['running', 'done'], 'La seconde recherche a ete annulee pour emplacement ferme alors que la population l avait ouvert a son echeance.');
+        $this->assertGreaterThanOrEqual(1, resolve(LifeformLevels::class)->levelOf($planetId, LifeformKind::Technology, self::ENVOYS));
     }
 
     public function testAnUnpopulatedPlanetIsLeftAlone(): void

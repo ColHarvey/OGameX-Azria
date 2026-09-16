@@ -90,7 +90,9 @@ final class LifeformPlanetUpdater
 
             foreach ($this->queue->dueItems($planetId, $now) as $element) {
                 if (max((int)$element->time_end, $depart) === $coupe) {
-                    $this->queue->deliver($planet, $element);
+                    // **La population de l echeance**, pas celle de la colonne : l etat n est ecrit qu a la
+                    // fin du passage, et le travail suivant demarre ici (journal §155.13).
+                    $this->queue->deliver($planet, $element, $etat->population);
                 }
             }
         }

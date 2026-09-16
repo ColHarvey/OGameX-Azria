@@ -70,6 +70,7 @@ final class LifeformCombatEngineTest extends AccountTestCase
         LifeformPlanet::query()->whereIn('planet_id', $planetes)->delete();
         LifeformAccount::query()->where('user_id', $this->currentUserId)->delete();
         LifeformSpeciesProgress::query()->where('user_id', $this->currentUserId)->delete();
+        $this->forgetHeldLifeformPlanets();
         LifeformBonusCache::invalidate();
         $this->restorePinnedSettings();
         parent::tearDown();
@@ -163,7 +164,7 @@ final class LifeformCombatEngineTest extends AccountTestCase
     public function testTheUnprotectedPopulationDiesOnlyWhenTheAttackerWins(): void
     {
         $this->choose(Species::Humans);
-        LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->update(['population' => 10000.0, 'calculated_at' => (int)Date::now()->timestamp + 10 * 86400]);
+        $this->holdLifeformPopulationForLiveRead($this->currentPlanetId, 10000.0, (int)Date::now()->timestamp);
         $pertes = resolve(LifeformCombatLosses::class);
         $chasseur = ObjectService::getShipObjectByMachineName('light_fighter');
         $instant = (int)Date::now()->timestamp;

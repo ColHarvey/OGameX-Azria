@@ -57,6 +57,7 @@ final class LifeformBonusPageTest extends AccountTestCase
         LifeformPlanet::query()->whereIn('planet_id', $planetes)->delete();
         LifeformAccount::query()->where('user_id', $this->currentUserId)->delete();
         LifeformSpeciesProgress::query()->where('user_id', $this->currentUserId)->delete();
+        $this->forgetHeldLifeformPlanets();
         LifeformBonusCache::invalidate();
         $this->restorePinnedSettings();
         parent::tearDown();
@@ -174,7 +175,7 @@ final class LifeformBonusPageTest extends AccountTestCase
 
     private function technology(int $planetId, int $slot, int $objectId, int $level): void
     {
-        LifeformPlanet::query()->where('planet_id', $planetId)->update(['population' => 500000000.0, 'calculated_at' => (int)Date::now()->timestamp + 10 * 86400]);
+        $this->holdLifeformPopulationForLiveRead($planetId, 500000000.0, (int)Date::now()->timestamp);
         $this->placeLifeformSlot($planetId, $slot, $objectId, (int)Date::now()->timestamp);
         resolve(LifeformLevels::class)->setLevel($planetId, LifeformKind::Technology, $objectId, $level);
     }

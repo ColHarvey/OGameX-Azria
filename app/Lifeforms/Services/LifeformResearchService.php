@@ -144,7 +144,7 @@ final class LifeformResearchService
     /**
      * Une technologie peut-elle etre recherchee ici : presente dans un emplacement ouvert ?
      */
-    public function mayResearch(LifeformObject $object, int $planetId, LifeformPlanet $state, PlanetLifeformProfile $profile, Species $species, array $buildingLevels): bool
+    public function mayResearch(LifeformObject $object, int $planetId, LifeformPlanet $state, PlanetLifeformProfile $profile, Species $species, array $buildingLevels, float|null $population = null): bool
     {
         if ($object->kind !== LifeformKind::Technology) {
             return false;
@@ -154,7 +154,7 @@ final class LifeformResearchService
             return false;
         }
 
-        return $this->isUnlocked((int)$slot->slot, $state, $profile, $this->requirementReduction($species, $buildingLevels));
+        return $this->isUnlockedWith((int)$slot->slot, $population ?? (float)$state->population, $profile, $this->requirementReduction($species, $buildingLevels));
     }
 
     /**

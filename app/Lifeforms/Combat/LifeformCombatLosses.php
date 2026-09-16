@@ -60,7 +60,20 @@ final class LifeformCombatLosses
             return 0;
         }
 
+        // **Une mort au combat n est pas un evenement que l horloge sait rejouer.** Elle ne vit ni dans la file
+        // des travaux ni dans les revisions de vitesse : une relecture partant d une ancre anterieure
+        // retrouverait donc les habitants tues et rendrait leurs bonus. L ancre est ramenee ici, sur l etat
+        // d apres la bataille : tout instant ulterieur se rejoue depuis des survivants, et tout instant
+        // anterieur devient irreconstituable — donc refuse, jamais devine (relance de Codex, journal §155.13).
+        //
+        // L ancre et l horloge coincident alors, et le lecteur prend la colonne pour tout instant qu il accepte :
+        // la population inscrite dans l ancre n est relue par personne avant le passage suivant, qui la
+        // reecrit. Elle est posee quand meme, pour que la ligne ne se contredise jamais — et la mutation qui y
+        // laisse l ancienne valeur est declaree **equivalente**, pas comptee comme tuee.
         $ligne->population = $survivants;
+        $ligne->previous_population = $survivants;
+        $ligne->previous_food = $ligne->food;
+        $ligne->previous_calculated_at = $ligne->calculated_at;
         $ligne->save();
 
         $proprietaire = $planet->getPlayer();

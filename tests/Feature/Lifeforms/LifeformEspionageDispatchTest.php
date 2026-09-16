@@ -14,12 +14,12 @@ use OGame\Lifeforms\Services\LifeformInstallationService;
 use OGame\Lifeforms\Services\LifeformLevels;
 use OGame\Lifeforms\Species;
 use OGame\Models\EspionageReport;
-use OGame\Models\Lifeforms\LifeformPlanet;
 use OGame\Models\Message;
 use OGame\Models\Resources;
 use OGame\Services\ObjectService;
 use OGame\Services\SettingsService;
 use Tests\FleetDispatchTestCase;
+use Tests\Support\PlacesLifeformSlots;
 
 /**
  * Une vraie sonde rapporte la section « formes de vie » (tranche 7) : la mission l ecrit, le rapport la
@@ -27,6 +27,8 @@ use Tests\FleetDispatchTestCase;
  */
 final class LifeformEspionageDispatchTest extends FleetDispatchTestCase
 {
+    use PlacesLifeformSlots;
+
     protected int $missionType = 6;
 
     protected string $missionName = 'Espionage';
@@ -56,6 +58,7 @@ final class LifeformEspionageDispatchTest extends FleetDispatchTestCase
     protected function tearDown(): void
     {
         resolve(SettingsService::class)->set('lifeforms_enabled', '0');
+        $this->forgetHeldLifeformPlanets();
         LifeformBonusCache::invalidate();
         parent::tearDown();
     }
@@ -77,7 +80,7 @@ final class LifeformEspionageDispatchTest extends FleetDispatchTestCase
             $espece = Species::Humans;
         }
         $installation->installOnExistingPlanet($cible->getPlanetId(), (int)Date::now()->timestamp);
-        LifeformPlanet::query()->where('planet_id', $cible->getPlanetId())->update(['population' => 54321.9, 'calculated_at' => (int)Date::now()->timestamp + 10 * 86400]);
+        $this->holdLifeformPopulationForLiveRead($cible->getPlanetId(), 54321.9, (int)Date::now()->timestamp);
         if ($espece === Species::Humans) {
             resolve(LifeformLevels::class)->setLevel($cible->getPlanetId(), LifeformKind::Building, self::PLANETARY_SHIELD, 10);
         }

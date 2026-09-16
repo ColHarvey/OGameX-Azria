@@ -16,6 +16,7 @@ use OGame\Models\Lifeforms\LifeformSpeciesProgress;
 use OGame\Models\Planet;
 use Tests\AccountTestCase;
 use Tests\Support\PinsSettings;
+use Tests\Support\PlacesLifeformSlots;
 
 /**
  * La section « formes de vie » du rapport d espionnage (tranche 7) : des faits a l ecriture, une phrase
@@ -24,6 +25,7 @@ use Tests\Support\PinsSettings;
 final class LifeformEspionageTest extends AccountTestCase
 {
     use PinsSettings;
+    use PlacesLifeformSlots;
 
     private const int PLANETARY_SHIELD = 11112;
 
@@ -41,6 +43,7 @@ final class LifeformEspionageTest extends AccountTestCase
         LifeformPlanet::query()->whereIn('planet_id', $planetes)->delete();
         LifeformAccount::query()->where('user_id', $this->currentUserId)->delete();
         LifeformSpeciesProgress::query()->where('user_id', $this->currentUserId)->delete();
+        $this->forgetHeldLifeformPlanets();
         LifeformBonusCache::invalidate();
         $this->restorePinnedSettings();
         parent::tearDown();
@@ -54,7 +57,7 @@ final class LifeformEspionageTest extends AccountTestCase
         $this->assertSame(['species' => '', 'population' => 0, 'protected_percent' => 0], $vide, 'Un corps sans forme de vie : la section existe et ne nomme aucune espece.');
 
         resolve(LifeformInstallationService::class)->chooseSpecies($this->currentUserId, Species::Humans, (int)Date::now()->timestamp);
-        LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->update(['population' => 12345.6, 'calculated_at' => (int)Date::now()->timestamp + 10 * 86400]);
+        $this->holdLifeformPopulationForLiveRead($this->currentPlanetId, 12345.6, (int)Date::now()->timestamp);
         resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Building, self::PLANETARY_SHIELD, 10);
         LifeformBonusCache::invalidate();
 
