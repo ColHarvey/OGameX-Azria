@@ -5,6 +5,7 @@ namespace OGame\Services;
 use Illuminate\Support\Facades\Date;
 use OGame\Factories\GameMissionFactory;
 use OGame\Models\Setting;
+use UnexpectedValueException;
 
 /**
  * Class SettingsService.
@@ -955,6 +956,31 @@ class SettingsService
     public function lifeformsDiscoverySpeedMultiplier(): float
     {
         return self::coefficient($this->get('lifeforms_discovery_speed_multiplier', '1'));
+    }
+
+    /**
+     * La part de la population **non protegee** qui meurt quand une attaque reussit, en pour cent.
+     *
+     * Decision de Keven (16 septembre 2026, journal §155.20), sur la recommandation de Codex : un choix
+     * d equilibrage Azria — 25 % au depart —, pas une regle officielle. Zero desactive les morts ; cent est la
+     * regle dure des tranches precedentes. Le Bouclier planetaire reduit la population exposee, et l abri de cent
+     * habitants reste garanti quel que soit le taux (`DemographicRules::SHELTERED`).
+     *
+     * **Le taux se fige a l ouverture de chaque combat** (`OpeningStateRecorder`) : le changer ne modifie aucune
+     * bataille deja ouverte. Ce que cette methode rend est donc le taux des combats **a venir** et des attaques
+     * instantanees.
+     *
+     * La porte d administration refuse tout ce qui n est pas un entier de 0 a 100 ; une valeur qui arriverait
+     * ici hors de ces bornes ne vient pas du jeu, et elle est refusee plutot que ramenee en silence.
+     */
+    public function lifeformPopulationLossPercent(): int
+    {
+        $texte = trim($this->get('lifeform_population_loss_rate', '25'));
+        if ($texte === '' || !ctype_digit($texte) || (int)$texte > 100) {
+            throw new UnexpectedValueException('Le reglage lifeform_population_loss_rate vaut « ' . $texte . '» et non un entier de 0 a 100.');
+        }
+
+        return (int)$texte;
     }
 
     /**

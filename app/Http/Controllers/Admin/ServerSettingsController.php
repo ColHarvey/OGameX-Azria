@@ -69,6 +69,7 @@ class ServerSettingsController extends OGameController
             'lifeforms_build_speed_multiplier' => $settingsService->lifeformsBuildSpeedMultiplier(),
             'lifeforms_research_speed_multiplier' => $settingsService->lifeformsResearchSpeedMultiplier(),
             'lifeforms_discovery_speed_multiplier' => $settingsService->lifeformsDiscoverySpeedMultiplier(),
+            'lifeform_population_loss_rate' => $settingsService->lifeformPopulationLossPercent(),
             'lifeforms_effective_build_speed' => $settingsService->economySpeed() * $settingsService->lifeformsBuildSpeedMultiplier(),
             'lifeforms_effective_research_speed' => $settingsService->economySpeed() * $settingsService->researchSpeed() * $settingsService->lifeformsResearchSpeedMultiplier(),
             'lifeforms_revision_count' => LifeformRuleRevision::query()->count(),
@@ -126,6 +127,14 @@ class ServerSettingsController extends OGameController
             'gt' => __('t_ingame.admin.lifeforms_invalid_multiplier'),
             'max' => __('t_ingame.admin.lifeforms_invalid_multiplier'),
         ]);
+        // L ampleur des morts de population (journal §155.20) : un entier de 0 a 100, rien d autre, et un refus
+        // ne change aucun reglage. Absent du formulaire, le taux revient a sa valeur de depart, 25.
+        $morts = request()->validate([
+            'lifeform_population_loss_rate' => ['nullable', 'integer', 'between:0,100'],
+        ], [
+            'integer' => __('t_ingame.admin.lifeforms_invalid_loss_rate'),
+            'between' => __('t_ingame.admin.lifeforms_invalid_loss_rate'),
+        ]);
 
         $settingsService->set('fleet_speed_war', request('fleet_speed_war'));
         $settingsService->set('fleet_speed_holding', request('fleet_speed_holding'));
@@ -179,6 +188,7 @@ class ServerSettingsController extends OGameController
         $settingsService->set('lifeforms_build_speed_multiplier', (string)($formesDeVie['lifeforms_build_speed_multiplier'] ?? 1));
         $settingsService->set('lifeforms_research_speed_multiplier', (string)($formesDeVie['lifeforms_research_speed_multiplier'] ?? 1));
         $settingsService->set('lifeforms_discovery_speed_multiplier', (string)($formesDeVie['lifeforms_discovery_speed_multiplier'] ?? 1));
+        $settingsService->set('lifeform_population_loss_rate', (string)(int)($morts['lifeform_population_loss_rate'] ?? 25));
         $administrateur = auth()->id();
         $lifeformRevisions->recordIfChanged((int)Date::now()->timestamp, is_int($administrateur) ? $administrateur : null, 'administration');
         $settingsService->set('newbie_protection_enabled', request('newbie_protection_enabled', 0));

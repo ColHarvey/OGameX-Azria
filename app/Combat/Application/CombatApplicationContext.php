@@ -140,6 +140,16 @@ interface CombatApplicationContext
     public function lifeformProtectedShareOf(PlanetService $target): float|null;
 
     /**
+     * La part de la population exposee qui meurt quand l attaque reussit, en pour cent (0 a 100).
+     *
+     * Un reglage d administration, choix d equilibrage Azria (journal §155.20). Le chemin instantane le lit a
+     * l arrivee ; le combat durable le fige a la cloture **depuis la photographie d ouverture** : un taux change
+     * pendant le ralliement ne touche pas une bataille deja engagee, et un document ancien garde la regle sous
+     * laquelle il a ete ecrit — jamais le taux courant.
+     */
+    public function lifeformPopulationLossPercent(): int;
+
+    /**
      * Le dernier motif qu'une faction hostile a inscrit contre ce joueur.
      *
      * Il ne change pas ce qui est debite, mais il change ce que le rapport **raconte**. Le

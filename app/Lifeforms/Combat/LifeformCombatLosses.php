@@ -2,6 +2,7 @@
 
 namespace OGame\Lifeforms\Combat;
 
+use InvalidArgumentException;
 use OGame\Combat\Exceptions\UnknownAdmissionHistory;
 use OGame\GameMessages\LifeformPopulationLossReport;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
@@ -17,15 +18,19 @@ use OGame\Services\PlanetService;
 /**
  * Les morts de la population quand une attaque reussit — decision de Keven, 15 septembre 2026 (journal §155.6).
  *
- * **La regle** : quand l attaquant l emporte (la garnison est detruite et il lui reste des vaisseaux), la
- * population non protegee perit. Restent : la part que le Bouclier planetaire protege (3 % par niveau,
- * plafond 90 %, `DemographicRules` regle 8), jamais moins que l abri de cent habitants, jamais plus que la
- * population. Les paliers se derivent de la population : ils tombent avec elle.
+ * **La regle** : quand l attaquant l emporte (la garnison est detruite et il lui reste des vaisseaux), une
+ * part de la population **exposee** perit. Exposee : ce que le Bouclier planetaire ne protege pas (3 % par
+ * niveau, plafond 90 %, `DemographicRules` regle 8). La part qui meurt est **le taux de morts**, un reglage
+ * d administration — 25 % au depart, choix d equilibrage Azria arrete par Keven le 16 septembre 2026 sur la
+ * recommandation de Codex (journal §155.20) ; zero desactive les morts, cent est la regle dure des tranches
+ * precedentes. Restent toujours l abri de cent habitants, jamais plus que la population. Les paliers se
+ * derivent de la population : ils tombent avec elle.
  *
- * **La part protegee vient du contexte d application**, pas du corps vivant : un combat durable la
- * photographie a l ouverture, une attaque instantanee la lit a l arrivee. La population, elle, est celle de
- * l instant d application, avancee par l horloge demographique — les habitants nes pendant le ralliement
- * sont la quand la bataille s applique.
+ * **La part protegee et le taux viennent du contexte d application**, pas du corps vivant ni du reglage du
+ * moment : un combat durable les photographie a l ouverture — changer le reglage ne touche aucune bataille
+ * deja ouverte —, une attaque instantanee les lit a l arrivee. La population, elle, est celle de l instant
+ * d application, avancee par l horloge demographique — les habitants nes pendant le ralliement sont la quand
+ * la bataille s applique.
  */
 final class LifeformCombatLosses
 {
@@ -37,10 +42,16 @@ final class LifeformCombatLosses
     }
 
     /**
+     * @param int $lossPercent la part de la population exposee qui meurt, de 0 a 100 — figee par le contexte
      * @return int les habitants perdus ; zero quand rien ne s applique
      */
-    public function applyIfAttackerWon(BattleResult $result, PlanetService $planet, float|null $protectedShare, int $instant): int
+    public function applyIfAttackerWon(BattleResult $result, PlanetService $planet, float|null $protectedShare, int $lossPercent, int $instant): int
     {
+        // **Une porte de confiance ne ramene pas en silence** : un taux hors de 0 a 100 ne vient d aucun reglage
+        // accepte ni d aucune photographie relue, et il est refuse avant tout effet.
+        if ($lossPercent < 0 || $lossPercent > 100) {
+            throw new InvalidArgumentException('Le taux de morts de population vaut ' . $lossPercent . ' : il tient entre 0 et 100.');
+        }
         if ($protectedShare === null || !$planet->isPlanet()) {
             return 0;
         }
@@ -81,9 +92,13 @@ final class LifeformCombatLosses
             );
         }
 
+        // **Les morts** : le taux, sur la population exposee — ce que le Bouclier ne protege pas —, jamais en
+        // dessous de l abri. A cent, tout ce qui n est pas protege meurt ; a zero, personne, et rien n est ecrit.
         $population = $avant->population;
         $part = max(0.0, min(1.0, $protectedShare));
-        $survivants = min($population, max((float)DemographicRules::SHELTERED, $population * $part));
+        $exposee = max(0.0, $population - $population * $part);
+        $morts = floor($exposee * $lossPercent / 100);
+        $survivants = min($population, max((float)DemographicRules::SHELTERED, $population - $morts));
         $pertes = (int)floor($population - $survivants);
         if ($pertes <= 0) {
             return 0;
@@ -112,6 +127,7 @@ final class LifeformCombatLosses
                 'lost' => $pertes,
                 'survivors' => (int)floor($survivants),
                 'protected_percent' => (int)round($part * 100),
+                'loss_percent' => $lossPercent,
             ]);
         }
 

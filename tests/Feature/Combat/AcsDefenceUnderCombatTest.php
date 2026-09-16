@@ -320,6 +320,11 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
                     return false;
                 }
 
+                public function lifeformPopulationLossPercent(): int
+                {
+                    return 100;
+                }
+
                 public function isGeneralForFleet(int $fleetMissionId, PlayerService $owner): bool
                 {
                     return false;

@@ -69,9 +69,20 @@ final class OpeningStateRecorder
 {
     /**
      * La version 8 ajoute au defenseur ses bonus de formes de vie (unites, population protegee, lune,
-     * debris, epaves) ; un document de version 7 se relit sans eux (journal §155.6).
+     * debris, epaves) ; un document de version 7 se relit sans eux (journal §155.6). La version 9 ajoute
+     * **les regles de formes de vie sous lesquelles la bataille s appliquera** (`lifeform_rules`) : le taux de
+     * morts de population, un reglage d administration lu ici, dans la transaction d ouverture — ce que
+     * l administration changera pendant le ralliement ne touchera que les combats ouverts apres (journal
+     * §155.20). Un document de version 8 ou anterieure garde la regle de son epoque, cent, jamais le taux
+     * courant.
      */
-    public const int VERSION = 8;
+    public const int VERSION = 9;
+
+    /**
+     * La regle des documents anterieurs a la version 9 : la totalite de la population exposee meurt (§155.6).
+     * Aux versions 7 et moins, aucun corps ne portait de forme de vie : la valeur ne s applique jamais.
+     */
+    public const int LOSS_PERCENT_BEFORE_VERSION_9 = 100;
 
     public function __construct(
         private CausalEventReader $reader = new CausalEventReader(),
@@ -135,6 +146,10 @@ final class OpeningStateRecorder
             // transaction d'ouverture : ce que l'administration changera pendant le ralliement ne
             // touchera que les combats ouverts apres.
             'universe' => PhotographedUniverse::fromLiveSettings(resolve(SettingsService::class))->toFrozenFacts(),
+            // **Les regles de formes de vie sous lesquelles cette bataille s appliquera** : le taux de morts, lu
+            // une fois ici. Il n est pas un reglage que le moteur lit (`PhotographedUniverse` les nomme un par
+            // un) : il decide de ce que le reglement ecrit, et il vit a cote.
+            'lifeform_rules' => ['population_loss_percent' => resolve(SettingsService::class)->lifeformPopulationLossPercent()],
             'provenance' => $recus,
         ];
 
@@ -280,6 +295,33 @@ final class OpeningStateRecorder
         }
 
         return PhotographedUniverse::fromFrozenFacts($faits);
+    }
+
+    /**
+     * Le taux de morts de population sous lequel ce combat s est ouvert, de 0 a 100.
+     *
+     * Un document de version 8 ou anterieure ne le porte pas, et **on ne retombe pas sur le reglage vivant** :
+     * il rend la regle de son epoque, cent — la seule sous laquelle il a pu etre ecrit. Un document de version 9
+     * qui ne le porterait pas, ou hors de ses bornes, est refuse.
+     */
+    public static function openingLifeformLossPercentOf(CombatInstance $combat): int
+    {
+        $document = self::documentOf($combat);
+        $version = $document['version'] ?? null;
+        if (!is_int($version) || $version < 9) {
+            return self::LOSS_PERCENT_BEFORE_VERSION_9;
+        }
+
+        $regles = $document['lifeform_rules'] ?? null;
+        if (!is_array($regles)) {
+            throw new MissingOpeningState('L etat d ouverture du combat ' . $combat->id . ' (version ' . $version . ') ne porte pas les regles de formes de vie.');
+        }
+        $taux = FrozenFact::int($regles, 'population_loss_percent');
+        if ($taux < 0 || $taux > 100) {
+            throw new MissingOpeningState('L etat d ouverture du combat ' . $combat->id . ' porte un taux de morts de ' . $taux . ' : un taux tient entre 0 et 100.');
+        }
+
+        return $taux;
     }
 
     /**

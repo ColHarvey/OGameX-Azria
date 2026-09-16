@@ -44,6 +44,48 @@ class FrozenCombatApplicationContextTest extends UnitTestCase
         $this->assertNull($contexte->lifeformProtectedShareOf($this->createMock(PlanetService::class)));
     }
 
+    /**
+     * **Le taux de morts appartient au schema 7 ; un schema 6 garde la regle de son epoque** (journal §155.20) :
+     * cent — tout ce qui n est pas protege meurt —, jamais le taux courant, et il se reecrit au schema 6 sans la
+     * clef qu il n a jamais portee.
+     */
+    public function testASchemaSixDocumentKeepsItsOwnRuleAndNeverTheCurrentRate(): void
+    {
+        $document = $this->aSnapshot();
+        $document['schema'] = FrozenCombatApplicationContext::SCHEMA_WITHOUT_LOSS_PERCENT;
+        unset($document['lifeform']['loss_percent']);
+
+        $contexte = FrozenCombatApplicationContext::fromStorage($document);
+        $this->assertSame(100, $contexte->lifeformPopulationLossPercent(), 'La regle sous laquelle il a ete ecrit.');
+        $this->assertSame(0.3, $contexte->lifeformProtectedShareOf($this->createMock(PlanetService::class)));
+        $this->assertSame($document, $contexte->toStorage(), 'Reecrit au schema 6, sans taux.');
+
+        $document = $this->aSnapshot();
+        $document['schema'] = FrozenCombatApplicationContext::SCHEMA_WITHOUT_LOSS_PERCENT;
+        $this->assertRefused($document, 'loss_percent', 'Un schema 6 qui porterait un taux serait une reparation a la main.');
+    }
+
+    public function testTheLossRateIsReadBackAndRefusedWhenMissingNotAnIntegerOrOutOfRange(): void
+    {
+        $this->assertSame(25, FrozenCombatApplicationContext::fromStorage($this->aSnapshot())->lifeformPopulationLossPercent());
+
+        foreach ([0, 100] as $borne) {
+            $document = $this->aSnapshot();
+            $document['lifeform']['loss_percent'] = $borne;
+            $this->assertSame($borne, FrozenCombatApplicationContext::fromStorage($document)->lifeformPopulationLossPercent(), 'Les bornes sont admises.');
+        }
+
+        $document = $this->aSnapshot();
+        unset($document['lifeform']['loss_percent']);
+        $this->assertRefused($document, 'loss_percent');
+
+        foreach ([-1, 101, '25', 25.0, null, true] as $mauvais) {
+            $document = $this->aSnapshot();
+            $document['lifeform']['loss_percent'] = $mauvais;
+            $this->assertRefused($document, 'lifeform.loss_percent');
+        }
+    }
+
     public function testTheProtectedShareIsReadBackAndTheCorpsIsNotReread(): void
     {
         $contexte = FrozenCombatApplicationContext::fromStorage($this->aSnapshot());
@@ -402,11 +444,11 @@ class FrozenCombatApplicationContextTest extends UnitTestCase
         return $joueur;
     }
 
-    private function assertRefused(mixed $document, string $attendu): void
+    private function assertRefused(mixed $document, string $attendu, string $message = ''): void
     {
         try {
             FrozenCombatApplicationContext::fromStorage($document);
-            $this->fail('A corrupted application snapshot was read (expected a refusal naming « ' . $attendu . ' »).');
+            $this->fail('A corrupted application snapshot was read (expected a refusal naming « ' . $attendu . ' »). ' . $message);
         } catch (CorruptedFrozenApplicationContext $refus) {
             $this->assertStringContainsString($attendu, $refus->defect, 'The refusal does not name what is wrong.');
         }
@@ -506,8 +548,9 @@ class FrozenCombatApplicationContextTest extends UnitTestCase
             // La classe General de chaque attaquante, lue sur son propre combattant : deux flottes d un meme
             // joueur peuvent etre entrees sous deux classes.
             'attacker_generals' => [21 => false, 22 => true],
-            // La part de population protegee par les formes de vie, photographiee a l ouverture et figee a la cloture.
-            'lifeform' => ['protected_share' => 0.3],
+            // La part de population protegee par les formes de vie et le taux de morts, photographies a l ouverture
+            // et figes a la cloture.
+            'lifeform' => ['protected_share' => 0.3, 'loss_percent' => 25],
             'wreck_field' => [
                 'min_resources_loss' => 150_000,
                 'min_fleet_percentage' => 5,

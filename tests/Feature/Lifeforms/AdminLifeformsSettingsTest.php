@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\DB;
 use OGame\Models\Lifeforms\LifeformRuleRevision;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
+use UnexpectedValueException;
 
 /**
  * La section « Formes de vie » des reglages du serveur : l interrupteur, les coefficients valides au
@@ -52,7 +53,49 @@ final class AdminLifeformsSettingsTest extends AccountTestCase
         $reponse->assertSee('name="lifeforms_build_speed_multiplier"', false);
         $reponse->assertSee('name="lifeforms_research_speed_multiplier"', false);
         $reponse->assertSee('name="lifeforms_discovery_speed_multiplier"', false);
+        $reponse->assertSee('name="lifeform_population_loss_rate"', false);
+        $reponse->assertSee('value="25" size="5" maxlength="3" name="lifeform_population_loss_rate"', false);
         $reponse->assertSee(__('t_ingame.admin.section_lifeforms'));
+    }
+
+    /**
+     * **L ampleur des morts de population est un reglage d administration** (decision de Keven, 16 septembre 2026,
+     * journal §155.20) : la part de la population non protegee qui meurt, 25 % au depart, 0 % pour desactiver, rien
+     * hors de 0 a 100. Un refus n ecrit rien.
+     */
+    public function testThePopulationLossRateIsWrittenBetweenZeroAndOneHundredAndRefusedOutside(): void
+    {
+        $reglages = resolve(SettingsService::class);
+        $this->assertSame(25, $reglages->lifeformPopulationLossPercent(), 'Sans reglage ecrit : 25 %, le choix d equilibrage Azria.');
+
+        foreach (['40' => 40, '0' => 0, '100' => 100] as $envoye => $attendu) {
+            $this->post(route('admin.serversettings.update'), $this->formulaire(['lifeform_population_loss_rate' => $envoye]))->assertRedirect(route('admin.serversettings.index'));
+            $this->assertSame($attendu, $reglages->lifeformPopulationLossPercent());
+        }
+
+        $avant = DB::table('settings')->pluck('value', 'key')->all();
+        foreach (['-1', '101', 'abc', '12.5'] as $mauvais) {
+            $reponse = $this->from(route('admin.serversettings.index'))->post(route('admin.serversettings.update'), $this->formulaire([
+                'lifeforms_enabled' => '1',
+                'lifeform_population_loss_rate' => $mauvais,
+            ]));
+            $reponse->assertRedirect(route('admin.serversettings.index'));
+            $reponse->assertSessionHasErrors('lifeform_population_loss_rate');
+        }
+        $this->assertSame($avant, DB::table('settings')->pluck('value', 'key')->all(), 'Un refus ne change aucun reglage, pas meme l interrupteur.');
+        $this->assertSame(100, $reglages->lifeformPopulationLossPercent(), 'Le dernier taux accepte est reste.');
+
+        // Une valeur qui n est pas passee par la porte — une base corrigee a la main — est refusee a la lecture, pas
+        // transtypee : « abc » ne vaut pas zero, « 150 » ne vaut pas cent.
+        foreach (['abc', '150', '-5', '12.5', ''] as $corrompu) {
+            $reglages->set('lifeform_population_loss_rate', $corrompu);
+            try {
+                $reglages->lifeformPopulationLossPercent();
+                $this->fail('Un reglage corrompu « ' . $corrompu . ' » a ete lu.');
+            } catch (UnexpectedValueException $refus) {
+                $this->assertStringContainsString('lifeform_population_loss_rate', $refus->getMessage());
+            }
+        }
     }
 
     public function testSavingOpensTheSwitchSetsTheMultipliersAndRecordsOneRevisionUntilSomethingChanges(): void
@@ -133,6 +176,7 @@ final class AdminLifeformsSettingsTest extends AccountTestCase
             $courant['lifeforms_build_speed_multiplier'],
             $courant['lifeforms_research_speed_multiplier'],
             $courant['lifeforms_discovery_speed_multiplier'],
+            $courant['lifeform_population_loss_rate'],
         );
 
         return array_merge($courant, $champs);

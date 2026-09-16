@@ -112,6 +112,7 @@ final class LifeformCombatTest extends FleetDispatchTestCase
     {
         resolve(SettingsService::class)->set('persistent_combat_enabled', '0');
         resolve(SettingsService::class)->set('lifeforms_enabled', '0');
+        resolve(SettingsService::class)->set('lifeform_population_loss_rate', '25');
         if ($this->planetesPeuplees !== []) {
             LifeformQueue::query()->whereIn('planet_id', $this->planetesPeuplees)->delete();
             LifeformSlotChange::query()->whereIn('planet_id', $this->planetesPeuplees)->delete();
@@ -128,6 +129,8 @@ final class LifeformCombatTest extends FleetDispatchTestCase
     public function testASuccessfulInstantAttackKillsTheUnprotectedPopulationAndReportsIt(): void
     {
         resolve(SettingsService::class)->set('lifeforms_enabled', '1');
+        // Ecrit sous la regle dure : tout ce qui n est pas protege meurt (journal §155.6) ; le taux est un reglage depuis §155.20.
+        resolve(SettingsService::class)->set('lifeform_population_loss_rate', '100');
         $this->basicSetup();
         $this->planetAddUnit('light_fighter', 200);
 
@@ -162,6 +165,8 @@ final class LifeformCombatTest extends FleetDispatchTestCase
     public function testTheDeathsOfABattleCloseTheSlotWithoutClearingTheMemoryByHand(): void
     {
         resolve(SettingsService::class)->set('lifeforms_enabled', '1');
+        // Ecrit sous la regle dure : tout ce qui n est pas protege meurt (journal §155.6) ; le taux est un reglage depuis §155.20.
+        resolve(SettingsService::class)->set('lifeform_population_loss_rate', '100');
         $this->basicSetup();
         $this->planetAddUnit('light_fighter', 200);
 
@@ -200,6 +205,135 @@ final class LifeformCombatTest extends FleetDispatchTestCase
         $verite = resolve(LifeformBonusResolver::class)->forPlayer($proprietaire)->fraction($effet);
         $this->assertLessThan($avant, $verite, 'Cent habitants ne tiennent aucun emplacement.');
         $this->assertSame($verite, $apres, 'La memoire a suivi les morts : la lecture d apres la bataille est celle des survivants, sans invalidation a la main.');
+    }
+
+    /**
+     * **Au taux de depart, un quart de la population exposee meurt** (decision de Keven, 16 septembre 2026 : 25 %,
+     * choix d equilibrage Azria — sur un million d habitants sans protection, environ 250 000 morts, 750 000
+     * survivants ; journal §155.20). Chemin instantane, par l entree reelle, sans rien poser : le reglage vaut 25
+     * quand rien ne l a ecrit.
+     */
+    public function testAtTheDefaultRateAQuarterOfTheExposedPopulationDies(): void
+    {
+        resolve(SettingsService::class)->set('lifeforms_enabled', '1');
+        $this->assertSame(25, resolve(SettingsService::class)->lifeformPopulationLossPercent(), 'Premisse : le taux de depart.');
+        $this->basicSetup();
+        $this->planetAddUnit('light_fighter', 200);
+
+        $unites = new UnitCollection();
+        $unites->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 200);
+        $cible = $this->sendMissionToOtherPlayerCleanPlanet($unites, new Resources(0, 0, 0, 0));
+        [$proprietaire, , $habitants] = $this->populate($cible->getPlanetId(), 1000000.0);
+        $this->assertGreaterThanOrEqual(1000000.0, $habitants, 'Premisse : au moins un million d habitants, sans Bouclier.');
+        $messagesAvant = Message::query()->where('user_id', $proprietaire)->where('key', 'lifeform_population_loss')->count();
+
+        $service = resolve(FleetMissionService::class, ['player' => $this->planetService->getPlayer()]);
+        $duree = $service->calculateFleetMissionDuration($this->planetService, $cible->getPlanetCoordinates(), $unites, resolve(AttackMission::class));
+        $this->travel($duree + 1)->seconds();
+        $this->reloadApplication();
+        $this->get('/overview')->assertStatus(200);
+
+        $morts = (int)floor($habitants * 0.25);
+        $population = (float)LifeformPlanet::query()->where('planet_id', $cible->getPlanetId())->value('population');
+        $this->assertEqualsWithDelta($habitants - $morts, $population, 0.001, 'Un quart de la population exposee est mort ; trois quarts survivent.');
+        $this->assertGreaterThan(700000.0, $population, 'Des attaques repetees restent dangereuses, mais une seule ne vide pas la planete.');
+
+        $message = Message::query()->where('user_id', $proprietaire)->where('key', 'lifeform_population_loss')->orderByDesc('id')->first();
+        $this->assertNotNull($message);
+        $this->assertSame($messagesAvant + 1, Message::query()->where('user_id', $proprietaire)->where('key', 'lifeform_population_loss')->count());
+        $this->assertSame($morts, (int)$message->params['lost']);
+        $this->assertSame((int)floor($habitants - $morts), (int)$message->params['survivors']);
+        $this->assertSame(0, (int)$message->params['protected_percent']);
+        $this->assertSame(25, (int)$message->params['loss_percent']);
+    }
+
+    /**
+     * **A zero, les morts sont desactivees** : une attaque reussie ne touche ni la population, ni l ancre, et
+     * n envoie aucun message — la voie de desactivation explicite que Keven demandait (journal §155.20).
+     */
+    public function testAtZeroASuccessfulAttackKillsNobodyAndSaysNothing(): void
+    {
+        resolve(SettingsService::class)->set('lifeforms_enabled', '1');
+        resolve(SettingsService::class)->set('lifeform_population_loss_rate', '0');
+        $this->basicSetup();
+        $this->planetAddUnit('light_fighter', 200);
+
+        $unites = new UnitCollection();
+        $unites->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 200);
+        $cible = $this->sendMissionToOtherPlayerCleanPlanet($unites, new Resources(0, 0, 0, 0));
+        [$proprietaire, , $habitants] = $this->populate($cible->getPlanetId(), 1000.0);
+        $ancreAvant = LifeformPlanet::query()->where('planet_id', $cible->getPlanetId())->first(['previous_population', 'previous_calculated_at']);
+        $this->assertNotNull($ancreAvant);
+        $messagesAvant = Message::query()->where('user_id', $proprietaire)->where('key', 'lifeform_population_loss')->count();
+
+        $service = resolve(FleetMissionService::class, ['player' => $this->planetService->getPlayer()]);
+        $duree = $service->calculateFleetMissionDuration($this->planetService, $cible->getPlanetCoordinates(), $unites, resolve(AttackMission::class));
+        $this->travel($duree + 1)->seconds();
+        $this->reloadApplication();
+        $this->get('/overview')->assertStatus(200);
+        $this->assertSame($duree + 1, (int)Date::now()->timestamp - (int)$ancreAvant->previous_calculated_at, 'Premisse : l attaque est arrivee et le monde a avance.');
+
+        $this->assertEqualsWithDelta($habitants, (float)LifeformPlanet::query()->where('planet_id', $cible->getPlanetId())->value('population'), 0.001, 'Personne ne meurt : la population stationnaire est intacte.');
+        $this->assertSame($messagesAvant, Message::query()->where('user_id', $proprietaire)->where('key', 'lifeform_population_loss')->count(), 'Aucun message de pertes civiles.');
+        $ancreApres = LifeformPlanet::query()->where('planet_id', $cible->getPlanetId())->first(['previous_population', 'previous_calculated_at']);
+        $this->assertNotNull($ancreApres);
+        $this->assertEqualsWithDelta((float)$ancreAvant->previous_population, (float)$ancreApres->previous_population, 0.001, 'L ancre n a pas ete ramenee : aucune mort a porter.');
+    }
+
+    /**
+     * **Le taux est fige a l ouverture du combat** : change pendant le ralliement, il ne touche pas la bataille
+     * deja ouverte — ni sa cloture, ni son reglement (exigence de Keven, journal §155.20). L ouverture le
+     * photographie (version 9), la cloture le fige (schema 7), le reglement l applique.
+     */
+    public function testTheLossRateIsFrozenAtTheOpeningAndAChangeDoesNotTouchAnOpenedBattle(): void
+    {
+        resolve(SettingsService::class)->set('lifeforms_enabled', '1');
+        resolve(SettingsService::class)->set('lifeform_population_loss_rate', '25');
+        [$ouvreuse, $cibleId, $ouverture] = $this->aRallyAboutToOpen(0, [], null, function (): void {
+            resolve(LifeformInstallationService::class)->chooseSpecies($this->currentUserId, Species::Mechas, (int)Date::now()->timestamp);
+            $this->sustainLifeformPopulation($this->currentPlanetId, Species::Mechas, 900000.0, (int)Date::now()->timestamp);
+        });
+        [$proprietaire, , $habitants] = $this->populate($cibleId, 400000.0);
+        $messagesAvant = Message::query()->where('user_id', $proprietaire)->where('key', 'lifeform_population_loss')->count();
+
+        $combat = $this->theOpeningProcessedAt($ouvreuse, $ouverture);
+        $etat = $combat->opening_state;
+        $this->assertIsArray($etat);
+        $this->assertSame(OpeningStateRecorder::VERSION, (int)$etat['version']);
+        $this->assertSame(25, OpeningStateRecorder::openingLifeformLossPercentOf($combat), 'L ouverture photographie le taux du moment.');
+        $barriere = CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->firstOrFail();
+        $echeanceDuRalliement = (int)$barriere->owned_through_effect_at;
+        $this->assertSame(CombatState::Rallying, $combat->status, 'Premisse : la fenetre est ouverte, rien n est clos.');
+
+        // L administration passe le taux a cent pendant le ralliement : cette bataille n en sait rien.
+        resolve(SettingsService::class)->set('lifeform_population_loss_rate', '100');
+        $this->assertSame(100, resolve(SettingsService::class)->lifeformPopulationLossPercent(), 'Premisse : le reglage vivant a change.');
+
+        // La cloture d abord (l echeance du ralliement), puis le reglement a l echeance de la bataille.
+        $this->travelTo(Date::createFromTimestamp($echeanceDuRalliement + 120));
+        $avance = (new PersistentCombatAdvancer())->advance($echeanceDuRalliement + 120);
+        $this->assertArrayNotHasKey($combat->id, $avance->failures, 'La cloture a echoue : ' . json_encode($avance->failures[$combat->id] ?? null));
+        $combat->refresh();
+        $this->assertNotNull($combat->ends_at, 'Premisse : la bataille est datee.');
+        // Le reglement date son heure de l horloge du serveur, pas de l appelant : le banc y va.
+        $this->travelTo(Date::createFromTimestamp(max($echeanceDuRalliement + 120, (int)$combat->ends_at + 1)));
+        $avance = (new PersistentCombatAdvancer())->advance((int)Date::now()->timestamp);
+        $this->assertArrayNotHasKey($combat->id, $avance->failures, 'Le reglement a echoue : ' . json_encode($avance->failures[$combat->id] ?? null));
+        $combat->refresh();
+        $this->assertSame(CombatState::Resolved, $combat->status, 'Premisse : la bataille est reglee.');
+        $photographie = $combat->frozen_settings;
+        $this->assertIsArray($photographie);
+        $contexte = FrozenCombatApplicationContext::fromStorage($photographie);
+        $this->assertSame(FrozenCombatApplicationContext::SCHEMA, (int)$photographie['schema']);
+        $this->assertSame(25, $contexte->lifeformPopulationLossPercent(), 'La cloture gele le taux de l ouverture, pas celui du moment.');
+
+        $morts = (int)floor($habitants * 0.25);
+        $this->assertEqualsWithDelta($habitants - $morts, (float)LifeformPlanet::query()->where('planet_id', $cibleId)->value('population'), 0.001, 'Un quart est mort, pas la totalite : le taux change apres l ouverture n a pas touche la bataille.');
+        $message = Message::query()->where('user_id', $proprietaire)->where('key', 'lifeform_population_loss')->orderByDesc('id')->first();
+        $this->assertNotNull($message);
+        $this->assertSame($messagesAvant + 1, Message::query()->where('user_id', $proprietaire)->where('key', 'lifeform_population_loss')->count());
+        $this->assertSame($morts, (int)$message->params['lost']);
+        $this->assertSame(25, (int)$message->params['loss_percent']);
     }
 
     public function testAFailedAttackSparesThePopulation(): void
@@ -286,6 +420,8 @@ final class LifeformCombatTest extends FleetDispatchTestCase
     public function testADurableCombatKillsFromTheFrozenShareAndFiresWithThePhotographedBonuses(): void
     {
         resolve(SettingsService::class)->set('lifeforms_enabled', '1');
+        // Ecrit sous la regle dure : tout ce qui n est pas protege meurt (journal §155.6) ; le taux est un reglage depuis §155.20.
+        resolve(SettingsService::class)->set('lifeform_population_loss_rate', '100');
         for ($i = 0; $i < 6; $i++) {
             $this->createAndLoginUser();
         }
@@ -383,6 +519,8 @@ final class LifeformCombatTest extends FleetDispatchTestCase
     public function testAWorkDoesNotStartOnAPopulationThatShouldHaveDiedBeforeIt(): void
     {
         resolve(SettingsService::class)->set('lifeforms_enabled', '1');
+        // Ecrit sous la regle dure : tout ce qui n est pas protege meurt (journal §155.6) ; le taux est un reglage depuis §155.20.
+        resolve(SettingsService::class)->set('lifeform_population_loss_rate', '100');
         for ($i = 0; $i < 6; $i++) {
             $this->createAndLoginUser();
         }
@@ -485,6 +623,8 @@ final class LifeformCombatTest extends FleetDispatchTestCase
     public function testBeforeTheClosureTheClockStopsAtTheRallyDeadline(): void
     {
         resolve(SettingsService::class)->set('lifeforms_enabled', '1');
+        // Ecrit sous la regle dure : tout ce qui n est pas protege meurt (journal §155.6) ; le taux est un reglage depuis §155.20.
+        resolve(SettingsService::class)->set('lifeform_population_loss_rate', '100');
         [$ouvreuse, $cibleId, $ouverture] = $this->aRallyAboutToOpen(0, [], null, function (): void {
             resolve(LifeformInstallationService::class)->chooseSpecies($this->currentUserId, Species::Mechas, (int)Date::now()->timestamp);
             $this->sustainLifeformPopulation($this->currentPlanetId, Species::Mechas, 900000.0, (int)Date::now()->timestamp);

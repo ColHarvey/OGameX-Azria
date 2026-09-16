@@ -3,6 +3,7 @@
 namespace Tests\Feature\Lifeforms;
 
 use Illuminate\Support\Facades\Date;
+use InvalidArgumentException;
 use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Services\PhotographedDefender;
 use OGame\Combat\Support\FrozenLifeformCombatBonuses;
@@ -161,6 +162,74 @@ final class LifeformCombatEngineTest extends AccountTestCase
     /**
      * **Les habitants non proteges perissent quand l attaque reussit, et seulement alors** (decision de Keven).
      */
+    /**
+     * **L ampleur des morts est un taux sur la population exposee** (decision de Keven, 16 septembre 2026,
+     * journal §155.20) : ce que le Bouclier ne protege pas est expose, le taux en tue une part, l abri de cent
+     * habitants reste garanti, zero desactive les morts, cent est la regle dure d avant. Hors de 0 a 100, refus.
+     */
+    public function testTheLossRateScalesTheExposedPopulationAndZeroDisablesTheDeaths(): void
+    {
+        $this->choose(Species::Humans);
+        $instantDeLaPose = (int)Date::now()->timestamp;
+        LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->update([
+            'population' => 10000.0, 'food' => 0.0, 'calculated_at' => $instantDeLaPose,
+            'previous_population' => 10000.0, 'previous_food' => 0.0, 'previous_calculated_at' => $instantDeLaPose,
+        ]);
+        LifeformBonusCache::invalidate();
+        $pertes = resolve(LifeformCombatLosses::class);
+        $instant = (int)Date::now()->timestamp;
+        $victoire = new BattleResult();
+        $victoire->attackerUnitsResult = new UnitCollection();
+        $victoire->attackerUnitsResult->addUnit(ObjectService::getShipObjectByMachineName('light_fighter'), 10);
+        $victoire->defenderUnitsResult = new UnitCollection();
+        $population = fn (): float => (float)LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->value('population');
+        $messages = fn (): int => Message::query()->where('user_id', $this->currentUserId)->where('key', 'lifeform_population_loss')->count();
+
+        // 30 % proteges, 25 % de morts : 7 000 exposes, 1 750 morts, 8 250 survivants.
+        $avant = $messages();
+        $this->assertSame(1750, $pertes->applyIfAttackerWon($victoire, $this->planetService, 0.3, 25, $instant), '25 % des 7 000 habitants exposes.');
+        $this->assertEqualsWithDelta(8250.0, $population(), 0.001);
+        $message = Message::query()->where('user_id', $this->currentUserId)->where('key', 'lifeform_population_loss')->orderByDesc('id')->first();
+        $this->assertNotNull($message);
+        $this->assertSame($avant + 1, $messages());
+        $this->assertSame(1750, (int)$message->params['lost']);
+        $this->assertSame(8250, (int)$message->params['survivors']);
+        $this->assertSame(30, (int)$message->params['protected_percent']);
+        $this->assertSame(25, (int)$message->params['loss_percent'], 'Le message dit le taux applique.');
+
+        // Zero : personne ne meurt, aucun message, l ancre n est pas touchee.
+        $ancreAvant = LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->first(['previous_population', 'previous_calculated_at']);
+        $this->assertNotNull($ancreAvant);
+        $this->assertSame(0, $pertes->applyIfAttackerWon($victoire, $this->planetService, 0.0, 0, $instant), 'A zero, les morts sont desactivees.');
+        $this->assertEqualsWithDelta(8250.0, $population(), 0.001);
+        $this->assertSame($avant + 1, $messages(), 'Pas de message quand personne ne meurt.');
+        $ancreApres = LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->first(['previous_population', 'previous_calculated_at']);
+        $this->assertNotNull($ancreApres);
+        $this->assertSame($ancreAvant->toArray(), $ancreApres->toArray(), 'A zero, rien n est ecrit : l ancre reste celle d avant.');
+
+        // Cent, sans Bouclier : la regle dure — tout ce qui n est pas a l abri meurt.
+        $this->assertSame(8150, $pertes->applyIfAttackerWon($victoire, $this->planetService, 0.0, 100, $instant));
+        $this->assertEqualsWithDelta(100.0, $population(), 0.001);
+
+        // L abri tient quel que soit le taux : 120 habitants exposes a 25 % feraient 90 survivants, l abri en garde 100.
+        LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->update(['population' => 120.0, 'previous_population' => 120.0]);
+        LifeformBonusCache::invalidate();
+        $this->assertSame(20, $pertes->applyIfAttackerWon($victoire, $this->planetService, 0.0, 25, $instant), 'L abri de cent habitants est preserve.');
+        $this->assertEqualsWithDelta(100.0, $population(), 0.001);
+
+        // Hors de 0 a 100 : refus, rien d ecrit.
+        LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->update(['population' => 10000.0, 'previous_population' => 10000.0]);
+        foreach ([-1, 101] as $horsBornes) {
+            try {
+                $pertes->applyIfAttackerWon($victoire, $this->planetService, 0.0, $horsBornes, $instant);
+                $this->fail('Un taux de ' . $horsBornes . ' % a ete accepte.');
+            } catch (InvalidArgumentException $refus) {
+                $this->assertStringContainsString('0 et 100', $refus->getMessage());
+            }
+        }
+        $this->assertEqualsWithDelta(10000.0, $population(), 0.001, 'Un taux refuse n ecrit rien.');
+    }
+
     public function testTheUnprotectedPopulationDiesOnlyWhenTheAttackerWins(): void
     {
         $this->choose(Species::Humans);
@@ -181,8 +250,8 @@ final class LifeformCombatEngineTest extends AccountTestCase
         $victoire->attackerUnitsResult->addUnit($chasseur, 10);
         $victoire->defenderUnitsResult = new UnitCollection();
 
-        $this->assertSame(0, $pertes->applyIfAttackerWon($victoire, $this->planetService, null, $instant), 'Sans part protegee connue (null), rien ne s applique.');
-        $this->assertSame(7000, $pertes->applyIfAttackerWon($victoire, $this->planetService, 0.3, $instant), '30 % proteges : 7 000 des 10 000 perissent.');
+        $this->assertSame(0, $pertes->applyIfAttackerWon($victoire, $this->planetService, null, 100, $instant), 'Sans part protegee connue (null), rien ne s applique.');
+        $this->assertSame(7000, $pertes->applyIfAttackerWon($victoire, $this->planetService, 0.3, 100, $instant), '30 % proteges : 7 000 des 10 000 perissent.');
         $this->assertEqualsWithDelta(3000.0, (float)LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->value('population'), 0.001);
         $message = Message::query()->where('user_id', $this->currentUserId)->where('key', 'lifeform_population_loss')->orderByDesc('id')->first();
         $this->assertNotNull($message);
@@ -190,12 +259,12 @@ final class LifeformCombatEngineTest extends AccountTestCase
         $this->assertSame(30, (int)$message->params['protected_percent']);
 
         // Chaque victoire tue la part non protegee de la population du moment : 70 % des 3 000 restants.
-        $this->assertSame(2100, $pertes->applyIfAttackerWon($victoire, $this->planetService, 0.3, $instant));
+        $this->assertSame(2100, $pertes->applyIfAttackerWon($victoire, $this->planetService, 0.3, 100, $instant));
         $this->assertEqualsWithDelta(900.0, (float)LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->value('population'), 0.001);
 
         // L abri : cent habitants survivent toujours, meme sans Bouclier.
-        $this->assertSame(800, $pertes->applyIfAttackerWon($victoire, $this->planetService, 0.0, $instant));
-        $this->assertSame(0, $pertes->applyIfAttackerWon($victoire, $this->planetService, 0.0, $instant), 'A l abri, plus personne ne meurt.');
+        $this->assertSame(800, $pertes->applyIfAttackerWon($victoire, $this->planetService, 0.0, 100, $instant));
+        $this->assertSame(0, $pertes->applyIfAttackerWon($victoire, $this->planetService, 0.0, 100, $instant), 'A l abri, plus personne ne meurt.');
         $this->assertEqualsWithDelta(100.0, (float)LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->value('population'), 0.001);
 
         // Une defense qui tient, ou un attaquant aneanti : personne ne meurt.
@@ -205,11 +274,11 @@ final class LifeformCombatEngineTest extends AccountTestCase
         $tenue->attackerUnitsResult->addUnit($chasseur, 10);
         $tenue->defenderUnitsResult = new UnitCollection();
         $tenue->defenderUnitsResult->addUnit(ObjectService::getUnitObjectByMachineName('rocket_launcher'), 1);
-        $this->assertSame(0, $pertes->applyIfAttackerWon($tenue, $this->planetService, 0.3, $instant));
+        $this->assertSame(0, $pertes->applyIfAttackerWon($tenue, $this->planetService, 0.3, 100, $instant));
         $aneanti = new BattleResult();
         $aneanti->attackerUnitsResult = new UnitCollection();
         $aneanti->defenderUnitsResult = new UnitCollection();
-        $this->assertSame(0, $pertes->applyIfAttackerWon($aneanti, $this->planetService, 0.3, $instant), 'Les deux camps aneantis : pas une victoire.');
+        $this->assertSame(0, $pertes->applyIfAttackerWon($aneanti, $this->planetService, 0.3, 100, $instant), 'Les deux camps aneantis : pas une victoire.');
         $this->assertEqualsWithDelta(10000.0, (float)LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->value('population'), 0.001);
     }
 

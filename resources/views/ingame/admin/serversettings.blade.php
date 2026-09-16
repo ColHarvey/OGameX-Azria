@@ -545,6 +545,13 @@
                                 <div class="smallFont">{{ __('t_ingame.admin.lifeforms_discovery_speed_multiplier_desc') }}</div>
                             </div>
                             <div class="fieldwrapper">
+                                <label class="styled textBeefy">{{ __('t_ingame.admin.lifeform_population_loss_rate') }}</label>
+                                <div class="thefield">
+                                    <input type="text" pattern="[0-9]*" class="textInput w50 textCenter textBeefy" value="{{ $lifeform_population_loss_rate }}" size="5" maxlength="3" name="lifeform_population_loss_rate">
+                                </div>
+                                <div class="smallFont">{{ __('t_ingame.admin.lifeform_population_loss_rate_desc') }}</div>
+                            </div>
+                            <div class="fieldwrapper">
                                 <div class="smallFont">{{ __('t_ingame.admin.lifeforms_revisions_desc', ['count' => $lifeforms_revision_count]) }}</div>
                             </div>
                             {{-- La protection des debutants : son propre interrupteur, desarme par defaut. --}}

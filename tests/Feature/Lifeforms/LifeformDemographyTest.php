@@ -287,7 +287,7 @@ final class LifeformDemographyTest extends AccountTestCase
         $victoire->attackerUnitsResult->addUnit($chasseur, 10);
         $victoire->defenderUnitsResult = new UnitCollection();
         $mort = $debut + 600;
-        $perdus = resolve(LifeformCombatLosses::class)->applyIfAttackerWon($victoire, $this->planetService, 0.0, $mort);
+        $perdus = resolve(LifeformCombatLosses::class)->applyIfAttackerWon($victoire, $this->planetService, 0.0, 100, $mort);
         $this->assertGreaterThan(0, $perdus, 'Premisse : l attaque a bien tue des habitants.');
 
         // **Les morts sont morts a l instant de la bataille, et les survivants recroissent depuis la.** La
@@ -347,7 +347,7 @@ final class LifeformDemographyTest extends AccountTestCase
         LifeformPlanet::query()->where('planet_id', $planetId)->update($depart);
         LifeformBonusCache::invalidate();
         $this->travelTo(Date::createFromTimestamp($debut));
-        $pertesALHeure = $pertes->applyIfAttackerWon($victoire, $this->planetService, 0.5, $debut);
+        $pertesALHeure = $pertes->applyIfAttackerWon($victoire, $this->planetService, 0.5, 100, $debut);
         $this->assertSame(150000, $pertesALHeure, 'Premisse : la moitie perit a l heure.');
         $this->travelTo(Date::createFromTimestamp($debut + 600));
         $this->planetService->update();
@@ -359,7 +359,7 @@ final class LifeformDemographyTest extends AccountTestCase
         $this->travelTo(Date::createFromTimestamp($debut + 600));
         $this->planetService->update();
         $this->assertSame($debut + 600, (int)LifeformPlanet::query()->where('planet_id', $planetId)->value('calculated_at'), 'Premisse : l horloge a depasse la bataille.');
-        $pertesEnRetard = $pertes->applyIfAttackerWon($victoire, $this->planetService, 0.5, $debut);
+        $pertesEnRetard = $pertes->applyIfAttackerWon($victoire, $this->planetService, 0.5, 100, $debut);
         $enRetard = $this->planetPhotograph($planetId, $debut + 300);
 
         $this->assertSame($pertesALHeure, $pertesEnRetard, 'Les pertes annoncees ne sont pas celles de l instant de la bataille.');
@@ -402,7 +402,7 @@ final class LifeformDemographyTest extends AccountTestCase
         $victoire->defenderUnitsResult = new UnitCollection();
 
         try {
-            resolve(LifeformCombatLosses::class)->applyIfAttackerWon($victoire, $this->planetService, 0.5, $debut);
+            resolve(LifeformCombatLosses::class)->applyIfAttackerWon($victoire, $this->planetService, 0.5, 100, $debut);
             $this->fail('Un reglement tardif hors fenetre a decide au lieu de se suspendre.');
         } catch (UnknownAdmissionHistory $anomalie) {
             $this->assertStringContainsString((string)$planetId, $anomalie->getMessage());

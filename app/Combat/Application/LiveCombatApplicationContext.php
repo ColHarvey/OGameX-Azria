@@ -132,4 +132,9 @@ final class LiveCombatApplicationContext implements CombatApplicationContext
     {
         return resolve(LifeformCombatPhotographer::class)->ofBody($target)->protectedShare;
     }
+
+    public function lifeformPopulationLossPercent(): int
+    {
+        return $this->settings->lifeformPopulationLossPercent();
+    }
 }

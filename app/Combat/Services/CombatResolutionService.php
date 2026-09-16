@@ -298,7 +298,7 @@ class CombatResolutionService
         // part protegee est celle que le contexte porte — photographiee a l ouverture pour un combat durable, lue a
         // l arrivee sur le chemin instantane —, l abri de cent habitants toujours garde. Le chemin est unique pour
         // les deux moteurs et les deux genres de combat.
-        $this->lifeformLosses->applyIfAttackerWon($battleResult, $defenderPlanet, $context->lifeformProtectedShareOf($defenderPlanet), $context->applicationInstant());
+        $this->lifeformLosses->applyIfAttackerWon($battleResult, $defenderPlanet, $context->lifeformProtectedShareOf($defenderPlanet), $context->lifeformPopulationLossPercent(), $context->applicationInstant());
 
         // **La collecte des Faucheurs attaquants, attribuee flotte par flotte avant tout retour.** Elle
         // etait calculee apres la boucle, pour l'initiateur seul, et retiree du champ sans entrer dans

@@ -3,6 +3,7 @@
 namespace OGame\Combat\Application;
 
 use Closure;
+use InvalidArgumentException;
 use OGame\Combat\Exceptions\CorruptedFrozenApplicationContext;
 use OGame\Combat\Services\CombatRoster;
 use OGame\Combat\Support\ResourceBoundary;
@@ -59,7 +60,9 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
 {
     private const array KEYS = ['schema', 'applied_at', 'players', 'space_docks', 'held_fleet_cargo', 'return_durations', 'attacker_generals', 'lifeform', 'wreck_field', 'npc_narrative'];
 
-    private const array LIFEFORM_KEYS = ['protected_share'];
+    private const array LIFEFORM_KEYS = ['protected_share', 'loss_percent'];
+
+    private const array LIFEFORM_KEYS_WITHOUT_LOSS_PERCENT = ['protected_share'];
 
     private const array NARRATIVE_KEYS = ['motive', 'variation', 'variations'];
 
@@ -81,7 +84,20 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
      * combat avec deux classes differentes voyait le champ d epaves de l une decide par la classe de
      * l autre.
      */
-    public const int SCHEMA = 6;
+    public const int SCHEMA = 7;
+
+    /**
+     * **Le schema 7 porte le taux de morts de population** (`lifeform.loss_percent`, 0 a 100), photographie a
+     * l ouverture et fige ici (journal §155.20). Un document au schema 6 a ete clos sous la regle dure — tout ce
+     * qui n est pas protege meurt — : il se relit avec **cent**, la regle sous laquelle il a ete ecrit, jamais
+     * avec le taux courant, et se reecrit au schema 6 sans la clef qu il n a jamais portee.
+     */
+    public const int SCHEMA_WITHOUT_LOSS_PERCENT = 6;
+
+    /**
+     * **La regle des documents anterieurs au schema 7** : la totalite de la population exposee meurt.
+     */
+    public const int LOSS_PERCENT_BEFORE_SCHEMA_7 = 100;
 
     /**
      * **Le schema 6 porte la part de population que les formes de vie protegent** (`lifeform.protected_share`,
@@ -109,6 +125,7 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
     private function __construct(
         private int $schema,
         private float|null $lifeformProtectedShare,
+        private int $lifeformLossPercent,
         private int $appliedAt,
         private array $players,
         private array $spaceDocks,
@@ -140,8 +157,11 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
      *                                        calculee a la cloture sur les survivants ; zero pour une
      *                                        flotte detruite, qui n'a pas de retour.
      */
-    public static function photograph(CombatRoster $roster, CombatApplicationContext $live, int $narrativeVariations, int $appliedAt, array $returnDurations = [], float|null $lifeformProtectedShare = null): self
+    public static function photograph(CombatRoster $roster, CombatApplicationContext $live, int $narrativeVariations, int $appliedAt, array $returnDurations = [], float|null $lifeformProtectedShare = null, int $lifeformLossPercent = self::LOSS_PERCENT_BEFORE_SCHEMA_7): self
     {
+        if ($lifeformLossPercent < 0 || $lifeformLossPercent > 100) {
+            throw new InvalidArgumentException('Le taux de morts de population a photographier vaut ' . $lifeformLossPercent . ' : il tient entre 0 et 100.');
+        }
         $joueurs = [];
 
         foreach (self::playersOf($roster) as $identifiant => $joueur) {
@@ -203,6 +223,7 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
         return new self(
             self::SCHEMA,
             $lifeformProtectedShare,
+            $lifeformLossPercent,
             $appliedAt,
             $joueurs,
             $chantiers,
@@ -240,8 +261,11 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
         }
 
         // Un document relu au schema 5 se reecrit au schema 5 : lui ajouter une part protegee ecrirait ce que sa
-        // cloture n a jamais photographie.
+        // cloture n a jamais photographie. Un document relu au schema 6 se reecrit au schema 6, sans le taux qu il
+        // n a jamais porte : sa regle est celle de son epoque, cent, et elle se lit dans son schema.
         if ($this->schema === self::SCHEMA) {
+            $document['lifeform'] = ['protected_share' => $this->lifeformProtectedShare, 'loss_percent' => $this->lifeformLossPercent];
+        } elseif ($this->schema === self::SCHEMA_WITHOUT_LOSS_PERCENT) {
             $document['lifeform'] = ['protected_share' => $this->lifeformProtectedShare];
         }
 
@@ -270,8 +294,8 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
 
         $schema = self::int($stored, 'schema', 'contexte');
 
-        if ($schema !== self::SCHEMA && $schema !== self::SCHEMA_WITHOUT_LIFEFORM && $schema !== self::SCHEMA_WITHOUT_FLEET_GENERALS) {
-            throw new CorruptedFrozenApplicationContext('le schema ' . $schema . ' est inconnu, seuls les schemas ' . self::SCHEMA_WITHOUT_FLEET_GENERALS . ', ' . self::SCHEMA_WITHOUT_LIFEFORM . ' et ' . self::SCHEMA . ' se relisent', $stored);
+        if ($schema !== self::SCHEMA && $schema !== self::SCHEMA_WITHOUT_LOSS_PERCENT && $schema !== self::SCHEMA_WITHOUT_LIFEFORM && $schema !== self::SCHEMA_WITHOUT_FLEET_GENERALS) {
+            throw new CorruptedFrozenApplicationContext('le schema ' . $schema . ' est inconnu, seuls les schemas ' . self::SCHEMA_WITHOUT_FLEET_GENERALS . ', ' . self::SCHEMA_WITHOUT_LIFEFORM . ', ' . self::SCHEMA_WITHOUT_LOSS_PERCENT . ' et ' . self::SCHEMA . ' se relisent', $stored);
         }
 
         // **La classe par flotte appartient au schema 5, et a lui seul.** Absente d un schema 5, elle ferait
@@ -297,14 +321,26 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
             throw new CorruptedFrozenApplicationContext('le schema ' . $schema . ' ne porte pas de classe General par flotte', $stored);
         }
 
-        // **La part protegee appartient au schema 6, et a lui seul.** Absente d un schema 6, la population d un corps
-        // a forme de vie serait epargnee sans decision ; presente dans un schema anterieur, elle serait une reparation
-        // a la main. Nulle, elle dit que le corps ne porte aucune forme de vie.
+        // **La part protegee appartient aux schemas 6 et 7.** Absente, la population d un corps a forme de vie
+        // serait epargnee sans decision ; presente dans un schema anterieur, elle serait une reparation a la main.
+        // Nulle, elle dit que le corps ne porte aucune forme de vie. **Le taux de morts appartient au schema 7, et
+        // a lui seul** : un schema 6 se relit avec la regle de son epoque — cent —, jamais avec le taux courant.
         $partProtegee = null;
+        $tauxDeMorts = self::LOSS_PERCENT_BEFORE_SCHEMA_7;
 
-        if ($schema === self::SCHEMA) {
+        if ($schema === self::SCHEMA || $schema === self::SCHEMA_WITHOUT_LOSS_PERCENT) {
             $formesDeVie = self::structure($stored, 'lifeform', 'contexte');
-            self::refuseUnknownKeys($formesDeVie, self::LIFEFORM_KEYS, 'contexte.lifeform');
+            self::refuseUnknownKeys($formesDeVie, $schema === self::SCHEMA ? self::LIFEFORM_KEYS : self::LIFEFORM_KEYS_WITHOUT_LOSS_PERCENT, 'contexte.lifeform');
+            if ($schema === self::SCHEMA) {
+                $taux = self::present($formesDeVie, 'loss_percent', 'contexte.lifeform');
+                if (!is_int($taux)) {
+                    throw new CorruptedFrozenApplicationContext('« contexte.lifeform.loss_percent » est un ' . get_debug_type($taux) . ' et non un entier', $stored);
+                }
+                if ($taux < 0 || $taux > 100) {
+                    throw new CorruptedFrozenApplicationContext('« contexte.lifeform.loss_percent » vaut ' . $taux . ' : un taux tient entre 0 et 100', $stored);
+                }
+                $tauxDeMorts = $taux;
+            }
             $partProtegee = self::present($formesDeVie, 'protected_share', 'contexte.lifeform');
 
             if ($partProtegee !== null) {
@@ -470,6 +506,7 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
         return new self(
             $schema,
             $partProtegee,
+            $tauxDeMorts,
             $instant,
             $joueurs,
             $chantiers,
@@ -666,6 +703,12 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
     {
         // Photographiee a la cloture depuis l ouverture ; le corps passe en argument n est pas relu.
         return $this->lifeformProtectedShare;
+    }
+
+    public function lifeformPopulationLossPercent(): int
+    {
+        // Photographie a la cloture depuis l ouverture ; un schema 6 rend la regle de son epoque, cent.
+        return $this->lifeformLossPercent;
     }
 
     public function isGeneral(PlayerService $player): bool

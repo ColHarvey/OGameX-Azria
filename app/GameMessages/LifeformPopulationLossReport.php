@@ -13,7 +13,7 @@ class LifeformPopulationLossReport extends GameMessage
     protected function initialize(): void
     {
         $this->key = 'lifeform_population_loss';
-        $this->params = ['coordinates', 'lost', 'survivors', 'protected_percent'];
+        $this->params = ['coordinates', 'lost', 'survivors', 'protected_percent', 'loss_percent'];
         $this->tab = 'fleets';
         $this->subtab = 'combat_reports';
     }
