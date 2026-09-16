@@ -16,6 +16,7 @@
             </header>
 
             <div id="technologies">
+                @include('ingame.lifeforms.partials.held', ['held' => $held ?? null])
                 @if (!empty($lifeforms_error))
                     <div class="fieldwrapper"><div class="smallFont overmark" role="alert">{{ $lifeforms_error }}</div></div>
                 @endif

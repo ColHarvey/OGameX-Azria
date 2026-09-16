@@ -5,6 +5,7 @@ namespace Tests\Feature\Lifeforms;
 use Illuminate\Support\Facades\Date;
 use OGame\Lifeforms\Catalogue\LifeformCatalogue;
 use OGame\Lifeforms\Catalogue\LifeformKind;
+use OGame\Lifeforms\Combat\LifeformCombatHold;
 use OGame\Lifeforms\Demography\DemographicClock;
 use OGame\Lifeforms\Demography\DemographicState;
 use OGame\Lifeforms\Demography\LifeformDemography;
@@ -238,6 +239,7 @@ final class LifeformPlanetUpdaterTest extends AccountTestCase
             resolve(LifeformQueueService::class),
             resolve(LifeformRuleRevisions::class),
             resolve(LifeformDemography::class),
+            resolve(LifeformCombatHold::class),
             1
         );
         $borne->update($this->planetService, $debut + 3606);

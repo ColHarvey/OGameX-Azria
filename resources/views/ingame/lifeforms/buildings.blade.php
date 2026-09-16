@@ -18,6 +18,7 @@
                 <div id="technologydetails_content"></div>
             </div>
             <div id="technologies">
+                @include('ingame.lifeforms.partials.held', ['held' => $held ?? null])
                 <h3>{{ __('t_lifeforms_ui.buildings.section') }}</h3>
                 @if (!empty($figures))
                     <p class="smallFont lifeform-figures" style="margin: 0 0 8px 0;">

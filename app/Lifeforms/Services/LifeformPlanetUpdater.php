@@ -2,12 +2,11 @@
 
 namespace OGame\Lifeforms\Services;
 
-use OGame\Combat\Enums\CombatState;
+use OGame\Lifeforms\Combat\LifeformCombatHold;
 use OGame\Lifeforms\Demography\DemographicState;
 use OGame\Lifeforms\Demography\LifeformDemography;
 use OGame\Lifeforms\Rules\LifeformRuleRevisions;
 use OGame\Lifeforms\Species;
-use OGame\Models\CombatInstance;
 use OGame\Models\Lifeforms\LifeformPlanet;
 use OGame\Models\Lifeforms\LifeformQueue;
 use OGame\Services\PlanetService;
@@ -35,6 +34,7 @@ final class LifeformPlanetUpdater
         private readonly LifeformQueueService $queue,
         private readonly LifeformRuleRevisions $revisions,
         private readonly LifeformDemography $demography,
+        private readonly LifeformCombatHold $hold,
         /**
          * La couture qui rend la borne temoignable.
          *
@@ -60,7 +60,8 @@ final class LifeformPlanetUpdater
         // et deux joueurs obtiendraient des possibilites differentes selon la vitesse du serveur. La
         // bataille est donc une coupe que l horloge ne franchit pas : ce qui suit son echeance attend le
         // reglement, et demarre alors sur les survivants, a sa vraie echeance (relance de Codex, §155.15).
-        $now = min($now, $this->heldAt($planet->getPlanetId(), $now));
+        // La lecture vit dans `LifeformCombatHold`, que les pages du joueur lisent aussi.
+        $now = min($now, $this->hold->until($planet->getPlanetId(), $now) ?? $now);
         if ($now <= (int)$ligne->calculated_at) {
             return;
         }
@@ -121,32 +122,6 @@ final class LifeformPlanetUpdater
         $ligne->food = $etat->food;
         $ligne->calculated_at = $etat->calculatedAt;
         $ligne->save();
-    }
-
-    /**
-     * L instant au-dela duquel ce passage n a pas le droit d aller : l echeance de la plus ancienne bataille
-     * datee et non reglee sur ce corps, ou `$now` s il n y en a pas.
-     *
-     * Une bataille est datee des sa cloture (`ends_at`, etat `Active`) et reglee a cette echeance par
-     * l avanceur ; entre les deux, l etat `Resolving` est celui de la transaction qui regle. Ces deux etats
-     * verrouillent deja le corps (`CombatState::locksTargetBody()`) : l horloge des formes de vie s y arrete
-     * de meme. Un combat mis de cote apres cinq echecs tient donc aussi la planete, jusqu a ce que
-     * l exploitation le reprenne ou l annule — c est coherent avec la barriere, et c est dit.
-     *
-     * `min()` est ecrit par prudence : la barriere du corps (`target_body_id` unique) interdit deux batailles
-     * datees a la fois sur un meme corps, donc la plus ancienne et la plus recente ne peuvent jamais differer.
-     * La mutation `min` → `max` est **equivalente par construction de la base**, et declaree telle.
-     */
-    private function heldAt(int $planetId, int $now): int
-    {
-        $echeance = CombatInstance::query()
-            ->where('target_planet_id', $planetId)
-            ->whereIn('status', [CombatState::Active->value, CombatState::Resolving->value])
-            ->whereNotNull('ends_at')
-            ->where('ends_at', '<=', $now)
-            ->min('ends_at');
-
-        return is_numeric($echeance) ? (int)$echeance : $now;
     }
 
     /**

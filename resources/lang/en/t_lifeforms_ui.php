@@ -152,6 +152,11 @@ return [
         'consumed_in' => 'Consumed in',
         'no_species' => 'No lifeform',
     ],
+    'held' => [
+        'title' => 'Development temporarily suspended',
+        'body' => 'A combat targeting this planet is awaiting resolution. Population, food and lifeform works will resume once the battle is settled, with no time lost.',
+        'since' => 'Frozen since:',
+    ],
     'welcome' => [
         'title' => 'Lifeforms are coming to Azria',
         'text' => 'Settle a civilisation on your planets, grow its population and unlock its technologies at your own pace.',

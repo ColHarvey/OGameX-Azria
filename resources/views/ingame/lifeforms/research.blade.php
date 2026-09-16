@@ -14,6 +14,7 @@
                     style="background-image:url({{ asset('img/headers/resources/' . $header_filename) }}.jpg);">
                 <h2>{{ __('t_lifeforms_ui.research.title') }} - {{ $species_name }}</h2>
             </header>
+            @include('ingame.lifeforms.partials.held', ['held' => $held ?? null])
             @if (!empty($lifeforms_error))
                 <div id="additionalinformation"><p class="overmark" role="alert">{{ $lifeforms_error }}</p></div>
             @endif

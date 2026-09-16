@@ -298,6 +298,7 @@
                 @if (!empty($lifeforms['species']) && !empty($lifeform_queues))
                 {{-- Formes de vie (journal §155) : la file des batiments de la planete courante. --}}
                 <div id="productionboxlfbuildingcomponent" class="productionboxlfbuilding injectedComponent parent overview">
+                    @include('ingame.lifeforms.partials.held', ['held' => $lifeforms['held'] ?? null])
                     @include('ingame.lifeforms.partials.queue', ['queue_active' => $lifeform_queues['buildings_active'], 'queue_waiting' => $lifeform_queues['buildings_queue'], 'kind' => 'building'])
                 </div>
                 @endif

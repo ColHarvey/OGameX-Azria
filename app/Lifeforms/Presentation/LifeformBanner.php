@@ -2,7 +2,9 @@
 
 namespace OGame\Lifeforms\Presentation;
 
+use Illuminate\Support\Facades\Date;
 use OGame\Facades\AppUtil;
+use OGame\Lifeforms\Combat\LifeformCombatHold;
 use OGame\Lifeforms\Demography\PlanetLifeformProfile;
 use OGame\Lifeforms\Rules\LifeformRuleRevisions;
 use OGame\Lifeforms\Services\LifeformInstallationService;
@@ -21,6 +23,7 @@ use OGame\Services\SettingsService;
  * Lecture seule. L etat de la planete a ete avance par `PlanetService::update()` au chargement de
  * la page ; ici on le presente, on ne le calcule pas.
  *
+ * @phpstan-type Suspension array{since: int, since_formatted: string}
  * @phpstan-type Chiffres array{population: float, population_formatted: string, living_space: int, living_space_formatted: string, tier2: float, tier2_formatted: string, tier3: float, tier3_formatted: string, satisfied: float, satisfied_formatted: string, hungry: float, hungry_formatted: string, growth_hour: float, growth_hour_formatted: string, sheltered: float, sheltered_formatted: string, food: float, food_formatted: string, food_storage: float, food_storage_formatted: string, food_production_hour: float, food_production_hour_formatted: string, food_consumption_hour: float, food_consumption_hour_formatted: string, food_balance_hour: float, food_balance_hour_formatted: string, food_runs_out_in: int|null, food_runs_out_formatted: string, full: bool}
  */
 final class LifeformBanner
@@ -30,11 +33,12 @@ final class LifeformBanner
         private readonly LifeformInstallationService $installation,
         private readonly LifeformLevels $levels,
         private readonly LifeformRuleRevisions $revisions,
+        private readonly LifeformCombatHold $hold,
     ) {
     }
 
     /**
-     * @return array{enabled: bool, species: Species|null, species_name: string|null, planet: Chiffres|null, welcome: bool}
+     * @return array{enabled: bool, species: Species|null, species_name: string|null, planet: Chiffres|null, welcome: bool, held: Suspension|null}
      */
     public function for(PlayerService $player, PlanetService|null $planet): array
     {
@@ -53,7 +57,24 @@ final class LifeformBanner
             'species_name' => is_string($nom) ? $nom : null,
             'planet' => $chiffres,
             'welcome' => $ouvert && $espece === null && !$this->welcomeDismissed($player->getId()),
+            'held' => $espece !== null && $planet !== null && $planet->isPlanet() ? $this->heldOn($planet) : null,
         ];
+    }
+
+    /**
+     * La bataille qui tient la planete, si une bataille non reglee la tient — ce que le joueur doit lire
+     * plutot qu une page qui semble defectueuse (journal §155.16). Meme lecture que `LifeformPlanetUpdater`.
+     *
+     * @return Suspension|null
+     */
+    public function heldOn(PlanetService $planet): array|null
+    {
+        $depuis = $this->hold->until($planet->getPlanetId(), (int)Date::now()->timestamp);
+        if ($depuis === null) {
+            return null;
+        }
+
+        return ['since' => $depuis, 'since_formatted' => date('d.m.Y H:i', $depuis)];
     }
 
     public function welcomeDismissed(int $userId): bool

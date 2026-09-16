@@ -152,6 +152,11 @@ return [
         'consumed_in' => 'Épuisée dans',
         'no_species' => 'Aucune forme de vie',
     ],
+    'held' => [
+        'title' => 'Développement temporairement suspendu',
+        'body' => 'Un combat visant cette planète attend sa résolution. La population, la nourriture et les travaux de formes de vie reprendront à l’issue de la bataille, sans perte de temps.',
+        'since' => 'Figé depuis :',
+    ],
     'welcome' => [
         'title' => 'Les formes de vie arrivent sur Azria',
         'text' => 'Installez une civilisation sur vos planètes, développez sa population et débloquez ses technologies à votre rythme.',

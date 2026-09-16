@@ -193,6 +193,7 @@ final class LifeformsController extends OGameController
             'queue_waiting' => $enAttente,
             'figures' => $this->banner->planetFigures($planet, $espece),
             'is_in_vacation_mode' => $vacances,
+            'held' => $this->banner->heldOn($planet),
         ]);
     }
 
@@ -394,6 +395,7 @@ final class LifeformsController extends OGameController
         }
 
         return view('ingame.lifeforms.research', [
+            'held' => $this->banner->heldOn($planet),
             'species' => $espece,
             'species_name' => __('t_lifeforms.species.' . $espece->machineName()),
             'planet_name' => $planet->getPlanetName(),
@@ -671,6 +673,7 @@ final class LifeformsController extends OGameController
         }
 
         return view('ingame.lifeforms.discoveries', [
+            'held' => $this->banner->heldOn($planet),
             'planet_name' => $planet->getPlanetName(),
             'header_filename' => $this->headerOf($planet),
             'species_name' => __('t_lifeforms.species.' . $espece->machineName()),
