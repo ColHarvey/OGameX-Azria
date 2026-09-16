@@ -70,7 +70,11 @@ final class LifeformQueueService
         return DB::transaction(function () use ($planet, $objet, $now): LifeformQueue {
             Planet::query()->whereKey($planet->getPlanetId())->lockForUpdate()->first();
             $etat = $this->stateOf($planet);
-            if (Species::from($etat->species) !== $objet->species) {
+            // **L espece ne restreint que les batiments.** Une technologie d une autre espece decouverte se prend
+            // dans un emplacement, eventuellement contre des artefacts, et se recherche ici : la refuser apres
+            // le choix laissait le joueur payer sans pouvoir lancer (relance de Codex, journal §155.18). Ce qui
+            // la retient est l emplacement, juge par `researchable()`.
+            if ($objet->kind === LifeformKind::Building && Species::from($etat->species) !== $objet->species) {
                 throw new LifeformRefused(LifeformRefused::WRONG_SPECIES, $objet->machineName);
             }
 
@@ -279,10 +283,15 @@ final class LifeformQueueService
     public function requirementsMet(LifeformObject $object, array $buildingLevels): bool
     {
         if ($object->kind === LifeformKind::Technology) {
-            // L arbre technologique s ouvre avec le centre de recherche de l espece (index 3).
-            $centre = LifeformCatalogue::buildingWithEffect($object->species, LifeformEffect::LF_RESEARCH_TIME_REDUCTION);
+            // L arbre technologique s ouvre avec le centre de recherche **de la planete** (index 3 de son espece),
+            // lu sur les batiments qu elle porte : une technologie d une autre espece n a pas d autre centre.
+            foreach ($buildingLevels as $id => $niveau) {
+                if ($niveau >= 1 && LifeformCatalogue::has((int)$id) && LifeformCatalogue::byId((int)$id)->bonus(LifeformEffect::LF_RESEARCH_TIME_REDUCTION) !== null) {
+                    return true;
+                }
+            }
 
-            return $centre !== null && ($buildingLevels[$centre->id] ?? 0) >= 1;
+            return false;
         }
         foreach ($object->requirements as $exige => $niveau) {
             if (($buildingLevels[$exige] ?? 0) < $niveau) {

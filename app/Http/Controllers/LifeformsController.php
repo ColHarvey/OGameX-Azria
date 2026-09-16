@@ -483,7 +483,7 @@ final class LifeformsController extends OGameController
         $enCours = $enFile->firstWhere('status', 'running');
         $cible = $niveau + $enFile->where('object_id', $objet->id)->count() + 1;
         $devis = LifeformQuote::for($objet, $cible, $niveaux, 0, 0, $vitesses);
-        $multiplicateur = $this->research->technologyBonusMultiplier($player->getId(), $espece, $niveaux);
+        $multiplicateur = $this->research->technologyBonusMultiplier($player->getId(), $objet->species, $niveaux);
         $ouvert = $this->research->isUnlocked((int)$emplacement->slot, $etat, $profil, $reduction);
 
         $effets = [];

@@ -154,6 +154,54 @@ final class LifeformCombatTest extends FleetDispatchTestCase
         $this->assertStringContainsString('[coordinates]' . $cible->getPlanetCoordinates()->asString() . '[/coordinates]', (string)$message->params['coordinates']);
     }
 
+    /**
+     * **Les morts d une bataille ferment l emplacement sans que personne ne vide la memoire** (relance de
+     * Codex, journal §155.18). Les bonus calcules avant la bataille restaient en memoire apres elle — une
+     * technologie comptait encore sur une population qui n existait plus.
+     */
+    public function testTheDeathsOfABattleCloseTheSlotWithoutClearingTheMemoryByHand(): void
+    {
+        resolve(SettingsService::class)->set('lifeforms_enabled', '1');
+        $this->basicSetup();
+        $this->planetAddUnit('light_fighter', 200);
+
+        $unites = new UnitCollection();
+        $unites->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 200);
+        $cible = $this->sendMissionToOtherPlayerCleanPlanet($unites, new Resources(0, 0, 0, 0));
+        // Assez d habitants pour les six emplacements du palier 1 (le sixieme en exige un million).
+        [$proprietaire, $espece, $habitants] = $this->populate($cible->getPlanetId(), 1100000.0);
+        $this->assertGreaterThanOrEqual(1100000.0, $habitants);
+        // La premiere technologie du palier 1 dont l effet est servi par le resolveur, dans son propre emplacement.
+        $technologie = null;
+        foreach (LifeformCatalogue::technologiesOf($espece) as $candidate) {
+            if ($candidate->tier() === 1 && $candidate->bonuses[0]->target === null && in_array($candidate->bonuses[0]->code, LifeformBonusResolver::APPLIED, true)) {
+                $technologie = $candidate;
+                break;
+            }
+        }
+        $this->assertNotNull($technologie, 'Chaque espece a une technologie de palier 1 dont l effet est servi.');
+        $this->placeLifeformSlot($cible->getPlanetId(), $technologie->index, $technologie->id, (int)Date::now()->timestamp);
+        resolve(LifeformLevels::class)->setLevel($cible->getPlanetId(), LifeformKind::Technology, $technologie->id, 4);
+        $effet = $technologie->bonuses[0]->code;
+
+        $avant = resolve(LifeformBonusResolver::class)->forPlayer($proprietaire)->fraction($effet);
+        $this->assertGreaterThan(0.0, $avant, 'Emplacement ouvert : la technologie compte, et la memoire la garde.');
+
+        $service = resolve(FleetMissionService::class, ['player' => $this->planetService->getPlayer()]);
+        $duree = $service->calculateFleetMissionDuration($this->planetService, $cible->getPlanetCoordinates(), $unites, resolve(AttackMission::class));
+        $this->travel($duree + 1)->seconds();
+        $this->reloadApplication();
+        $this->get('/overview')->assertStatus(200);
+        $this->assertEqualsWithDelta((float)DemographicRules::SHELTERED, (float)LifeformPlanet::query()->where('planet_id', $cible->getPlanetId())->value('population'), 0.001, 'Seul l abri survit.');
+
+        // Sans rien vider a la main : la lecture qui suit la bataille est celle des survivants.
+        $apres = resolve(LifeformBonusResolver::class)->forPlayer($proprietaire)->fraction($effet);
+        LifeformBonusCache::invalidate();
+        $verite = resolve(LifeformBonusResolver::class)->forPlayer($proprietaire)->fraction($effet);
+        $this->assertLessThan($avant, $verite, 'Cent habitants ne tiennent aucun emplacement.');
+        $this->assertSame($verite, $apres, 'La memoire a suivi les morts : la lecture d apres la bataille est celle des survivants, sans invalidation a la main.');
+    }
+
     public function testAFailedAttackSparesThePopulation(): void
     {
         resolve(SettingsService::class)->set('lifeforms_enabled', '1');

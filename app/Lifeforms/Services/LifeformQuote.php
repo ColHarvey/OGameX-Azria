@@ -11,8 +11,13 @@ use OGame\Lifeforms\Rules\LifeformSpeeds;
 use OGame\Models\Resources;
 
 /**
- * Le devis d un niveau : prix, energie et duree, avec les reductions que les batiments de l espece
- * accordent sur la planete (Megalithe pour les batiments, centre de recherche pour les technologies).
+ * Le devis d un niveau : prix, energie et duree, avec les reductions que les batiments **de la planete**
+ * accordent (Megalithe pour les batiments, centre de recherche pour les technologies).
+ *
+ * Les reductions se lisent sur les batiments que la planete porte, jamais sur ceux de l espece de l objet :
+ * une technologie d une autre espece, prise contre des artefacts, est reduite par le centre de recherche
+ * de la planete qui la recherche — il n existe pas d autre centre sur cette planete (relance de Codex,
+ * journal §155.18).
  *
  * Un devis est **calcule au serveur, au moment du depart du travail**, et fige dans la file. Il ne
  * lit que le catalogue, les niveaux de la planete, ses accelerateurs classiques et les vitesses en
@@ -46,7 +51,8 @@ final readonly class LifeformQuote
     }
 
     /**
-     * Les fractions de reduction (cout, duree) que la planete accorde a cet objet.
+     * Les fractions de reduction (cout, duree) que la planete accorde a cet objet — lues sur les batiments
+     * qu elle porte, quelle que soit l espece de l objet.
      *
      * @param array<int, int> $buildingLevels
      * @return array{0: float, 1: float}
@@ -58,9 +64,12 @@ final readonly class LifeformQuote
             : [LifeformEffect::LF_RESEARCH_COST_REDUCTION, LifeformEffect::LF_RESEARCH_TIME_REDUCTION];
         $cout = 0.0;
         $temps = 0.0;
-        foreach (LifeformCatalogue::buildingsOf($object->species) as $batiment) {
-            $niveau = $buildingLevels[$batiment->id] ?? 0;
-            if ($niveau <= 0) {
+        foreach ($buildingLevels as $id => $niveau) {
+            if ($niveau <= 0 || !LifeformCatalogue::has((int)$id)) {
+                continue;
+            }
+            $batiment = LifeformCatalogue::byId((int)$id);
+            if ($batiment->kind !== LifeformKind::Building) {
                 continue;
             }
             $bonusCout = $batiment->bonus($codeCout);

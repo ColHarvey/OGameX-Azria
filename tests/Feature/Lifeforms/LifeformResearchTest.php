@@ -3,12 +3,19 @@
 namespace Tests\Feature\Lifeforms;
 
 use Illuminate\Support\Facades\Date;
+use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
+use OGame\Lifeforms\Catalogue\LifeformCatalogue;
+use OGame\Lifeforms\Catalogue\LifeformEffect;
+use OGame\Lifeforms\Catalogue\LifeformFormulas;
 use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\LifeformRefused;
+use OGame\Lifeforms\Research\LifeformExperience;
 use OGame\Lifeforms\Research\LifeformSlotHistory;
+use OGame\Lifeforms\Rules\LifeformRuleRevisions;
 use OGame\Lifeforms\Services\LifeformInstallationService;
 use OGame\Lifeforms\Services\LifeformLevels;
 use OGame\Lifeforms\Services\LifeformQueueService;
+use OGame\Lifeforms\Services\LifeformQuote;
 use OGame\Lifeforms\Services\LifeformResearchService;
 use OGame\Lifeforms\Species;
 use OGame\Models\Lifeforms\LifeformAccount;
@@ -23,6 +30,7 @@ use OGame\Models\Planet;
 use OGame\Models\Resources;
 use Tests\AccountTestCase;
 use Tests\Support\PinsSettings;
+use Tests\Support\PlacesLifeformSlots;
 
 /**
  * Les emplacements de recherche (tranche 3) : ouverture par la population, choix, recherche par la
@@ -31,12 +39,17 @@ use Tests\Support\PinsSettings;
 final class LifeformResearchTest extends AccountTestCase
 {
     use PinsSettings;
+    use PlacesLifeformSlots;
 
     private const int RESEARCH_CENTRE = 11103;
 
     private const int ENVOYS = 11201;
 
     private const int EXTRACTORS = 11202;
+
+    private const int VOLCANIC_BATTERIES = 12201;
+
+    private const int METROPOLIS = 11111;
 
     protected function setUp(): void
     {
@@ -161,6 +174,82 @@ final class LifeformResearchTest extends AccountTestCase
         $this->planetService->update();
         $this->assertSame(1, $niveaux->levelOf($planetId, LifeformKind::Technology, self::ENVOYS));
         $this->assertSame('done', $element->refresh()->status);
+    }
+
+    /**
+     * **Une technologie d une autre espece, prise contre des artefacts, se recherche** (relance de Codex,
+     * journal §155.18).
+     *
+     * Le choix d un emplacement autorise les technologies des especes decouvertes, contre des artefacts ;
+     * la file refusait ensuite tout objet d une autre espece que la planete. Le joueur payait ses
+     * artefacts et ne pouvait pas lancer sa recherche. Et trois lectures prenaient l espece de l objet
+     * pour celle de la planete : le centre de recherche exige, les reductions du devis, et le
+     * multiplicateur d experience affiche — qui est celui de l espece de LA TECHNOLOGIE, comme le
+     * resolveur l applique.
+     */
+    public function testAForeignTechnologyTakenWithArtifactsIsResearchedWithThePlanetsCentre(): void
+    {
+        $planetId = $this->currentPlanetId;
+        $maintenant = (int)Date::now()->timestamp;
+        $niveaux = resolve(LifeformLevels::class);
+        $recherche = resolve(LifeformResearchService::class);
+        $vitesses = resolve(LifeformRuleRevisions::class)->live();
+
+        $niveaux->setLevel($planetId, LifeformKind::Building, self::RESEARCH_CENTRE, 1);
+        // Une population que la planete porte vraiment : posee sans logement ni ferme, elle s effondrerait a la
+        // premiere mise a jour et fermerait l emplacement avant la livraison.
+        $this->assertGreaterThanOrEqual(250000.0, $this->sustainLifeformPopulation($planetId, Species::Humans, 250000.0, $maintenant));
+        // Les Rock tal sont decouverts, avec l experience du niveau 40 (+4 %) ; les Humains n en ont aucune.
+        $this->assertSame(40, LifeformExperience::levelOf(738000));
+        LifeformSpeciesProgress::query()->updateOrCreate(
+            ['user_id' => $this->currentUserId, 'species' => Species::Rocktal->value],
+            ['discovered_at' => $maintenant - 100, 'experience' => 738000]
+        );
+        $this->assertSame(1, LifeformAccount::query()->where('user_id', $this->currentUserId)->update(['artifacts' => 200]));
+
+        $choix = $recherche->choose($planetId, $this->currentUserId, 1, (string)self::VOLCANIC_BATTERIES, $maintenant);
+        $this->assertSame('artifacts', $choix->chosen_via);
+        $this->assertSame(0, (int)LifeformAccount::query()->where('user_id', $this->currentUserId)->value('artifacts'), 'Les 200 artefacts du palier 1 sont payes.');
+
+        // Sans le centre, la technologie etrangere est refusee — le logement et la ferme ne l ouvrent pas.
+        $niveaux->setLevel($planetId, LifeformKind::Building, self::RESEARCH_CENTRE, 0);
+        $this->assertRefused(fn () => resolve(LifeformQueueService::class)->add($this->planetService, self::VOLCANIC_BATTERIES, $maintenant), LifeformRefused::REQUIREMENTS_UNMET);
+        $niveaux->setLevel($planetId, LifeformKind::Building, self::RESEARCH_CENTRE, 1);
+        // La Metropole de la planete (+0,5 % par niveau sur toutes les technologies) compte aussi pour elle.
+        $niveaux->setLevel($planetId, LifeformKind::Building, self::METROPOLIS, 8);
+
+        // Le devis lit les reductions du centre de recherche de LA PLANETE, pas de l espece de la technologie.
+        $volcanique = LifeformCatalogue::byId(self::VOLCANIC_BATTERIES);
+        $devis = LifeformQuote::for($volcanique, 1, $niveaux->buildingLevelsOf($planetId), 0, 0, $vitesses);
+        $local = LifeformQuote::for(LifeformCatalogue::byId(self::ENVOYS), 1, $niveaux->buildingLevelsOf($planetId), 0, 0, $vitesses);
+        $this->assertGreaterThan(0.0, $local->timeReduction);
+        $this->assertSame($local->timeReduction, $devis->timeReduction, 'Le centre de recherche humain reduit aussi une technologie rock tal.');
+        $this->assertSame($local->costReduction, $devis->costReduction);
+
+        // La page de detail : recherchable, et le multiplicateur d experience est celui des Rock tal.
+        $detail = $this->get(route('lifeforms.research.ajax', ['technology' => self::VOLCANIC_BATTERIES]));
+        $detail->assertStatus(200);
+        $html = (string)$detail->json('content.technologydetails');
+        $this->assertStringNotContainsString(__('t_lifeforms_ui.research.centre_needed'), $html, 'Le centre de la planete est la : aucune raison de refus.');
+        $this->assertStringContainsString('<button class="upgrade" data-technology="' . self::VOLCANIC_BATTERIES . '" >', $html, 'Le bouton est actif.');
+        $this->assertStringContainsString('>+0.27 %<', $html, 'Batteries volcaniques niveau 1 : 0,25 % × (1 + 4 % d experience rock tal) × (1 + 4 % de Metropole niveau 8) = 0,2704 %.');
+        $this->assertStringNotContainsString('>+0.26 %<', $html, 'Sans la Metropole de la planete, on lirait 0,26 %.');
+        $this->assertStringNotContainsString('>+0.25 %<', $html, 'Le multiplicateur n est pas celui de l espece de la planete, qui n a aucune experience.');
+
+        // La file : acceptee, demarree, au prix et a la duree reduits par le centre de la planete.
+        $demande = $this->post(route('lifeforms.buildings.addbuildrequest.post'), ['technologyId' => self::VOLCANIC_BATTERIES, 'mode' => 1, '_token' => csrf_token()]);
+        $demande->assertJsonPath('status', 'success');
+        $element = LifeformQueue::query()->where('planet_id', $planetId)->where('object_id', self::VOLCANIC_BATTERIES)->firstOrFail();
+        $this->assertSame('running', $element->status);
+        $this->assertSame($maintenant + $devis->duration, (int)$element->time_end);
+        $this->assertSame((int)$devis->price->metal->get(), (int)$element->metal);
+
+        // Livree, elle compte pour le compte, multipliee par l experience rock tal.
+        $this->travelTo(Date::createFromTimestamp((int)$element->time_end + 1));
+        $this->planetService->update();
+        $this->assertSame(1, $niveaux->levelOf($planetId, LifeformKind::Technology, self::VOLCANIC_BATTERIES));
+        $attendu = LifeformFormulas::technologyBonusPercent($volcanique->bonuses[0], 1, 1.04 * 1.04 - 1) / 100;
+        $this->assertEqualsWithDelta($attendu, resolve(LifeformBonusResolver::class)->forPlayer($this->currentUserId)->fraction(LifeformEffect::ENERGY_PRODUCTION), 1e-9);
     }
 
     public function testResettingATierKeepsTheLevelsAndCanBeRestoredForAnHourThenNotBeforeADay(): void

@@ -173,20 +173,28 @@ final class LifeformResearchService
     }
 
     /**
-     * Le multiplicateur des bonus de technologies de la planete : (1 + experience de l espece) × (1 +
-     * bonus des batiments « ameliore toutes les technologies »).
+     * Le multiplicateur des bonus d une technologie sur la planete : (1 + experience de **l espece de la
+     * technologie**) × (1 + bonus « ameliore toutes les technologies » des batiments **de la planete**).
      *
-     * @param array<int, int> $buildingLevels
+     * C est ce que le resolveur applique (`LifeformBonusResolver`, experience par `$technologie->species`) ;
+     * la page l affiche donc de la meme facon. Une technologie d une autre espece prend l experience de cette
+     * espece-la, pas celle de la planete (relance de Codex, journal §155.18).
+     *
+     * @param Species $technologySpecies l espece de la technologie, dont l experience compte
+     * @param array<int, int> $buildingLevels les batiments de la planete
      */
-    public function technologyBonusMultiplier(int $userId, Species $species, array $buildingLevels): float
+    public function technologyBonusMultiplier(int $userId, Species $technologySpecies, array $buildingLevels): float
     {
-        $progres = LifeformSpeciesProgress::query()->where('user_id', $userId)->where('species', $species->value)->first();
+        $progres = LifeformSpeciesProgress::query()->where('user_id', $userId)->where('species', $technologySpecies->value)->first();
         $experience = LifeformExperience::bonusFraction(LifeformExperience::levelOf($progres === null ? 0 : (int)$progres->experience));
         $batiments = 0.0;
-        foreach (LifeformCatalogue::buildingsOf($species) as $batiment) {
-            $bonus = $batiment->bonus(LifeformEffect::LF_TECH_BONUS);
+        foreach ($buildingLevels as $id => $niveau) {
+            if ($niveau <= 0 || !LifeformCatalogue::has((int)$id)) {
+                continue;
+            }
+            $bonus = LifeformCatalogue::byId((int)$id)->bonus(LifeformEffect::LF_TECH_BONUS);
             if ($bonus !== null) {
-                $batiments += LifeformFormulas::buildingBonusPercent($bonus, $buildingLevels[$batiment->id] ?? 0) / 100;
+                $batiments += LifeformFormulas::buildingBonusPercent($bonus, (int)$niveau) / 100;
             }
         }
 

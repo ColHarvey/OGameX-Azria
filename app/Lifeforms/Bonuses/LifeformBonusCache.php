@@ -17,9 +17,11 @@ use Closure;
  * ## Pourquoi une minute
  *
  * Un travailleur de longue duree (file, planificateur) garderait sinon une lecture perimee : toute
- * ecriture des formes de vie faite **dans ce processus** l invalide (`invalidate()`), et une ecriture
- * faite ailleurs est vue au plus tard une minute apres. L etat des emplacements depend aussi de la
- * population, qui bouge sans ecriture des niveaux : la meme minute borne ce retard.
+ * ecriture des formes de vie faite **dans ce processus** l invalide (`invalidate()`) — niveaux,
+ * emplacements, decouvertes dans leur service, et la **population** par `LifeformPlanetObserver`, parce
+ * qu elle decide quelles technologies sont actives (relance de Codex, journal §155.18 : la croissance et
+ * les morts au combat ne l invalidaient pas). Une ecriture faite ailleurs, hors de ce processus ou hors
+ * d Eloquent, est vue au plus tard une minute apres : la minute borne ce retard-la, et lui seul.
  */
 final class LifeformBonusCache
 {

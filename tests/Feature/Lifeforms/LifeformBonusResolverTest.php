@@ -194,9 +194,11 @@ final class LifeformBonusResolverTest extends AccountTestCase
         $this->technology($this->currentPlanetId, 1, self::VOLCANIC_BATTERIES, 4);
         $this->assertEqualsWithDelta(0.01, $resolveur->forPlayer($this->currentUserId)->fraction(LifeformEffect::ENERGY_PRODUCTION), 1e-9);
 
-        // La population retombe sous le seuil : l emplacement se ferme, la technologie ne compte plus.
+        // La population retombe sous le seuil : l emplacement se ferme, la technologie ne compte plus. Ecrite ici
+        // hors des ecrivains du jeu (comme le ferait un autre processus), la memoire ne peut pas le savoir avant
+        // l invalidation ou la minute ; les ecrivains du jeu, eux, invalident (temoins ci-dessous).
         LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->update(['population' => 100.0]);
-        $this->assertEqualsWithDelta(0.01, $resolveur->forPlayer($this->currentUserId)->fraction(LifeformEffect::ENERGY_PRODUCTION), 1e-9, 'La memoire tient jusqu a l invalidation ou la minute.');
+        $this->assertEqualsWithDelta(0.01, $resolveur->forPlayer($this->currentUserId)->fraction(LifeformEffect::ENERGY_PRODUCTION), 1e-9, 'Une ecriture hors du jeu : la memoire tient jusqu a l invalidation ou la minute.');
         LifeformBonusCache::invalidate();
         $this->assertSame(0.0, $resolveur->forPlayer($this->currentUserId)->fraction(LifeformEffect::ENERGY_PRODUCTION), 'Emplacement ferme : la technologie dort.');
 
@@ -204,6 +206,36 @@ final class LifeformBonusResolverTest extends AccountTestCase
         LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->update(['population' => 2000000.0]);
         resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Technology, self::VOLCANIC_BATTERIES, 8);
         $this->assertEqualsWithDelta(0.02, $resolveur->forPlayer($this->currentUserId)->fraction(LifeformEffect::ENERGY_PRODUCTION), 1e-9);
+    }
+
+    /**
+     * **La croissance ecrite par le passage ouvre l emplacement sans que personne ne vide la memoire**
+     * (relance de Codex, journal §155.18). La population decide quelles technologies sont actives ; une
+     * memoire qui survivait a son ecriture gardait une technologie endormie apres le franchissement d un
+     * seuil — jusqu a une minute dans un processus persistant.
+     */
+    public function testGrowthWrittenByTheUpdaterOpensTheSlotWithoutClearingTheMemoryByHand(): void
+    {
+        $resolveur = resolve(LifeformBonusResolver::class);
+        $this->choose(Species::Rocktal);
+        $planetId = $this->currentPlanetId;
+        $maintenant = (int)Date::now()->timestamp;
+
+        // Un monde qui porte au moins 300 000 habitants, et une population encore sous le seuil de l emplacement 1.
+        $espace = $this->sustainLifeformPopulation($planetId, Species::Rocktal, 300000.0, $maintenant);
+        $this->assertGreaterThanOrEqual(300000.0, $espace);
+        $this->placeLifeformSlot($planetId, 1, self::VOLCANIC_BATTERIES, $maintenant);
+        resolve(LifeformLevels::class)->setLevel($planetId, LifeformKind::Technology, self::VOLCANIC_BATTERIES, 4);
+        LifeformPlanet::query()->where('planet_id', $planetId)->update(['population' => 199500.0, 'previous_population' => 199500.0]);
+        LifeformBonusCache::invalidate();
+        $this->assertSame(0.0, $resolveur->forPlayer($this->currentUserId)->fraction(LifeformEffect::ENERGY_PRODUCTION), 'Sous le seuil de 200 000 : l emplacement est ferme, et la memoire garde ce zero.');
+
+        // Une heure de croissance, ecrite par l entree reelle : la population franchit le seuil.
+        $this->travelTo(Date::createFromTimestamp($maintenant + 3600));
+        $this->planetService->update();
+        $population = (float)LifeformPlanet::query()->where('planet_id', $planetId)->value('population');
+        $this->assertGreaterThan(200000.0, $population, 'La croissance a franchi le seuil (espace ÷ 80 par heure).');
+        $this->assertEqualsWithDelta(0.01, $resolveur->forPlayer($this->currentUserId)->fraction(LifeformEffect::ENERGY_PRODUCTION), 1e-9, 'Sans rien vider a la main : la memoire suit l ecriture de la population.');
     }
 
     public function testBuildingEnergyIsSummedFromTheLevels(): void
