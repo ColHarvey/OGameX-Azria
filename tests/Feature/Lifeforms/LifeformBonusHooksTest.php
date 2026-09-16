@@ -24,6 +24,7 @@ use OGame\Models\Lifeforms\LifeformSlotChange;
 use OGame\Models\Lifeforms\LifeformSpeciesProgress;
 use OGame\Models\Lifeforms\LifeformTechnologyLevel;
 use OGame\Models\Planet;
+use OGame\Models\Resource;
 use OGame\Models\User;
 use OGame\Services\CharacterClassService;
 use OGame\Services\FleetMissionService;
@@ -173,6 +174,17 @@ final class LifeformBonusHooksTest extends AccountTestCase
         $consommationMine = abs($planete->getObjectProduction('metal_mine', null, true)->energy->get());
         $this->assertGreaterThan(0, $consommationMine);
         $this->assertLessThan(abs($mine->mine->energy->get()), $consommationMine, 'La mine consomme moins que sans la Chambre de perturbation.');
+
+        // **Les foreuses consomment 10 % de moins, et la page le dit comme le bilan** (demande de Keven, journal
+        // §155.19). Modules de cristal ionique niveau 100 : 0,1 % par niveau, plafonne a 50 %. Quatre-vingts
+        // foreuses a 100 % : 80 × 50 × (1 − 0,10) = 3 600, et non 4 000.
+        $foreuses = 80 * 50 * (1 - 0.10);
+        $this->assertSame((int)($consommationMine + $energieFormesDeVie + $foreuses), (int)$planete->energyConsumption()->get(), 'Le bilan de la planete compte les foreuses reduites, la mine reduite et les batiments de forme de vie.');
+        $page = $this->get('/resources/settings');
+        $page->assertStatus(200);
+        $html = (string)$page->getContent();
+        $this->assertStringContainsString('title="' . (new Resource(-$foreuses))->getFormattedFull() . '"', $html, 'La page des ressources affiche l energie des foreuses reduite par les Modules de cristal ionique.');
+        $this->assertStringNotContainsString('title="' . (new Resource(-4000.0))->getFormattedFull() . '"', $html, 'Elle n affiche pas la consommation sans les formes de vie.');
         $foreuses = (int)floor(80 * 50 * (1 - 0.10));
         $this->assertEquals((int)($consommationMine + $foreuses + $energieFormesDeVie), (int)$planete->energyConsumption()->get(), 'La consommation de la planete : la mine (reduite), les foreuses (reduites de 10 %) et les batiments de forme de vie.');
     }

@@ -9,6 +9,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Date;
 use Illuminate\View\View;
 use OGame\Http\Controllers\Abstracts\AbstractBuildingsController;
+use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
 use OGame\Models\{
     ProductionIndex,
     Resources,
@@ -175,6 +176,10 @@ class ResourcesController extends AbstractBuildingsController
         $metalMine->production->playerService = $player;
         $metalMine->production->characterClassService = app(CharacterClassService::class);
         $metalMine->production->allianceClassService = app(AllianceClassService::class);
+        // Le meme montage que `PlanetService::getCrawlerEnergyConsumption()` : sans le resolveur des formes de vie,
+        // la page affichait la consommation des foreuses sans la reduction des Modules de cristal ionique, que le
+        // bilan de la planete applique (journal §155.19).
+        $metalMine->production->lifeformBonusResolver = app(LifeformBonusResolver::class);
         $metalMine->production->universe_speed = $settingsService->economySpeed();
         $crawlerEnergy = $metalMine->production->getCrawlerEnergyConsumption();
         $productionindex_total->crawler->energy->set($crawlerEnergy);
