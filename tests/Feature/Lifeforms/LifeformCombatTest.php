@@ -293,6 +293,102 @@ final class LifeformCombatTest extends FleetDispatchTestCase
         $this->assertNotNull(Message::query()->where('user_id', $proprietaire)->where('key', 'lifeform_population_loss')->orderByDesc('id')->first());
     }
 
+    /**
+     * **Un travail ne demarre pas grace a une population qui devait mourir avant son demarrage** (relance de Codex).
+     *
+     * La bataille est datee de son echeance, mais le reglement arrive apres. Si, entre les deux, une page du
+     * proprietaire fait passer sa planete au-dela de l echeance, le passage livre un travail et **demarre le
+     * suivant sur la population d avant la bataille** — un emplacement que les morts auraient ferme. Le
+     * reglement, arrive ensuite, retrouve la population de l echeance et l applique ; il ne defait pas ce qui a
+     * demarre. Deux joueurs obtiendraient des possibilites differentes selon la vitesse du serveur.
+     *
+     * La regle proposee : **le passage demographique ne depasse jamais l echeance d une bataille non reglee**.
+     * La bataille est une coupe que l horloge ne franchit pas ; ce qui suit son echeance attend qu elle soit
+     * reglee, et demarre alors sur les survivants, a sa vraie echeance.
+     */
+    public function testAWorkDoesNotStartOnAPopulationThatShouldHaveDiedBeforeIt(): void
+    {
+        resolve(SettingsService::class)->set('lifeforms_enabled', '1');
+        for ($i = 0; $i < 6; $i++) {
+            $this->createAndLoginUser();
+        }
+        $this->basicSetup();
+
+        $unites = new UnitCollection();
+        $unites->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 350);
+        $cible = $this->sendMissionToOtherPlayerCleanPlanet($unites, new Resources(0, 0, 0, 0));
+        $cibleId = $cible->getPlanetId();
+        $cible->removeUnits($cible->getShipUnits(), false);
+        $cible->removeUnits($cible->getDefenseUnits(), false);
+        $cible->save();
+        $cible->reloadPlanet();
+
+        $mission = DB::table('fleet_missions')->where('user_id', $this->currentUserId)->where('processed', 0)->orderByDesc('id')->first();
+        $this->assertNotNull($mission, 'No fleet was dispatched.');
+        $arrivee = (int)$mission->time_arrival;
+        $proprietaire = (int)DB::table('planets')->where('id', $cibleId)->value('user_id');
+        DB::table('users')->where('id', $proprietaire)->update(['tactical_retreat_ratio' => 0]);
+        DB::table('planets')->where('id', $cibleId)->update(['rocket_launcher' => 10, 'time_last_update' => (int)now()->timestamp + 86_400]);
+        $this->requireAnAdmissibleHistoryFor($proprietaire, $arrivee, 'le proprietaire de la cible');
+        $this->requireAnAdmissibleHistoryFor($this->currentUserId, $arrivee, 'l attaquant');
+
+        // La cible porte assez d habitants pour ouvrir l emplacement 1 (deux cent mille), sans Bouclier : la
+        // bataille ne laissera que l abri, et l emplacement se fermera.
+        [, $espece] = $this->populate($cibleId, 200000.0);
+        $technologie = LifeformResearchService::technologyAt($espece, 1, 1);
+        $centre = LifeformCatalogue::buildingWithEffect($espece, LifeformEffect::LF_RESEARCH_TIME_REDUCTION);
+        $this->assertNotNull($centre);
+        resolve(LifeformLevels::class)->setLevel($cibleId, LifeformKind::Building, $centre->id, 1);
+        $this->placeLifeformSlot($cibleId, 1, $technologie->id, $arrivee - 100);
+        DB::table('planets')->where('id', $cibleId)->update(['metal' => 50_000_000, 'crystal' => 50_000_000, 'deuterium' => 50_000_000]);
+
+        $this->app->bind(BattleDraws::class, static fn (): SeededDraws => new SeededDraws(4242));
+        resolve(SettingsService::class)->set('persistent_combat_enabled', '1');
+        $this->travelTo(Date::createFromTimestamp($arrivee));
+        $this->get('/overview')->assertStatus(200);
+
+        $combat = $this->theCombatOf((int)$mission->id, $cibleId);
+        $this->assertNotNull($combat, 'The arrival did not open a combat.');
+        $this->assertSame(CombatState::Active, $combat->status, 'A single fleet closes its window at once.');
+        $echeance = (int)$combat->ends_at;
+        $this->assertGreaterThan($arrivee, $echeance, 'Premisse : la bataille est datee apres l arrivee.');
+
+        // **Deux niveaux de la technologie en file** : le premier s acheve une minute apres la bataille, le
+        // second attend derriere lui. Le second ne peut demarrer que si l emplacement est ouvert a ce moment.
+        LifeformQueue::query()->create([
+            'planet_id' => $cibleId, 'user_id' => $proprietaire, 'kind' => LifeformKind::Technology->value,
+            'object_id' => $technologie->id, 'target_level' => 1, 'metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'energy' => 0,
+            'time_start' => $arrivee, 'time_end' => $echeance + 60, 'status' => 'running',
+            'catalogue_version' => LifeformCatalogue::VERSION,
+        ]);
+        $second = LifeformQueue::query()->create([
+            'planet_id' => $cibleId, 'user_id' => $proprietaire, 'kind' => LifeformKind::Technology->value,
+            'object_id' => $technologie->id, 'target_level' => 2, 'metal' => 0, 'crystal' => 0, 'deuterium' => 0, 'energy' => 0,
+            'time_start' => null, 'time_end' => null, 'status' => 'waiting',
+            'catalogue_version' => LifeformCatalogue::VERSION,
+        ]);
+
+        // **Le proprietaire charge une page deux minutes apres l echeance, avant le reglement.** Son passage
+        // ne doit pas franchir la bataille : rien de ce qui suit son echeance ne se livre ni ne demarre.
+        $this->travelTo(Date::createFromTimestamp($echeance + 120));
+        $corps = resolve(PlanetServiceFactory::class)->make($cibleId, true);
+        $this->assertNotNull($corps);
+        resolve(LifeformPlanetUpdater::class)->update($corps, $echeance + 120);
+        $this->assertSame($echeance, (int)LifeformPlanet::query()->where('planet_id', $cibleId)->value('calculated_at'), 'Le passage a franchi l echeance d une bataille non reglee.');
+        $this->assertSame('waiting', $second->refresh()->status, 'Le second niveau a demarre sur une population que la bataille allait tuer.');
+
+        // Le reglement applique la bataille a son echeance ; puis la vie reprend, sur les survivants.
+        $this->settle($combat);
+        $this->assertEqualsWithDelta((float)DemographicRules::SHELTERED, (float)LifeformPlanet::query()->where('planet_id', $cibleId)->value('population'), 0.001, 'Premisse : seule l abri survit.');
+        $reprise = resolve(PlanetServiceFactory::class)->make($cibleId, true);
+        $this->assertNotNull($reprise);
+        resolve(LifeformPlanetUpdater::class)->update($reprise, $echeance + 120);
+
+        $this->assertSame(1, resolve(LifeformLevels::class)->levelOf($cibleId, LifeformKind::Technology, $technologie->id), 'Le premier niveau, echu une minute apres la bataille, est livre a sa vraie echeance.');
+        $this->assertSame('canceled', $second->refresh()->status, 'Le second niveau devait etre juge sur les survivants : emplacement ferme, travail annule — le meme sort qu un reglement a l heure lui aurait fait.');
+        $this->assertSame($echeance + 120, (int)LifeformPlanet::query()->where('planet_id', $cibleId)->value('calculated_at'), 'Une fois la bataille reglee, l horloge rattrape.');
+    }
+
     private function settle(CombatInstance $combat): void
     {
         (new CombatSettlementService(resolve(CombatResolutionService::class)))->settle(
