@@ -3,7 +3,6 @@
 namespace OGame\Lifeforms\Services;
 
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use OGame\Lifeforms\Bonuses\LifeformBonusCache;
 use OGame\Lifeforms\Catalogue\LifeformCatalogue;
 use OGame\Lifeforms\Catalogue\LifeformEffect;
@@ -12,6 +11,7 @@ use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\Catalogue\LifeformObject;
 use OGame\Lifeforms\Demography\LifeformDemography;
 use OGame\Lifeforms\Demography\PlanetLifeformProfile;
+use OGame\Lifeforms\LifeformHistoryUnavailable;
 use OGame\Lifeforms\LifeformRefused;
 use OGame\Lifeforms\Research\LifeformExperience;
 use OGame\Lifeforms\Research\LifeformSlotHistory;
@@ -386,25 +386,24 @@ final class LifeformResearchService
      * un emplacement ouvert par une population franchie apres l instant n armait pas la flotte
      * (relance de Codex, journal §155.11).
      *
-     * Quand la population de cet instant n est pas reconstituable — l horloge de la planete l a depassee
-     * lors d un passage plus ancien que celui dont l instantane est garde —, la lecture retombe sur la
-     * colonne et **le dit au journal du serveur**. Ne pas deviner, ne pas desarmer la flotte en silence,
-     * alerter : c est la conduite arretee pour un historique inconnu.
+     * Quand la population de cet instant n est pas reconstituable — l horloge de la planete l a depassee lors
+     * d un passage plus ancien que celui dont l instantane est garde —, cette lecture **leve**. Elle ne
+     * retombe ni sur zero ni sur la valeur courante : l une desarmerait la flotte, l autre l armerait, et un
+     * avertissement au journal ne rendrait aucune des deux juste. L appelant suspend (journal §155.12).
      *
      * @param array<int, int> $buildingLevels niveaux de batiments **a cet instant**
      * @return array<int, int> niveau par identifiant de technologie
+     * @throws LifeformHistoryUnavailable
      */
     public function activeTechnologyLevelsAt(int $planetId, LifeformPlanet $state, PlanetLifeformProfile $profile, Species $species, array $buildingLevels, int $at): array
     {
         $population = $this->demography->populationAt($planetId, $at);
         if ($population === null) {
-            $population = (float)$state->population;
-            Log::warning('Formes de vie : population non reconstituable pour un gel de combat.', [
-                'planet_id' => $planetId,
-                'instant' => $at,
-                'calculated_at' => (int)$state->calculated_at,
-                'previous_calculated_at' => $state->previous_calculated_at,
-            ]);
+            throw new LifeformHistoryUnavailable(
+                'La population de la planete ' . $planetId . ' a l instant ' . $at . ' ne peut pas etre etablie : '
+                . 'l horloge est a ' . (int)$state->calculated_at . ' et l etat garde part de '
+                . var_export($state->previous_calculated_at, true) . '.'
+            );
         }
 
         return $this->activeAmong(

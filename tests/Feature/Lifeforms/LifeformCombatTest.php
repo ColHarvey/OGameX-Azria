@@ -10,10 +10,12 @@ use OGame\Combat\Services\CombatResolutionService;
 use OGame\Combat\Services\CombatRosterReader;
 use OGame\Combat\Services\CombatSettlementService;
 use OGame\Combat\Services\OpeningStateRecorder;
+use OGame\Combat\Services\PersistentCombatAdvancer;
 use OGame\Combat\Services\PhotographedDefender;
 use OGame\Combat\Support\CombatantFrozenAtEntry;
 use OGame\Combat\Support\FrozenCombatCharacteristics;
 use OGame\Combat\Support\FrozenLifeformCombatBonuses;
+use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameMissions\AttackMission;
 use OGame\GameMissions\BattleEngine\Draws\BattleDraws;
@@ -27,6 +29,7 @@ use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\Demography\DemographicRules;
 use OGame\Lifeforms\Services\LifeformInstallationService;
 use OGame\Lifeforms\Services\LifeformLevels;
+use OGame\Lifeforms\Services\LifeformPlanetUpdater;
 use OGame\Lifeforms\Services\LifeformResearchService;
 use OGame\Lifeforms\Species;
 use OGame\Models\CombatEntryCharacteristic;
@@ -105,7 +108,8 @@ final class LifeformCombatTest extends FleetDispatchTestCase
         $unites = new UnitCollection();
         $unites->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 200);
         $cible = $this->sendMissionToOtherPlayerCleanPlanet($unites, new Resources(0, 0, 0, 0));
-        [$proprietaire] = $this->populate($cible->getPlanetId(), 10000.0);
+        // Attaque instantanee : le corps est lu vivant, aucun instant n est rejoue, la population est figee.
+        [$proprietaire, , $habitants] = $this->populate($cible->getPlanetId(), 1000.0);
 
         $service = resolve(FleetMissionService::class, ['player' => $this->planetService->getPlayer()]);
         $duree = $service->calculateFleetMissionDuration($this->planetService, $cible->getPlanetCoordinates(), $unites, resolve(AttackMission::class));
@@ -118,7 +122,7 @@ final class LifeformCombatTest extends FleetDispatchTestCase
 
         $message = Message::query()->where('user_id', $proprietaire)->where('key', 'lifeform_population_loss')->orderByDesc('id')->first();
         $this->assertNotNull($message, 'Le proprietaire apprend ses pertes civiles.');
-        $this->assertSame(10000 - DemographicRules::SHELTERED, (int)$message->params['lost']);
+        $this->assertSame((int)$habitants - DemographicRules::SHELTERED, (int)$message->params['lost']);
         $this->assertSame(DemographicRules::SHELTERED, (int)$message->params['survivors']);
         $this->assertSame(0, (int)$message->params['protected_percent']);
         $this->assertStringContainsString('[coordinates]' . $cible->getPlanetCoordinates()->asString() . '[/coordinates]', (string)$message->params['coordinates']);
@@ -133,7 +137,7 @@ final class LifeformCombatTest extends FleetDispatchTestCase
         $unites = new UnitCollection();
         $unites->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 5);
         $cible = $this->sendMissionToOtherPlayerCleanPlanet($unites, new Resources(0, 0, 0, 0));
-        [$proprietaire] = $this->populate($cible->getPlanetId(), 10000.0);
+        [$proprietaire, , $habitants] = $this->populate($cible->getPlanetId(), 1000.0);
         $messagesAvant = Message::query()->where('user_id', $proprietaire)->where('key', 'lifeform_population_loss')->count();
         $cible->addUnit('rocket_launcher', 300);
         $cible->save();
@@ -144,7 +148,7 @@ final class LifeformCombatTest extends FleetDispatchTestCase
         $this->reloadApplication();
         $this->get('/overview')->assertStatus(200);
 
-        $this->assertEqualsWithDelta(10000.0, (float)LifeformPlanet::query()->where('planet_id', $cible->getPlanetId())->value('population'), 0.001, 'Cinq chasseurs contre trois cents lanceurs : l attaque echoue, personne ne meurt.');
+        $this->assertEqualsWithDelta($habitants, (float)LifeformPlanet::query()->where('planet_id', $cible->getPlanetId())->value('population'), 0.001, 'Cinq chasseurs contre trois cents lanceurs : l attaque echoue, personne ne meurt.');
         $this->assertSame($messagesAvant, Message::query()->where('user_id', $proprietaire)->where('key', 'lifeform_population_loss')->count());
     }
 
@@ -156,16 +160,15 @@ final class LifeformCombatTest extends FleetDispatchTestCase
         [$ouvreuse, $cibleId, $ouverture] = $this->aRallyAboutToOpen(0, [], null, function () use ($chasseur): void {
             // L attaquant est un Mechas dont la Revision generale du chasseur leger vaut +3 % au depart.
             resolve(LifeformInstallationService::class)->chooseSpecies($this->currentUserId, Species::Mechas, (int)Date::now()->timestamp);
-            // La population est figee : l horloge demographique, qui tourne a chaque page, ramenerait sinon une population
-            // posee au-dessus de l espace de vie sous le seuil de l emplacement avant meme l ouverture.
-            LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->update(['population' => 2000000.0, 'calculated_at' => (int)Date::now()->timestamp + 10 * 86400]);
+            // La planete porte vraiment ses deux millions d habitants : logement et ferme au niveau qu il faut.
+            $this->sustainLifeformPopulation($this->currentPlanetId, Species::Mechas, 900000.0, (int)Date::now()->timestamp);
             $this->placeLifeformSlot($this->currentPlanetId, 5, self::GENERAL_OVERHAUL_LIGHT_FIGHTER, (int)Date::now()->timestamp);
             resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Technology, self::GENERAL_OVERHAUL_LIGHT_FIGHTER, 10);
             $this->assertSame(3.0, resolve(PlayerServiceFactory::class)->make($this->currentUserId, true)->getLifeformUnitStatsPercent($chasseur), 'Premisse : l attaquant part avec +3 %.');
         });
 
         // Le defenseur : une technologie de son espece qui arme un vaisseau, au niveau 10 (+3 %).
-        [, $especeCible] = $this->populate($cibleId, 2000000.0);
+        [, $especeCible] = $this->populate($cibleId, 900000.0);
         [$technologie, $vaisseauCible, $position] = self::UNIT_TECH[$especeCible->value];
         $unite = ObjectService::getShipObjectByMachineName($vaisseauCible);
         $this->placeLifeformSlot($cibleId, $position, $technologie, (int)Date::now()->timestamp);
@@ -243,7 +246,7 @@ final class LifeformCombatTest extends FleetDispatchTestCase
         $this->requireAnAdmissibleHistoryFor($this->currentUserId, $arrivee, 'l attaquant');
 
         // **La forme de vie est posee avant l arrivee** : c est elle que l ouverture photographiera.
-        $this->populate($cible->getPlanetId(), 10000.0);
+        $this->populate($cible->getPlanetId(), 1000.0);
 
         // La bataille est rejouable ; la liaison se pose apres le dernier envoi, que `reloadApplication()` efface.
         $this->app->bind(BattleDraws::class, static fn (): SeededDraws => new SeededDraws(4242));
@@ -317,13 +320,13 @@ final class LifeformCombatTest extends FleetDispatchTestCase
 
         [$ouvreuse, $cibleId, $ouverture] = $this->aRallyAboutToOpen(0, [], null, function () use ($chasseur): void {
             resolve(LifeformInstallationService::class)->chooseSpecies($this->currentUserId, Species::Mechas, (int)Date::now()->timestamp);
-            LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->update(['population' => 2000000.0, 'calculated_at' => (int)Date::now()->timestamp + 10 * 86400]);
+            $this->sustainLifeformPopulation($this->currentPlanetId, Species::Mechas, 900000.0, (int)Date::now()->timestamp);
             $this->placeLifeformSlot($this->currentPlanetId, 5, self::GENERAL_OVERHAUL_LIGHT_FIGHTER, (int)Date::now()->timestamp);
             resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Technology, self::GENERAL_OVERHAUL_LIGHT_FIGHTER, 10);
             $this->assertSame(3.0, resolve(PlayerServiceFactory::class)->make($this->currentUserId, true)->getLifeformUnitStatsPercent($chasseur), 'Premisse : la flotte part avec +3 %.');
         });
 
-        [, $especeCible] = $this->populate($cibleId, 2000000.0);
+        [, $especeCible] = $this->populate($cibleId, 900000.0);
 
         // **Le defenseur aussi** : sa technologie passe au niveau 11 apres l ouverture, avant le traitement.
         [$technologieCible, $vaisseauCible, $position] = self::UNIT_TECH[$especeCible->value];
@@ -446,13 +449,13 @@ final class LifeformCombatTest extends FleetDispatchTestCase
 
         [$ouvreuse, $cibleId, $ouverture] = $this->aRallyAboutToOpen(0, [], null, function () use ($chasseur): void {
             resolve(LifeformInstallationService::class)->chooseSpecies($this->currentUserId, Species::Mechas, (int)Date::now()->timestamp);
-            LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->update(['population' => 2000000.0, 'calculated_at' => (int)Date::now()->timestamp + 10 * 86400]);
+            $this->sustainLifeformPopulation($this->currentPlanetId, Species::Mechas, 900000.0, (int)Date::now()->timestamp);
             $this->placeLifeformSlot($this->currentPlanetId, 5, self::GENERAL_OVERHAUL_LIGHT_FIGHTER, (int)Date::now()->timestamp);
             resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Technology, self::GENERAL_OVERHAUL_LIGHT_FIGHTER, 10);
             $this->assertSame(3.0, resolve(PlayerServiceFactory::class)->make($this->currentUserId, true)->getLifeformUnitStatsPercent($chasseur), 'Premisse : la flotte part avec +3 %.');
         });
 
-        $this->populate($cibleId, 2000000.0);
+        $this->populate($cibleId, 900000.0);
 
         // **Le joueur vide le palier une seconde apres l arrivee**, avant que le travailleur ne passe.
         resolve(LifeformResearchService::class)->resetTier($this->currentPlanetId, 1, $ouverture + 1);
@@ -476,12 +479,145 @@ final class LifeformCombatTest extends FleetDispatchTestCase
     }
 
     /**
-     * Installe la forme de vie du proprietaire sur la planete visee (l espece qu il a, ou les Humains s il n en a pas),
-     * avec une population figee ; rend le proprietaire et son espece.
+     * **Deux passages de population entre l arrivee et son traitement : les valeurs de l admission, ou rien.**
      *
-     * @return array{0: int, 1: Species}
+     * C est le cas que la relance de Codex nomme. L etat garde ne couvre qu un passage ; si un second avance la
+     * planete avant que le travailleur ne traite l arrivee, l instant d admission sort de la fenetre. La regle
+     * exigee ici ne laisse aucune troisieme voie : **soit les valeurs exactes de l admission, soit une
+     * suspension controlee** — jamais celles du moment.
+     *
+     * Une suspension se reconnait a ce qu elle **n ecrit rien** : pas de combat, pas de ligne de
+     * caracteristiques, la mission non traitee, et les pages du joueur intactes.
      */
-    private function populate(int $planetId, float $population): array
+    public function testTwoPopulationPassesBeforeProcessingGiveTheAdmissionValuesOrASuspension(): void
+    {
+        resolve(SettingsService::class)->set('lifeforms_enabled', '1');
+        $chasseur = ObjectService::getShipObjectByMachineName('light_fighter');
+
+        [$ouvreuse, $cibleId, $ouverture] = $this->aRallyAboutToOpen(0, [], null, function () use ($chasseur): void {
+            resolve(LifeformInstallationService::class)->chooseSpecies($this->currentUserId, Species::Mechas, (int)Date::now()->timestamp);
+            $this->sustainLifeformPopulation($this->currentPlanetId, Species::Mechas, 900000.0, (int)Date::now()->timestamp);
+            $this->placeLifeformSlot($this->currentPlanetId, 5, self::GENERAL_OVERHAUL_LIGHT_FIGHTER, (int)Date::now()->timestamp);
+            resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Technology, self::GENERAL_OVERHAUL_LIGHT_FIGHTER, 10);
+            $this->assertSame(3.0, resolve(PlayerServiceFactory::class)->make($this->currentUserId, true)->getLifeformUnitStatsPercent($chasseur), 'Premisse : la flotte part avec +3 %.');
+        });
+        $this->populate($cibleId, 900000.0);
+
+        // **Deux passages de la planete apres l arrivee**, sans que personne ne traite la mission : c est l etat
+        // qu une arrivee differee laisse derriere elle.
+        $passage = resolve(LifeformPlanetUpdater::class);
+        $passage->update($this->planetService, $ouverture + 60);
+        $passage->update($this->planetService, $ouverture + 120);
+        $etat = LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->firstOrFail();
+        $this->assertGreaterThan($ouverture, (int)$etat->previous_calculated_at, 'Premisse : l instant d admission est sorti de la fenetre rejouable.');
+
+        $this->travelTo(Date::createFromTimestamp($ouverture + 180));
+        // Une anomalie d historique ne doit jamais fermer les pages du joueur (journal §120).
+        $this->get('/overview')->assertStatus(200);
+
+        $combat = $this->theCombatOf((int)$ouvreuse->id, $cibleId);
+        if ($combat === null) {
+            // **Suspension controlee** : rien n a ete decide, et la mission attend le passage suivant.
+            $this->assertSame(0, (int)$ouvreuse->refresh()->processed, 'Une arrivee suspendue reste a traiter.');
+            $this->assertNull($ouvreuse->combat_instance_id, 'Une arrivee suspendue ne porte aucun lien de combat.');
+            $this->assertEqualsWithDelta(2000000.0, (float)LifeformPlanet::query()->where('planet_id', $cibleId)->value('population'), 1000.0, 'Aucun reglement partiel : la population de la cible est intacte.');
+
+            return;
+        }
+
+        // Le ralliement s ouvre — c est le corps vise qu il photographie, et lui reste lisible. Restent alors
+        // deux issues, et **une seule est interdite** : des caracteristiques qui ne seraient pas celles de
+        // l admission.
+        $ligne = CombatEntryCharacteristic::query()->where('combat_instance_id', $combat->id)->where('fleet_mission_id', $ouvreuse->id)->first();
+
+        if ($ligne !== null) {
+            $gele = FrozenCombatCharacteristics::fromStorage($ligne->getAttributes());
+            $this->assertSame(3.0, round($gele->lifeformBonuses->unitStatsPercent($chasseur), 4), 'La flotte porte autre chose que ce qu elle portait a son admission.');
+
+            return;
+        }
+
+        // Aucune caracteristique n a ete inventee : la fermeture doit alors **se suspendre**, et ne rien regler.
+        // Le ralliement se ferme quand la barriere du corps est echue, pas a une heure inscrite sur l instance :
+        // on avance donc franchement au-dela.
+        // **La base du processus porte les batailles des essais voisins** : tout se mesure sur celle-ci,
+        // jamais sur les compteurs globaux du passage.
+        $fermeture = $ouverture + 3600;
+        $this->travelTo(Date::createFromTimestamp($fermeture));
+        $avance = (new PersistentCombatAdvancer())->advance($fermeture);
+        $this->assertArrayHasKey($combat->id, $avance->failures, 'Une fermeture suspendue se compte comme un echec, sinon elle repasse chaque minute sans jamais etre vue.');
+        $this->assertSame(CombatState::Rallying, $combat->refresh()->status, 'La fermeture a conclu alors que l admission n est pas etablie.');
+        $this->assertNull($combat->battle_result, 'Une bataille a ete calculee sans savoir ce que la flotte apportait.');
+    }
+
+    /**
+     * **Une arrivee suspendue est reprise, et la reprise ne fabrique rien non plus.**
+     *
+     * Suspendre n est utile que si la suspension est **rejouable** : la mission reste a traiter, le passage
+     * suivant la retrouve, et la meme question se repose. Tant que l instant d admission reste hors de portee,
+     * la reponse reste « je ne sais pas » — pas « prends la valeur du moment ». C est le second temoin demande.
+     */
+    public function testASuspendedArrivalIsReplayedAndStillInventsNothing(): void
+    {
+        resolve(SettingsService::class)->set('lifeforms_enabled', '1');
+
+        [$ouvreuse, $cibleId, $ouverture] = $this->aRallyAboutToOpen(0, [], null, function (): void {
+            resolve(LifeformInstallationService::class)->chooseSpecies($this->currentUserId, Species::Mechas, (int)Date::now()->timestamp);
+            $this->sustainLifeformPopulation($this->currentPlanetId, Species::Mechas, 900000.0, (int)Date::now()->timestamp);
+            $this->placeLifeformSlot($this->currentPlanetId, 5, self::GENERAL_OVERHAUL_LIGHT_FIGHTER, (int)Date::now()->timestamp);
+            resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Technology, self::GENERAL_OVERHAUL_LIGHT_FIGHTER, 10);
+        });
+        $this->populate($cibleId, 900000.0);
+
+        // La cible, elle, sort de la fenetre : c est son corps que l ouverture doit photographier. **Son
+        // proprietaire est partage par tout le processus** : son etat est releve avant d etre bouscule, et
+        // repose exactement a la fin.
+        $avant = LifeformPlanet::query()->where('planet_id', $cibleId)->firstOrFail()->only(['population', 'food', 'calculated_at', 'previous_population', 'previous_food', 'previous_calculated_at']);
+        $passage = resolve(LifeformPlanetUpdater::class);
+        $cible = resolve(PlanetServiceFactory::class)->make($cibleId, true);
+        $this->assertNotNull($cible, 'La planete visee doit exister pour etre bousculee.');
+        $passage->update($cible, $ouverture + 60);
+        $passage->update($cible, $ouverture + 120);
+        $this->assertGreaterThan(
+            $ouverture,
+            (int)LifeformPlanet::query()->where('planet_id', $cibleId)->value('previous_calculated_at'),
+            'Premisse : l ouverture ne peut plus etre photographiee sur ce corps.'
+        );
+
+        $stockAvant = (float)LifeformPlanet::query()->where('planet_id', $cibleId)->value('population');
+
+        // Premier passage du travailleur : suspension.
+        $this->travelTo(Date::createFromTimestamp($ouverture + 180));
+        $this->get('/overview')->assertStatus(200);
+        $this->assertNull($this->theCombatOf((int)$ouvreuse->id, $cibleId), 'L ouverture devait etre suspendue.');
+        $this->assertSame(0, (int)$ouvreuse->refresh()->processed, 'La mission reste a traiter.');
+
+        // **Le passage suivant la rejoue** : meme question, meme reponse, et toujours rien d invente.
+        $this->travelTo(Date::createFromTimestamp($ouverture + 240));
+        // Les pages restent accessibles a chaque reprise.
+        $this->get('/overview')->assertStatus(200);
+        $this->assertNull($this->theCombatOf((int)$ouvreuse->id, $cibleId), 'La reprise a decide au lieu de se suspendre a nouveau.');
+        $this->assertSame(0, (int)$ouvreuse->refresh()->processed);
+        $this->assertSame(0, CombatEntryCharacteristic::query()->where('fleet_mission_id', $ouvreuse->id)->count(), 'Aucune caracteristique n a ete inventee.');
+        $this->assertEqualsWithDelta($stockAvant, (float)LifeformPlanet::query()->where('planet_id', $cibleId)->value('population'), 1000.0, 'Aucun reglement partiel sur la cible.');
+
+        // **Une epreuve remet ce qu elle a leve**, a l identique : la laisser hors de sa fenetre rejouable
+        // ferait suspendre le ralliement de l essai suivant, qui ne dirait rien de ce qu il mesure.
+        LifeformPlanet::query()->where('planet_id', $cibleId)->update($avant);
+        LifeformBonusCache::invalidate();
+    }
+
+    /**
+     * Installe la forme de vie du proprietaire sur la planete visee (l espece qu il a, ou les Humains s il n en a pas),
+     * avec une population que la planete soutient ; rend le proprietaire et son espece.
+     *
+     * La population posee est **stationnaire** : elle vaut l espace de vie du couple logement/ferme choisi, donc
+     * l horloge ne la fait plus bouger et un essai peut mesurer des pertes sans qu une croissance brouille le
+     * compte. Elle vaut **au moins** ce qui est demande, rarement le chiffre exact : l aide la rend.
+     *
+     * @return array{0: int, 1: Species, 2: float}
+     */
+    private function populate(int $planetId, float $auMoins): array
     {
         $proprietaire = (int)DB::table('planets')->where('id', $planetId)->value('user_id');
         $installation = resolve(LifeformInstallationService::class);
@@ -491,10 +627,11 @@ final class LifeformCombatTest extends FleetDispatchTestCase
             $espece = Species::Humans;
         }
         $installation->installOnExistingPlanet($planetId, (int)Date::now()->timestamp);
-        // La population est figee : l horloge demographique n a rien a avancer avant l application.
-        LifeformPlanet::query()->where('planet_id', $planetId)->update(['population' => $population, 'calculated_at' => (int)Date::now()->timestamp + 10 * 86400]);
-        LifeformBonusCache::invalidate();
+        // **La planete porte vraiment sa population** : logement et ferme au niveau qui l abrite et la nourrit.
+        // Une horloge gelee dans le futur rendrait tout instant passe irreconstituable, et le gel d un combat
+        // se suspendrait a juste titre (journal §155.12).
+        $population = $this->sustainLifeformPopulation($planetId, $espece, $auMoins, (int)Date::now()->timestamp);
 
-        return [$proprietaire, $espece];
+        return [$proprietaire, $espece, $population];
     }
 }

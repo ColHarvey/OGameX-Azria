@@ -2,12 +2,14 @@
 
 namespace OGame\Lifeforms\Combat;
 
+use OGame\Combat\Exceptions\UnknownAdmissionHistory;
 use OGame\Combat\Support\FrozenLifeformCombatBonuses;
 use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
 use OGame\Lifeforms\Bonuses\LifeformBonusSet;
 use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\Demography\PlanetLifeformProfile;
+use OGame\Lifeforms\LifeformHistoryUnavailable;
 use OGame\Lifeforms\Rules\LifeformRuleRevisions;
 use OGame\Lifeforms\Services\LifeformLevels;
 use OGame\Lifeforms\Species;
@@ -27,9 +29,17 @@ use OGame\Services\PlayerService;
  * (`LifeformLevels::levelsAt()`), l**occupation des emplacements** par son historique
  * (`LifeformSlotHistory`). Le gel qui suit fait le reste : rien n est relu pendant que la bataille dure.
  *
- * Deux choses ne se remontent pas et ne le pretendent pas : la **population**, qui decide qu un emplacement
- * est ouvert et dont l horloge demographique ne recule pas, et l**experience** d une espece, qui bouge par
- * les decouvertes. Journal §155.10.
+ * L**experience** revient par les vols de decouverte deja regles, et la **population** — celle qui decide qu un
+ * emplacement est ouvert — se rejoue depuis l etat d ou le dernier passage de la planete est parti.
+ *
+ * ## Quand la population de l instant n est pas etablissable
+ *
+ * L etat garde ne couvre qu un passage : au-dela, l instant demande n est pas reconstituable. Cette
+ * photographie **leve alors `UnknownAdmissionHistory`** au lieu de rendre une valeur. Ni zero, ni la valeur
+ * courante : l une desarmerait la flotte, l autre l armerait, et un avertissement au journal ne rendrait
+ * aucune des deux juste. Le socle des combats connait deja cette conduite pour un historique de classe
+ * manquant — arrivee suspendue, aucun reglement partiel, pages du joueur intactes, raison explicite — et
+ * c est elle qui s applique ici (journal §155.12).
  */
 final class LifeformCombatPhotographer
 {
@@ -45,10 +55,14 @@ final class LifeformCombatPhotographer
      *
      * `$at` est l instant d admission : les niveaux y sont **ramenes par la file des travaux**, pour qu une
      * recherche achevee entre l arrivee et son traitement n arme pas cette flotte (revue de Codex, §155.9).
+     *
+     * @throws UnknownAdmissionHistory quand l etat de cet instant ne peut pas etre etabli
      */
     public function ofPlayer(PlayerService $player, int|null $at = null): FrozenLifeformCombatBonuses
     {
-        return new FrozenLifeformCombatBonuses($this->unitStatsOf($this->resolver->forPlayer($player->getId(), $at)), null, 0.0, 0.0, 0.0);
+        $bonus = $this->orSuspend(fn (): LifeformBonusSet => $this->resolver->forPlayer($player->getId(), $at), 'le compte ' . $player->getId());
+
+        return new FrozenLifeformCombatBonuses($this->unitStatsOf($bonus), null, 0.0, 0.0, 0.0);
     }
 
     /**
@@ -58,11 +72,16 @@ final class LifeformCombatPhotographer
      * `$at` est l instant photographie : le Bouclier planetaire, la lune, les debris et les epaves y sont
      * **ramenes** comme les unites le sont. Un Bouclier acheve entre l ouverture d un ralliement et le
      * passage du travailleur sauvait sinon une population qu il ne couvrait pas encore (revue de Codex).
+     *
+     * @throws UnknownAdmissionHistory quand l etat de cet instant ne peut pas etre etabli
      */
     public function ofBody(PlanetService $body, int|null $at = null): FrozenLifeformCombatBonuses
     {
         $proprietaire = $body->getPlayer();
-        $unites = $proprietaire === null ? [] : $this->unitStatsOf($this->resolver->forPlayer($proprietaire->getId(), $at));
+        $quoi = 'le corps ' . $body->getPlanetId();
+        $unites = $proprietaire === null
+            ? []
+            : $this->unitStatsOf($this->orSuspend(fn (): LifeformBonusSet => $this->resolver->forPlayer($proprietaire->getId(), $at), $quoi));
         if (!$body->isPlanet()) {
             return new FrozenLifeformCombatBonuses($unites, null, 0.0, 0.0, 0.0);
         }
@@ -74,7 +93,7 @@ final class LifeformCombatPhotographer
             ? $this->levels->buildingLevelsOf($body->getPlanetId())
             : $this->levels->levelsAt($body->getPlanetId(), LifeformKind::Building, $at);
         $profil = PlanetLifeformProfile::fromLevels(Species::from((int)$etat->species), $niveaux, $this->revisions->live()->demography());
-        $planete = $this->resolver->forPlanet($body->getPlanetId(), $at);
+        $planete = $this->orSuspend(fn (): LifeformBonusSet => $this->resolver->forPlanet($body->getPlanetId(), $at), $quoi);
 
         return new FrozenLifeformCombatBonuses(
             $unites,
@@ -83,6 +102,29 @@ final class LifeformCombatPhotographer
             $planete->fraction(LifeformEffect::DEBRIS_RECOVERY),
             $planete->fraction(LifeformEffect::WRECK_RECOVERY),
         );
+    }
+
+    /**
+     * Traduit un etat de formes de vie introuvable en l anomalie que le socle des combats sait suspendre.
+     *
+     * La photographie ne decide de rien : elle dit « je ne sais pas », et le chemin d arrivee ou d ouverture
+     * fait ce qu il fait deja pour un historique de classe manquant. La conversion vit ici, a la frontiere,
+     * pour que le socle n ait rien a apprendre des formes de vie.
+     *
+     * @param callable(): LifeformBonusSet $lecture
+     * @throws UnknownAdmissionHistory
+     */
+    private function orSuspend(callable $lecture, string $quoi): LifeformBonusSet
+    {
+        try {
+            return $lecture();
+        } catch (LifeformHistoryUnavailable $manque) {
+            throw new UnknownAdmissionHistory(
+                $quoi . ' ne peut pas etre gele a son admission : ' . $manque->getMessage(),
+                0,
+                $manque
+            );
+        }
     }
 
     /**

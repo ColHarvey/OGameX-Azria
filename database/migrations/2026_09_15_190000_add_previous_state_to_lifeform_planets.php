@@ -18,10 +18,10 @@ use Illuminate\Support\Facades\Schema;
  * connu donne exactement ce qu elle avait calcule. Il suffit de garder **l etat d ou le dernier passage est
  * parti** : tout instant que ce passage a traverse se rejoue depuis la.
  *
- * Et c est precisement la fenetre utile : la requete qui traite une arrivee est la premiere dont l horloge
- * depasse cette arrivee, donc son passage part forcement **avant** elle. Au-dela de cette fenetre, la lecture
- * reste celle de la colonne — en retard, jamais en avance, donc jamais retroactive ; `LifeformDemography` le
- * dit noir sur blanc.
+ * **Cette fenetre couvre un passage, et pas davantage.** Une arrivee differee pendant qu un second passage
+ * avance la planete sort de la fenetre : son instant n est alors plus reconstituable, et le gel **suspend**
+ * au lieu de choisir une valeur. Ni zero, ni la valeur courante — voir `LifeformHistoryUnavailable` et le
+ * journal §155.12, ou l elargissement de cette conservation est propose sans etre applique.
  */
 return new class () extends Migration {
     public function up(): void

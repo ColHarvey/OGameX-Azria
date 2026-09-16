@@ -69,7 +69,24 @@ trait EntersADurableCombat
             return;
         }
 
-        $combat = resolve(CombatOpeningService::class)->openOrJoin($mission, $targetBodyId, (int)$mission->time_arrival);
+        // **Une ouverture qui ne peut pas photographier le corps est suspendue, pas decidee.** La
+        // photographie de l ouverture est prise dans la transaction qui cree l instance ; si ce que le corps
+        // apportait a cet instant ne peut pas etre etabli — une population de forme de vie hors de la fenetre
+        // rejouable —, cette transaction revient en arriere et **rien n est ecrit** : ni combat, ni lien, ni
+        // caracteristique. La mission reste non traitee et le passage suivant la rejoue. Lever ici fermerait
+        // toutes les pages du joueur (journal §120), et inventer une valeur changerait la bataille.
+        try {
+            $combat = resolve(CombatOpeningService::class)->openOrJoin($mission, $targetBodyId, (int)$mission->time_arrival);
+        } catch (UnknownAdmissionHistory $anomalie) {
+            Log::critical('Ouverture suspendue : ce que le corps apportait a son ouverture ne peut pas etre etabli.', [
+                'fleet_mission_id' => $mission->id,
+                'target_body_id' => $targetBodyId,
+                'opened_at' => (int)$mission->time_arrival,
+                'raison' => $anomalie->getMessage(),
+            ]);
+
+            return;
+        }
 
         if ($combat->status === CombatState::Rallying || $this->belongsToCombat($mission, $combat)) {
             $mission->combat_instance_id = $combat->id;

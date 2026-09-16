@@ -20,16 +20,21 @@ use OGame\Models\Lifeforms\LifeformQueue;
  * niveaux, ceux que `LifeformLevels::levelsAt()` rend pour le debut de chaque morceau. Ce n est pas une
  * promesse : `LifeformDemographyTest` rejoue un passage reel et exige **la meme population au flottant pres**.
  *
- * ## D ou part la relecture
+ * ## D ou part la relecture, et ce qu elle ne couvre pas
  *
  * La colonne `previous_calculated_at` garde l etat **d ou le dernier passage est parti**. Tout instant que ce
- * passage a traverse se rejoue donc exactement. C est la fenetre qui compte : la requete qui traite une
- * arrivee est la premiere dont l horloge la depasse, donc son passage part avant elle.
+ * passage a traverse se rejoue donc exactement — **un passage, pas davantage**. Une version precedente
+ * affirmait que cela suffisait toujours, « la requete qui traite une arrivee etant la premiere dont l horloge
+ * la depasse » : cette affirmation n etait pas prouvee, et elle est fausse des qu une arrivee est differee
+ * pendant qu un second passage avance la planete (journal §155.12).
  *
- * **Hors de cette fenetre**, `populationAt()` rend la population de la colonne quand celle-ci est **anterieure
- * ou egale** a l instant demande — en retard, donc jamais retroactive — et `null` quand elle lui est
- * posterieure sans instantane pour la rejouer. Un `null` veut dire « je ne sais pas », et l appelant le dit au
- * lieu de deviner (journal §155.11).
+ * `populationAt()` rend donc trois choses, et la troisieme compte autant que les deux autres :
+ *
+ * - la population de la colonne quand celle-ci est **anterieure ou egale** a l instant demande — en retard,
+ *   donc jamais retroactive ;
+ * - la population **rejouee** quand l instantane garde couvre l instant ;
+ * - **`null`** sinon. `null` veut dire « je ne sais pas », et l appelant **suspend** au lieu de choisir une
+ *   valeur : ni zero, ni la valeur courante.
  */
 final class LifeformDemography
 {
