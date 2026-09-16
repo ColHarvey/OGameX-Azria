@@ -164,7 +164,14 @@ final class LifeformCombatEngineTest extends AccountTestCase
     public function testTheUnprotectedPopulationDiesOnlyWhenTheAttackerWins(): void
     {
         $this->choose(Species::Humans);
-        $this->holdLifeformPopulationForLiveRead($this->currentPlanetId, 10000.0, (int)Date::now()->timestamp);
+        // Les pertes se prennent sur la population de l instant : la planete est datee de cet instant, ancre
+        // comprise, et rien ne s ecoule entre deux applications.
+        $instantDeLaPose = (int)Date::now()->timestamp;
+        LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->update([
+            'population' => 10000.0, 'food' => 0.0, 'calculated_at' => $instantDeLaPose,
+            'previous_population' => 10000.0, 'previous_food' => 0.0, 'previous_calculated_at' => $instantDeLaPose,
+        ]);
+        LifeformBonusCache::invalidate();
         $pertes = resolve(LifeformCombatLosses::class);
         $chasseur = ObjectService::getShipObjectByMachineName('light_fighter');
         $instant = (int)Date::now()->timestamp;

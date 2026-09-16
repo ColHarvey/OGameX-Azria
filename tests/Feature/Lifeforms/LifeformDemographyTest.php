@@ -3,17 +3,23 @@
 namespace Tests\Feature\Lifeforms;
 
 use Illuminate\Support\Facades\Date;
+use OGame\Combat\Exceptions\UnknownAdmissionHistory;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Lifeforms\Bonuses\LifeformBonusCache;
+use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
+use OGame\Lifeforms\Catalogue\LifeformCatalogue;
 use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\Combat\LifeformCombatLosses;
 use OGame\Lifeforms\Demography\DemographicClock;
+use OGame\Lifeforms\Demography\DemographicRules;
 use OGame\Lifeforms\Demography\DemographicState;
 use OGame\Lifeforms\Demography\LifeformDemography;
 use OGame\Lifeforms\Demography\PlanetLifeformProfile;
 use OGame\Lifeforms\Rules\LifeformRuleRevisions;
 use OGame\Lifeforms\Services\LifeformInstallationService;
 use OGame\Lifeforms\Services\LifeformLevels;
+use OGame\Lifeforms\Services\LifeformPlanetUpdater;
 use OGame\Lifeforms\Services\LifeformQueueService;
 use OGame\Lifeforms\Species;
 use OGame\Models\Lifeforms\LifeformAccount;
@@ -21,12 +27,16 @@ use OGame\Models\Lifeforms\LifeformBuildingLevel;
 use OGame\Models\Lifeforms\LifeformPlanet;
 use OGame\Models\Lifeforms\LifeformQueue;
 use OGame\Models\Lifeforms\LifeformRuleRevision;
+use OGame\Models\Lifeforms\LifeformSlot;
+use OGame\Models\Lifeforms\LifeformSlotChange;
 use OGame\Models\Lifeforms\LifeformSpeciesProgress;
+use OGame\Models\Lifeforms\LifeformTechnologyLevel;
 use OGame\Models\Planet;
 use OGame\Models\Resources;
 use OGame\Services\ObjectService;
 use Tests\AccountTestCase;
 use Tests\Support\PinsSettings;
+use Tests\Support\PlacesLifeformSlots;
 
 /**
  * La relecture demographique : quelle population la planete portait-elle **a un instant** ?
@@ -48,10 +58,15 @@ use Tests\Support\PinsSettings;
 final class LifeformDemographyTest extends AccountTestCase
 {
     use PinsSettings;
+    use PlacesLifeformSlots;
 
     private const int RESIDENTIAL = 11101;
 
     private const int FARM = 11102;
+
+    private const int RESEARCH_CENTRE = 11103;
+
+    private const int ENVOYS = 11201;
 
     private int $revisionsAvant = 0;
 
@@ -68,6 +83,9 @@ final class LifeformDemographyTest extends AccountTestCase
     {
         $planetes = Planet::query()->where('user_id', $this->currentUserId)->pluck('id');
         LifeformQueue::query()->whereIn('planet_id', $planetes)->delete();
+        LifeformSlot::query()->whereIn('planet_id', $planetes)->delete();
+        LifeformSlotChange::query()->whereIn('planet_id', $planetes)->delete();
+        LifeformTechnologyLevel::query()->whereIn('planet_id', $planetes)->delete();
         LifeformBuildingLevel::query()->whereIn('planet_id', $planetes)->delete();
         LifeformPlanet::query()->whereIn('planet_id', $planetes)->delete();
         LifeformAccount::query()->where('user_id', $this->currentUserId)->delete();
@@ -271,15 +289,151 @@ final class LifeformDemographyTest extends AccountTestCase
         $mort = $debut + 600;
         $perdus = resolve(LifeformCombatLosses::class)->applyIfAttackerWon($victoire, $this->planetService, 0.0, $mort);
         $this->assertGreaterThan(0, $perdus, 'Premisse : l attaque a bien tue des habitants.');
-        $this->assertLessThan(1000.0, (float)LifeformPlanet::query()->where('planet_id', $planetId)->value('population'), 'Premisse : il ne reste que l abri.');
 
-        // **La question qui doit ne jamais ressusciter personne** : un instant posterieur a l attaque, mais
-        // anterieur a l horloge — donc rejoue depuis l ancre, qui ne connait pas la bataille.
+        // **Les morts sont morts a l instant de la bataille, et les survivants recroissent depuis la.** La
+        // population a l horloge vaut la croissance de l abri de cent habitants sur les dix minutes qui restaient,
+        // calculee a part ; et un instant posterieur a l attaque mais anterieur a l horloge se rejoue depuis les
+        // survivants, jamais depuis une ancre d avant la bataille — c est la question qui ne doit ressusciter
+        // personne.
+        $horloge = new DemographicClock();
+        $survivants = new DemographicState((float)DemographicRules::SHELTERED, $profil->foodStorage, $mort);
+        $attenduAlHorloge = $horloge->advance($survivants, $profil, $fin);
+        $this->assertEqualsWithDelta($attenduAlHorloge->population, (float)LifeformPlanet::query()->where('planet_id', $planetId)->value('population'), 1e-6, 'La population a l horloge n est pas celle des survivants recrus depuis la bataille.');
         $apres = resolve(LifeformDemography::class)->populationAt($planetId, $mort + 60);
-        $this->assertTrue(
-            $apres === null || $apres < 10000.0,
-            'La relecture a ressuscite les habitants tues : elle rejoue la croissance depuis une ancre d avant la bataille. Rendu : ' . var_export($apres, true)
-        );
+        $this->assertNotNull($apres, 'Un instant de la fenetre d apres la bataille reste lisible.');
+        $this->assertEqualsWithDelta($horloge->advance($survivants, $profil, $mort + 60)->population, (float)$apres, 1e-6, 'La relecture a ressuscite les habitants tues : elle rejoue la croissance depuis une ancre d avant la bataille.');
+        $this->assertNull(resolve(LifeformDemography::class)->populationAt($planetId, $mort - 60), 'Un instant d avant la bataille n est plus reconstituable : refuse, pas devine.');
+    }
+
+    /**
+     * **Le temoin decisif** (relance de Codex) : une bataille reglee a l heure, puis dix minutes de croissance des
+     * survivants, doit donner **exactement** la meme planete que cette bataille reglee dix minutes en retard.
+     *
+     * Un reglement tardif doit donc retrouver la population de l instant de la bataille, y appliquer les pertes,
+     * puis recalculer la croissance des survivants jusqu a l horloge. Deplacer l ancre ne suffit pas si les pertes
+     * sont prises sur la population de l horloge, ou si celle-ci est ensuite redatee a l instant de la bataille.
+     * Population, nourriture, bonus et pertes annoncees doivent coincider.
+     */
+    public function testABattleSettledLateGivesTheSamePlanetAsABattleSettledOnTime(): void
+    {
+        $debut = (int)Date::now()->timestamp;
+        $planetId = $this->planetService->getPlanetId();
+        $niveaux = resolve(LifeformLevels::class);
+        $niveaux->setLevel($planetId, LifeformKind::Building, self::RESIDENTIAL, 30);
+        $niveaux->setLevel($planetId, LifeformKind::Building, self::FARM, 35);
+        $niveaux->setLevel($planetId, LifeformKind::Building, self::RESEARCH_CENTRE, 1);
+        resolve(LifeformRuleRevisions::class)->recordIfChanged($debut, null, 'banc');
+        $this->placeLifeformSlot($planetId, 1, self::ENVOYS, $debut - 10);
+        $niveaux->setLevel($planetId, LifeformKind::Technology, self::ENVOYS, 3);
+
+        $profil = PlanetLifeformProfile::fromLevels(Species::Humans, $niveaux->buildingLevelsOf($planetId), 8.0);
+        $depart = [
+            'population' => 300000.0,
+            'food' => $profil->foodStorage,
+            'calculated_at' => $debut,
+            'previous_population' => 300000.0,
+            'previous_food' => $profil->foodStorage,
+            'previous_calculated_at' => $debut,
+        ];
+        $chasseur = ObjectService::getShipObjectByMachineName('light_fighter');
+        $victoire = new BattleResult();
+        $victoire->attackerUnitsResult = new UnitCollection();
+        $victoire->attackerUnitsResult->addUnit($chasseur, 10);
+        $victoire->defenderUnitsResult = new UnitCollection();
+        $pertes = resolve(LifeformCombatLosses::class);
+        $lecture = resolve(LifeformDemography::class);
+
+        // **A l heure** : la bataille a l instant, puis dix minutes de croissance des survivants.
+        LifeformPlanet::query()->where('planet_id', $planetId)->update($depart);
+        LifeformBonusCache::invalidate();
+        $this->travelTo(Date::createFromTimestamp($debut));
+        $pertesALHeure = $pertes->applyIfAttackerWon($victoire, $this->planetService, 0.5, $debut);
+        $this->assertSame(150000, $pertesALHeure, 'Premisse : la moitie perit a l heure.');
+        $this->travelTo(Date::createFromTimestamp($debut + 600));
+        $this->planetService->update();
+        $aLHeure = $this->planetPhotograph($planetId, $debut + 300);
+
+        // **En retard** : la planete a deja avance de dix minutes quand la bataille s applique a son instant.
+        LifeformPlanet::query()->where('planet_id', $planetId)->update($depart);
+        LifeformBonusCache::invalidate();
+        $this->travelTo(Date::createFromTimestamp($debut + 600));
+        $this->planetService->update();
+        $this->assertSame($debut + 600, (int)LifeformPlanet::query()->where('planet_id', $planetId)->value('calculated_at'), 'Premisse : l horloge a depasse la bataille.');
+        $pertesEnRetard = $pertes->applyIfAttackerWon($victoire, $this->planetService, 0.5, $debut);
+        $enRetard = $this->planetPhotograph($planetId, $debut + 300);
+
+        $this->assertSame($pertesALHeure, $pertesEnRetard, 'Les pertes annoncees ne sont pas celles de l instant de la bataille.');
+        $this->assertEqualsWithDelta($aLHeure['population'], $enRetard['population'], 1e-6, 'Reglee en retard, la bataille ne donne pas la meme population : les pertes ont ete prises sur la population de l horloge, ou les survivants n ont pas recru.');
+        $this->assertEqualsWithDelta($aLHeure['food'], $enRetard['food'], 1e-6, 'La nourriture diverge entre les deux reglements.');
+        $this->assertSame($aLHeure['calculated_at'], $enRetard['calculated_at']);
+        $this->assertEqualsWithDelta($aLHeure['au_milieu'], $enRetard['au_milieu'], 1e-6, 'La population relue au milieu de la fenetre diverge : l ancre n est pas datee de la bataille.');
+        $this->assertSame($aLHeure['bonus'], $enRetard['bonus'], 'Les bonus de technologies divergent entre les deux reglements.');
+    }
+
+    /**
+     * **Un reglement tardif dont l instant n est plus reconstituable ne devine pas** : il leve l anomalie que le
+     * socle des combats sait suspendre, et n ecrit rien.
+     */
+    public function testALateSettlementBeyondTheWindowRefusesInsteadOfGuessing(): void
+    {
+        $debut = (int)Date::now()->timestamp;
+        $planetId = $this->planetService->getPlanetId();
+        $niveaux = resolve(LifeformLevels::class);
+        $niveaux->setLevel($planetId, LifeformKind::Building, self::RESIDENTIAL, 30);
+        $niveaux->setLevel($planetId, LifeformKind::Building, self::FARM, 35);
+        resolve(LifeformRuleRevisions::class)->recordIfChanged($debut, null, 'banc');
+        $profil = PlanetLifeformProfile::fromLevels(Species::Humans, $niveaux->buildingLevelsOf($planetId), 8.0);
+
+        // Deux passages apres la bataille : l ancre est passee au-dela de son instant.
+        LifeformPlanet::query()->where('planet_id', $planetId)->update([
+            'population' => 300000.0, 'food' => $profil->foodStorage, 'calculated_at' => $debut,
+            'previous_population' => 300000.0, 'previous_food' => $profil->foodStorage, 'previous_calculated_at' => $debut,
+        ]);
+        $passage = resolve(LifeformPlanetUpdater::class);
+        $passage->update($this->planetService, $debut + 300);
+        $passage->update($this->planetService, $debut + 600);
+        $avant = LifeformPlanet::query()->where('planet_id', $planetId)->firstOrFail()->only(['population', 'food', 'calculated_at', 'previous_population', 'previous_food', 'previous_calculated_at']);
+        $this->assertGreaterThan($debut, (int)$avant['previous_calculated_at'], 'Premisse : l instant de la bataille est sorti de la fenetre.');
+
+        $chasseur = ObjectService::getShipObjectByMachineName('light_fighter');
+        $victoire = new BattleResult();
+        $victoire->attackerUnitsResult = new UnitCollection();
+        $victoire->attackerUnitsResult->addUnit($chasseur, 10);
+        $victoire->defenderUnitsResult = new UnitCollection();
+
+        try {
+            resolve(LifeformCombatLosses::class)->applyIfAttackerWon($victoire, $this->planetService, 0.5, $debut);
+            $this->fail('Un reglement tardif hors fenetre a decide au lieu de se suspendre.');
+        } catch (UnknownAdmissionHistory $anomalie) {
+            $this->assertStringContainsString((string)$planetId, $anomalie->getMessage());
+        }
+        $this->assertSame($avant, LifeformPlanet::query()->where('planet_id', $planetId)->firstOrFail()->only(array_keys($avant)), 'Un reglement refuse ne doit rien ecrire.');
+    }
+
+    /**
+     * Population, nourriture, horloge, population relue au milieu de la fenetre, et bonus de technologies.
+     *
+     * @return array{population: float, food: float, calculated_at: int, au_milieu: float, bonus: array<string, float>}
+     */
+    private function planetPhotograph(int $planetId, int $milieu): array
+    {
+        LifeformBonusCache::invalidate();
+        $ligne = LifeformPlanet::query()->where('planet_id', $planetId)->firstOrFail();
+        $bonus = [];
+        $jeu = resolve(LifeformBonusResolver::class)->forPlayer($this->currentUserId);
+        foreach (LifeformCatalogue::byId(self::ENVOYS)->bonuses as $b) {
+            $bonus[$b->code . '/' . ($b->target ?? '')] = round($jeu->fraction($b->code, $b->target), 12);
+        }
+        $auMilieu = resolve(LifeformDemography::class)->populationAt($planetId, $milieu);
+        $this->assertNotNull($auMilieu, 'Le milieu de la fenetre doit rester lisible.');
+
+        return [
+            'population' => (float)$ligne->population,
+            'food' => (float)$ligne->food,
+            'calculated_at' => (int)$ligne->calculated_at,
+            'au_milieu' => (float)$auMilieu,
+            'bonus' => $bonus,
+        ];
     }
 
     /**
