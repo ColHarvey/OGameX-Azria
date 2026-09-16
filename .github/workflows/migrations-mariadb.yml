@@ -45,6 +45,12 @@ on:
       - 'app/History/**'
       - 'app/Services/CharacterClassService.php'
       - 'app/Observers/UserObserver.php'
+      # Les formes de vie (journal §155) : le choix d espece, le demarrage d un travail et le reglement
+      # d un vol de decouverte tiennent chacun un verrou de ligne, et les trois courses qui les eprouvent
+      # vivent dans tests/MariaDb. Sans ce chemin, un changement d un de ces verrous ne lancerait plus
+      # le bac — et la mutation survivante du chantier (relecture du statut sous le verrou) ne se mesure
+      # que la.
+      - 'app/Lifeforms/**'
       - 'tests/Feature/HullRepairTest.php'
       - 'tests/Feature/Patrol*.php'
       - 'tests/MariaDb/**'
@@ -79,6 +85,12 @@ on:
       - 'app/History/**'
       - 'app/Services/CharacterClassService.php'
       - 'app/Observers/UserObserver.php'
+      # Les formes de vie (journal §155) : le choix d espece, le demarrage d un travail et le reglement
+      # d un vol de decouverte tiennent chacun un verrou de ligne, et les trois courses qui les eprouvent
+      # vivent dans tests/MariaDb. Sans ce chemin, un changement d un de ces verrous ne lancerait plus
+      # le bac — et la mutation survivante du chantier (relecture du statut sous le verrou) ne se mesure
+      # que la.
+      - 'app/Lifeforms/**'
       - 'tests/Feature/HullRepairTest.php'
       - 'tests/Feature/Patrol*.php'
       - 'tests/MariaDb/**'
@@ -304,12 +316,16 @@ jobs:
         if: always()
         # Le plancher ne dit pas lesquels ont tourne : les courses des classes d alliance et celle des
         # historiques de classe sont exigees par leur nom (journal §143 et §144). 168 essais au run
-        # 34695884708, plus ces cinq-la.
+        # 34695884708, plus ces cinq-la. Les trois courses des formes de vie (journal §155) le sont
+        # aussi : un vert qui ne les nommerait pas ne prouverait pas qu elles ont tourne.
         run: >-
           php scripts/verifier-junit.php storage/logs/junit-mariadb.xml --minimum=173 --sans-ignores
           --exige=testTwoFreeFirstChoicesAtOnceGrantOnlyOneFreeClass
           --exige=testDisbandingWaitsOnTheAllianceBeforeLockingAnyAccount
           --exige=testTwoConcurrentDisbandsBothFinishAndLeaveTheAllianceGone
+          --exige=testTwoSimultaneousChoicesLeaveOneSpeciesAndOneRowPerPlanet
+          --exige=testTwoSimultaneousRequestsStartOneWorkAndPayOnce
+          --exige=testTwoSimultaneousSettlementsCreditOnceAndReportOnce
           --exige=testTheClassAtAnAdmissionIsNeverAMixOfTheColumnAndTheHistory
           --exige=testTwoSeparateReadsWouldMixWhereTheReaderDoesNot
 
