@@ -211,5 +211,15 @@ class ChatBarDesignTest extends AccountTestCase
         $this->assertStringContainsString("$(d).closest('#chatBar').length", $js, 'Le panneau Azria ne va que dans la barre.');
         // Les dates : le serveur envoie des secondes, la fabrique les rend en millisecondes.
         $this->assertStringContainsString('horodatage = horodatage * 1000', $js);
+        // Un message recu vise l onglet, jamais la ligne du panneau qui porte le meme identifiant (la fenetre s ouvre en direct).
+        $this->assertStringContainsString("find(\".chat_bar_list_item[data-playerid='\" + F + \"']\")", $js);
+        $this->assertStringNotContainsString("find(\"[data-playerid='\" + F + \"']\")", $js, 'Le selecteur lache attrapait la ligne du panneau des contacts.');
+        // Le pont : l onglet des contacts reste compact, la conversation se decale par une variable posee par chat.js.
+        $this->assertStringContainsString("style.setProperty('--az-deck-shift'", $js);
+        $regle = '.chat_bar_list_item.open > .chat_box { right: calc(-1px + var(--az-deck-shift, 0px)); }';
+        $source = (string)preg_replace('/\s+/', ' ', (string)file_get_contents(resource_path('css/ingame/chat-azria.css')));
+        $this->assertStringContainsString('#chatBar.azria-chat ' . $regle, $source, 'La feuille source lit le decalage du pont.');
+        $this->assertStringContainsString('#chatBar.azria-chat .chat_bar_list_item.open>.chat_box{right:calc(-1px + var(--az-deck-shift,0px))}', $this->feuilleServie(), 'La feuille servie porte la regle du pont telle que Vite l ecrit.');
+        $this->assertStringNotContainsString(':has(', (string)file_get_contents(resource_path('css/ingame/chat-azria.css')), 'Aucun elargissement de l onglet des contacts.');
     }
 }
