@@ -366,6 +366,7 @@ return [
         'tactical_reason_no_alliance' => 'Sans alliance',
         'tactical_reason_unavailable' => 'Indisponible ici',
         'tactical_reason_destroyed' => 'Corps détruit',
+        'tactical_reason_discovery' => 'Découvertes fermées : aucune espèce choisie',
         'tactical_reason_patrol_own' => 'Depuis une de vos planètes seulement',
         'tactical_reason_patrol_current' => 'Depuis la planète active seulement : changez de planète dans le bandeau',
         'tactical_reason_patrol_no_fleet' => 'Choisissez une flotte standard',

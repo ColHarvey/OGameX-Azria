@@ -40,13 +40,17 @@ final class GalaxyDiscoveries
     /**
      * L etat des decouvertes pour un systeme affiche.
      *
-     * @return array{enabled: bool, count: int, header: string, missions: array<int, array{missionType: int, canSend: true|string, discoveryCount: int, link: string, name: string}>}
+     * `general` est ce qui vaut pour toutes les positions a la fois (vrai, ou la raison : pas une planete, centre
+     * absent, quota epuise) ; c est ce que la reponse d un vol rend au bundle, qui grise toutes les autres icones sur une
+     * raison — jamais l etat d une seule position, propre a elle (journal §160).
+     *
+     * @return array{enabled: bool, general: true|string, count: int, header: string, missions: array<int, array{missionType: int, canSend: true|string, discoveryCount: int, link: string, name: string}>}
      */
     public function forSystem(PlayerService $player, int $galaxy, int $system, int $now): array
     {
         $espece = $this->settings->lifeformsEnabled() ? $this->installation->speciesOf($player->getId()) : null;
         if ($espece === null) {
-            return ['enabled' => false, 'count' => 0, 'header' => $this->header(0), 'missions' => []];
+            return ['enabled' => false, 'general' => (string)__('t_ingame.galaxy.discovery_locked'), 'count' => 0, 'header' => $this->header(0), 'missions' => []];
         }
 
         $compte = $this->discoveries->accrueQuota($player->getId(), $now);
@@ -95,7 +99,7 @@ final class GalaxyDiscoveries
             ];
         }
 
-        return ['enabled' => true, 'count' => $disponibles, 'header' => $this->header($disponibles), 'missions' => $missions];
+        return ['enabled' => true, 'general' => $generale ?? true, 'count' => $disponibles, 'header' => $this->header($disponibles), 'missions' => $missions];
     }
 
     /** Le compteur de l en-tete de la Galaxie, tel que la page le rend et que la reponse d un vol le remet. */

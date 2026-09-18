@@ -60,13 +60,19 @@ final class LifeformGalaxyDiscoveryTest extends AccountTestCase
         $page->assertStatus(200);
         $page->assertSee('"lifeformEnabled": false', false);
         $page->assertSee('"discover": ' . GalaxyDiscoveries::MISSION_TYPE, false);
-        $page->assertDontSee('galaxyHeaderDiscoveryListLink', false); // Sans espece, rien a lancer : pas de lien.
+        $page->assertDontSee('galaxyHeaderDiscoveryListLink', false); // Le lien de secours vers la vue liste n existe plus (journal §160).
 
         $charge = $this->systemeAjax();
         $this->assertFalse($charge['lifeformEnabled']);
         foreach ($charge['system']['galaxyContent'] as $ligne) {
             $this->assertSame([], $this->missionDeDecouverte($ligne), 'Sans espece, aucune ligne ne propose de vol.');
         }
+
+        // Un vol demande quand meme (adresse forgee) : refuse, et la reponse dit au bundle de griser toutes les icones.
+        $refus = $this->postJson(route('lifeforms.discoveries.galaxy'), $this->coordonnees(1) + ['_token' => csrf_token()]);
+        $this->assertFalse($refus->json('response.success'));
+        $this->assertSame(__('t_ingame.galaxy.discovery_locked'), $refus->json('response.discovery.canSendDiscovery'), 'Sans espece, l etat general est un refus, jamais « vrai ».');
+        $this->assertSame(0, $refus->json('response.discovery.discoveryCount'));
 
         $refus = $this->postJson(route('lifeforms.discoveries.galaxy'), $this->coordonnees(2) + ['_token' => csrf_token()]);
         $refus->assertStatus(200);
@@ -112,10 +118,12 @@ final class LifeformGalaxyDiscoveryTest extends AccountTestCase
         $page->assertSee('id="galaxyHeaderDiscoveryCount">', false);
         $page->assertSee(__('t_ingame.galaxy.discoveries') . ': ' . LifeformDiscoveryRules::QUOTA_PER_DAY, false);
         $page->assertSee('var showDiscoveryWarning = false;', false);
-        // L icone ADN vit dans la vue liste ; la carte tactique, vue par defaut, ne la porte pas encore. L en-tete mene
-        // le joueur a la vue liste par le bouton que la page porte deja (releve de Codex, journal §155.26).
-        $page->assertSee('<a href="#" id="galaxyHeaderDiscoveryListLink" onclick="document.getElementById(\'gtViewList\').click(); return false;">' . e(__('t_ingame.galaxy.discoveries_list_view')) . '</a>', false);
-        $page->assertSee('id="gtViewList"', false); // Premisse : le bouton vise existe.
+        // L icone ADN vit dans la vue liste ET dans la fiche de la carte tactique (action « decouvrir », journal §160) : le
+        // lien de secours vers la vue liste (§155.26) a disparu, la fiche publie le libelle et la raison de l action.
+        $page->assertDontSee('galaxyHeaderDiscoveryListLink', false);
+        $page->assertSee('"decouvrir":' . json_encode(__('t_ingame.galaxy.discovery_title')), false);
+        $page->assertSee('"discovery":' . json_encode(__('t_ingame.galaxy.tactical_reason_discovery')), false);
+        $page->assertSee('id="gtViewList"', false); // La vue liste reste a un clic.
         LifeformPagesTest::assertScriptsCarryNoHtmlEntity((string)$page->getContent());
     }
 
@@ -125,21 +133,29 @@ final class LifeformGalaxyDiscoveryTest extends AccountTestCase
         resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Building, self::RESEARCH_CENTRE, 1);
         $metalAvant = $this->planetService->metal()->get();
 
+        // Un premier vol vers la position 1 : elle devient « en approche ». La reponse d un vol suivant doit dire que les
+        // AUTRES positions restent ouvertes (`canSendDiscovery` = vrai) — le bundle grise toutes les icones sinon. Elle
+        // le disait d apres la seule position 1, deja prise : toutes les icones du systeme se grisaient apres le second
+        // vol (vu au navigateur, journal §160).
+        $premier = $this->postJson(route('lifeforms.discoveries.galaxy'), $this->coordonnees(1) + ['_token' => csrf_token()]);
+        $this->assertTrue($premier->json('response.success'));
+        $metalAvant -= LifeformDiscoveryRules::cost()->metal->get();
+
         $reponse = $this->postJson(route('lifeforms.discoveries.galaxy'), $this->coordonnees(2) + ['_token' => csrf_token()]);
         $reponse->assertStatus(200);
         $this->assertIsString($reponse->json('newAjaxToken'));
         $this->assertTrue($reponse->json('response.success'));
         $this->assertStringContainsString($this->coordonneesTexte(2), (string)$reponse->json('response.message'));
         $this->assertSame($this->coordonnees(2), $reponse->json('response.coordinates'));
-        $this->assertSame(LifeformDiscoveryRules::QUOTA_PER_DAY - 1, $reponse->json('response.discovery.discoveryCount'));
-        $this->assertTrue($reponse->json('response.discovery.canSendDiscovery'), 'Les autres positions restent ouvertes.');
-        $this->assertSame(__('t_ingame.galaxy.discoveries') . ': ' . (LifeformDiscoveryRules::QUOTA_PER_DAY - 1), $reponse->json('response.discovery.galaxyHeader.LOCA_GALAXY_LIFEFORM_DISCOVERY_COUNT'));
+        $this->assertSame(LifeformDiscoveryRules::QUOTA_PER_DAY - 2, $reponse->json('response.discovery.discoveryCount'));
+        $this->assertTrue($reponse->json('response.discovery.canSendDiscovery'), 'Les autres positions restent ouvertes, meme quand la position 1 est prise.');
+        $this->assertSame(__('t_ingame.galaxy.discoveries') . ': ' . (LifeformDiscoveryRules::QUOTA_PER_DAY - 2), $reponse->json('response.discovery.galaxyHeader.LOCA_GALAXY_LIFEFORM_DISCOVERY_COUNT'));
         // Ce que displayMiniFleetMessage() lit encore : les compteurs de l en-tete de la Galaxie.
         foreach (['slots', 'probes', 'recyclers', 'missiles', 'planetType'] as $clef) {
             $this->assertArrayHasKey($clef, $reponse->json('response'));
         }
 
-        $vol = LifeformDiscovery::query()->where('user_id', $this->currentUserId)->first();
+        $vol = LifeformDiscovery::query()->where('user_id', $this->currentUserId)->where('position', $this->positionVisee(2))->first();
         $this->assertNotNull($vol, 'Le vol existe : c est le meme service que le formulaire.');
         $this->assertSame('running', $vol->status);
         $this->planetService->reloadPlanet();
@@ -152,7 +168,7 @@ final class LifeformGalaxyDiscoveryTest extends AccountTestCase
                 continue;
             }
             $mission = $this->missionDeDecouverte($ligne);
-            if ((int)$ligne['position'] === $this->positionVisee(2)) {
+            if (in_array((int)$ligne['position'], [$this->positionVisee(1), $this->positionVisee(2)], true)) {
                 $this->assertSame(__('t_ingame.galaxy.discovery_underway'), $mission['canSend']);
             } else {
                 $this->assertTrue($mission['canSend'], 'position ' . $ligne['position']);
@@ -163,8 +179,9 @@ final class LifeformGalaxyDiscoveryTest extends AccountTestCase
         $refus = $this->postJson(route('lifeforms.discoveries.galaxy'), $this->coordonnees(2) + ['_token' => csrf_token()]);
         $this->assertFalse($refus->json('response.success'));
         $this->assertSame(__('t_lifeforms_ui.refused.recently_explored', ['coordinates' => $this->coordonneesTexte(2)]), $refus->json('response.message'));
-        $this->assertSame(LifeformDiscoveryRules::QUOTA_PER_DAY - 1, $refus->json('response.discovery.discoveryCount'));
-        $this->assertSame(1, LifeformDiscovery::query()->where('user_id', $this->currentUserId)->count());
+        $this->assertSame(LifeformDiscoveryRules::QUOTA_PER_DAY - 2, $refus->json('response.discovery.discoveryCount'));
+        $this->assertTrue($refus->json('response.discovery.canSendDiscovery'), 'Un refus propre a une position ne grise pas les autres.');
+        $this->assertSame(2, LifeformDiscovery::query()->where('user_id', $this->currentUserId)->count());
 
         // Un quota epuise grise toutes les icones, et la reponse le dit pour que le script les grise sans recharger.
         LifeformAccount::query()->where('user_id', $this->currentUserId)->update(['discoveries_available' => 1]);

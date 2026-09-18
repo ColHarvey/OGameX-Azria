@@ -253,6 +253,7 @@
                         'coloniser' => __('t_ingame.fleet.mission_colonise'),
                         'demenager' => __('t_ingame.galaxy.relocate_action'),
                         'expedition' => __('t_ingame.fleet.mission_expedition'),
+                        'decouvrir' => __('t_ingame.galaxy.discovery_title'),
                         'patrouiller' => __('t_ingame.galaxy.tactical_patrol_action'),
                         'deplacer' => __('t_ingame.galaxy.tactical_patrol_move'),
                         'rappeler' => __('t_ingame.galaxy.tactical_patrol_recall'),
@@ -281,6 +282,7 @@
                         'patrolCurrentOnly' => __('t_ingame.galaxy.tactical_reason_patrol_current'),
                         'patrolNoFleet' => __('t_ingame.galaxy.tactical_reason_patrol_no_fleet'),
                         'patrolNoDestination' => __('t_ingame.galaxy.tactical_reason_patrol_no_destination'),
+                        'discovery' => __('t_ingame.galaxy.tactical_reason_discovery'),
                     ],
                 ];
             @endphp
@@ -457,12 +459,9 @@
                                 {{ __('t_ingame.galaxy.used_slots') }}:<span id="slotUsed">0</span>/<span id="slotValue">0</span>
                             </div>
                             <div id="galaxyHeaderDiscoveryCount">
+                                {{-- L icone ADN vit dans la vue liste ET dans la fiche de la carte tactique (action « Vaisseau
+                                     d exploration », journal §160) : plus de lien vers la vue liste. --}}
                                 {{ $lifeform_discovery_header }}
-                                @if ($lifeform_discoveries_enabled)
-                                    {{-- L icone ADN vit dans la vue liste ; la carte tactique, vue par defaut, ne la porte pas encore
-                                         (JavaScript du front, build en CI). Le lien mene le joueur la ou l action existe (§155.26). --}}
-                                    · <a href="#" id="galaxyHeaderDiscoveryListLink" onclick="document.getElementById('gtViewList').click(); return false;">{{ __('t_ingame.galaxy.discoveries_list_view') }}</a>
-                                @endif
                             </div>
                         </div>
 

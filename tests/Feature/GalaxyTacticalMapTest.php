@@ -450,6 +450,8 @@ class GalaxyTacticalMapTest extends UnitTestCase
             "'.cellAction a.colonize-active'" => 'colonisation',
             "'.cellAction a.planetMoveDefault'" => 'relocation',
             "chercherDansLInfobulle('debris' + position, 'a[onclick]')" => 'recycling',
+            "'.cellAction a.planetDiscover'" => 'discovery flight',
+            "'.cellAction .planetDiscoverUnavailable'" => 'discovery refusal reason',
         ] as $selecteur => $action) {
             $this->assertStringContainsString(
                 $selecteur,
@@ -492,6 +494,8 @@ class GalaxyTacticalMapTest extends UnitTestCase
             'class="tooltip planetMoveIcons colonize-active' => 'colonisation',
             'class="planetMoveIcons planetMoveDefault' => 'relocation',
             'onClick="sendShips(${8},' => 'recycling',
+            'class="tooltip js_hideTipOnMobile ipiHintable planetDiscover position${galaxyContentObject.position}"' => 'discovery flight',
+            'class="planetDiscoverIcons planetDiscoverUnavailable tooltip ipiHintable icon js_hideTipOnMobile"' => 'discovery refusal',
         ] as $marque => $action) {
             $this->assertStringContainsString(
                 $marque,
@@ -1636,8 +1640,8 @@ class GalaxyTacticalMapTest extends UnitTestCase
         $tableDesIcones = $bloc[1] ?? '';
         $this->assertNotSame('', $tableDesIcones, 'The action icon table is gone.');
         preg_match_all("/([a-zA-Z]+): '([a-z0-9-]+\.svg)'/", $tableDesIcones, $icones, PREG_SET_ORDER);
-        /* Dix-sept actions de l'inventaire de la revue 112, plus les cinq des patrouilles (pack `patrols-v1`). */
-        $this->assertCount(22, $icones, 'The action icon table no longer lists the seventeen actions of the inventory and the five of the patrols.');
+        /* Dix-sept actions de l'inventaire de la revue 112, les cinq des patrouilles (pack `patrols-v1`), et le vaisseau d'exploration (§160). */
+        $this->assertCount(23, $icones, 'The action icon table no longer lists the seventeen actions of the inventory, the five of the patrols and the exploration ship.');
 
         foreach ($icones as [, $action, $fichier]) {
             $this->assertFileExists(public_path('img/galaxy-tactical/' . $fichier), 'The icon of ' . $action . ' is missing on disk: a button without an image.');
@@ -1656,6 +1660,28 @@ class GalaxyTacticalMapTest extends UnitTestCase
         }
 
         $this->assertStringContainsString('            recycler: function () {', $module, 'Expedition debris lost their Recycle decision.');
+
+        /* Le vaisseau d'exploration (journal §160) : sur la planete, la lune et la position libre, en premier sur la position
+           libre comme dans la vue liste ; le bouton delegue au lien ADN que le bundle herite a rendu, et la grille se
+           recompose quand la reponse du vol remplace l'icone. Le bundle servi porte le module tel qu'il est ecrit. */
+        preg_match_all("/(planete|lune|libre): \[([^\]]*)\]/", $inventaire, $parGenre, PREG_SET_ORDER);
+        $this->assertCount(3, $parGenre);
+        foreach ($parGenre as [, $genre, $liste]) {
+            $this->assertStringContainsString("'decouvrir'", $liste, 'The exploration ship is not offered on ' . $genre . '.');
+        }
+        $this->assertStringStartsWith("'decouvrir'", trim($parGenre[2][2]), 'On a free position the exploration ship comes first, as in the list view.');
+        preg_match('/            decouvrir: function \(\) \{(.*?)\n            \},/s', $module, $decision);
+        $corps = $decision[1] ?? '';
+        $this->assertStringContainsString("chercher('.cellAction a.planetDiscover')", $corps);
+        $this->assertStringContainsString('recomposerApresLeVol(f);', $corps, 'The card would keep an active button after the flight left.');
+        $this->assertStringContainsString("chercher('.cellAction .planetDiscoverUnavailable')", $corps, 'The refusal reason of the server is not read.');
+        $this->assertStringContainsString("raison('discovery')", $corps);
+        $this->assertMatchesRegularExpression('/function recomposerApresLeVol\(f\) \{.*?new MutationObserver\(function \(\) \{\s*observateur\.disconnect\(\);\s*composerLesActions\(f\);\s*\}\);/s', $module, 'The recomposition after a flight does not recompose the grid when the icon changes.');
+        $manifeste = json_decode((string)file_get_contents(public_path('build/manifest.json')), true);
+        $this->assertIsArray($manifeste);
+        $bundle = (string)file_get_contents(public_path('build/' . $manifeste['resources/js/ingame.js']['file']));
+        $this->assertStringContainsString("decouvrir: 'action-discovery.svg'", $bundle, 'The served bundle does not carry the exploration ship: the map would offer nothing.');
+        $this->assertStringContainsString('function recomposerApresLeVol(f) {', $bundle);
 
         /* Un bouton grise est un vrai `disabled`, il porte sa raison, et il est desature sans survol. */
         $this->assertStringContainsString('            b.disabled = true;', $module, 'A greyed button is only styled: keyboard and mouse still fire it.');

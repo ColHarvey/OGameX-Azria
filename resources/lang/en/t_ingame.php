@@ -480,6 +480,7 @@ return [
         'tactical_reason_no_alliance' => 'No alliance',
         'tactical_reason_unavailable' => 'Unavailable here',
         'tactical_reason_destroyed' => 'Destroyed body',
+        'tactical_reason_discovery' => 'Discoveries closed: no species chosen',
         'tactical_reason_patrol_own' => 'From one of your own planets only',
         'tactical_reason_patrol_current' => 'From the active planet only: switch planet in the header',
         'tactical_reason_patrol_no_fleet' => 'Choose a standard fleet',

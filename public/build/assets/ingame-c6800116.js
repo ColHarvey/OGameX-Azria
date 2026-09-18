@@ -77226,6 +77226,8 @@ window.playOGameXWormhole = function (canvas) {
         coloniser: 'action-colonize.svg',
         demenager: 'action-relocate.svg',
         expedition: 'action-expedition.svg',
+        /* Le vaisseau d'exploration des formes de vie : l'icone ADN de la vue liste, dans le style du pack. */
+        decouvrir: 'action-discovery.svg',
         /* Les patrouilles : les icones du pack `patrols-v1` de Codex, prefixees `patrol-`. */
         patrouiller: 'patrol-patrol.svg',
         deplacer: 'patrol-move.svg',
@@ -77239,10 +77241,10 @@ window.playOGameXWormhole = function (canvas) {
      * Une action absente de la ligne n'est pas cachee : elle est grisee avec sa raison.
      */
     var ACTIONS_PAR_GENRE = {
-        planete: ['espionner', 'attaquer', 'transporter', 'deployer', 'acs', 'missiles', 'phalange', 'message', 'ami', 'ignorer', 'classement', 'alliance', 'patrouiller'],
-        lune: ['espionner', 'attaquer', 'transporter', 'deployer', 'acs', 'detruireLune', 'message', 'ami', 'classement', 'alliance'],
+        planete: ['espionner', 'attaquer', 'transporter', 'deployer', 'acs', 'missiles', 'phalange', 'decouvrir', 'message', 'ami', 'ignorer', 'classement', 'alliance', 'patrouiller'],
+        lune: ['espionner', 'attaquer', 'transporter', 'deployer', 'acs', 'detruireLune', 'decouvrir', 'message', 'ami', 'classement', 'alliance'],
         debris: ['recycler'],
-        libre: ['coloniser', 'demenager'],
+        libre: ['decouvrir', 'coloniser', 'demenager'],
         profond: ['expedition'],
         patrouille: ['deplacer', 'rappeler']
     };
@@ -77436,6 +77438,36 @@ window.playOGameXWormhole = function (canvas) {
             },
             detruireLune: function () {
                 return parMission(9) || refusOrdinaire();
+            },
+            /*
+             * ## Le vaisseau d'exploration (formes de vie)
+             *
+             * La vue liste porte l'icone ADN du jeu officiel dans `.cellAction` de chaque position —
+             * planete, lune, position libre — rendue par `getDiscoveryLinkIcon()` d'apres ce que le
+             * serveur a decide (`GalaxyDiscoveries::forSystem()`) : un lien qui appelle
+             * `discoverPlanet()` quand le vol peut partir, un pictogramme grise portant la raison sinon
+             * (verrouille, quota epuise, vol en approche, position explorée depuis moins de sept
+             * jours), rien du tout quand les formes de vie sont fermees ou qu'aucune espece n'est
+             * choisie. Le bouton de la fiche delegue au lien, et la reponse du vol remplace l'icone :
+             * la grille se recompose alors d'elle-meme (`recomposerApresLeVol`).
+             */
+            decouvrir: function () {
+                var lien = chercher('.cellAction a.planetDiscover');
+
+                if (avecClic(lien)) {
+                    return actif(function () {
+                        recomposerApresLeVol(f);
+                        lien.click();
+                    });
+                }
+
+                var grise = chercher('.cellAction .planetDiscoverUnavailable');
+
+                if (grise && (grise.getAttribute('title') || '').trim() !== '') {
+                    return inactif(grise.getAttribute('title').trim());
+                }
+
+                return inactif(raison('discovery'));
             },
             recycler: function () {
                 var lien = chercherDansLInfobulle('debris' + position, 'a[onclick]');
@@ -77641,6 +77673,29 @@ window.playOGameXWormhole = function (canvas) {
         b.appendChild(texte);
 
         return b;
+    }
+
+    /*
+     * Le vol d'exploration repond en remplacant l'icone ADN de la ligne (`discoverPlanet()` du bundle
+     * herite) : la fiche observe la cellule et recompose sa grille a ce moment-la, une fois — le
+     * bouton devient « en approche », grise, sans que le joueur ait a rouvrir la fiche.
+     */
+    function recomposerApresLeVol(f) {
+        var cellule = f.querySelector('.cellAction');
+
+        if (!cellule || typeof MutationObserver === 'undefined') {
+            return;
+        }
+
+        var observateur = new MutationObserver(function () {
+            observateur.disconnect();
+            composerLesActions(f);
+        });
+
+        observateur.observe(cellule, { childList: true, subtree: true });
+        window.setTimeout(function () {
+            observateur.disconnect();
+        }, 15000);
     }
 
     /* La grille des actions, recomposee a chaque ouverture — et quand le choix de flotte d'expedition change. */

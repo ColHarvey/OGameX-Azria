@@ -821,11 +821,12 @@ final class LifeformsController extends OGameController
             $reponse['message'] = __($refus->translationKey());
         }
 
-        // L etat des autres positions du systeme, APRES le vol : un quota epuise grise toutes les icones.
+        // L etat des autres positions du systeme, APRES le vol : un quota epuise grise toutes les icones. Le bundle
+        // grise TOUTES les autres icones sur une raison : c est donc l etat general (quota, centre, planete) qui est rendu,
+        // jamais celui d une seule position — la position 1 prise grisait tout le systeme (journal §160).
         $etat = $galaxie->forSystem($player, $cible->galaxy, $cible->system, $maintenant);
-        $autre = $cible->position === 1 ? 2 : 1;
         $reponse['discovery'] = [
-            'canSendDiscovery' => $etat['enabled'] ? $etat['missions'][$autre]['canSend'] : __('t_ingame.galaxy.discovery_locked'),
+            'canSendDiscovery' => $etat['general'],
             'discoveryCount' => $etat['count'],
             'galaxyHeader' => ['LOCA_GALAXY_LIFEFORM_DISCOVERY_COUNT' => $etat['header']],
         ];
