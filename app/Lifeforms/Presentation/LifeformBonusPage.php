@@ -62,7 +62,7 @@ final class LifeformBonusPage
     /**
      * Les effets que le compte porte, chacun avec son total applique et son detail par planete.
      *
-     * @return array<int, array{key: string, label: string, total: float, capped: bool, planets: array<int, array{name: string, coordinates: string, total: float, rows: array<int, array{slot: int, level: int, title: string, percent: float}>}>}>
+     * @return array<int, array{key: string, label: string, total: float, capped: bool, planets: array<int, array{name: string, coordinates: string, total: float, rows: array<int, array{object: int, slot: int, level: int, title: string, percent: float}>}>}>
      */
     public function effectsOf(PlayerService $player): array
     {
@@ -94,6 +94,9 @@ final class LifeformBonusPage
                 foreach ($contributionsDeLaPlanete as $contribution) {
                     $sousTotal += $contribution->fraction * 100;
                     $rows[] = [
+                        // L'identifiant de l'objet suit la ligne : la page des bonus montre la vignette de la
+                        // technologie, comme le jeu officiel range ses lignes de bonus.
+                        'object' => $contribution->objectId,
                         'slot' => $contribution->slot,
                         'level' => $contribution->level,
                         'title' => self::titleOfObject($contribution->objectId),

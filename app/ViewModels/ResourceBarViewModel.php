@@ -3,6 +3,7 @@
 namespace OGame\ViewModels;
 
 use OGame\Facades\AppUtil;
+use OGame\Lifeforms\Presentation\LifeformBanner;
 use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
 use stdClass;
@@ -55,7 +56,11 @@ final class ResourceBarViewModel
     {
         $planet = $body ?? $player->planets->current();
         $planet->updateResources(false);
-        $resources = self::resourcesOf($planet, $player);
+
+        // **La population et la nourriture appartiennent au bandeau**, pas seulement au gabarit : le compteur du
+        // jeu lit `resources.population.tooltip` des que la page porte `#population_box`, donc sans elles dans la
+        // charge la resynchronisation levait et le bandeau restait fige (journal §155.23).
+        $resources = self::resourcesOf($planet, $player, app(LifeformBanner::class)->figuresOf($player, $planet));
 
         $ticker = self::tickerOf($resources);
 
@@ -69,11 +74,12 @@ final class ResourceBarViewModel
     /**
      * Les faits bruts et formates, tels que le gabarit les affiche.
      *
+     * @param array<string, mixed>|null $lifeforms les chiffres de la planete, quand le compte porte une espece
      * @return array<string, array<string, mixed>>
      */
-    private static function resourcesOf(PlanetService $planet, PlayerService $player): array
+    private static function resourcesOf(PlanetService $planet, PlayerService $player, array|null $lifeforms = null): array
     {
-        return [
+        $resources = [
             'metal' => [
                 'amount' => $planet->metal()->get(),
                 'amount_formatted' => $planet->metal()->getFormattedLong(),
@@ -117,6 +123,65 @@ final class ResourceBarViewModel
                 'amount_formatted' => AppUtil::formatNumber($player->getDarkMatter()),
             ],
         ];
+
+        if ($lifeforms === null) {
+            return $resources;
+        }
+
+        $population = (int)floor($lifeforms['population']);
+        $food = (int)floor($lifeforms['food']);
+        $resources['population'] = [
+            'amount' => $population,
+            // La tuile abrege comme les autres (« 15.353Mn ») : le compteur du navigateur reecrit la valeur avec
+            // cette meme abreviation a chaque battement, et le nombre entier vit dans l'infobulle.
+            'amount_formatted' => AppUtil::formatNumberLong($population),
+            'storage' => $lifeforms['living_space'],
+            'production_second' => $lifeforms['growth_hour'] / 3600,
+            'tooltip' => self::populationTooltip($lifeforms),
+        ];
+        $resources['food'] = [
+            'amount' => $food,
+            'amount_formatted' => AppUtil::formatNumberLong($food),
+            'storage' => (int)floor($lifeforms['food_storage']),
+            'production_second' => $lifeforms['food_balance_hour'] / 3600,
+            'tooltip' => self::foodTooltip($lifeforms),
+        ];
+
+        return $resources;
+    }
+
+    /**
+     * L'infobulle de la population : les memes lignes que le gabarit ecrivait lui-meme, composees ici une seule
+     * fois — sinon la synchronisation remplacait l'infobulle du rendu par une autre, legerement differente.
+     *
+     * @param array<string, mixed> $lifeforms
+     */
+    private static function populationTooltip(array $lifeforms): string
+    {
+        return self::tooltip(__('t_lifeforms_ui.banner.population'), [
+            [__('t_lifeforms_ui.banner.available'), '', (string)$lifeforms['population_formatted']],
+            [__('t_lifeforms_ui.banner.tier2'), '', (string)$lifeforms['tier2_formatted']],
+            [__('t_lifeforms_ui.banner.tier3'), '', (string)$lifeforms['tier3_formatted']],
+            [__('t_lifeforms_ui.banner.living_space'), $lifeforms['full'] ? 'overmark' : '', (string)$lifeforms['living_space_formatted']],
+            [__('t_lifeforms_ui.banner.satisfied'), 'undermark', (string)$lifeforms['satisfied_formatted']],
+            [__('t_lifeforms_ui.banner.hungry'), $lifeforms['hungry'] > 0 ? 'overmark' : '', (string)$lifeforms['hungry_formatted']],
+            [__('t_lifeforms_ui.banner.growth'), '', $lifeforms['growth_hour_formatted'] . '/h'],
+            [__('t_lifeforms_ui.banner.sheltered'), 'middlemark', (string)$lifeforms['sheltered_formatted']],
+        ]);
+    }
+
+    /**
+     * @param array<string, mixed> $lifeforms
+     */
+    private static function foodTooltip(array $lifeforms): string
+    {
+        return self::tooltip(__('t_lifeforms_ui.banner.food'), [
+            [__('t_lifeforms_ui.banner.available'), '', (string)$lifeforms['food_formatted']],
+            [__('t_lifeforms_ui.banner.storage'), '', (string)$lifeforms['food_storage_formatted']],
+            [__('t_lifeforms_ui.banner.production'), 'undermark', $lifeforms['food_production_hour_formatted'] . '/h'],
+            [__('t_lifeforms_ui.banner.consumption'), 'overmark', $lifeforms['food_consumption_hour_formatted'] . '/h'],
+            [__('t_lifeforms_ui.banner.consumed_in'), ($lifeforms['food_runs_out_in'] === null ? '' : 'overmark ') . 'timeTillFoodRunsOut', (string)$lifeforms['food_runs_out_formatted']],
+        ]);
     }
 
     /**
@@ -160,6 +225,23 @@ final class ResourceBarViewModel
             ]),
             'classesListItem' => '',
         ];
+
+        // Les deux tuiles des formes de vie : le compteur les tient comme des stocks — une production par seconde
+        // (la croissance, le bilan de nourriture) plafonnee au stockage (l'espace vital, le grenier).
+        foreach (['population', 'food'] as $name) {
+            if (!isset($resources[$name])) {
+                continue;
+            }
+            $facts = $resources[$name];
+            $ticker['resources'][$name] = [
+                'amount' => $facts['amount'],
+                'storage' => $facts['storage'],
+                'baseProduction' => 0,
+                'production' => $facts['production_second'],
+                'tooltip' => $facts['tooltip'],
+                'classesListItem' => '',
+            ];
+        }
 
         $ticker['techs'] = new stdClass();
         $ticker['honorScore'] = self::HONOR_SCORE_OF_THE_TEMPLATE;

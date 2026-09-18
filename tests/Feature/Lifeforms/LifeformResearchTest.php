@@ -354,6 +354,62 @@ final class LifeformResearchTest extends AccountTestCase
         $this->assertSame([1 => self::ENVOYS], $historique->occupantsAt($planetId, $meme), 'Un choix fait a la seconde de la remise a zero est perdu.');
     }
 
+    /**
+     * **La page des recherches prend les icones, les boutons et les variables que la feuille et le bundle du jeu
+     * attendent** (controle a l ecran, journal §155.23) :
+     *
+     * - un emplacement libre porte `research-allowed` (centre ouvert) ou `research-disallowed` (centre ferme,
+     *   vacances), jamais le cadenas `research-locked` reserve aux emplacements que la population ferme, et jamais
+     *   une image de cadenas en ligne ;
+     * - les remises a zero sont le gros bouton vert du jeu (`a.build-it`), gris quand rien n est a remettre
+     *   (`a.build-it_disabled`), pas un `button.btn_blue` ;
+     * - les deux variables que le bundle lit sans garde au clic de la fleche verte sont declarees ;
+     * - le panneau d une technologie porte sa bande de description en enfant direct, la note d empire dedans, et
+     *   un titre d une seule ligne ; le choix d un emplacement prend la couche `lfresearchlayer` et ses boutons
+     *   `a.select-button`, et degage les 30 px du titre absolu.
+     */
+    public function testTheResearchPageTakesTheIconsAndButtonsTheStylesheetGives(): void
+    {
+        $niveaux = resolve(LifeformLevels::class);
+        $this->populate(250000.0);
+
+        $sansCentre = $this->get(route('lifeforms.research'));
+        $sansCentre->assertStatus(200);
+        $html = (string)$sansCentre->getContent();
+        $this->assertSame(1, substr_count($html, 'research-disallowed'), 'Centre ferme : l emplacement ouvert et vide le dit.');
+        $this->assertSame(0, substr_count($html, 'research-allowed'));
+        $this->assertSame(17, substr_count($html, 'research-locked'), 'Les dix-sept autres restent fermes par la population.');
+        $this->assertStringNotContainsString('5395f4191666be14fe8d735eea568a.png', $html, 'Le cadenas vient de la feuille, jamais d un style en ligne.');
+        $sansCentre->assertSee('var planetMoveInProgress = false;', false);
+        $sansCentre->assertSee('var lastBuildingSlot = {', false);
+        $sansCentre->assertDontSee('class="btn_blue"', false);
+        $sansCentre->assertSee('<a id="resetTier1" class="build-it_disabled tooltip"', false);
+
+        $niveaux->setLevel($this->currentPlanetId, LifeformKind::Building, self::RESEARCH_CENTRE, 1);
+        $avecCentre = $this->get(route('lifeforms.research'));
+        $html = (string)$avecCentre->getContent();
+        $this->assertSame(1, substr_count($html, 'research-allowed'), 'Centre ouvert : l emplacement libre invite a choisir.');
+        $this->assertSame(0, substr_count($html, 'research-disallowed'));
+
+        // Le choix d un emplacement : la couche officielle et ses boutons verts.
+        $choix = (string)$this->get(route('lifeforms.research.ajax', ['technology' => 9001]))->json('content.technologydetails');
+        $this->assertStringContainsString('class="lifeform-slot-choice lfresearchlayer"', $choix);
+        $this->assertStringContainsString('<a class="select-button"', $choix);
+        $this->assertStringNotContainsString('btn_blue', $choix);
+        $this->assertStringContainsString('padding: 30px 8px 8px 8px;', $choix, 'Le contenu degage les 26 px du titre absolu.');
+
+        // Une technologie placee : la remise a zero devient possible, en vert.
+        resolve(LifeformResearchService::class)->choose($this->currentPlanetId, $this->currentUserId, 1, 'local', (int)Date::now()->timestamp);
+        $this->get(route('lifeforms.research'))->assertSee('<a class="build-it" id="resetTier1"', false);
+
+        // Son panneau : la bande de description en enfant direct, la note d empire dedans, un titre sur une ligne.
+        $panneau = (string)$this->get(route('lifeforms.research.ajax', ['technology' => self::ENVOYS]))->json('content.technologydetails');
+        $this->assertSame('technologydetails', LifeformPagesTest::parentIdOfTheDescriptionBand($panneau));
+        $this->assertStringContainsString(e(__('t_lifeforms_ui.research.global_note')), $panneau);
+        $this->assertGreaterThan(strpos($panneau, '<div class="description">'), strpos($panneau, e(__('t_lifeforms_ui.research.global_note'))), 'La note vit dans la bande de description.');
+        $this->assertSame(1, preg_match('#<h3>' . preg_quote((string)__('t_lifeforms.intergalactic_envoys.title'), '#') . '</h3>#', $panneau), 'Le titre tient sur une ligne, sans l espece.');
+    }
+
     private function populate(float $population): void
     {
         LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->update(['population' => $population]);

@@ -688,6 +688,14 @@ final class LifeformCombatTest extends FleetDispatchTestCase
             $reponse->assertStatus(200);
             $reponse->assertSee(e(__('t_lifeforms_ui.held.title')), false);
             $reponse->assertSee('data-held-since="' . $echeanceDuRalliement . '"', false);
+            // L avis se pose AVANT le cadre `#technologies` : dedans, il repoussait la barre de titre loin de
+            // l embout haut du cadre (mesure a l ecran, journal §155.23). Sur la vue generale, avant les boites.
+            $html = (string)$reponse->getContent();
+            $avis = strpos($html, 'data-held-since=');
+            $cadre = strpos($html, $page === '/overview' ? 'id="productionboxBottom"' : '<div id="technologies">');
+            $this->assertNotFalse($avis, $page);
+            $this->assertNotFalse($cadre, $page . ' : le cadre attendu manque.');
+            $this->assertLessThan($cadre, $avis, $page . ' : l avis de suspension doit preceder le cadre, pas vivre dedans.');
         }
         $this->assertSame($echeanceDuRalliement, (int)LifeformPlanet::query()->where('planet_id', $cibleId)->value('calculated_at'), 'Charger ses pages ne fait pas avancer une planete tenue.');
 

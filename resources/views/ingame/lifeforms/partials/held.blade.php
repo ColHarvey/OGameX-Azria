@@ -14,10 +14,10 @@
             line-height: 15px;
             text-align: center;
         }
-        .lifeformHeldNotice strong { color: #ffd98a; }
+        .lifeformHeldNotice strong { color: #ffd98a; font-size: 12px; }
     </style>
     <div class="lifeformHeldNotice" role="status" data-held-since="{{ $held['since'] }}">
-        <strong>{{ __('t_lifeforms_ui.held.title') }}</strong>
+        <strong>{{ __('t_lifeforms_ui.held.title') }}</strong><br>
         {{ __('t_lifeforms_ui.held.body') }}
         <span class="smallFont">{{ __('t_lifeforms_ui.held.since') }} {{ $held['since_formatted'] }}</span>
     </div>

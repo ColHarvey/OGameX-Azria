@@ -275,6 +275,11 @@
         <div class="c-left"></div>
         <div class="c-right"></div>
 
+        {{-- Le bandeau de suspension en PLEINE LARGEUR, au-dessus des boites, comme l attente de suppression :
+             dans la colonne des batiments (220 px) il repoussait la boite des batiments de formes de vie et
+             desalignait la rangee (journal §155.23). --}}
+        @include('ingame.lifeforms.partials.held', ['held' => $lifeforms['held'] ?? null])
+
         <div id="productionboxBottom">
             <div class="productionBoxBuildings boxColumn building">
                 <div id="productionboxbuildingcomponent" class="productionboxbuilding injectedComponent parent overview">
@@ -298,7 +303,6 @@
                 @if (!empty($lifeforms['species']) && !empty($lifeform_queues))
                 {{-- Formes de vie (journal §155) : la file des batiments de la planete courante. --}}
                 <div id="productionboxlfbuildingcomponent" class="productionboxlfbuilding injectedComponent parent overview">
-                    @include('ingame.lifeforms.partials.held', ['held' => $lifeforms['held'] ?? null])
                     @include('ingame.lifeforms.partials.queue', ['queue_active' => $lifeform_queues['buildings_active'], 'queue_waiting' => $lifeform_queues['buildings_queue'], 'kind' => 'building'])
                 </div>
                 @endif

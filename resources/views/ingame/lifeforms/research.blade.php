@@ -34,7 +34,7 @@
                                 @elseif ($s['object'] === null)
                                     <li class="technology hasDetails tooltip hideTooltipOnMouseenter js_hideTipOnMobile tpd-hideOnClickOutside lifeform-slot-empty" data-slot="{{ $s['slot'] }}"
                                         data-technology="{{ 9000 + $s['slot'] }}" data-status="on" data-is-spaceprovider=""
-                                        aria-label="{{ __('t_lifeforms_ui.research.slot_empty') }}" title="{{ __('t_lifeforms_ui.research.slot_empty') }}"><span class="icon medium lifeform-slot-free" style="display: block; width: 100px; height: 100px; background: url('/img/icons/5395f4191666be14fe8d735eea568a.png') no-repeat; background-size: contain; opacity: .55;"></span></li>
+                                        aria-label="{{ __('t_lifeforms_ui.research.slot_empty') }}" title="{{ __('t_lifeforms_ui.research.slot_empty') }}"><span class="icon medium {{ $is_in_vacation_mode || !$s['centre_open'] ? 'research-disallowed' : 'research-allowed' }}"></span></li>
                                 @else
                                     @php $objet = $s['object']; @endphp
                                     <li class="technology lifeformTech{{ $objet->id }} hasDetails tooltip hideTooltipOnMouseenter js_hideTipOnMobile tpd-hideOnClickOutside" data-slot="{{ $s['slot'] }}"
@@ -70,23 +70,23 @@
                                 @endif
                             @endforeach
                         </ul>
-                        <div class="buttons" style="text-align: center; margin-bottom: 8px;">
+                        <div class="buttons">
                             @if ($palier['can_reset'])
                                 <form method="post" action="{{ route('lifeforms.research.reset') }}" style="display: inline;"
                                       onsubmit="return confirm({{ json_encode(__('t_lifeforms_ui.research.reset_confirm', ['tier' => $tier])) }});">
                                     {{ csrf_field() }}
                                     <input type="hidden" name="tier" value="{{ $tier }}">
-                                    <button type="submit" id="resetTier{{ $tier }}" class="btn_blue" data-tier="{{ $tier }}">{{ __('t_lifeforms_ui.research.reset', ['tier' => $tier]) }}</button>
+                                    <a class="build-it" id="resetTier{{ $tier }}" data-tier="{{ $tier }}" href="#" onclick="this.closest('form').requestSubmit(); return false;"><span>{{ __('t_lifeforms_ui.research.reset', ['tier' => $tier]) }}</span></a>
                                 </form>
                             @elseif ($palier['can_restore'])
                                 <form method="post" action="{{ route('lifeforms.research.restore') }}" style="display: inline;">
                                     {{ csrf_field() }}
                                     <input type="hidden" name="tier" value="{{ $tier }}">
-                                    <button type="submit" id="restoreTier{{ $tier }}" class="btn_blue" data-tier="{{ $tier }}">{{ __('t_lifeforms_ui.research.restore', ['tier' => $tier]) }}</button>
+                                    <a class="build-it" id="restoreTier{{ $tier }}" data-tier="{{ $tier }}" href="#" onclick="this.closest('form').requestSubmit(); return false;"><span>{{ __('t_lifeforms_ui.research.restore', ['tier' => $tier]) }}</span></a>
                                 </form>
                             @else
-                                <span id="resetTier{{ $tier }}" class="smallFont tooltip" data-tier="{{ $tier }}" data-enabled="false"
-                                      title="{{ $palier['research_in_progress'] ? __('t_lifeforms_ui.refused.research_in_progress') : ($palier['reset_available_at'] !== null && $palier['reset_available_at'] > \Illuminate\Support\Facades\Date::now()->timestamp ? __('t_lifeforms_ui.research.reset_cooldown') : __('t_lifeforms_ui.refused.nothing_to_reset')) }}">{{ __('t_lifeforms_ui.research.reset', ['tier' => $tier]) }}</span>
+                                <a id="resetTier{{ $tier }}" class="build-it_disabled tooltip" data-tier="{{ $tier }}" data-enabled="false"
+                                      title="{{ $palier['research_in_progress'] ? __('t_lifeforms_ui.refused.research_in_progress') : ($palier['reset_available_at'] !== null && $palier['reset_available_at'] > \Illuminate\Support\Facades\Date::now()->timestamp ? __('t_lifeforms_ui.research.reset_cooldown') : __('t_lifeforms_ui.refused.nothing_to_reset')) }}"><span>{{ __('t_lifeforms_ui.research.reset', ['tier' => $tier]) }}</span></a>
                             @endif
                         </div>
                     </div>
@@ -114,6 +114,22 @@
             var technologyDetailsEndpoint = "{{ route('lifeforms.research.ajax') }}";
             var selectCharacterClassEndpoint = "#";
             var deselectCharacterClassEndpoint = "#";
+
+            {{-- **Les deux variables que le bundle lit sans garde** au clic de la fleche verte d une vignette
+                 (`if (planetMoveInProgress)` puis `lastBuildingSlot.shouldWarnForTechnologyId(...)`, assets/ingame-*.js).
+                 Absentes, le clic levait une ReferenceError et rien ne partait en construction (journal §155.23).
+                 Les batiments et technologies de formes de vie ne consomment aucun emplacement de planete : aucun
+                 avertissement de dernier emplacement ne s applique, d ou `showWarning` a faux. --}}
+            var LOCA_PLANETMOVE_BREAKUP_WARNING = @json(__('t_ingame.buildings.planet_move_warning'));
+            var LOCA_ALL_NETWORK_ATTENTION = @json(__('t_ingame.shared.caution'));
+            var LOCA_ALL_YES = @json(__('t_ingame.shared.yes'));
+            var LOCA_ALL_NO = @json(__('t_ingame.shared.no'));
+            var planetMoveInProgress = {{ $planet_move_in_progress ? 'true' : 'false' }};
+            var lastBuildingSlot = {
+                "showWarning": false,
+                "exemptTechnologyIds": [],
+                "shouldWarnForTechnologyId": function (technologyId) { return false; }
+            };
 
             var technologyDetails = new TechnologyDetails({
                 technologyDetailsEndpoint: technologyDetailsEndpoint,

@@ -281,27 +281,28 @@
                     </span>
                     </div>
                 </div>
-                @if (!empty($lifeforms['planet']))
-                @php $lf = $lifeforms['planet']; @endphp
-                {{-- Formes de vie (journal §155) : population et nourriture de la planete courante, avec
-                     l infobulle du jeu officiel. Les nombres viennent du serveur ; rien n est estime ici. --}}
+                @if (isset($resources['population']))
+                {{-- Formes de vie (journal §155) : population et nourriture de la planete courante. Les deux tuiles
+                     lisent le MEME composeur que la resynchronisation (`ResourceBarViewModel`) — infobulle comprise,
+                     sinon le compteur du jeu remplacait a la premiere synchronisation une infobulle par une autre.
+                     Les classes de seuil sont celles que `ResourceTicker` repose ensuite (stock contre stockage). --}}
                 <div class="resource_tile population">
                     <div id="population_box" class="population tooltipHTML resource ipiHintable tpd-hideOnClickOutside"
-                         title="{{ __('t_lifeforms_ui.banner.population') }}|<table class=&quot;resourceTooltip&quot;><tr><th>{{ __('t_lifeforms_ui.banner.available') }}</th><td><span class=&quot;&quot;>{{ $lf['population_formatted'] }}</span></td></tr><tr><th>{{ __('t_lifeforms_ui.banner.tier2') }}</th><td><span class=&quot;&quot;>{{ $lf['tier2_formatted'] }}</span></td></tr><tr><th>{{ __('t_lifeforms_ui.banner.tier3') }}</th><td><span class=&quot;&quot;>{{ $lf['tier3_formatted'] }}</span></td></tr><tr><th>{{ __('t_lifeforms_ui.banner.living_space') }}</th><td><span class=&quot;{{ $lf['full'] ? 'overmark' : '' }}&quot;>{{ $lf['living_space_formatted'] }}</span></td></tr><tr><th>{{ __('t_lifeforms_ui.banner.satisfied') }}</th><td><span class=&quot;undermark&quot;>{{ $lf['satisfied_formatted'] }}</span></td></tr><tr><th>{{ __('t_lifeforms_ui.banner.hungry') }}</th><td><span class=&quot;{{ $lf['hungry'] > 0 ? 'overmark' : '' }}&quot;>{{ $lf['hungry_formatted'] }}</span></td></tr><tr><th>{{ __('t_lifeforms_ui.banner.growth') }}</th><td><span class=&quot;&quot;>{{ $lf['growth_hour_formatted'] }}/h</span></td></tr><tr><th>{{ __('t_lifeforms_ui.banner.sheltered') }}</th><td><span class=&quot;middlemark&quot;>{{ $lf['sheltered_formatted'] }}</span></td></tr></table>"
+                         title="{{ $resources['population']['tooltip'] }}"
                          data-ipi-hint="ipiResourcepopulation">
                         <a href="{{ route('lifeforms.buildings') }}"><div class="resourceIcon population"></div></a>
                         <span class="value">
-                        <span id="resources_population" data-raw="{{ (int)floor($lf['population']) }}" class="{{ $lf['full'] ? 'overmark' : '' }}">{{ $lf['population_formatted'] }}</span>
+                        <span id="resources_population" data-raw="{{ $resources['population']['amount'] }}" class="{{ $resources['population']['amount'] >= $resources['population']['storage'] ? 'overmark' : '' }}">{{ $resources['population']['amount_formatted'] }}</span>
                     </span>
                     </div>
                 </div>
                 <div class="resource_tile food">
                     <div id="food_box" class="food tooltipHTML resource ipiHintable tpd-hideOnClickOutside"
-                         title="{{ __('t_lifeforms_ui.banner.food') }}|<table class=&quot;resourceTooltip&quot;><tr><th>{{ __('t_lifeforms_ui.banner.available') }}</th><td><span class=&quot;&quot;>{{ $lf['food_formatted'] }}</span></td></tr><tr><th>{{ __('t_lifeforms_ui.banner.storage') }}</th><td><span class=&quot;&quot;>{{ $lf['food_storage_formatted'] }}</span></td></tr><tr><th>{{ __('t_lifeforms_ui.banner.production') }}</th><td><span class=&quot;undermark&quot;>{{ $lf['food_production_hour_formatted'] }}/h</span></td></tr><tr><th>{{ __('t_lifeforms_ui.banner.consumption') }}</th><td><span class=&quot;overmark&quot;>{{ $lf['food_consumption_hour_formatted'] }}/h</span></td></tr><tr><th>{{ __('t_lifeforms_ui.banner.consumed_in') }}</th><td><span class=&quot;{{ $lf['food_runs_out_in'] === null ? '' : 'overmark' }} timeTillFoodRunsOut&quot;>{{ $lf['food_runs_out_formatted'] }}</span></td></tr></table>"
+                         title="{{ $resources['food']['tooltip'] }}"
                          data-ipi-hint="ipiResourcefood">
                         <a href="{{ route('lifeforms.buildings') }}"><div class="resourceIcon food"></div></a>
                         <span class="value">
-                        <span id="resources_food" data-raw="{{ (int)floor($lf['food']) }}" class="{{ $lf['food_balance_hour'] < 0 ? 'overmark' : '' }}">{{ $lf['food_formatted'] }}</span>
+                        <span id="resources_food" data-raw="{{ $resources['food']['amount'] }}" class="{{ $resources['food']['amount'] >= $resources['food']['storage'] ? 'overmark' : '' }}">{{ $resources['food']['amount_formatted'] }}</span>
                     </span>
                     </div>
                 </div>
@@ -328,7 +329,10 @@
                 <a href="{{ route('lifeforms.index') }}" class="tooltipHTML js_hideTipOnMobile ipiHintable"
                    title="{{ __('t_lifeforms_ui.page.title') }}|{{ $lifeforms['species_name'] ?? __('t_lifeforms_ui.banner.no_species') }}" data-ipi-hint="ipiLifeformSettings">
                     @if (!empty($lifeforms['species']))
-                        <div class="lifeform-item-icon lifeform{{ $lifeforms['species']->value }}" style="background: url('{{ asset('img/lifeform/lifeformtype_sprite.png') }}') no-repeat;"></div>
+                        {{-- Aucun style en ligne : la feuille du jeu porte deja le sprite ET la position de chaque
+                             espece (`#commandercomponent #lifeform .lifeform-item-icon.lifeformN`). Un raccourci
+                             `background:` en ligne remettait la position a 0 0 et la pastille etait vide. --}}
+                        <div class="lifeform-item-icon lifeform{{ $lifeforms['species']->value }}"></div>
                     @else
                         <div class="resourceIcon population"></div>
                     @endif

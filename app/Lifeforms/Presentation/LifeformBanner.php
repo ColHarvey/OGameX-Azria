@@ -43,7 +43,7 @@ final class LifeformBanner
     public function for(PlayerService $player, PlanetService|null $planet): array
     {
         $ouvert = $this->settings->lifeformsEnabled();
-        $espece = $ouvert || $this->installation->accountOf($player->getId()) !== null ? $this->installation->speciesOf($player->getId()) : null;
+        $espece = $this->speciesFor($player);
         $chiffres = null;
         if ($espece !== null && $planet !== null && $planet->isPlanet()) {
             $chiffres = $this->planetFigures($planet, $espece);
@@ -59,6 +59,33 @@ final class LifeformBanner
             'welcome' => $ouvert && $espece === null && !$this->welcomeDismissed($player->getId()),
             'held' => $espece !== null && $planet !== null && $planet->isPlanet() ? $this->heldOn($planet) : null,
         ];
+    }
+
+    /**
+     * Les chiffres de la planete pour ce compte, sans le reste du bandeau.
+     *
+     * Le bandeau des ressources se resynchronise toutes les trente secondes (`/ajax/resourcebox`) : il lui
+     * faut la population et la nourriture, pas l invitation d accueil ni la suspension de la planete, qui
+     * coutent chacune une lecture de plus.
+     *
+     * @return Chiffres|null
+     */
+    public function figuresOf(PlayerService $player, PlanetService|null $planet): array|null
+    {
+        $espece = $this->speciesFor($player);
+
+        return $espece !== null && $planet !== null && $planet->isPlanet() ? $this->planetFigures($planet, $espece) : null;
+    }
+
+    /**
+     * L espece du compte : celle qu il porte, meme quand les formes de vie sont refermees — un compte deja
+     * engage garde son espece, et son bandeau garde ses chiffres.
+     */
+    private function speciesFor(PlayerService $player): Species|null
+    {
+        return $this->settings->lifeformsEnabled() || $this->installation->accountOf($player->getId()) !== null
+            ? $this->installation->speciesOf($player->getId())
+            : null;
     }
 
     /**

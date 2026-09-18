@@ -116,6 +116,8 @@ final class LifeformBonusPageTest extends AccountTestCase
         $this->assertEqualsWithDelta(1.0, $energie['planets'][$this->currentPlanetId]['total'], 1e-9);
         $this->assertEqualsWithDelta(1.5, $energie['planets'][$seconde]['total'], 1e-9);
         $premiere = $energie['planets'][$this->currentPlanetId]['rows'][0];
+        $this->assertSame(self::VOLCANIC_BATTERIES, $premiere['object'], 'La ligne nomme l objet dont la page montre la vignette.');
+        $this->assertSame(self::GEOTHERMAL_POWER_PLANTS, $energie['planets'][$seconde]['rows'][0]['object']);
         $this->assertSame(1, $premiere['slot'], 'L emplacement est celui ou la technologie est placee.');
         $this->assertSame(4, $premiere['level']);
         $this->assertSame(__('t_lifeforms.volcanic_batteries.title'), $premiere['title']);
@@ -156,6 +158,11 @@ final class LifeformBonusPageTest extends AccountTestCase
         $page->assertSee(__('t_lifeforms.volcanic_batteries.title'));
         $page->assertSee('1 %');
         $this->assertStringNotContainsString('t_lifeforms_ui.', (string)$page->getContent());
+        // Les lignes du composant officiel (journal §155.23) : `inner-bonus-item-heading`, avec la vignette de la
+        // technologie. Le tableau a quatre colonnes du premier gabarit n etait habille par aucune classe.
+        $page->assertSee('<inner-bonus-item-heading', false);
+        $page->assertSee('class="queuePic lifeformqueuetiny lifeformTech' . self::VOLCANIC_BATTERIES . '"', false);
+        $page->assertDontSee('<table class="smallFont"', false);
 
         $this->pinSettings(['lifeforms_enabled' => 0]);
         LifeformBonusCache::invalidate();

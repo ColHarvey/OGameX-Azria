@@ -8,24 +8,28 @@
         </div>
     @endif
 
-    <div id="suppliescomponent" class="maincontent">
-        <div id="supplies" class="lifeform-buildings">
+    <div id="lfbuildingscomponent" class="maincontent">
+        {{-- `#lfbuildings` est le conteneur que la feuille du jeu taille pour CETTE page : meme cadre que `#supplies`,
+             mais la grille y est en `space-between` avec son remplisseur de 422 px et 7 px de respiration en bas.
+             La page empruntait `#supplies`, d ou des vignettes rangees de travers (journal §155.23). --}}
+        <div id="lfbuildings" class="lifeform-buildings">
             <header data-anchor="technologyDetails" data-technologydetails-size="large"
                     style="background-image:url({{ asset('img/headers/resources/' . $header_filename) }}.jpg);">
-                <h2>{{ __('t_lifeforms_ui.buildings.title') }} - {{ $species_name }} - {{ $planet_name }}</h2>
+                {{-- Un seul segment apres le titre : `#lfbuildings header h2` n a ni largeur ni `nowrap`, un titre
+                     en trois parties passait a la ligne et debordait du bandeau. Le nom de la planete est deja
+                     dans la liste de droite. --}}
+                <h2>{{ __('t_lifeforms_ui.buildings.title') }} - {{ $species_name }}</h2>
             </header>
             <div id="technologydetails_wrapper">
                 <div id="technologydetails_content"></div>
             </div>
+            {{-- L avis de suspension se pose AVANT le cadre, comme sur la page des recherches : dedans, il repoussait la
+                 barre de titre de la grille loin de l embout haut du cadre (`#technologies:before`). --}}
+            @include('ingame.lifeforms.partials.held', ['held' => $held ?? null])
             <div id="technologies">
-                @include('ingame.lifeforms.partials.held', ['held' => $held ?? null])
                 <h3>{{ __('t_lifeforms_ui.buildings.section') }}</h3>
-                @if (!empty($figures))
-                    <p class="smallFont lifeform-figures" style="margin: 0 0 8px 0;">
-                        {{ __('t_lifeforms_ui.banner.population') }} : <span class="undermark">{{ $figures['population_formatted'] }}</span> / {{ $figures['living_space_formatted'] }}
-                        · {{ __('t_lifeforms_ui.banner.food') }} : <span class="{{ $figures['food_balance_hour'] < 0 ? 'overmark' : 'undermark' }}">{{ $figures['food_formatted'] }}</span> ({{ $figures['food_balance_hour_formatted'] }}/h)
-                    </p>
-                @endif
+                {{-- Aucun paragraphe de chiffres ici : la population et la nourriture vivent dans la barre du haut,
+                     avec leur infobulle complete. Les repeter en 9 px sans cadre coupait le bandeau de titre. --}}
                 <ul id="producers" class="icons">
                     @foreach ($tiles as $tile)
                         @php $objet = $tile['object']; @endphp
@@ -98,6 +102,22 @@
             var technologyDetailsEndpoint = "{{ route('lifeforms.buildings.ajax') }}";
             var selectCharacterClassEndpoint = "#";
             var deselectCharacterClassEndpoint = "#";
+
+            {{-- **Les deux variables que le bundle lit sans garde** au clic de la fleche verte d une vignette
+                 (`if (planetMoveInProgress)` puis `lastBuildingSlot.shouldWarnForTechnologyId(...)`, assets/ingame-*.js).
+                 Absentes, le clic levait une ReferenceError et rien ne partait en construction (journal §155.23).
+                 Les batiments et technologies de formes de vie ne consomment aucun emplacement de planete : aucun
+                 avertissement de dernier emplacement ne s applique, d ou `showWarning` a faux. --}}
+            var LOCA_PLANETMOVE_BREAKUP_WARNING = @json(__('t_ingame.buildings.planet_move_warning'));
+            var LOCA_ALL_NETWORK_ATTENTION = @json(__('t_ingame.shared.caution'));
+            var LOCA_ALL_YES = @json(__('t_ingame.shared.yes'));
+            var LOCA_ALL_NO = @json(__('t_ingame.shared.no'));
+            var planetMoveInProgress = {{ $planet_move_in_progress ? 'true' : 'false' }};
+            var lastBuildingSlot = {
+                "showWarning": false,
+                "exemptTechnologyIds": [],
+                "shouldWarnForTechnologyId": function (technologyId) { return false; }
+            };
 
             var technologyDetails = new TechnologyDetails({
                 technologyDetailsEndpoint: technologyDetailsEndpoint,

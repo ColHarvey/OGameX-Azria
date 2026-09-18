@@ -69,7 +69,11 @@
             </div>
         </div>
 
-        <div class="lifeform_effects" style="margin: 8px 0;">
+    </div>
+
+    {{-- La bande de description est un frere de `.content` (journal §155.23). --}}
+    <div class="description">
+        <div class="lifeform_effects">
             <table class="lifeform_effects_table smallFont" style="width: 100%; border-collapse: collapse;">
                 <thead>
                     <tr>
@@ -90,6 +94,8 @@
             </table>
         </div>
 
-        <p class="description smallFont">{{ $description }}</p>
+        <div class="txt_box">
+            <span class="text smallFont">{{ $description }}</span>
+        </div>
     </div>
 </div>

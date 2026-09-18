@@ -37,6 +37,7 @@ return [
         'research_button' => 'Rechercher :title au niveau :level',
         'research' => 'Rechercher',
         'population_label' => 'Population exigée :',
+        'population_value' => ':population (palier :tier)',
         'slot_label' => 'Emplacement :',
         'technology_slot' => 'nº :slot (palier :tier)',
         'global_note' => 'Les bonus des technologies s’additionnent sur tout l’empire, tant que la population de l’emplacement est suffisante.',

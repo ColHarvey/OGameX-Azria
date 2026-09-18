@@ -36,6 +36,7 @@ return [
         'centre_needed' => 'The research centre of your species must be level 1.',
         'research_button' => 'Research :title level :level',
         'research' => 'Research',
+        'population_value' => ':population (tier :tier)',
         'population_label' => 'Population required:',
         'slot_label' => 'Slot:',
         'technology_slot' => 'no. :slot (tier :tier)',

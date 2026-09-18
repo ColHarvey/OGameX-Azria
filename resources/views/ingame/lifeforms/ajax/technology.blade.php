@@ -10,7 +10,8 @@
 
     <div class="content">
         <button class="close">✖</button>
-        <h3>{{ $title }} <span class="smallFont">({{ $species_name }})</span></h3>
+        {{-- Une seule ligne : le titre est absolu sur 450 px, et deux lignes recouvraient les informations. --}}
+        <h3>{{ $title }}</h3>
 
         <div class="information">
             <span class="level" data-value="{{ $next_level }}">
@@ -21,7 +22,7 @@
                     <time class="value tooltip" title="">{{ $production_time }}</time>
                 </li>
                 <li class="lifeform_population"><strong>{{ __('t_lifeforms_ui.research.population_label') }}</strong>
-                    <span class="value">{{ __('t_lifeforms_ui.research.requires', ['population' => $population_required, 'tier' => $tier]) }}</span>
+                    <span class="value">{{ __('t_lifeforms_ui.research.population_value', ['population' => $population_required, 'tier' => $tier]) }}</span>
                 </li>
                 <li class="lifeform_slot"><strong>{{ __('t_lifeforms_ui.research.slot_label') }}</strong>
                     <span class="value">{{ __('t_lifeforms_ui.research.technology_slot', ['slot' => $slot, 'tier' => $tier]) }}</span>
@@ -56,7 +57,13 @@
             </div>
         </div>
 
-        <div class="lifeform_effects" style="margin: 8px 0;">
+    </div>
+
+    {{-- **La bande de description est un frere de `.content`**, pas un enfant : la feuille la pose a 203 px du haut
+         sur 95 px de haut et toute la largeur (`#technologydetails>.description`). Dedans, le tableau des effets
+         puis le texte, comme la page officielle range son `.txt_box`. --}}
+    <div class="description">
+        <div class="lifeform_effects">
             <table class="lifeform_effects_table smallFont" style="width: 100%; border-collapse: collapse;">
                 <thead>
                     <tr>
@@ -75,9 +82,13 @@
                     @endforeach
                 </tbody>
             </table>
-            <p class="smallFont" style="margin: 4px 0 0 0;">{{ __('t_lifeforms_ui.research.global_note') }}</p>
         </div>
 
-        <p class="description smallFont">{{ $description }}</p>
+        <div class="txt_box">
+            <span class="text smallFont">{{ $description }}</span>
+            {{-- La regle que le joueur doit lire avant de placer une technologie : ses bonus valent pour tout
+                 l empire, tant que la population de l emplacement tient. --}}
+            <span class="text smallFont lifeform_global_note">{{ __('t_lifeforms_ui.research.global_note') }}</span>
+        </div>
     </div>
 </div>
