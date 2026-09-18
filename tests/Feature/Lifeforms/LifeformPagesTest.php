@@ -70,6 +70,8 @@ final class LifeformPagesTest extends AccountTestCase
         $vueGenerale->assertSee('id="lifeform-welcome"', false);
         $vueGenerale->assertSee(route('lifeforms.welcome.later'), false);
         $vueGenerale->assertDontSee('id="population_box"', false);
+        // Sans espece, le bouton principal du menu mene au choix : il n y a rien a batir.
+        $this->assertSame(route('lifeforms.index'), self::menuButtonTargetOf((string)$vueGenerale->getContent()));
 
         $page = $this->get(route('lifeforms.index'));
         $page->assertStatus(200);
@@ -119,6 +121,15 @@ final class LifeformPagesTest extends AccountTestCase
         $vueGenerale->assertDontSee('id="lifeform-welcome"', false);
         $vueGenerale->assertSee('id="productionboxlfbuildingcomponent"', false);
         $vueGenerale->assertSee('id="productionboxlfresearchcomponent"', false);
+
+        // **Le parcours officiel une fois l espece choisie** : bouton principal → batiments, petite icone →
+        // recherches, portrait du bandeau → page des especes (releve de Codex, journal §155.24).
+        $html = (string)$vueGenerale->getContent();
+        $this->assertSame(route('lifeforms.buildings'), self::menuButtonTargetOf($html));
+        $this->assertSame(1, preg_match('#<span class="menu_icon">\s*<a href="([^"]+)"#', substr($html, (int)strpos($html, 'id="menu-lifeforms"')), $icone));
+        $this->assertSame(route('lifeforms.research'), $icone[1] ?? null);
+        $this->assertSame(1, preg_match('#<div id="lifeform" class="fleft">\s*<a href="([^"]+)"#', $html, $portrait));
+        $this->assertSame(route('lifeforms.index'), $portrait[1] ?? null);
     }
 
     public function testTheBuildingsPageListsTheTwelveBuildingsOfTheSpecies(): void
@@ -178,6 +189,8 @@ final class LifeformPagesTest extends AccountTestCase
         // (200 px, `overflow:hidden`) coupait les effets quand ils vivaient dedans (journal §155.23).
         $this->assertSame('technologydetails', $this->parentIdOfTheDescriptionBand($html));
         $this->assertStringContainsString('<div class="txt_box">', $html);
+        // Et la variable que le bundle lit au clic du bouton du panneau : sans elle, ReferenceError (demo pilotee).
+        $this->assertStringContainsString('var showLifeformBonusCapReached = false;', $html);
 
         $this->get(route('lifeforms.buildings.ajax', ['technology' => 99999]))->assertStatus(404);
         $this->get(route('lifeforms.buildings.ajax', ['technology' => 12101]))->assertStatus(404);
@@ -194,6 +207,23 @@ final class LifeformPagesTest extends AccountTestCase
         $page->assertSee('data-status="active"', false);
         $page->assertSee('lfBuildingCountdown', false);
         $page->assertSee(route('lifeforms.buildings.cancelbuildrequest'), false);
+
+        // **Le script de la file doit etre du JavaScript, pas du HTML** : `{{ json_encode() }}` dans un `<script>`
+        // rendait `errorBoxDecision(&quot;Prudence&quot;, ...)` — le navigateur ne decode pas les entites d un script,
+        // le bloc entier cassait, et ni le compte a rebours ni l annulation ne vivaient (releve de Codex, journal
+        // §155.24). Le temoin vise la forme : aucune entite HTML dans aucun bloc de script de la page.
+        self::assertScriptsCarryNoHtmlEntity((string)$page->getContent());
+        $page->assertSee('errorBoxDecision("' . __('t_ingame.shared.caution') . '", "" + question + "", "' . __('t_ingame.shared.yes') . '", "' . __('t_ingame.shared.no') . '", function () {', false);
+
+        // **Et l annulation depuis une fiche passe sa question en JSON** : une apostrophe du texte (« l'amélioration »,
+        // en francais — la langue vient de la session, comme le joueur la choisit) fermait la chaine JavaScript ecrite
+        // entre apostrophes dans l attribut `onclick`.
+        $fiche = (string)$this->withSession(['locale' => 'fr'])->get(route('lifeforms.buildings.ajax', ['technology' => 11101]))->json('content.technologydetails');
+        $this->assertSame(1, preg_match('/onclick="cancelbuilding\(11101,' . $element->id . ',(&quot;.*?&quot;)\); return false;"/', $fiche, $appel), 'La fiche porte l appel d annulation avec sa question.');
+        $question = json_decode(html_entity_decode($appel[1], ENT_QUOTES | ENT_HTML5), true);
+        $this->assertIsString($question, 'La question est une chaine JSON valide une fois l attribut decode.');
+        $this->assertStringContainsString("'", $question, 'Premisse : la question porte une apostrophe, sinon l essai ne distingue rien.');
+        $this->assertSame(__('t_ingame.ajax_object.cancel_expansion_confirm', ['name' => __('t_lifeforms.residential_sector.title', [], 'fr'), 'level' => (int)$element->target_level], 'fr'), $question);
 
         $mauvaisJeton = $this->post(route('lifeforms.buildings.addbuildrequest.post'), ['technologyId' => 11101, '_token' => 'faux']);
         $mauvaisJeton->assertJsonPath('success', false);
@@ -299,6 +329,12 @@ final class LifeformPagesTest extends AccountTestCase
         // position du sprite a 0 0 et la pastille etait vide a cote des officiers.
         $vueGenerale = $this->get(route('overview.index'));
         $vueGenerale->assertSee('<div class="lifeform-item-icon lifeform2"></div>', false);
+
+        // Chaque page porte des scripts en ligne (file, variables du bouton vert, repli des listes) : aucun ne porte
+        // d entite HTML — voir testTheDetailPanel... pour le defaut que cette forme a produit.
+        foreach ([$especes, $decouvertes, $bonus, $vueGenerale] as $reponse) {
+            self::assertScriptsCarryNoHtmlEntity((string)$reponse->getContent());
+        }
     }
 
     /**
@@ -380,6 +416,32 @@ final class LifeformPagesTest extends AccountTestCase
         $this->assertIsArray($ferme['resources']);
         $this->assertArrayHasKey('population', $ferme['resources'], 'Interrupteur ferme, compte engage : la charge garde la population.');
         $this->assertArrayHasKey('food', $ferme['resources']);
+    }
+
+    /** La cible du bouton principal « Formes de vie » du menu de gauche. */
+    private static function menuButtonTargetOf(string $html): string
+    {
+        $menu = substr($html, (int)strpos($html, 'id="menu-lifeforms"'));
+        self::assertSame(1, preg_match('#<a class="menubutton[^"]*"\s+href="([^"]+)"#', $menu, $m), 'Le bouton principal du menu est absent.');
+
+        return $m[1] ?? '';
+    }
+
+    /**
+     * **Aucune entite HTML dans un bloc de script.** Le navigateur ne decode pas `&quot;` ni `&#039;` dans un
+     * `<script>` : une seule suffit a casser tout le bloc, en silence pour un essai qui lit le HTML. La forme de code
+     * fautive est `{{ json_encode(...) }}` ou `{{ $texte }}` dans un script ; la juste est `@json(...)`.
+     */
+    public static function assertScriptsCarryNoHtmlEntity(string $html): void
+    {
+        self::assertGreaterThan(0, preg_match_all('#<script\b[^>]*>(.*?)</script>#s', $html, $scripts), 'La page porte des scripts.');
+        foreach ($scripts[1] as $i => $script) {
+            // Les guillemets et apostrophes echappes : ce que `{{ }}` produit et qui ferme une chaine JavaScript. Un
+            // `&amp;` dans une chaine HTML portee par un script (vue generale) est, lui, legitime.
+            foreach (['&quot;', '&#039;', '&#39;'] as $entite) {
+                self::assertStringNotContainsString($entite, $script, "Le bloc de script nº$i porte l entite $entite : du HTML dans du JavaScript.");
+            }
+        }
     }
 
     /**

@@ -167,6 +167,15 @@ final class LifeformResearchTest extends AccountTestCase
         $this->assertSame($maintenant + 147, $element->time_end, 'Niveau 1 a x8 : 1000 × 1,2 ÷ 8 = 150 s, moins les 2 % du centre de recherche niveau 1.');
         $this->assertSame(4987, $element->metal, 'Le prix reduit est celui qui a ete paye.');
 
+        // **La fiche d une recherche en cours porte son annulation en JSON** : une apostrophe du texte francais
+        // (« l'amélioration ») fermait la chaine JavaScript ecrite entre apostrophes (releve de Codex, §155.24).
+        $fiche = (string)$this->withSession(['locale' => 'fr'])->get(route('lifeforms.research.ajax', ['technology' => self::ENVOYS]))->json('content.technologydetails');
+        $this->assertSame(1, preg_match('/onclick="cancelbuilding\(' . self::ENVOYS . ',' . $element->id . ',(&quot;.*?&quot;)\); return false;"/', $fiche, $appel), 'La fiche porte l appel d annulation avec sa question.');
+        $question = json_decode(html_entity_decode($appel[1], ENT_QUOTES | ENT_HTML5), true);
+        $this->assertIsString($question);
+        $this->assertStringContainsString("'", $question, 'Premisse : la question porte une apostrophe.');
+        $this->assertSame(__('t_ingame.ajax_object.cancel_expansion_confirm', ['name' => __('t_lifeforms.intergalactic_envoys.title', [], 'fr'), 'level' => 1], 'fr'), $question);
+
         // Pendant la recherche, la remise a zero du palier est refusee.
         $this->assertRefused(fn () => resolve(LifeformResearchService::class)->resetTier($planetId, 1, $maintenant), LifeformRefused::RESEARCH_IN_PROGRESS);
 
@@ -381,6 +390,7 @@ final class LifeformResearchTest extends AccountTestCase
         $this->assertSame(17, substr_count($html, 'research-locked'), 'Les dix-sept autres restent fermes par la population.');
         $this->assertStringNotContainsString('5395f4191666be14fe8d735eea568a.png', $html, 'Le cadenas vient de la feuille, jamais d un style en ligne.');
         $sansCentre->assertSee('var planetMoveInProgress = false;', false);
+        LifeformPagesTest::assertScriptsCarryNoHtmlEntity($html);
         $sansCentre->assertSee('var lastBuildingSlot = {', false);
         $sansCentre->assertDontSee('class="btn_blue"', false);
         $sansCentre->assertSee('<a id="resetTier1" class="build-it_disabled tooltip"', false);
@@ -406,6 +416,7 @@ final class LifeformResearchTest extends AccountTestCase
         $panneau = (string)$this->get(route('lifeforms.research.ajax', ['technology' => self::ENVOYS]))->json('content.technologydetails');
         $this->assertSame('technologydetails', LifeformPagesTest::parentIdOfTheDescriptionBand($panneau));
         $this->assertStringContainsString(e(__('t_lifeforms_ui.research.global_note')), $panneau);
+        $this->assertStringContainsString('var showLifeformBonusCapReached = false;', $panneau, 'Le bouton du panneau lit cette variable ; sans elle, ReferenceError et rien ne part.');
         $this->assertGreaterThan(strpos($panneau, '<div class="description">'), strpos($panneau, e(__('t_lifeforms_ui.research.global_note'))), 'La note vit dans la bande de description.');
         $this->assertSame(1, preg_match('#<h3>' . preg_quote((string)__('t_lifeforms.intergalactic_envoys.title'), '#') . '</h3>#', $panneau), 'Le titre tient sur une ligne, sans l espece.');
     }

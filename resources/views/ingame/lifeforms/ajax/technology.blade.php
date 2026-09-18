@@ -4,7 +4,7 @@
     <div class="lifeformsprite sprite_large lifeformTech{{ $object->id }}">
         @if ($active_item !== null)
             <a role="button" href="javascript:void(0);" class="tooltip abort_link js_hideTipOnMobile" title=""
-               onclick="cancelbuilding({{ $object->id }},{{ $active_item->id }},'{{ __('t_ingame.ajax_object.cancel_expansion_confirm', ['name' => $title, 'level' => $active_item->target_level]) }}'); return false;"></a>
+               onclick="cancelbuilding({{ $object->id }},{{ $active_item->id }},{{ json_encode(__('t_ingame.ajax_object.cancel_expansion_confirm', ['name' => $title, 'level' => $active_item->target_level])) }}); return false;"></a>
         @endif
     </div>
 
@@ -92,3 +92,10 @@
         </div>
     </div>
 </div>
+
+{{-- **Une variable que le bundle lit au clic du bouton du panneau** (`TechnologyDetails`, garde du plafond de bonus) : la
+     fiche officielle la pose en fin de fragment, que jQuery execute a l insertion. Sans elle : ReferenceError, et la
+     recherche ne partait pas (demo pilotee, journal §155.24). Le plafond n est pas mesure ici : aucun avertissement. --}}
+<script type="text/javascript">
+    var showLifeformBonusCapReached = false;
+</script>

@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Date;
 use Illuminate\View\View;
 use OGame\Facades\AppUtil;
+use OGame\Galaxy\GalaxyHeaderCounters;
 use OGame\Lifeforms\Catalogue\LifeformCatalogue;
 use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Catalogue\LifeformFormulas;
@@ -16,6 +17,7 @@ use OGame\Lifeforms\Demography\PlanetLifeformProfile;
 use OGame\Lifeforms\Discovery\LifeformDiscoveryOutcome;
 use OGame\Lifeforms\Discovery\LifeformDiscoveryRules;
 use OGame\Lifeforms\LifeformRefused;
+use OGame\Lifeforms\Presentation\GalaxyDiscoveries;
 use OGame\Lifeforms\Presentation\LifeformBanner;
 use OGame\Lifeforms\Presentation\LifeformBonusPage;
 use OGame\Lifeforms\Presentation\LifeformEffectPresenter;
@@ -717,6 +719,64 @@ final class LifeformsController extends OGameController
             'coordinates' => $cible->asString(),
             'duration' => AppUtil::formatTimeDuration((int)$vol->ends_at - $maintenant),
         ]));
+    }
+
+    /**
+     * Un vol lance depuis l icone ADN de la Galaxie (journal §155.24).
+     *
+     * La reponse a la forme que `discoverPlanet()` du bundle lit : `newAjaxToken`, puis `response.success`,
+     * `response.message` (affiche avec les coordonnees), `response.coordinates`, et `response.discovery` — la
+     * possibilite d un nouveau vol vers les autres positions, le nombre de vols restants et le compteur de
+     * l en-tete. Le bundle redemande ensuite le bandeau des ressources (le cout a ete debite) et la boite des
+     * evenements. Le juge est le meme que celui du formulaire : `LifeformDiscoveryService::launch()`.
+     */
+    public function discoverFromGalaxy(Request $request, PlayerService $player, GalaxyDiscoveries $galaxie): JsonResponse
+    {
+        $valide = $request->validate([
+            'galaxy' => ['required', 'integer', 'min:1', 'max:' . $this->settings->numberOfGalaxies()],
+            'system' => ['required', 'integer', 'min:1', 'max:499'],
+            'position' => ['required', 'integer', 'min:1', 'max:15'],
+        ]);
+        $cible = new Coordinate((int)$valide['galaxy'], (int)$valide['system'], (int)$valide['position']);
+        $maintenant = (int)Date::now()->timestamp;
+        $compteurs = GalaxyHeaderCounters::of($player);
+
+        $reponse = [
+            'coordinates' => ['galaxy' => $cible->galaxy, 'system' => $cible->system, 'position' => $cible->position],
+            'planetType' => 1,
+            'type' => 0,
+            'shipsSent' => 0,
+            'slots' => $compteurs['slotsUsed'],
+            'probes' => $compteurs['probes'],
+            'recyclers' => $compteurs['recyclers'],
+            'missiles' => $compteurs['missiles'],
+        ];
+
+        try {
+            if (!$this->settings->lifeformsEnabled()) {
+                throw new LifeformRefused(LifeformRefused::CLOSED);
+            }
+            $vol = $this->discoveries->launch($player->planets->current(), $cible, $maintenant);
+            $reponse['success'] = true;
+            $reponse['message'] = __('t_lifeforms_ui.discoveries.launched', [
+                'coordinates' => $cible->asString(),
+                'duration' => AppUtil::formatTimeDuration((int)$vol->ends_at - $maintenant),
+            ]);
+        } catch (LifeformRefused $refus) {
+            $reponse['success'] = false;
+            $reponse['message'] = __($refus->translationKey());
+        }
+
+        // L etat des autres positions du systeme, APRES le vol : un quota epuise grise toutes les icones.
+        $etat = $galaxie->forSystem($player, $cible->galaxy, $cible->system, $maintenant);
+        $autre = $cible->position === 1 ? 2 : 1;
+        $reponse['discovery'] = [
+            'canSendDiscovery' => $etat['enabled'] ? $etat['missions'][$autre]['canSend'] : __('t_ingame.galaxy.discovery_locked'),
+            'discoveryCount' => $etat['count'],
+            'galaxyHeader' => ['LOCA_GALAXY_LIFEFORM_DISCOVERY_COUNT' => $etat['header']],
+        ];
+
+        return response()->json(['newAjaxToken' => csrf_token(), 'response' => $reponse]);
     }
 
     private function outcomeLabel(LifeformDiscoveryOutcome $issue): string

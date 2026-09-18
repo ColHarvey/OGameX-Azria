@@ -46,7 +46,9 @@
                 var cancelBuildListEntryUrl = '{{ $cancelRoute }}';
                 new CountdownTimer('lfBuildingCountdown', {{ $reste }}, '{{ url()->current() }}', null, true, 3)
                 function cancelbuilding(id, listId, question) {
-                    errorBoxDecision({{ json_encode(__('t_ingame.shared.caution')) }}, "" + question + "", {{ json_encode(__('t_ingame.shared.yes')) }}, {{ json_encode(__('t_ingame.shared.no')) }}, function () {
+                    {{-- @json, jamais {{ json_encode }} : dans un script, les guillemets echappes en &quot; ne sont pas
+                         decodes et cassaient tout le bloc — ni compte a rebours, ni annulation (relevé de Codex). --}}
+                    errorBoxDecision(@json(__('t_ingame.shared.caution')), "" + question + "", @json(__('t_ingame.shared.yes')), @json(__('t_ingame.shared.no')), function () {
                         buildListActionCancel(id, listId)
                     });
                 }
@@ -66,7 +68,9 @@
             <script type="text/javascript">
                 var cancelBuildListEntryUrl = '{{ $cancelRoute }}';
                 function cancelbuilding(id, listId, question) {
-                    errorBoxDecision({{ json_encode(__('t_ingame.shared.caution')) }}, "" + question + "", {{ json_encode(__('t_ingame.shared.yes')) }}, {{ json_encode(__('t_ingame.shared.no')) }}, function () {
+                    {{-- @json, jamais {{ json_encode }} : dans un script, les guillemets echappes en &quot; ne sont pas
+                         decodes et cassaient tout le bloc — ni compte a rebours, ni annulation (relevé de Codex). --}}
+                    errorBoxDecision(@json(__('t_ingame.shared.caution')), "" + question + "", @json(__('t_ingame.shared.yes')), @json(__('t_ingame.shared.no')), function () {
                         buildListActionCancel(id, listId)
                     });
                 }

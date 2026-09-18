@@ -622,8 +622,12 @@
                                 <div class="menuImage lifeform {{(Request::is('lifeforms*') ? 'highlighted' : '') }}"></div>
                             </a>
                         </span>
+                        {{-- Le parcours officiel : le bouton principal mene aux BATIMENTS, la petite icone aux
+                             recherches, le portrait en haut a la page des especes. Tant que le compte n a pas choisi
+                             son espece, il n y a rien a batir : le bouton mene alors au choix (releve de Codex,
+                             journal §155.24). --}}
                         <a class="menubutton {{(Request::is('lifeforms*') ? 'selected' : '') }}"
-                           href="{{ route('lifeforms.index') }}"
+                           href="{{ !empty($lifeforms['species']) ? route('lifeforms.buildings') : route('lifeforms.index') }}"
                            accesskey=""
                            target="_self"
                         >
@@ -976,6 +980,10 @@
                 var constants = {
                     "espionage": 6,
                     "missleattack": 10,
+                    {{-- Les decouvertes des formes de vie dans la Galaxie : le bundle lit ces deux constantes
+                         (`getDiscoveryLinkIcon`). Le type est celui du jeu officiel. --}}
+                    "lifeformEnabled": {{ !empty($lifeforms['enabled']) && !empty($lifeforms['species']) ? 'true' : 'false' }},
+                    "discover": {{ OGame\Lifeforms\Presentation\GalaxyDiscoveries::MISSION_TYPE }},
                     "language": "en",
                     "name": "144"
                 };

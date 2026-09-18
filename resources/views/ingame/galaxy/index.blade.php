@@ -288,6 +288,8 @@
             var shipsendingDone = 1;
             var premiumLink = "#?page=premium&openDetail=3";
             var sendDiscoverSystemUrl = "";
+            {{-- Pas de question avant chaque vol : le cout est dans l infobulle de l icone et la page des decouvertes. --}}
+            var showDiscoveryWarning = false;
             var missleAttackLink = "{{ route('galaxy.missile-attack.overlay') }}?width=669&height=250";
             var canSwitchGalaxy = true;
             var notEnoughDeuteriumMessage = @json(__('t_ingame.galaxy.deut_needed_relocate'));
@@ -455,7 +457,7 @@
                                 {{ __('t_ingame.galaxy.used_slots') }}:<span id="slotUsed">0</span>/<span id="slotValue">0</span>
                             </div>
                             <div id="galaxyHeaderDiscoveryCount">
-                                {{ __('t_ingame.galaxy.discoveries') }}: 0/3950
+                                {{ $lifeform_discovery_header }}
                             </div>
                         </div>
 

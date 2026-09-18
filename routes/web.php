@@ -112,6 +112,7 @@ Route::middleware(['auth', 'banned', 'globalgame', 'locale', 'firstlogin'])->gro
     Route::post('/lifeforms/research/restore', [LifeformsController::class, 'restoreTier'])->name('lifeforms.research.restore');
     Route::get('/lifeforms/discoveries', [LifeformsController::class, 'discoveries'])->name('lifeforms.discoveries');
     Route::post('/lifeforms/discoveries/launch', [LifeformsController::class, 'launchDiscovery'])->name('lifeforms.discoveries.launch');
+    Route::post('/ajax/lifeforms/discover', [LifeformsController::class, 'discoverFromGalaxy'])->name('lifeforms.discoveries.galaxy');
     Route::get('/lifeforms/bonuses', [LifeformsController::class, 'bonuses'])->name('lifeforms.bonuses');
 
     // Facilities

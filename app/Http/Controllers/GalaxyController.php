@@ -5,12 +5,14 @@ namespace OGame\Http\Controllers;
 use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Date;
 use Illuminate\View\View;
 use Log;
 use OGame\Combat\Services\HeldTargetCheck;
 use OGame\Facades\AppUtil;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\Galaxy\GalaxyHeaderCounters;
+use OGame\Lifeforms\Presentation\GalaxyDiscoveries;
 use OGame\Models\Alliance;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
@@ -113,6 +115,7 @@ class GalaxyController extends OGameController
             // un chantier eteint et le serveur refusait au devis : le joueur composait une flotte
             // pour rien. Une action ne s offre que si l ordre qu elle prepare peut aboutir.
             'patrols_enabled' => $settingsService->patrolsEnabled(),
+            'lifeform_discovery_header' => app(GalaxyDiscoveries::class)->forSystem($player, $galaxy, $system, (int)Date::now()->timestamp)['header'],
         ]);
     }
 
@@ -190,6 +193,18 @@ class GalaxyController extends OGameController
             } else {
                 $galaxy_rows[] = $this->createEmptySpaceRow($galaxy, $system, $i);
             }
+        }
+
+        // **Les decouvertes des formes de vie, une icone ADN par position** (journal §155.24) : le bundle lit la
+        // mission de type `constants.discover` au niveau de la LIGNE, pour une planete comme pour une case vide.
+        $decouvertes = app(GalaxyDiscoveries::class)->forSystem($player, $galaxy, $system, (int)Date::now()->timestamp);
+        if ($decouvertes['enabled']) {
+            foreach ($galaxy_rows as &$row) {
+                if (isset($decouvertes['missions'][$row['position']])) {
+                    $row['availableMissions'][] = $decouvertes['missions'][$row['position']];
+                }
+            }
+            unset($row);
         }
 
         // Add position 16 (expedition position) with debris field if Discoverer class
@@ -886,6 +901,7 @@ class GalaxyController extends OGameController
         $galaxy = $request->input('galaxy');
         $system = $request->input('system');
         $galaxyContent = $this->getGalaxyArray($galaxy, $system, $player, $planetServiceFactory, $phalanxService);
+        $decouvertes = app(GalaxyDiscoveries::class)->forSystem($player, (int)$galaxy, (int)$system, (int)Date::now()->timestamp);
         $slotsColonized = $this->calculateColonizedSlots($galaxyContent);
 
         // Check if current planet is a moon with sensor phalanx
@@ -904,7 +920,8 @@ class GalaxyController extends OGameController
         return response()->json([
             'components' => [],
             'filterSettings' => [],
-            'lifeformEnabled' => false,
+            'lifeformEnabled' => $decouvertes['enabled'],
+            'lifeformDiscoveryHeader' => $decouvertes['header'],
             'newAjaxToken' => csrf_token(),
             'reservedPositions' => $this->getReservedPositions($galaxy, $system),
             'success' => true,
