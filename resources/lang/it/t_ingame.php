@@ -1449,4 +1449,37 @@ return [
         'msg_no'                        => 'No',
         'msg_ok'                        => 'Ok',
     ],
+
+    // -------------------------------------------------------------------------
+    // Chat page and chat bar (Azria design)
+    // -------------------------------------------------------------------------
+    'chat' => [
+        'title'                 => 'Chat',
+        'player_list'           => 'Elenco giocatori',
+        'buddies'               => 'Amici',
+        'alliance'              => 'Alleanza',
+        'strangers'             => 'Sconosciuti',
+        'no_buddies'            => 'Nessun amico',
+        'alliance_chat'         => 'Chat dell’alleanza',
+        'submit'                => 'Invia',
+        'contacts'              => 'Contatti',
+        'communications'        => 'Comunicazioni',
+        'filter_by'             => 'Filtra',
+        'filter_online'         => 'Online',
+        'filter_all'            => 'Tutti',
+        'filter_active'         => 'Conversazioni',
+        'alliance_channel'      => 'Canale dell’alleanza',
+        'status_online'         => 'Online',
+        'status_offline'        => 'Offline',
+        'status_hidden'         => 'Stato non visibile',
+        'contacts_online_short' => '#+# online',
+        'contacts_network'      => 'Rete di contatti',
+        'online_ratio'          => '#online# / #total# online',
+        'collapse_contacts'     => 'Riduci i contatti',
+        'private_conversation'  => 'Conversazione privata',
+        'minimize_conversation' => 'Riduci la conversazione',
+        'close_conversation'    => 'Chiudi la conversazione',
+        'open_messaging'        => 'Apri la messaggistica',
+        'load_error'            => 'Impossibile caricare i contatti.',
+    ],
 ];

@@ -99,12 +99,11 @@
 #chatBar.azria-chat .chat_bar_list_item.open {
     width: 350px; /* la largeur que chat.js suppose sous le theme (updateChatBar) */
 }
-/* L onglet des contacts prend la largeur de son panneau quand il est ouvert : le panneau (266 px) ne recouvre plus la
-   conversation voisine. Ferme, le panneau porte un style en ligne display:none (gabarit) ou display: none (jQuery) ;
-   ouvert, jQuery retire ce style — c est cette absence qui est lue. */
-#chatBar.azria-chat .chat_bar_pl_list_item:has(> .cb_playerlist_box:not([style*="display:none"]):not([style*="display: none"])) {
-    width: 266px;
-    justify-content: flex-end;
+/* Le pont de la maquette : l onglet CONTACTS reste compact, et quand son panneau (266 px) est ouvert, chaque fenetre de
+   conversation ouverte se decale a gauche du panneau, a 14 px, au lieu de passer dessous. Le decalage est mesure par chat.js
+   (`azriaDeck()` : 266 + 14 − largeur de l onglet − 7 d ecart, zero sous 620 px ou panneau ferme) et pose sur la barre. */
+#chatBar.azria-chat .chat_bar_list_item.open > .chat_box {
+    right: calc(-1px + var(--az-deck-shift, 0px));
 }
 #chatBar.azria-chat .chat_bar_list_item .az-tab-icon,
 #chatBar.azria-chat .onlineCount .az-svg {

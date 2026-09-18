@@ -1449,4 +1449,37 @@ return [
         'msg_no'                        => 'Nee',
         'msg_ok'                        => 'Ok',
     ],
+
+    // -------------------------------------------------------------------------
+    // Chat page and chat bar (Azria design)
+    // -------------------------------------------------------------------------
+    'chat' => [
+        'title'                 => 'Chat',
+        'player_list'           => 'Spelerslijst',
+        'buddies'               => 'Vrienden',
+        'alliance'              => 'Alliantie',
+        'strangers'             => 'Onbekenden',
+        'no_buddies'            => 'Geen vrienden',
+        'alliance_chat'         => 'Alliantiechat',
+        'submit'                => 'Verzenden',
+        'contacts'              => 'Contacten',
+        'communications'        => 'Communicatie',
+        'filter_by'             => 'Filteren',
+        'filter_online'         => 'Online',
+        'filter_all'            => 'Alle',
+        'filter_active'         => 'Gesprekken',
+        'alliance_channel'      => 'Alliantiekanaal',
+        'status_online'         => 'Online',
+        'status_offline'        => 'Offline',
+        'status_hidden'         => 'Status niet zichtbaar',
+        'contacts_online_short' => '#+# online',
+        'contacts_network'      => 'Contactennetwerk',
+        'online_ratio'          => '#online# / #total# online',
+        'collapse_contacts'     => 'Contacten inklappen',
+        'private_conversation'  => 'Privégesprek',
+        'minimize_conversation' => 'Gesprek minimaliseren',
+        'close_conversation'    => 'Gesprek sluiten',
+        'open_messaging'        => 'Berichtenpagina openen',
+        'load_error'            => 'De contacten konden niet worden geladen.',
+    ],
 ];

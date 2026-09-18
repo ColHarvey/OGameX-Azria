@@ -420,7 +420,7 @@ ogame.chat = {
                         m.showChatHistory(a)
                     }
                 }
-                var b = $(".chat_bar_list").find("[data-playerid='" + a.playerId + "']");
+                var b = $(".chat_bar_list").find(".chat_bar_list_item[data-playerid='" + a.playerId + "']");
                 m.updateCustomScrollbar(b.find(".chat_box_ctn"))
             }, error: function (c, a, b) {
             }
@@ -459,7 +459,7 @@ ogame.chat = {
                         m.showChatHistory(a)
                     }
                 }
-                var b = $(".chat_bar_list").find("[data-associationid='" + a.associationId + "']");
+                var b = $(".chat_bar_list").find(".chat_bar_list_item[data-associationid='" + a.associationId + "']");
                 m.updateCustomScrollbar(b.find(".chat_box_ctn"))
             }, error: function (c, a, b) {
             }
@@ -504,10 +504,13 @@ ogame.chat = {
     addChatItem: function (F, x, B, D, v, A, r) {
         var u = ogame.chat;
         var q;
+        // **L onglet, pas n importe quel element qui porte l identifiant** : le panneau des contacts vit dans la meme liste et ses
+        // lignes portent data-playerid ; le message d un contact sans fenetre ouverte s ajoutait a sa ligne, donc nulle part, et
+        // la fenetre ne s ouvrait jamais en direct (defaut herite, ferme avec le design Azria, journal §158).
         if (x > 0) {
-            q = $(".chat_bar_list").find("[data-associationid='" + x + "']")
+            q = $(".chat_bar_list").find(".chat_bar_list_item[data-associationid='" + x + "']")
         } else {
-            q = $(".chat_bar_list").find("[data-playerid='" + F + "']")
+            q = $(".chat_bar_list").find(".chat_bar_list_item[data-playerid='" + F + "']")
         }
         var y = {};
         y.date = r;
@@ -531,7 +534,7 @@ ogame.chat = {
         if (!q.length) {
             var E = u.createChatBarContainer(F);
             u.updateChatBar(E);
-            q = $(".chat_bar_list").find("[data-playerid='" + F + "']")
+            q = $(".chat_bar_list").find(".chat_bar_list_item[data-playerid='" + F + "']")
         }
         var w = u.createChatItem(y);
         var s = u.getLastChatItemData();
@@ -645,6 +648,23 @@ ogame.chat = {
         }
         return l
     },
+    /**
+     * Le pont de la maquette (theme Azria) : l onglet CONTACTS reste compact ; quand son panneau est ouvert, les fenetres de
+     * conversation ouvertes se decalent a gauche du panneau, a 14 px, au lieu de passer dessous. La valeur est posee sur la
+     * barre (`--az-deck-shift`), la feuille l applique ; zero sous 620 px (une seule fenetre) ou panneau ferme.
+     */
+    azriaDeck: function () {
+        var bar = $('#chatBar');
+        if (!bar.hasClass('azria-chat')) {
+            return;
+        }
+        var panel = $('#chatBarPlayerList > .cb_playerlist_box');
+        var shift = 0;
+        if (panel.length && panel.is(':visible') && $('body').innerWidth() >= 620) {
+            shift = Math.max(0, panel.outerWidth() + 14 - ($('#chatBarPlayerList').outerWidth() + 7));
+        }
+        bar[0].style.setProperty('--az-deck-shift', shift + 'px');
+    },
     setVisibilityState: function () {
         var n = ogame.chat;
         var s = n.getVisibleChatPlayerIds();
@@ -669,6 +689,7 @@ ogame.chat = {
                 }
             }
         }
+        n.azriaDeck()
     },
     isInJson: function (f, d) {
         var e = null;
@@ -823,7 +844,11 @@ ogame.chat = {
         if (status === 'alliance') {
             small.text(n.loca('ALLIANCE_CHANNEL'));
         } else if (status === 'online' || status === 'offline') {
-            small.append($('<span class="az-status-dot"></span>').addClass(status)).append(document.createTextNode(n.loca(status === 'online' ? 'STATUS_ONLINE' : 'STATUS_OFFLINE')));
+            // La pastille verte seulement pour une presence en ligne ; hors ligne se dit en toutes lettres, sans pastille.
+            if (status === 'online') {
+                small.append('<span class="az-status-dot online"></span>');
+            }
+            small.append(document.createTextNode(n.loca(status === 'online' ? 'STATUS_ONLINE' : 'STATUS_OFFLINE')));
         } else {
             small.text(n.loca('PRIVATE_CONVERSATION'));
         }
@@ -918,11 +943,13 @@ ogame.chat = {
             }
             $(".cb_playerlist_box").toggle();
             c.updateCustomScrollbar($(".scrollContainer"), true);
+            c.azriaDeck();
             c.updateVisibleState()
         }).on("click.chatBar", ".cb_playerlist_box .az-collapse", function (a) {
             // Replier le panneau des contacts : la meme chose que fermer l onglet.
             a.stopPropagation();
             $(".cb_playerlist_box").hide();
+            c.azriaDeck();
             c.updateVisibleState()
         }).on("click.chatBar", ".cb_playerlist_box .az-filter button", function (a) {
             // Les trois filtres du panneau posent les deux cases que `filterPlayerlist` lit deja : en ligne, tous, discussions.
@@ -1193,6 +1220,7 @@ ogame.chat = {
                 n.insertAfter("#chatBarPlayerList");
                 r.updateCustomScrollbar(n.find(".chat_box_ctn"))
             }
+            r.azriaDeck();
             return
         }
         if (p >= s) {
@@ -1206,6 +1234,7 @@ ogame.chat = {
             n.insertAfter("#chatBarPlayerList");
             r.updateCustomScrollbar(n.find(".chat_box_ctn"))
         }
+        r.azriaDeck()
     },
     updateCustomScrollbar: function (c, d) {
         if (!c || c.length == 0) {

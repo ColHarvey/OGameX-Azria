@@ -72,11 +72,13 @@ class ChatBarDesignTest extends AccountTestCase
         $this->assertStringContainsString(e(__('t_ingame.layout.contacts_online', ['count' => 0])), $page, 'Le libelle historique reste en infobulle de l onglet.');
     }
 
-    public function testEveryLabelChatJsShowsComesFromChatLocaInBothLanguages(): void
+    public function testEveryLabelChatJsShowsComesFromChatLocaInTheFiveLanguages(): void
     {
-        foreach (['fr', 'en'] as $locale) {
-            $this->app->setLocale($locale);
-            $page = (string)$this->get('/overview')->assertStatus(200)->getContent();
+        // Les cinq langues du jeu (le kit les exige) : chaque clef resout dans sa langue, jamais en clef brute ni en repli.
+        $temoins = ['fr' => 'Statut non visible', 'en' => 'Status not visible', 'it' => 'Stato non visibile', 'nl' => 'Status niet zichtbaar', 'zh-TW' => '狀態不可見'];
+        foreach (['fr', 'en', 'it', 'nl', 'zh-TW'] as $locale) {
+            // La page suit le choix de langue de la session (middleware Locale, priorite 1), pas la langue du banc.
+            $page = (string)$this->withSession(['locale' => $locale])->get('/overview')->assertStatus(200)->getContent();
             $loca = json_decode($this->capture('#var chatLoca = (\{.*?\});#s', $page, 'chatLoca est pose par le gabarit.'), true);
             $this->assertIsArray($loca);
             foreach (self::CLEFS_CHAT_LOCA as $clef) {
@@ -85,12 +87,10 @@ class ChatBarDesignTest extends AccountTestCase
                 $this->assertNotSame('', $loca[$clef]);
                 $this->assertStringNotContainsString('t_ingame.', $loca[$clef], "chatLoca.$clef est une clef brute ($locale).");
             }
-            $this->assertSame(__('t_ingame.chat.status_hidden'), $loca['STATUS_HIDDEN']);
+            $this->assertSame($temoins[$locale], $loca['STATUS_HIDDEN'], "La clef est traduite en $locale, pas reprise de l anglais.");
             $this->assertStringContainsString('#+#', $loca['CONTACTS_ONLINE_SHORT'], 'Le nombre de contacts en ligne se remplace cote client.');
             $this->assertStringContainsString('#online#', $loca['ONLINE_RATIO']);
         }
-        $this->app->setLocale('fr');
-
         $js = $this->chatJs();
         foreach (["'Player list'", "'Filter by:'", "'Buddies'", "'Strangers'", "'No buddies'", "'Alliance Chat'", "'Status not visible'", "'Online chats", "'Active chats", "Error loading buddies</p>"] as $litteral) {
             $this->assertStringNotContainsString($litteral, $js, "chat.js affiche encore « $litteral » en dur.");

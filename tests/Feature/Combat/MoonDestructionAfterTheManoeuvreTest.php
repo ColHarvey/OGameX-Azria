@@ -3,6 +3,8 @@
 namespace Tests\Feature\Combat;
 
 use OGame\Enums\CharacterClass;
+use OGame\GameMissions\BattleEngine\Draws\BattleDraws;
+use OGame\GameMissions\BattleEngine\Draws\SeededDraws;
 use OGame\GameMissions\MoonDestructionMission;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\FleetMission;
@@ -181,6 +183,10 @@ final class MoonDestructionAfterTheManoeuvreTest extends FleetDispatchTestCase
 
         $this->travel($duree + 1)->seconds();
         $this->reloadApplication();
+        // Une bataille rejouable : trois mille lance-missiles contre deux Etoiles se jouent au tirage, et un tirage sur
+        // quelques dizaines balayait la defense — la lune tombait et le temoin rougissait sans defaut (18 septembre 2026).
+        // La liaison se pose apres le rafraichissement de l application, que le dernier envoi a provoque.
+        $this->app->bind(BattleDraws::class, static fn (): SeededDraws => new SeededDraws(4242));
         $this->get('/overview')->assertStatus(200);
 
         return [$lune->getPlanetId(), $mission];

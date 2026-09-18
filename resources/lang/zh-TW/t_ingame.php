@@ -1283,4 +1283,37 @@ return [
         'msg_no'                        => '否',
         'msg_ok'                        => '確定',
     ],
+
+    // -------------------------------------------------------------------------
+    // Chat page and chat bar (Azria design)
+    // -------------------------------------------------------------------------
+    'chat' => [
+        'title'                 => '聊天',
+        'player_list'           => '玩家列表',
+        'buddies'               => '好友',
+        'alliance'              => '聯盟',
+        'strangers'             => '陌生人',
+        'no_buddies'            => '沒有好友',
+        'alliance_chat'         => '聯盟聊天',
+        'submit'                => '送出',
+        'contacts'              => '聯絡人',
+        'communications'        => '通訊',
+        'filter_by'             => '篩選',
+        'filter_online'         => '在線',
+        'filter_all'            => '全部',
+        'filter_active'         => '對話',
+        'alliance_channel'      => '聯盟頻道',
+        'status_online'         => '在線',
+        'status_offline'        => '離線',
+        'status_hidden'         => '狀態不可見',
+        'contacts_online_short' => '#+# 位在線',
+        'contacts_network'      => '聯絡人網路',
+        'online_ratio'          => '#online# / #total# 在線',
+        'collapse_contacts'     => '收合聯絡人',
+        'private_conversation'  => '私人對話',
+        'minimize_conversation' => '最小化對話',
+        'close_conversation'    => '關閉對話',
+        'open_messaging'        => '開啟訊息頁面',
+        'load_error'            => '無法載入聯絡人。',
+    ],
 ];
