@@ -3,11 +3,14 @@
 namespace OGame\Lifeforms\Presentation;
 
 use OGame\Facades\AppUtil;
+use OGame\Lifeforms\Catalogue\LifeformBonus;
 use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Catalogue\LifeformFormulas;
 use OGame\Lifeforms\Catalogue\LifeformObject;
 use OGame\Lifeforms\Demography\PlanetLifeformProfile;
 use OGame\Lifeforms\Species;
+use OGame\Services\ObjectService;
+use RuntimeException;
 
 /**
  * Les effets d un batiment de forme de vie, tels que le joueur les lit : la valeur au niveau courant
@@ -47,17 +50,45 @@ final class LifeformEffectPresenter
                 LifeformEffect::TIER2_CAPACITY => [self::entier((int)floor($profilCourant->tier2Capacity)), self::entier((int)floor($profilSuivant->tier2Capacity))],
                 LifeformEffect::TIER3_CAPACITY => [self::entier((int)floor($profilCourant->tier3Capacity)), self::entier((int)floor($profilSuivant->tier3Capacity))],
                 LifeformEffect::POPULATION_PROTECTION => [self::pourcent($profilCourant->protectedShare * 100), self::pourcent($profilSuivant->protectedShare * 100)],
-                default => [self::pourcent(LifeformFormulas::buildingBonusPercent($bonus, $courant)), self::pourcent(LifeformFormulas::buildingBonusPercent($bonus, $courant + 1))],
+                default => LifeformEffect::isReduction($bonus->code)
+                    ? [self::reduction(LifeformFormulas::buildingBonusPercent($bonus, $courant)), self::reduction(LifeformFormulas::buildingBonusPercent($bonus, $courant + 1))]
+                    : [self::pourcent(LifeformFormulas::buildingBonusPercent($bonus, $courant)), self::pourcent(LifeformFormulas::buildingBonusPercent($bonus, $courant + 1))],
             };
             $effets[] = [
                 'code' => $bonus->code,
-                'label' => __('t_lifeforms_ui.effects.' . $bonus->code, ['target' => $bonus->target === null ? '' : __('t_resources.' . $bonus->target . '.title')]),
+                'label' => self::labelOf($bonus),
                 'now' => $maintenant,
                 'next' => $apres,
             ];
         }
 
         return $effets;
+    }
+
+    /**
+     * Le libelle d un effet, cible nommee : un objet du jeu (vaisseau, defense…) ou une classe de personnage.
+     *
+     * Un seul ecrivain pour les fiches des batiments, des technologies et la page des bonus : trois copies rendaient
+     * « Bonus de classe : t_resources.collector.title » (aucune clef pour une classe) et « … : :target — Chasseur lourd »
+     * (remplacement jamais fait) — audit des effets, journal §157.
+     */
+    public static function labelOf(LifeformBonus $bonus): string
+    {
+        return __('t_lifeforms_ui.effects.' . $bonus->code, ['target' => $bonus->target === null ? '' : self::titleOfTarget($bonus->target)]);
+    }
+
+    /**
+     * Le nom lisible d une cible : un objet du jeu, ou une classe de personnage.
+     */
+    public static function titleOfTarget(string $target): string
+    {
+        try {
+            return ObjectService::getObjectByMachineName($target)->title;
+        } catch (RuntimeException) {
+            $classe = __('t_ingame.characterclass.' . $target . '.name');
+
+            return is_string($classe) && !str_contains($classe, 't_ingame.') ? $classe : $target;
+        }
     }
 
     private static function entier(int $valeur): string
@@ -76,5 +107,16 @@ final class LifeformEffectPresenter
         $texte = rtrim(rtrim(number_format($arrondi, 2, '.', ''), '0'), '.');
 
         return ($arrondi > 0 ? '+' : '') . $texte . ' %';
+    }
+
+    /**
+     * Une reduction s ecrit avec son signe : « −10 % » et non « +10 % » sous un libelle qui dit « Reduction » (audit §157).
+     */
+    private static function reduction(float $valeur): string
+    {
+        $arrondi = round($valeur, 2);
+        $texte = rtrim(rtrim(number_format($arrondi, 2, '.', ''), '0'), '.');
+
+        return ($arrondi > 0 ? '−' : '') . $texte . ' %';
     }
 }

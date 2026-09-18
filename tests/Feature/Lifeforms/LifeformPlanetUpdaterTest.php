@@ -50,6 +50,8 @@ final class LifeformPlanetUpdaterTest extends AccountTestCase
 
     private const int ENVOYS = 11201;
 
+    private const int HIGH_ENERGY_SMELTING = 11106;
+
     private int $revisionsAvant = 0;
 
     protected function setUp(): void
@@ -133,6 +135,55 @@ final class LifeformPlanetUpdaterTest extends AccountTestCase
         $this->assertGreaterThan(210.0, $etat->population, 'La ferme livree a nourri la croissance.');
         $this->assertEqualsWithDelta($attendu->population, $etat->population, 1e-6, 'Six secondes sans ferme, puis une heure avec.');
         $this->assertEqualsWithDelta($attendu->food, $etat->food, 1e-6);
+    }
+
+    /**
+     * **Un batiment de forme de vie livre pendant une absence change le taux de production a son echeance**, comme un
+     * batiment classique (`PlanetService::updateBuildingQueue()` segmente par `updateResourcesUntil()`). La livraison
+     * posait le niveau sans arreter le compteur : toute l absence etait creditee au taux d avant, et le taux d apres
+     * n entrait en jeu qu au passage suivant (audit des effets, journal §157).
+     */
+    public function testABuildingDeliveredDuringAnAbsenceCreditsEachSegmentAtItsOwnRate(): void
+    {
+        $planete = $this->planetService;
+        $debut = (int)Date::now()->timestamp;
+        $this->planetSetObjectLevel('metal_mine', 10);
+        $this->planetSetObjectLevel('solar_plant', 40);
+        $this->planetSetObjectLevel('metal_store', 15); // un entrepot qui ne borne pas l heure de production
+        $niveaux = resolve(LifeformLevels::class);
+        $niveaux->setLevel($planete->getPlanetId(), LifeformKind::Building, self::RESIDENTIAL, 21);
+        $niveaux->setLevel($planete->getPlanetId(), LifeformKind::Building, self::FARM, 22);
+        $niveaux->setLevel($planete->getPlanetId(), LifeformKind::Building, self::RESEARCH_CENTRE, 5);
+        $this->planetAddResources(new Resources(1000000, 1000000, 1000000, 0));
+        $planete->update();
+        $planete->updateResourceStorageStats(true);
+        $planete->updateResourceProductionStats(true);
+        $this->assertGreaterThan(2000000, $planete->metalStorage()->get(), 'Premisse : l entrepot ne borne rien.');
+        $tauxAvant = $planete->getMetalProductionPerHour();
+        $this->assertGreaterThan(0, $tauxAvant);
+        $this->assertSame(100, (int)$planete->getResourceProductionFactor(), 'Premisse : toute l energie.');
+
+        // La Fonderie a haute energie niveau 1 : +1,5 % de metal, a x8 : 1 × 2 000 × 1,3 ÷ 8 = 325 s.
+        $element = resolve(LifeformQueueService::class)->add($planete, self::HIGH_ENERGY_SMELTING, $debut);
+        $this->assertSame('running', $element->status);
+        $echeance = (int)$element->time_end;
+        $this->assertSame($debut + 325, $echeance);
+        $planete->reloadPlanet();
+        $metalAuDepart = $planete->metal()->get();
+        $this->assertSame($debut, (int)$planete->getUpdatedAt()->timestamp, 'Premisse : le compteur part de maintenant.');
+
+        // Une heure d absence apres l echeance.
+        $this->travelTo(Date::createFromTimestamp($echeance + 3600));
+        $planete->update();
+        $planete->reloadPlanet();
+        $this->assertSame('done', $element->refresh()->status);
+        $tauxApres = $planete->getMetalProductionPerHour();
+        $this->assertGreaterThan($tauxAvant, $tauxApres, 'Premisse : la Fonderie rapporte.');
+
+        $attendu = $metalAuDepart + $tauxAvant * 325 / 3600 + $tauxApres;
+        $auTauxDAvant = $metalAuDepart + $tauxAvant * 3925 / 3600;
+        $this->assertGreaterThan(1.0, $attendu - $auTauxDAvant, 'Les deux lectures se distinguent d au moins une unite.');
+        $this->assertEqualsWithDelta($attendu, $planete->metal()->get(), 1.0, '325 s au taux d avant, puis une heure au taux de la Fonderie.');
     }
 
     /**

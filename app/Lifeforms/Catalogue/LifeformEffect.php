@@ -87,6 +87,14 @@ final class LifeformEffect
     public const string UNASSIGNED = 'unassigned';
 
     /**
+     * Un effet dont la valeur est une BAISSE (cout, duree, consommation, exigence) : les fiches l ecrivent avec « − ».
+     */
+    public static function isReduction(string $code): bool
+    {
+        return str_ends_with($code, '_reduction') || $code === self::EXPEDITION_FLEET_LOSS_REDUCTION;
+    }
+
+    /**
      * Tous les codes connus.
      *
      * @return array<int, string>

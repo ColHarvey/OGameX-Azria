@@ -60,7 +60,9 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
 {
     private const array KEYS = ['schema', 'applied_at', 'players', 'space_docks', 'held_fleet_cargo', 'return_durations', 'attacker_generals', 'lifeform', 'wreck_field', 'npc_narrative'];
 
-    private const array LIFEFORM_KEYS = ['protected_share', 'loss_percent'];
+    private const array LIFEFORM_KEYS = ['protected_share', 'loss_percent', 'wreck_recovery'];
+
+    private const array LIFEFORM_KEYS_WITHOUT_WRECK_RECOVERY = ['protected_share', 'loss_percent'];
 
     private const array LIFEFORM_KEYS_WITHOUT_LOSS_PERCENT = ['protected_share'];
 
@@ -84,7 +86,16 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
      * combat avec deux classes differentes voyait le champ d epaves de l une decide par la classe de
      * l autre.
      */
-    public const int SCHEMA = 7;
+    public const int SCHEMA = 8;
+
+    /**
+     * **Le schema 8 porte la part des Nano-robots de reparation de chaque corps d origine** (`lifeform.wreck_recovery`,
+     * fraction par identifiant de corps, audit des effets §157) : le champ d epaves d un attaquant General la lit
+     * ici, jamais sur la planete vivante. Un document au schema 7 a ete clos sans qu aucune part soit appliquee au
+     * champ de l attaquant : il se relit a **zero**, la regle sous laquelle il a ete ecrit, et se reecrit au schema 7
+     * sans la clef qu il n a jamais portee.
+     */
+    public const int SCHEMA_WITHOUT_WRECK_RECOVERY = 7;
 
     /**
      * **Le schema 7 porte le taux de morts de population** (`lifeform.loss_percent`, 0 a 100), photographie a
@@ -121,11 +132,14 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
      * @param array<int, int> $returnDurations
      * @param array<int, bool>|null $attackerGenerals La classe General de chaque flotte attaquante, par
      *        identifiant de mission ; nulle pour un document au schema 4, qui ne la porte que par joueur.
+     * @param array<int, int|float>|null $wreckRecovery La part des Nano-robots de reparation, par identifiant de corps
+     *        d origine ; nulle pour un document anterieur au schema 8, qui se lit a zero.
      */
     private function __construct(
         private int $schema,
         private float|null $lifeformProtectedShare,
         private int $lifeformLossPercent,
+        private array|null $wreckRecovery,
         private int $appliedAt,
         private array $players,
         private array $spaceDocks,
@@ -184,9 +198,13 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
         }
 
         $chantiers = [];
+        $nanoRobots = [];
 
         foreach (self::bodiesOf($roster) as $identifiant => $corps) {
             $chantiers[$identifiant] = $live->spaceDockLevelFor($corps);
+            // La part des Nano-robots du meme chantier, figee avec son niveau : le champ d epaves de l attaquant
+            // ne depend pas de ce qui a ete monte ou demonte pendant la bataille (audit des effets, §157).
+            $nanoRobots[$identifiant] = self::aWreckRecoveryShare($live->wreckRecoveryBonusFor($corps), $identifiant);
         }
 
         // **La cargaison des renforts retenus entre dans la photographie.** L'application la
@@ -224,6 +242,7 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
             self::SCHEMA,
             $lifeformProtectedShare,
             $lifeformLossPercent,
+            $nanoRobots,
             $appliedAt,
             $joueurs,
             $chantiers,
@@ -263,7 +282,11 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
         // Un document relu au schema 5 se reecrit au schema 5 : lui ajouter une part protegee ecrirait ce que sa
         // cloture n a jamais photographie. Un document relu au schema 6 se reecrit au schema 6, sans le taux qu il
         // n a jamais porte : sa regle est celle de son epoque, cent, et elle se lit dans son schema.
+        // Un document relu au schema 7 se reecrit au schema 7, sans la part des Nano-robots qu il n a jamais portee :
+        // sa regle est celle de son epoque, zero, et elle se lit dans son schema.
         if ($this->schema === self::SCHEMA) {
+            $document['lifeform'] = ['protected_share' => $this->lifeformProtectedShare, 'loss_percent' => $this->lifeformLossPercent, 'wreck_recovery' => $this->wreckRecovery];
+        } elseif ($this->schema === self::SCHEMA_WITHOUT_WRECK_RECOVERY) {
             $document['lifeform'] = ['protected_share' => $this->lifeformProtectedShare, 'loss_percent' => $this->lifeformLossPercent];
         } elseif ($this->schema === self::SCHEMA_WITHOUT_LOSS_PERCENT) {
             $document['lifeform'] = ['protected_share' => $this->lifeformProtectedShare];
@@ -294,8 +317,8 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
 
         $schema = self::int($stored, 'schema', 'contexte');
 
-        if ($schema !== self::SCHEMA && $schema !== self::SCHEMA_WITHOUT_LOSS_PERCENT && $schema !== self::SCHEMA_WITHOUT_LIFEFORM && $schema !== self::SCHEMA_WITHOUT_FLEET_GENERALS) {
-            throw new CorruptedFrozenApplicationContext('le schema ' . $schema . ' est inconnu, seuls les schemas ' . self::SCHEMA_WITHOUT_FLEET_GENERALS . ', ' . self::SCHEMA_WITHOUT_LIFEFORM . ', ' . self::SCHEMA_WITHOUT_LOSS_PERCENT . ' et ' . self::SCHEMA . ' se relisent', $stored);
+        if ($schema !== self::SCHEMA && $schema !== self::SCHEMA_WITHOUT_WRECK_RECOVERY && $schema !== self::SCHEMA_WITHOUT_LOSS_PERCENT && $schema !== self::SCHEMA_WITHOUT_LIFEFORM && $schema !== self::SCHEMA_WITHOUT_FLEET_GENERALS) {
+            throw new CorruptedFrozenApplicationContext('le schema ' . $schema . ' est inconnu, seuls les schemas ' . self::SCHEMA_WITHOUT_FLEET_GENERALS . ', ' . self::SCHEMA_WITHOUT_LIFEFORM . ', ' . self::SCHEMA_WITHOUT_LOSS_PERCENT . ', ' . self::SCHEMA_WITHOUT_WRECK_RECOVERY . ' et ' . self::SCHEMA . ' se relisent', $stored);
         }
 
         // **La classe par flotte appartient au schema 5, et a lui seul.** Absente d un schema 5, elle ferait
@@ -327,11 +350,35 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
         // a lui seul** : un schema 6 se relit avec la regle de son epoque — cent —, jamais avec le taux courant.
         $partProtegee = null;
         $tauxDeMorts = self::LOSS_PERCENT_BEFORE_SCHEMA_7;
+        // **La part des Nano-robots appartient au schema 8, et a lui seul** : un schema 7 se relit a zero, la regle
+        // sous laquelle son champ d epaves a ete calcule.
+        $nanoRobots = null;
 
-        if ($schema === self::SCHEMA || $schema === self::SCHEMA_WITHOUT_LOSS_PERCENT) {
+        if ($schema === self::SCHEMA || $schema === self::SCHEMA_WITHOUT_WRECK_RECOVERY || $schema === self::SCHEMA_WITHOUT_LOSS_PERCENT) {
             $formesDeVie = self::structure($stored, 'lifeform', 'contexte');
-            self::refuseUnknownKeys($formesDeVie, $schema === self::SCHEMA ? self::LIFEFORM_KEYS : self::LIFEFORM_KEYS_WITHOUT_LOSS_PERCENT, 'contexte.lifeform');
+            self::refuseUnknownKeys($formesDeVie, match ($schema) {
+                self::SCHEMA => self::LIFEFORM_KEYS,
+                self::SCHEMA_WITHOUT_WRECK_RECOVERY => self::LIFEFORM_KEYS_WITHOUT_WRECK_RECOVERY,
+                default => self::LIFEFORM_KEYS_WITHOUT_LOSS_PERCENT,
+            }, 'contexte.lifeform');
             if ($schema === self::SCHEMA) {
+                $nanoRobots = [];
+                foreach (self::structure($formesDeVie, 'wreck_recovery', 'contexte.lifeform') as $corps => $part) {
+                    if (!is_int($corps) || $corps < 1) {
+                        throw new CorruptedFrozenApplicationContext('« lifeform.wreck_recovery » porte un corps dont l identifiant est ' . self::describe($corps) . ' et non un entier positif', $stored);
+                    }
+                    if (!is_int($part) && !is_float($part)) {
+                        throw new CorruptedFrozenApplicationContext('« contexte.lifeform.wreck_recovery[' . $corps . '] » est ' . self::describe($part) . ' et non un nombre', $stored);
+                    }
+                    if (!is_finite((float)$part) || $part < 0.0 || $part > 1.0) {
+                        throw new CorruptedFrozenApplicationContext('« contexte.lifeform.wreck_recovery[' . $corps . '] » vaut ' . $part . ' : une part tient entre 0 et 1', $stored);
+                    }
+                    // Gardee telle qu ecrite : une part nulle traverse le JSON en entier, et le document doit se
+                    // reecrire identique a ce qui a ete lu.
+                    $nanoRobots[$corps] = $part;
+                }
+            }
+            if ($schema === self::SCHEMA || $schema === self::SCHEMA_WITHOUT_WRECK_RECOVERY) {
                 $taux = self::present($formesDeVie, 'loss_percent', 'contexte.lifeform');
                 if (!is_int($taux)) {
                     throw new CorruptedFrozenApplicationContext('« contexte.lifeform.loss_percent » est un ' . get_debug_type($taux) . ' et non un entier', $stored);
@@ -410,6 +457,18 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
             }
 
             $chantiers[$corps] = $niveau;
+        }
+
+        // Les deux cartes par corps decrivent le meme chantier : une part sans son niveau, ou l inverse, est une
+        // reparation a la main, et le champ d epaves lirait le monde vivant pour le corps qui manque.
+        if ($nanoRobots !== null) {
+            $corpsDesChantiers = array_keys($chantiers);
+            $corpsDesNanoRobots = array_keys($nanoRobots);
+            sort($corpsDesChantiers);
+            sort($corpsDesNanoRobots);
+            if ($corpsDesChantiers !== $corpsDesNanoRobots) {
+                throw new CorruptedFrozenApplicationContext('« lifeform.wreck_recovery » porte les corps ' . implode(', ', $corpsDesNanoRobots) . ' alors que « space_docks » porte les corps ' . implode(', ', $corpsDesChantiers), $stored);
+            }
         }
 
         $cargaisons = [];
@@ -507,6 +566,7 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
             $schema,
             $partProtegee,
             $tauxDeMorts,
+            $nanoRobots,
             $instant,
             $joueurs,
             $chantiers,
@@ -607,6 +667,53 @@ final readonly class FrozenCombatApplicationContext implements CombatApplication
                 $this->spaceDocks
             );
         }
+
+        if ($this->wreckRecovery !== null) {
+            $nanoRobotsFiges = array_keys($this->wreckRecovery);
+            sort($nanoRobotsFiges);
+
+            if ($nanoRobotsFiges !== $corpsAttendus) {
+                throw new CorruptedFrozenApplicationContext(
+                    'la photographie porte la part des Nano-robots des corps ' . implode(', ', $nanoRobotsFiges)
+                    . ' alors que l effectif touche les corps ' . implode(', ', $corpsAttendus),
+                    $this->wreckRecovery
+                );
+            }
+        }
+    }
+
+    public function wreckRecoveryBonusFor(PlanetService $originBody): float
+    {
+        if ($this->wreckRecovery === null) {
+            // Un document anterieur au schema 8 : aucune part n a ete appliquee a sa cloture, et le relire dans le
+            // monde courant ferait dependre le champ d epaves de ce qui a ete construit depuis.
+            return 0.0;
+        }
+
+        $corps = $originBody->getPlanetId();
+
+        if (!array_key_exists($corps, $this->wreckRecovery)) {
+            throw new CorruptedFrozenApplicationContext(
+                'le corps ' . $corps . ' n a pas ete photographie : aucune part de Nano-robots de reparation '
+                . 'n a ete figee pour lui, et la lire dans le monde courant ferait dependre le champ '
+                . 'd epaves de ce qui a ete construit pendant la bataille',
+                array_keys($this->wreckRecovery)
+            );
+        }
+
+        return (float)$this->wreckRecovery[$corps];
+    }
+
+    /**
+     * Une part de Nano-robots a photographier : un nombre fini entre 0 et 1, sinon la cloture s arrete.
+     */
+    private static function aWreckRecoveryShare(float $part, int $corps): float
+    {
+        if (!is_finite($part) || $part < 0.0 || $part > 1.0) {
+            throw new InvalidArgumentException('La part des Nano-robots de reparation du corps ' . $corps . ' a photographier vaut ' . $part . ' : elle tient entre 0 et 1.');
+        }
+
+        return $part;
     }
 
     /**

@@ -59,10 +59,15 @@ class CapacityPropertyService extends ObjectPropertyService
             $breakdown['totalValue'] = $totalValue;
         }
 
-        // Formes de vie : le fret des vaisseaux civils (Extension des soutes, Compresseur neuromodal), sur la
-        // valeur de base, arrondi vers le bas, sur sa propre ligne (journal §155.5).
+        // Formes de vie : le fret des vaisseaux civils (Extension des soutes, Compresseur neuromodal) ET la technologie
+        // propre au vaisseau (Mk II, Revision generale, Surcadencage : « structural integrity, shield strength, firepower,
+        // cargo capacity and basic speed », fichier maitre), sur la valeur de base, arrondi vers le bas, sur une ligne
+        // (journal §155.5, complete par l audit des effets §157 : le fret manquait).
+        $lifeformPercentage = $player->getLifeformUnitStatsPercent($this->parent_object);
         if (LifeformBonusResolver::isCivilShip($this->parent_object->machine_name)) {
-            $lifeformPercentage = $player->lifeformBonuses()->fraction(LifeformEffect::CIVIL_SHIP_CARGO) * 100;
+            $lifeformPercentage = round($lifeformPercentage + $player->lifeformBonuses()->fraction(LifeformEffect::CIVIL_SHIP_CARGO) * 100, 6);
+        }
+        {
             if ($lifeformPercentage > 0) {
                 $lifeformValue = (int)floor($this->base_value * $lifeformPercentage / 100);
                 $totalValue += $lifeformValue;
@@ -103,7 +108,7 @@ class CapacityPropertyService extends ObjectPropertyService
         if ($object->id === 202 || $object->id === 203) {
             $multiplier = $characterClassService->getTransporterCargoBonus($user);
             if ($multiplier > 1.0) {
-                return (int)(($multiplier - 1.0) * 100);
+                return (int)round(($multiplier - 1.0) * 100, 6);
             }
         }
 
@@ -111,7 +116,8 @@ class CapacityPropertyService extends ObjectPropertyService
         if ($object->id === 209 || $object->id === 219) {
             $multiplier = $characterClassService->getRecyclerPathfinderCargoBonus($user);
             if ($multiplier > 1.0) {
-                return (int)(($multiplier - 1.0) * 100);
+                // Amplifie par les formes de vie, 1,2199999… en flottant : arrondi avant l entier (audit §157).
+                return (int)round(($multiplier - 1.0) * 100, 6);
             }
         }
 

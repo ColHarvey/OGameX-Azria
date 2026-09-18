@@ -9,6 +9,7 @@ use OGame\Lifeforms\Bonuses\LifeformBonusCache;
 use OGame\Lifeforms\Catalogue\LifeformCatalogue;
 use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Catalogue\LifeformFormulas;
+use OGame\Lifeforms\Demography\PlanetLifeformProfile;
 use OGame\Lifeforms\Discovery\LifeformDiscoveryOutcome;
 use OGame\Lifeforms\Discovery\LifeformDiscoveryRules;
 use OGame\Lifeforms\LifeformRefused;
@@ -16,6 +17,7 @@ use OGame\Lifeforms\Rules\LifeformRuleRevisions;
 use OGame\Lifeforms\Species;
 use OGame\Models\Lifeforms\LifeformAccount;
 use OGame\Models\Lifeforms\LifeformDiscovery;
+use OGame\Models\Lifeforms\LifeformPlanet;
 use OGame\Models\Lifeforms\LifeformSpeciesProgress;
 use OGame\Models\Planet\Coordinate;
 use OGame\Services\MessageService;
@@ -194,21 +196,32 @@ final class LifeformDiscoveryService
     }
 
     /**
-     * La reduction de duree des Emissaires intergalactiques (1 % par niveau, actifs sur la planete).
+     * La reduction de duree des Emissaires intergalactiques (1 % par niveau), ACTIFS sur la planete de depart.
+     *
+     * La meme regle que le resolveur pour toute technologie : l emplacement doit etre ouvert (une population retombee
+     * sous le seuil eteint l effet), et le bonus prend le multiplicateur d experience de l espece de la technologie et
+     * de la Metropole de la planete — c est ce que la fiche affichait, et que le lancement n appliquait pas (audit des
+     * effets, journal §157). Une seule lecture des technologies actives, `activeTechnologyLevels()`.
      */
     public function envoysReduction(int $userId, int $planetId): float
     {
         $emissaires = LifeformCatalogue::byMachineName('intergalactic_envoys');
         $bonus = $emissaires->bonus(LifeformEffect::DISCOVERY_DURATION_REDUCTION);
-        if ($bonus === null) {
+        $etat = LifeformPlanet::query()->where('planet_id', $planetId)->first();
+        if ($bonus === null || $etat === null) {
             return 0.0;
         }
-        $niveau = $this->levels->levelOf($planetId, $emissaires->kind, $emissaires->id);
-        if ($niveau <= 0 || $this->research->slotHolding($planetId, $emissaires->id) === null) {
+        $espece = Species::from((int)$etat->species);
+        $niveaux = $this->levels->buildingLevelsOf($planetId);
+        $profil = PlanetLifeformProfile::fromLevels($espece, $niveaux, $this->revisions->live()->demography());
+        $actifs = $this->research->activeTechnologyLevels($planetId, $etat, $profil, $espece, $niveaux);
+        $niveau = $actifs[$emissaires->id] ?? 0;
+        if ($niveau <= 0) {
             return 0.0;
         }
+        $multiplicateur = $this->research->technologyBonusMultiplier($userId, $emissaires->species, $niveaux);
 
-        return min(0.99, LifeformFormulas::technologyBonusPercent($bonus, $niveau) / 100);
+        return min(0.99, LifeformFormulas::technologyBonusPercent($bonus, $niveau, $multiplicateur - 1) / 100);
     }
 
     private function accrue(LifeformAccount $compte, int $now): void

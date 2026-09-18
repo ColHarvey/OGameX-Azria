@@ -89,9 +89,9 @@ abstract class ObjectPropertyService
             ];
         }
 
-        // Formes de vie : les « Mk II » et les renforts de defense, en pour cent de la valeur de base, sur
-        // les trois caracteristiques de combat seulement ; arrondi a part, sur sa propre ligne, comme les
-        // lignes de classe des services de vitesse et de fret (journal §155.5).
+        // Formes de vie : les « Mk II » et les renforts de defense, en pour cent de la valeur de base, sur les trois
+        // caracteristiques de combat ici ; le fret et la vitesse, que la meme technologie porte aussi, sont poses par
+        // leurs services (journal §155.5, complete par l audit des effets §157). Arrondi a part, sur sa propre ligne.
         $lifeformValue = 0;
         if (in_array($this->propertyName, ['attack', 'shield', 'structural_integrity'], true)) {
             $lifeformPercentage = $player->getLifeformUnitStatsPercent($this->parent_object);

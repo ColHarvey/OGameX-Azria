@@ -102,6 +102,19 @@ class FleetMissionService
     }
 
     /**
+     * Le multiplicateur de vitesse d une expedition de ce joueur, tel que `calculateFleetMissionDuration()` l applique :
+     * les Chercheurs (classe d alliance) et la Propulsion telekinetique (formes de vie). Il ne depend pas de la cible ;
+     * la page Flotte le porte pour que la duree annoncee soit celle que le serveur ecrit (audit des effets, §157).
+     */
+    public function expeditionFlightSpeedBonus(PlayerService $player): float
+    {
+        $expedition = GameMissionFactory::getMissionById(ExpeditionMission::getTypeId(), []);
+        $classes = $this->classesDAlliance ??= resolve(AllianceClassService::class);
+
+        return $classes->getExpeditionSpeedBonus($player->getUser()) * $this->lifeformFlightSpeedBonus($player, $expedition);
+    }
+
+    /**
      * Le multiplicateur de vitesse que les formes de vie ajoutent a **ce vol-ci** : la Propulsion
      * telekinetique des Kaelesh, vers une expedition seulement (journal §155.5).
      */

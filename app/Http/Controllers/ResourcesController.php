@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Date;
 use Illuminate\View\View;
 use OGame\Http\Controllers\Abstracts\AbstractBuildingsController;
 use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
+use OGame\Lifeforms\Services\LifeformInstallationService;
 use OGame\Models\{
     ProductionIndex,
     Resources,
@@ -202,8 +203,16 @@ class ResourcesController extends AbstractBuildingsController
         $characterClassService = app(CharacterClassService::class);
         $max_crawler_overload = $characterClassService->getMaxCrawlerOverload($player->getUser());
 
+        // Formes de vie : la ligne de ce que les batiments de la planete et les technologies du compte rapportent,
+        // sur le modele de la classe de personnage (audit des effets, journal §157). L index la comptait deja dans
+        // le total ; la page ne la montrait pas, et les lignes visibles ne faisaient plus la somme.
+        $espece = app(LifeformInstallationService::class)->speciesOf($player->getId());
+        $nomEspece = $espece === null ? null : __('t_lifeforms.species.' . $espece->machineName());
+
         return view('ingame.resources.settings')->with([
             'currentPlayer' => $player,
+            'lifeform_species' => $espece,
+            'lifeform_species_name' => is_string($nomEspece) ? $nomEspece : null,
             'basic_income' => $this->planet->getPlanetBasicIncome(),
             'planet_name' => $this->planet->getPlanetName(),
             'building_resource_rows' => $building_resource_rows,

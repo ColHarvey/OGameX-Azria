@@ -1037,17 +1037,26 @@ class ExpeditionMission extends GameMission
             return ExpeditionOutcomeType::Failed;
         }
 
-        // Scale weights to integers (multiply by 10) to avoid precision loss
-        // from casting float totals to int for random_int(). Without this,
-        // outcomes with small fractional weights (e.g. merchant 0.4, black_hole 0.2)
-        // can fall into sub-integer gaps in the cumulative range and become unreachable.
-        $scaledTotal = (int)round($totalWeight * 10);
+        // Scale weights to integers to avoid precision loss from casting float totals to int for random_int().
+        // Without this, outcomes with small fractional weights (e.g. merchant 0.4, black_hole 0.2) can fall into
+        // sub-integer gaps in the cumulative range and become unreachable.
+        //
+        // L echelle est fine (`WEIGHT_SCALE`) : au dixieme, une reduction de 0,5 % du trou noir (Reseau psionique
+        // niveau 10 : 0,2 x 0,995 = 0,199) redonnait 2 comme sans elle, et la technologie n avait aucun effet
+        // jusqu a 25 % de reduction (audit des effets, journal §157).
+        $scaledTotal = 0;
+        foreach ($weightedOutcomes as $weighted) {
+            $scaledTotal += self::scaledWeight((float)$weighted['weight']);
+        }
+        if ($scaledTotal <= 0) {
+            return ExpeditionOutcomeType::Failed;
+        }
         $random = random_int(1, $scaledTotal);
 
         // Find which outcome was selected
         $currentWeight = 0;
         foreach ($weightedOutcomes as $weighted) {
-            $currentWeight += (int)round($weighted['weight'] * 10);
+            $currentWeight += self::scaledWeight((float)$weighted['weight']);
             if ($random <= $currentWeight) {
                 return $weighted['outcome'];
             }
@@ -1055,6 +1064,14 @@ class ExpeditionMission extends GameMission
 
         // Fallback (should never reach here)
         return ExpeditionOutcomeType::Failed;
+    }
+
+    /** Un poids d issue en entiers : dix-millieme de point, pour que les petites reductions comptent. */
+    public const int WEIGHT_SCALE = 10000;
+
+    public static function scaledWeight(float $weight): int
+    {
+        return (int)round($weight * self::WEIGHT_SCALE);
     }
 
     /**

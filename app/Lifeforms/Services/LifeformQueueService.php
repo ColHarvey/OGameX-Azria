@@ -4,6 +4,7 @@ namespace OGame\Lifeforms\Services;
 
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
+use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
 use OGame\Lifeforms\Catalogue\LifeformAvailability;
 use OGame\Lifeforms\Catalogue\LifeformCatalogue;
 use OGame\Lifeforms\Catalogue\LifeformEffect;
@@ -50,6 +51,7 @@ final class LifeformQueueService
         private readonly LifeformRuleRevisions $revisions,
         private readonly LifeformLevels $levels,
         private readonly LifeformResearchService $research,
+        private readonly LifeformBonusResolver $resolver,
     ) {
     }
 
@@ -157,6 +159,7 @@ final class LifeformQueueService
                 $planet->getObjectLevel('robot_factory'),
                 $planet->getObjectLevel('nano_factory'),
                 $vitesses,
+                $objet->kind === LifeformKind::Technology ? $this->resolver->lifeformResearchTimeReductionOf((int)$element->user_id) : 0.0,
             );
 
             try {
@@ -244,9 +247,18 @@ final class LifeformQueueService
             return;
         }
         $genre = LifeformKind::from($element->kind);
+        // **Le compteur de ressources s arrete a l echeance avant que le niveau change**, comme pour un batiment
+        // classique (`PlanetService::updateBuildingQueue()`) : ce qui precede l echeance est credite au taux d avant,
+        // ce qui suit au taux d apres. Sans cet arret, toute l absence etait creditee au taux d avant et le nouveau
+        // taux n entrait en jeu qu au passage suivant (audit des effets, journal §157). Une technologie vaut pour tout
+        // l empire : l arret se fait ici sur la planete qui la livre ; les autres planetes prennent le nouveau taux a
+        // leur prochain passage, comme pour la Technologie plasma classique (limite dite).
+        $planet->updateResourcesUntil((int)$element->time_end, false);
         $this->levels->setLevel($planet->getPlanetId(), $genre, (int)$element->object_id, (int)$element->target_level);
         $element->status = 'done';
         $element->save();
+        $planet->updateResourceProductionStats(false);
+        $planet->updateResourceStorageStats(false);
         $this->start($planet, $genre, (int)$element->time_end, $populationAtDeadline);
     }
 

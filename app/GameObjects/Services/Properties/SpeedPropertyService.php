@@ -84,13 +84,16 @@ class SpeedPropertyService extends ObjectPropertyService
             $breakdown['totalValue'] = $totalValue;
         }
 
-        // Formes de vie : la vitesse de tous les vaisseaux (Propulsion a plasma) et celle des civils
-        // (Propulsion a fusion), sur la vitesse de base, sur leur propre ligne (journal §155.5).
+        // Formes de vie : la vitesse de tous les vaisseaux SAUF l Etoile de la mort (Propulsion a plasma : « all ships
+        // (excluding Deathstars) », fichier maitre), celle des civils (Propulsion a fusion), et la technologie propre au
+        // vaisseau (Mk II, Revision generale, Surcadencage : la « basic speed » est l une de ses cinq caracteristiques),
+        // sur la vitesse de base, sur une ligne (journal §155.5, complete par l audit des effets §157).
         $lifeformBonuses = $player->lifeformBonuses();
-        $lifeformPercentage = $lifeformBonuses->fraction(LifeformEffect::SHIP_SPEED) * 100;
+        $lifeformPercentage = $this->parent_object->machine_name === 'deathstar' ? 0.0 : $lifeformBonuses->fraction(LifeformEffect::SHIP_SPEED) * 100;
         if (LifeformBonusResolver::isCivilShip($this->parent_object->machine_name)) {
             $lifeformPercentage += $lifeformBonuses->fraction(LifeformEffect::CIVIL_SHIP_SPEED) * 100;
         }
+        $lifeformPercentage = round($lifeformPercentage + $player->getLifeformUnitStatsPercent($this->parent_object), 6);
         if ($lifeformPercentage > 0) {
             $lifeformValue = floor(($effectiveBase / 100) * $lifeformPercentage);
             $totalValue += $lifeformValue;

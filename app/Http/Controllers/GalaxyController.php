@@ -537,11 +537,15 @@ class GalaxyController extends OGameController
             if ($phalanx_level > 0) {
                 $target_coordinate = new Coordinate($galaxy, $system, $position);
                 $moon_coordinates = $current_planet->getPlanetCoordinates();
+                // La portee du joueur — Decouvreur, Reseau d analyse interplanetaire —, la meme que le balayage
+                // accepte (PhalanxController) : sans l identifiant, la Galaxie offrait le bouton sur la portee de base
+                // seule (audit des effets, journal §157).
                 $in_range = $phalanxService->canScanTarget(
                     $moon_coordinates->galaxy,
                     $moon_coordinates->system,
                     $phalanx_level,
-                    $target_coordinate
+                    $target_coordinate,
+                    $this->playerService->getId()
                 );
 
                 if ($in_range) {

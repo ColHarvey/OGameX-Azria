@@ -819,7 +819,10 @@ class CombatResolutionService
             $context->wreckFieldLifetimeHours(),
             $context->applicationInstant()
         );
-        $wreckFieldData = $wreckFieldService->calculateShipsForWreckField($attackerUnitsLost, $spaceDockLevel);
+        // **La part des Nano-robots vient du contexte, comme le niveau du chantier** : lue vivante, elle dependrait de
+        // ce qui a ete monte ou demonte pendant la bataille ; absente, l attaquant Mechas ramenait moins d epaves que
+        // sa fiche ne le promettait (audit des effets, journal §157).
+        $wreckFieldData = $wreckFieldService->calculateShipsForWreckField($attackerUnitsLost, $spaceDockLevel, $spaceDockPlanet->getPlanetId(), $context->wreckRecoveryBonusFor($originPlanet));
 
         // Check if wreck field conditions are met
         $totalLostValue = $attackerUnitsLost->toResources()->metal->get() +

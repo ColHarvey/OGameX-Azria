@@ -484,6 +484,46 @@
                             <td>
                             </td>
                         </tr>
+                        {{-- Formes de vie : batiments de la planete et technologies du compte, sur le modele de la classe
+                             (audit des effets, journal §157). Grisee sans espece, comme la classe sans classe. --}}
+                        <tr class="">
+                            <td class="label">
+                                {{ __('t_ingame.resource_settings.lifeform') }}
+                            </td>
+                            <td>
+                                @php
+                                    $hasLifeform = $lifeform_species !== null;
+                                    $lifeformTooltip = $hasLifeform ? $lifeform_species_name . '|' . __('t_ingame.resource_settings.lifeform_tooltip') : __('t_lifeforms_ui.banner.no_species');
+                                @endphp
+                                {{-- Le portrait prend la classe officielle `.lifeform-item-icon.small` (36 px, habillee partout) ;
+                                     sans espece, l icone de population grisee, comme la classe sans classe. --}}
+                                <div class="tooltipHTML {{ $hasLifeform ? 'lifeform-item-icon small lifeform' . $lifeform_species->value : 'resourceIcon population grayscale' }}"
+                                     title="{{ $lifeformTooltip }}">
+                                </div>
+                            </td>
+                            <td class="{{ $production_total->lifeform->metal->get() > 0 ? 'undermark' : 'normalmark' }}">
+                                <span class="tooltipCustom {{ $hasLifeform ? '' : 'disabled' }}" title="{{ $production_total->lifeform->metal->getFormattedFull() }}">
+                                    {{ $production_total->lifeform->metal->getFormattedLong() }}
+                                </span>
+                            </td>
+                            <td class="{{ $production_total->lifeform->crystal->get() > 0 ? 'undermark' : 'normalmark' }}">
+                                <span class="tooltipCustom {{ $hasLifeform ? '' : 'disabled' }}" title="{{ $production_total->lifeform->crystal->getFormattedFull() }}">
+                                    {{ $production_total->lifeform->crystal->getFormattedLong() }}
+                                </span>
+                            </td>
+                            <td class="{{ $production_total->lifeform->deuterium->get() > 0 ? 'undermark' : 'normalmark' }}">
+                                <span class="tooltipCustom {{ $hasLifeform ? '' : 'disabled' }}" title="{{ $production_total->lifeform->deuterium->getFormattedFull() }}">
+                                    {{ $production_total->lifeform->deuterium->getFormattedLong() }}
+                                </span>
+                            </td>
+                            <td class="{{ $production_total->lifeform->energy->get() > 0 ? 'undermark' : 'normalmark' }}">
+                                <span class="tooltipCustom {{ $hasLifeform ? '' : 'disabled' }}" title="{{ $production_total->lifeform->energy->getFormattedFull() }}">
+                                    {{ $production_total->lifeform->energy->getFormattedLong() }}
+                                </span>
+                            </td>
+                            <td>
+                            </td>
+                        </tr>
                         <tr class="alt">
                             <td colspan="2" class="label">{{ __('t_ingame.resource_settings.storage_capacity') }}</td>
                             <td class="{{ $metal >= $metal_storage ? 'overmark' : 'normalmark' }} left2">

@@ -36,14 +36,18 @@ final readonly class LifeformQuote
 
     /**
      * @param array<int, int> $buildingLevels niveaux des batiments de formes de vie de la planete
+     * @param float $empireResearchTimeReduction la part d empire qui raccourcit les recherches de formes de vie
+     *                                            (Intelligence en essaim efficace, `LifeformBonusResolver::lifeformResearchTimeReductionOf()`)
      */
-    public static function for(LifeformObject $object, int $targetLevel, array $buildingLevels, int $robotics, int $nanites, LifeformSpeeds $speeds): self
+    public static function for(LifeformObject $object, int $targetLevel, array $buildingLevels, int $robotics, int $nanites, LifeformSpeeds $speeds, float $empireResearchTimeReduction = 0.0): self
     {
         [$cout, $temps] = self::reductionsFor($object, $buildingLevels);
         $prix = LifeformFormulas::cost($object, $targetLevel, $cout);
         if ($object->kind === LifeformKind::Building) {
             $duree = LifeformFormulas::buildingDuration($object, $targetLevel, $robotics, $nanites, $speeds->building(), $temps);
         } else {
+            // Les batiments de la planete et, en plus, la technologie d empire qui parle des recherches de formes de vie.
+            $temps = min(0.99, $temps + max(0.0, $empireResearchTimeReduction));
             $duree = LifeformFormulas::technologyDuration($object, $targetLevel, $speeds->technology(), $temps);
         }
 

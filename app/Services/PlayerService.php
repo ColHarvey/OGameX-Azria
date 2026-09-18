@@ -519,9 +519,11 @@ class PlayerService
      */
     public function getLifeformUnitStatsPercent(GameObject $object): float
     {
+        // Le pour cent se pose en millioniemes exacts : 0,3 x 3 / 100 x 100 vaut 0,8999999999999999 en flottant, et
+        // floor(4000 x 0,8999… / 100) perdait une unite de coque a de nombreux niveaux (audit des effets, journal §157).
         return match ($object->type) {
-            GameObjectType::Ship => $this->lifeformBonuses()->fraction(LifeformEffect::SHIP_STATS, $object->machine_name) * 100,
-            GameObjectType::Defense => $this->lifeformBonuses()->fraction(LifeformEffect::DEFENCE_STATS) * 100,
+            GameObjectType::Ship => round($this->lifeformBonuses()->fraction(LifeformEffect::SHIP_STATS, $object->machine_name) * 100, 6),
+            GameObjectType::Defense => round($this->lifeformBonuses()->fraction(LifeformEffect::DEFENCE_STATS) * 100, 6),
             default => 0.0,
         };
     }

@@ -53,7 +53,7 @@ class FrozenCombatApplicationContextTest extends UnitTestCase
     {
         $document = $this->aSnapshot();
         $document['schema'] = FrozenCombatApplicationContext::SCHEMA_WITHOUT_LOSS_PERCENT;
-        unset($document['lifeform']['loss_percent']);
+        unset($document['lifeform']['loss_percent'], $document['lifeform']['wreck_recovery']);
 
         $contexte = FrozenCombatApplicationContext::fromStorage($document);
         $this->assertSame(100, $contexte->lifeformPopulationLossPercent(), 'La regle sous laquelle il a ete ecrit.');
@@ -62,7 +62,59 @@ class FrozenCombatApplicationContextTest extends UnitTestCase
 
         $document = $this->aSnapshot();
         $document['schema'] = FrozenCombatApplicationContext::SCHEMA_WITHOUT_LOSS_PERCENT;
+        unset($document['lifeform']['wreck_recovery']);
         $this->assertRefused($document, 'loss_percent', 'Un schema 6 qui porterait un taux serait une reparation a la main.');
+    }
+
+    /**
+     * **Le schema 8 porte la part des Nano-robots de reparation de chaque corps d origine** (`lifeform.wreck_recovery`,
+     * audit des effets §157) : le champ d epaves d un attaquant General la lit ici, jamais sur la planete vivante. Un
+     * schema 7 se relit a zero — la regle sous laquelle il a ete clos : aucune part n etait appliquee — et se reecrit
+     * au schema 7 sans la clef qu il n a jamais portee.
+     */
+    public function testTheWreckRecoveryShareIsReadBackPerBodyAndASchemaSevenDocumentReadsZero(): void
+    {
+        $contexte = FrozenCombatApplicationContext::fromStorage($this->aSnapshot());
+        $this->assertSame(0.13, $contexte->wreckRecoveryBonusFor($this->aBody(7)));
+        $this->assertSame(0.0, $contexte->wreckRecoveryBonusFor($this->aBody(9)));
+        try {
+            $contexte->wreckRecoveryBonusFor($this->aBody(8));
+            $this->fail('A body absent from the snapshot was read live.');
+        } catch (CorruptedFrozenApplicationContext $refus) {
+            $this->assertStringContainsString('8', $refus->defect);
+        }
+
+        $document = $this->aSnapshot();
+        $document['schema'] = FrozenCombatApplicationContext::SCHEMA_WITHOUT_WRECK_RECOVERY;
+        unset($document['lifeform']['wreck_recovery']);
+        $septieme = FrozenCombatApplicationContext::fromStorage($document);
+        $this->assertSame(0.0, $septieme->wreckRecoveryBonusFor($this->aBody(7)), 'La regle de son epoque : aucune part.');
+        $this->assertSame(25, $septieme->lifeformPopulationLossPercent());
+        $this->assertSame($document, $septieme->toStorage(), 'Reecrit au schema 7, sans la clef.');
+
+        $document = $this->aSnapshot();
+        $document['schema'] = FrozenCombatApplicationContext::SCHEMA_WITHOUT_WRECK_RECOVERY;
+        $this->assertRefused($document, 'wreck_recovery', 'Un schema 7 qui porterait la part serait une reparation a la main.');
+
+        foreach ([1.5, -0.1, '0.13', null, true] as $mauvais) {
+            $document = $this->aSnapshot();
+            $document['lifeform']['wreck_recovery'][7] = $mauvais;
+            $this->assertRefused($document, 'wreck_recovery[7]');
+        }
+        $document = $this->aSnapshot();
+        unset($document['lifeform']['wreck_recovery']);
+        $this->assertRefused($document, 'wreck_recovery');
+        $document = $this->aSnapshot();
+        $document['lifeform']['wreck_recovery'] = [7 => 0.13];
+        $this->assertRefused($document, 'wreck_recovery', 'Un corps photographie sans sa part : le champ d epaves lirait le monde vivant.');
+    }
+
+    private function aBody(int $id): PlanetService
+    {
+        $corps = $this->createMock(PlanetService::class);
+        $corps->method('getPlanetId')->willReturn($id);
+
+        return $corps;
     }
 
     public function testTheLossRateIsReadBackAndRefusedWhenMissingNotAnIntegerOrOutOfRange(): void
@@ -550,7 +602,7 @@ class FrozenCombatApplicationContextTest extends UnitTestCase
             'attacker_generals' => [21 => false, 22 => true],
             // La part de population protegee par les formes de vie et le taux de morts, photographies a l ouverture
             // et figes a la cloture.
-            'lifeform' => ['protected_share' => 0.3, 'loss_percent' => 25],
+            'lifeform' => ['protected_share' => 0.3, 'loss_percent' => 25, 'wreck_recovery' => [7 => 0.13, 9 => 0.0]],
             'wreck_field' => [
                 'min_resources_loss' => 150_000,
                 'min_fleet_percentage' => 5,

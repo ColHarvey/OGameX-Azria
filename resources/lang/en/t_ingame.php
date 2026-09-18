@@ -168,6 +168,8 @@ return [
         'character_class'    => 'Character Class',
         'alliance_class'    => 'Alliance class',
         'commanding_staff'   => 'Commanding Staff',
+        'lifeform'           => 'Lifeforms',
+        'lifeform_tooltip'   => 'Lifeform buildings of the planet and lifeform technologies of the account',
         'storage_capacity'   => 'Storage capacity',
         'total_per_hour'     => 'Total per hour:',
         'total_per_day'      => 'Total per day',

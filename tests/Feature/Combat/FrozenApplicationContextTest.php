@@ -14,11 +14,23 @@ use OGame\Combat\Services\CombatSettlementService;
 use OGame\Enums\CharacterClass;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameMissions\AttackMission;
+use OGame\GameMissions\BattleEngine\Draws\BattleDraws;
+use OGame\GameMissions\BattleEngine\Draws\SeededDraws;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Lifeforms\Bonuses\LifeformBonusCache;
+use OGame\Lifeforms\Catalogue\LifeformKind;
+use OGame\Lifeforms\Services\LifeformInstallationService;
+use OGame\Lifeforms\Services\LifeformLevels;
+use OGame\Lifeforms\Species;
 use OGame\Models\BattleReport;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatInstance;
 use OGame\Models\FleetMission;
+use OGame\Models\Lifeforms\LifeformAccount;
+use OGame\Models\Lifeforms\LifeformBuildingLevel;
+use OGame\Models\Lifeforms\LifeformPlanet;
+use OGame\Models\Lifeforms\LifeformSpeciesProgress;
+use OGame\Models\Planet;
 use OGame\Models\Resources;
 use OGame\Models\User;
 use OGame\Models\WreckField;
@@ -77,7 +89,14 @@ class FrozenApplicationContextTest extends FleetDispatchTestCase
 
     protected function tearDown(): void
     {
+        $planetes = Planet::query()->where('user_id', $this->currentUserId)->pluck('id');
+        LifeformBuildingLevel::query()->whereIn('planet_id', $planetes)->delete();
+        LifeformPlanet::query()->whereIn('planet_id', $planetes)->delete();
+        LifeformAccount::query()->where('user_id', $this->currentUserId)->delete();
+        LifeformSpeciesProgress::query()->where('user_id', $this->currentUserId)->delete();
+        LifeformBonusCache::invalidate();
         $reglages = resolve(SettingsService::class);
+        $reglages->set('lifeforms_enabled', 0);
         $reglages->set('wreck_field_min_resources_loss', 150000);
         $reglages->set('wreck_field_min_fleet_percentage', 5);
         $reglages->set('debris_field_from_ships', 30);
@@ -162,6 +181,47 @@ class FrozenApplicationContextTest extends FleetDispatchTestCase
             $rapport->general['attacker_wreckage'] ?? null,
             'The wreck field was sized by the space dock as it is now, not as it was when the battle was computed.'
         );
+    }
+
+    /**
+     * **Le champ d epaves de l attaquant General prend les Nano-robots de reparation de son corps d origine, tels
+     * qu ils etaient a la cloture** (audit des effets, journal §157). Le chemin lisait le chantier spatial photographie
+     * mais aucune part de formes de vie : un attaquant Mechas ramenait moins d epaves que sa fiche ne le promettait, et
+     * un niveau monte pendant la bataille aurait change la taille du champ.
+     */
+    public function testTheAttackerWreckFieldTakesTheNanoRepairBotsPhotographedAtTheClosure(): void
+    {
+        resolve(SettingsService::class)->set('lifeforms_enabled', 1);
+        [$combat, $attaquant, $mission] = $this->anEngagedCombatWhoseAttackerIs(CharacterClass::GENERAL, 0, function (int $origine, int $joueur): void {
+            // Mechas, Nano-robots de reparation niveau 10 : +13 % d epaves reparables sur le corps d origine.
+            resolve(LifeformInstallationService::class)->chooseSpecies($joueur, Species::Mechas, (int)Date::now()->timestamp);
+            resolve(LifeformLevels::class)->setLevel($origine, LifeformKind::Building, 13112, 10);
+            LifeformBonusCache::invalidate();
+        }, 4242); // une bataille rejouable : les pertes ne dependent pas du tirage du jour
+
+        $origine = (int)$mission->planet_id_from;
+        $document = $combat->frozen_settings;
+        $this->assertIsArray($document);
+        $this->assertSame(FrozenCombatApplicationContext::SCHEMA, $document['schema']);
+        $this->assertEqualsWithDelta(0.13, $document['lifeform']['wreck_recovery'][$origine] ?? null, 1e-9, 'La part des Nano-robots du corps d origine est photographiee a la cloture.');
+
+        // Entre la cloture et l echeance, les Nano-robots sont demontes.
+        resolve(LifeformLevels::class)->setLevel($origine, LifeformKind::Building, 13112, 0);
+        LifeformBonusCache::invalidate();
+
+        $this->settle($combat);
+
+        $combat->refresh();
+        $rapport = BattleReport::query()->find($combat->battle_report_id);
+        $this->assertNotNull($rapport);
+        $perdus = BattleResultCodec::fromStorage($combat->battle_result)->attackerUnitsLost;
+        $this->assertGreaterThan(0, $perdus->getAmount(), 'The attacker lost nothing: no wreck field would exist either way.');
+
+        $epaves = new WreckFieldService($this->playerOf($attaquant), resolve(SettingsService::class));
+        $avecBonusGele = $this->asReportShape($epaves->calculateShipsForWreckField($perdus, 1, null, 0.13));
+        $sansBonus = $this->asReportShape($epaves->calculateShipsForWreckField($perdus, 1));
+        $this->assertNotSame($avecBonusGele, $sansBonus, 'Both give the same wreck field: the test would prove nothing.');
+        $this->assertSame($avecBonusGele, $rapport->general['attacker_wreckage'] ?? null, 'The attacker wreck field ignores the Nano repair bots photographed at the closure, or reads them live.');
     }
 
     /**
@@ -338,7 +398,11 @@ class FrozenApplicationContextTest extends FleetDispatchTestCase
      *
      * @return array{0: CombatInstance, 1: User, 2: FleetMission}
      */
-    private function anEngagedCombatWhoseAttackerIs(CharacterClass $classe, int $defenderFighters = 0): array
+    /**
+     * @param callable(int, int): void|null $avantLeDepart Ce que l essai pose sur le corps d origine (identifiant) et
+     *                                                     le joueur avant l envoi de la flotte — une forme de vie, par exemple.
+     */
+    private function anEngagedCombatWhoseAttackerIs(CharacterClass $classe, int $defenderFighters = 0, callable|null $avantLeDepart = null, int|null $graine = null): array
     {
         for ($i = 0; $i < 6; $i++) {
             $this->createAndLoginUser();
@@ -348,6 +412,9 @@ class FrozenApplicationContextTest extends FleetDispatchTestCase
 
         $attaquant = User::query()->findOrFail($this->currentUserId);
         $this->recordCharacterClass((int)$attaquant->id, $classe);
+        if ($avantLeDepart !== null) {
+            $avantLeDepart($this->currentPlanetId, (int)$attaquant->id);
+        }
 
         $units = new UnitCollection();
         $units->addUnit(ObjectService::getUnitObjectByMachineName('small_cargo'), 50);
@@ -378,6 +445,12 @@ class FrozenApplicationContextTest extends FleetDispatchTestCase
             'time_last_update' => (int)now()->timestamp + 86_400,
         ]);
         $cible->reloadPlanet();
+
+        // Une bataille rejouable quand l essai en a besoin : la liaison se pose apres le dernier envoi, que le
+        // rafraichissement de l application efface (journal, « rien ne survit a un envoi de flotte »).
+        if ($graine !== null) {
+            $this->app->bind(BattleDraws::class, static fn (): SeededDraws => new SeededDraws($graine));
+        }
 
         $combat = (new CombatOpeningService())->openOrJoin($mission, $cible->getPlanetId(), (int)$mission->time_arrival);
 

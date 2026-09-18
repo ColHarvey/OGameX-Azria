@@ -150,6 +150,16 @@ interface CombatApplicationContext
     public function lifeformPopulationLossPercent(): int;
 
     /**
+     * La part d epaves reparables en plus que les Nano-robots de reparation du chantier qui gouverne le champ
+     * d epaves d une flotte partie de ce corps rendent (fraction, 0 a 0,5) — le meme chantier que
+     * `spaceDockLevelFor()` : une lune emprunte celui de sa planete (audit des effets, journal §157).
+     *
+     * Le chemin instantane la lit au retour ; le combat durable la fige a la cloture, comme le niveau du chantier :
+     * des Nano-robots montes ou demontes pendant la bataille ne changent pas la taille du champ.
+     */
+    public function wreckRecoveryBonusFor(PlanetService $originBody): float;
+
+    /**
      * Le dernier motif qu'une faction hostile a inscrit contre ce joueur.
      *
      * Il ne change pas ce qui est debite, mais il change ce que le rapport **raconte**. Le

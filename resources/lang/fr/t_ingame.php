@@ -111,6 +111,8 @@ return [
         'character_class' => 'Classe de personnage',
         'alliance_class' => 'Classe d\'alliance',
         'commanding_staff' => 'État-major',
+        'lifeform' => 'Formes de vie',
+        'lifeform_tooltip' => 'Bâtiments de forme de vie de la planète et technologies de forme de vie du compte',
         'storage_capacity' => 'Capacité de stockage',
         'total_per_hour' => 'Total par heure :',
         'total_per_day' => 'Total par jour',

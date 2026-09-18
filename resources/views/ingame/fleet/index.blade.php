@@ -172,6 +172,9 @@
             var SPEEDFAKTOR_FLEET_PEACEFUL = {{ $settings->fleetSpeedPeaceful() }};
             var SPEEDFAKTOR_FLEET_WAR = {{ $settings->fleetSpeedWar() }};
             var SPEEDFAKTOR_FLEET_HOLDING = {{ $settings->fleetSpeedHolding() }};
+            // Le multiplicateur de vitesse d une expedition de ce joueur (Chercheurs, Propulsion telekinetique),
+            // celui que FleetMissionService::calculateFleetMissionDuration() applique (audit des effets, journal §157).
+            var FLIGHT_SPEED_BONUS_EXPEDITION = {{ json_encode((float)$expeditionFlightSpeedBonus) }};
             var PLANETTYPE_PLANET = 1;
             var PLANETTYPE_DEBRIS = 2;
             var PLANETTYPE_MOON = 3;
@@ -422,6 +425,20 @@
             var inactiveSystems = 0;
 
             var lootFoodOnAttack = false;
+
+            // La duree annoncee d une expedition : la regle du serveur (FleetMissionService::durationOverDistance —
+            // la duree entiere, constante comprise, divisee par le bonus), que FleetHelper.calcDuration ignore.
+            // Le carburant, lui, se calcule sans ce bonus des deux cotes (consumptionOverDistance sans mission).
+            FleetDispatcher.prototype.getDuration = function () {
+                var distance = this.getDistance();
+                var maxSpeed = this.getMaxSpeed();
+                var faktor = this.fleetHelper.getFleetSpeedFaktor(this.mission);
+                var bonus = this.mission === this.fleetHelper.MISSION_EXPEDITION ? FLIGHT_SPEED_BONUS_EXPEDITION : 1;
+                if (!(faktor > 0) || !(bonus > 1)) {
+                    return this.fleetHelper.calcDuration(distance, maxSpeed, this.speedPercent, this.mission);
+                }
+                return Math.max(Math.round((35000 / this.speedPercent * Math.sqrt(distance * 10 / maxSpeed) + 10) / faktor / bonus), 1);
+            };
 
             $(function () {
                 fleetDispatcher = new FleetDispatcher(window);

@@ -35,6 +35,7 @@ use OGame\Lifeforms\Species;
 use OGame\Models\CelestialBodyCombatBarrier;
 use OGame\Models\CombatEntryCharacteristic;
 use OGame\Models\CombatInstance;
+use OGame\Models\Enums\PlanetType;
 use OGame\Models\Lifeforms\LifeformBuildingLevel;
 use OGame\Models\Lifeforms\LifeformPlanet;
 use OGame\Models\Lifeforms\LifeformQueue;
@@ -84,15 +85,16 @@ final class LifeformCombatTest extends FleetDispatchTestCase
     private array $planetesPeuplees = [];
 
     /**
-     * Une technologie de palier 1 par espece qui arme un vaisseau, avec le vaisseau et la position.
+     * Une technologie par espece qui arme un vaisseau, avec le vaisseau et **l emplacement de son indice** — le seul que
+     * le jeu accepte (WRONG_SLOT) ; les Humains, les Rock'tal et les Kaelesh n en ont qu au palier 2 (3 a 5 M d habitants).
      *
      * @var array<int, array{0: int, 1: string, 2: int}>
      */
     private const array UNIT_TECH = [
-        1 => [11209, 'light_fighter', 1],
-        2 => [12208, 'heavy_fighter', 1],
+        1 => [11209, 'light_fighter', 9],
+        2 => [12208, 'heavy_fighter', 8],
         3 => [13205, 'light_fighter', 5],
-        4 => [14209, 'heavy_fighter', 1],
+        4 => [14209, 'heavy_fighter', 9],
     ];
 
     protected function basicSetup(): void
@@ -155,6 +157,54 @@ final class LifeformCombatTest extends FleetDispatchTestCase
         $this->assertSame(DemographicRules::SHELTERED, (int)$message->params['survivors']);
         $this->assertSame(0, (int)$message->params['protected_percent']);
         $this->assertStringContainsString('[coordinates]' . $cible->getPlanetCoordinates()->asString() . '[/coordinates]', (string)$message->params['coordinates']);
+    }
+
+    /**
+     * **Une vraie attaque instantanee epargne la part que le Bouclier planetaire protege** (audit des effets, §157) :
+     * chaque maillon etait prouve isolement (photographe → 30 %, pertes → 25 % de l expose) ; ici la cible est un compte
+     * neuf, Humains, Bouclier planetaire niveau 10, et l arrivee de la flotte tue 25 % des 70 % exposes — pas 25 % de tout.
+     */
+    public function testARealInstantAttackSparesTheShareThePlanetaryShieldProtects(): void
+    {
+        resolve(SettingsService::class)->set('lifeforms_enabled', '1');
+        resolve(SettingsService::class)->set('lifeform_population_loss_rate', '25');
+
+        // La cible : un compte neuf, donc sans espece, qui prend les Humains et leur Bouclier.
+        $this->createAndLoginUser();
+        $cibleId = $this->currentPlanetId;
+        $cibleJoueur = $this->currentUserId;
+        $coordonnees = $this->planetService->getPlanetCoordinates();
+        [$proprietaire, $espece, $habitants] = $this->populate($cibleId, 10000.0);
+        $this->assertSame($cibleJoueur, $proprietaire);
+        $this->assertSame(Species::Humans, $espece, 'Un compte neuf prend les Humains.');
+        resolve(LifeformLevels::class)->setLevel($cibleId, LifeformKind::Building, 11112, 10); // 3 % par niveau : 30 %
+        LifeformBonusCache::invalidate();
+        DB::table('users')->where('id', $cibleJoueur)->update(['tactical_retreat_ratio' => 0]);
+        DB::table('planets')->where('id', $cibleId)->update(['rocket_launcher' => 0, 'light_laser' => 0]);
+
+        // L attaquant : un autre compte neuf.
+        $this->createAndLoginUser();
+        $this->basicSetup();
+        $this->planetAddUnit('light_fighter', 200);
+        $unites = new UnitCollection();
+        $unites->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 200);
+        $this->dispatchFleet($coordonnees, $unites, new Resources(0, 0, 0, 0), PlanetType::Planet);
+        $mission = DB::table('fleet_missions')->where('user_id', $this->currentUserId)->where('processed', 0)->orderByDesc('id')->first();
+        $this->assertNotNull($mission);
+
+        $this->travelTo(Date::createFromTimestamp((int)$mission->time_arrival + 1));
+        $this->reloadApplication();
+        $this->get('/overview')->assertStatus(200);
+
+        $message = Message::query()->where('user_id', $cibleJoueur)->where('key', 'lifeform_population_loss')->orderByDesc('id')->first();
+        $this->assertNotNull($message, 'Le proprietaire apprend ses pertes civiles.');
+        $this->assertSame(30, (int)$message->params['protected_percent'], 'Le Bouclier niveau 10 protege 30 %.');
+        $this->assertSame(25, (int)$message->params['loss_percent']);
+        $attendu = (int)floor($habitants * 0.70 * 0.25);
+        $this->assertSame($attendu, (int)$message->params['lost'], '25 % des 70 % exposes.');
+        $this->assertLessThan((int)floor($habitants * 0.25), $attendu, 'Sans Bouclier, 25 % de tous auraient peri : le Bouclier a change le chiffre.');
+        $population = (float)LifeformPlanet::query()->where('planet_id', $cibleId)->value('population');
+        $this->assertEqualsWithDelta($habitants - $attendu, $population, 0.001);
     }
 
     /**
@@ -375,10 +425,12 @@ final class LifeformCombatTest extends FleetDispatchTestCase
             $this->assertSame(3.0, resolve(PlayerServiceFactory::class)->make($this->currentUserId, true)->getLifeformUnitStatsPercent($chasseur), 'Premisse : l attaquant part avec +3 %.');
         });
 
-        // Le defenseur : une technologie de son espece qui arme un vaisseau, au niveau 10 (+3 %).
-        [, $especeCible] = $this->populate($cibleId, 900000.0);
+        // Le defenseur : une technologie de son espece qui arme un vaisseau, au niveau 10 (+3 %), dans l emplacement de
+        // son indice — la population soutenue et le palier ouvert par ses capacites.
+        [, $especeCible] = $this->populate($cibleId, 5000000.0);
         [$technologie, $vaisseauCible, $position] = self::UNIT_TECH[$especeCible->value];
         $unite = ObjectService::getShipObjectByMachineName($vaisseauCible);
+        $this->openLifeformTierFor($cibleId, $especeCible, $position);
         $this->placeLifeformSlot($cibleId, $position, $technologie, (int)Date::now()->timestamp);
         resolve(LifeformLevels::class)->setLevel($cibleId, LifeformKind::Technology, $technologie, 10);
 
@@ -749,11 +801,12 @@ final class LifeformCombatTest extends FleetDispatchTestCase
             $this->assertSame(3.0, resolve(PlayerServiceFactory::class)->make($this->currentUserId, true)->getLifeformUnitStatsPercent($chasseur), 'Premisse : la flotte part avec +3 %.');
         });
 
-        [, $especeCible] = $this->populate($cibleId, 900000.0);
+        [, $especeCible] = $this->populate($cibleId, 5000000.0);
 
         // **Le defenseur aussi** : sa technologie passe au niveau 11 apres l ouverture, avant le traitement.
         [$technologieCible, $vaisseauCible, $position] = self::UNIT_TECH[$especeCible->value];
         $uniteCible = ObjectService::getShipObjectByMachineName($vaisseauCible);
+        $this->openLifeformTierFor($cibleId, $especeCible, $position);
         $this->placeLifeformSlot($cibleId, $position, $technologieCible, $ouverture - 1000);
         resolve(LifeformLevels::class)->setLevel($cibleId, LifeformKind::Technology, $technologieCible, 10);
         LifeformQueue::query()->create([

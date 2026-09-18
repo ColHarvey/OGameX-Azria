@@ -6,6 +6,8 @@ use Closure;
 use Illuminate\Support\Facades\Date;
 use OGame\Combat\Exceptions\MissingHeldFleetCargo;
 use OGame\Enums\CharacterClass;
+use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
+use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Combat\LifeformCombatPhotographer;
 use OGame\Models\FleetMission;
 use OGame\Models\Resources;
@@ -136,5 +138,13 @@ final class LiveCombatApplicationContext implements CombatApplicationContext
     public function lifeformPopulationLossPercent(): int
     {
         return $this->settings->lifeformPopulationLossPercent();
+    }
+
+    public function wreckRecoveryBonusFor(PlanetService $originBody): float
+    {
+        // Le meme chantier que spaceDockLevelFor() : une lune emprunte les Nano-robots de sa planete.
+        $porteur = $originBody->isMoon() ? $originBody->planet() : $originBody;
+
+        return $porteur->isPlanet() ? resolve(LifeformBonusResolver::class)->forPlanet($porteur->getPlanetId())->fraction(LifeformEffect::WRECK_RECOVERY) : 0.0;
     }
 }

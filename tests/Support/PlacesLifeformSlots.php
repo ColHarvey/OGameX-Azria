@@ -5,11 +5,13 @@ namespace Tests\Support;
 use OGame\Lifeforms\Bonuses\LifeformBonusCache;
 use OGame\Lifeforms\Catalogue\LifeformCatalogue;
 use OGame\Lifeforms\Catalogue\LifeformEffect;
+use OGame\Lifeforms\Catalogue\LifeformFormulas;
 use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\Demography\DemographicClock;
 use OGame\Lifeforms\Demography\DemographicState;
 use OGame\Lifeforms\Demography\PlanetLifeformProfile;
 use OGame\Lifeforms\Research\LifeformSlotHistory;
+use OGame\Lifeforms\Research\LifeformSlotRules;
 use OGame\Lifeforms\Rules\LifeformRuleRevisions;
 use OGame\Lifeforms\Services\LifeformLevels;
 use OGame\Lifeforms\Species;
@@ -64,11 +66,60 @@ trait PlacesLifeformSlots
      */
     protected function placeLifeformSlot(int $planetId, int $slot, int $objectId, int $at): void
     {
+        // **La technologie va dans l emplacement de son indice, et nulle part ailleurs** : c est ce que le vrai chemin
+        // (`LifeformResearchService::choose`, WRONG_SLOT) impose. Un banc qui posait une technologie de palier 3 dans un
+        // emplacement de palier 1 mesurait un etat que le jeu ne produit jamais, avec une population qui n ouvre pas
+        // cet emplacement-la (audit des effets, journal §157).
+        $objet = LifeformCatalogue::byId($objectId);
+        if ($objet->kind !== LifeformKind::Technology || $objet->index !== $slot) {
+            throw new RuntimeException("La technologie $objet->machineName (indice $objet->index) ne va pas dans l emplacement $slot : le jeu la refuserait (WRONG_SLOT).");
+        }
         LifeformSlot::query()->updateOrCreate(
             ['planet_id' => $planetId, 'slot' => $slot],
             ['object_id' => $objectId, 'chosen_via' => 'local', 'selected_at' => $at]
         );
         resolve(LifeformSlotHistory::class)->record($planetId, $slot, $objectId, $at);
+    }
+
+    /**
+     * Ouvre le palier d un emplacement par les capacites de l espece : le batiment de palier 2 (et 3) au plus petit
+     * niveau dont la capacite atteint l exigence de l emplacement — base × N × facteur^(N−1), la formule du profil.
+     * La population, elle, reste a la charge de l essai (posee ou soutenue).
+     */
+    protected function openLifeformTierFor(int $planetId, Species $species, int $slot): void
+    {
+        $exigence = LifeformSlotRules::populationRequired($slot);
+        $niveaux = resolve(LifeformLevels::class);
+        foreach ([2 => LifeformEffect::TIER2_CAPACITY, 3 => LifeformEffect::TIER3_CAPACITY] as $palier => $code) {
+            if (LifeformSlotRules::tierOf($slot) < $palier) {
+                continue;
+            }
+            $batiment = LifeformCatalogue::buildingWithEffect($species, $code);
+            $bonus = $batiment?->bonus($code);
+            if ($batiment === null || $bonus === null) {
+                throw new RuntimeException('L espece ' . $species->name . ' n a pas de batiment de palier ' . $palier . ' au catalogue.');
+            }
+            for ($niveau = 1; $niveau <= 60; $niveau++) {
+                if (LifeformFormulas::quantityFromLevelOne($bonus, $niveau) + 1e-9 >= $exigence) {
+                    $niveaux->setLevel($planetId, LifeformKind::Building, $batiment->id, max($niveau, $niveaux->levelOf($planetId, LifeformKind::Building, $batiment->id)));
+                    continue 2;
+                }
+            }
+            throw new RuntimeException("Aucun niveau de {$batiment->machineName} n ouvre l emplacement $slot.");
+        }
+        LifeformBonusCache::invalidate();
+    }
+
+    /**
+     * Pose une technologie **dans l emplacement de son indice**, palier ouvert par ses capacites, et rend cet emplacement.
+     */
+    protected function placeLifeformTechnology(int $planetId, Species $species, int $objectId, int $at): int
+    {
+        $objet = LifeformCatalogue::byId($objectId);
+        $this->openLifeformTierFor($planetId, $species, $objet->index);
+        $this->placeLifeformSlot($planetId, $objet->index, $objectId, $at);
+
+        return $objet->index;
     }
 
     /**

@@ -19,6 +19,7 @@ use OGame\GameMessages\FleetUnionInvite as FleetUnionInviteMessage;
 use OGame\GameMissions\BattleEngine\Services\TacticalRetreatService;
 use OGame\GameMissions\PatrolMission;
 use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\FleetTemplate;
@@ -134,6 +135,8 @@ class FleetController extends OGameController
         return view('ingame.fleet.index')->with([
             'player' => $player,
             'planet' => $planet,
+            // La duree annoncee d une expedition suit la regle du serveur (Chercheurs, Propulsion telekinetique).
+            'expeditionFlightSpeedBonus' => resolve(FleetMissionService::class)->expeditionFlightSpeedBonus($player),
             'targetPlanetName' => $cible['name'],
             'targetPlayerName' => $cible['playerName'],
             'targetPlayerId' => $cible['playerId'],
@@ -362,7 +365,11 @@ class FleetController extends OGameController
         $currentPlanet = $currentPlayer->planets->current();
 
         // Pre-multiply fuel by character class modifier so JS and PHP use the same values.
-        $fuelMultiplier = $characterClassService->getDeuteriumConsumptionMultiplier($currentPlayer->getUser());
+        // Et par la reduction des formes de vie (Recuperation de chaleur, Module d efficacite), que
+        // `FleetMissionService::consumptionOverDistance()` applique apres la classe : sans elle, l ecran annoncait
+        // plus que le debit (audit des effets, journal §157).
+        $fuelMultiplier = $characterClassService->getDeuteriumConsumptionMultiplier($currentPlayer->getUser())
+            * (1 - $currentPlayer->lifeformBonuses()->reduction(LifeformEffect::FUEL_CONSUMPTION_REDUCTION));
 
         // Return ships data for this planet taking into account the current planet's properties and research levels.
         $shipsData = [];

@@ -138,8 +138,8 @@ final class LifeformCombatEngineTest extends AccountTestCase
         resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Building, 11112, 10);
         $this->assertEqualsWithDelta(0.3, $photographe->ofBody($this->planetService)->protectedShare, 1e-9, 'Bouclier planetaire niveau 10 : 30 %.');
 
-        LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->update(['population' => 2000000.0]);
-        $this->placeLifeformSlot($this->currentPlanetId, 1, 11209, (int)Date::now()->timestamp);
+        LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->update(['population' => 5000000.0]);
+        $this->placeLifeformTechnology($this->currentPlanetId, Species::Humans, 11209, (int)Date::now()->timestamp);
         resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Technology, 11209, 10);
         $corps = $photographe->ofBody($this->planetService);
         $this->assertSame(['light_fighter' => 3.0], $corps->unitStats, 'Chasseur leger Mk II niveau 10 : +3 %.');

@@ -4,14 +4,13 @@ namespace OGame\Lifeforms\Presentation;
 
 use OGame\Lifeforms\Bonuses\LifeformBonusContribution;
 use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
+use OGame\Lifeforms\Catalogue\LifeformBonus;
 use OGame\Lifeforms\Catalogue\LifeformCatalogue;
 use OGame\Lifeforms\Research\LifeformExperience;
 use OGame\Lifeforms\Species;
 use OGame\Models\Lifeforms\LifeformSpeciesProgress;
 use OGame\Models\Planet;
-use OGame\Services\ObjectService;
 use OGame\Services\PlayerService;
-use RuntimeException;
 
 /**
  * Ce que la page des bonus montre : les niveaux d experience du compte, puis chaque effet avec son total
@@ -138,29 +137,13 @@ final class LifeformBonusPage
         return [$morceaux[0], $morceaux[1] ?? null];
     }
 
+    /**
+     * Le libelle d un effet cible : le meme ecrivain que les fiches (`LifeformEffectPresenter::labelOf`), qui remplace
+     * `:target` au lieu d accoler la cible — la page rendait « … : :target — Chasseur lourd » (audit §157).
+     */
     private static function labelOf(string $code, string|null $target): string
     {
-        $effet = __('t_lifeforms_ui.effects.' . $code);
-        $nom = is_string($effet) ? $effet : $code;
-        if ($target === null) {
-            return $nom;
-        }
-
-        return $nom . ' — ' . self::titleOfTarget($target);
-    }
-
-    /**
-     * Le nom lisible d une cible : un objet du jeu, ou une classe de personnage.
-     */
-    private static function titleOfTarget(string $target): string
-    {
-        try {
-            return ObjectService::getObjectByMachineName($target)->title;
-        } catch (RuntimeException) {
-            $classe = __('t_ingame.characterclass.' . $target . '.name');
-
-            return is_string($classe) && !str_contains($classe, 't_ingame.') ? $classe : $target;
-        }
+        return LifeformEffectPresenter::labelOf(new LifeformBonus($code, $target, 0.0, 0.0, null));
     }
 
     private static function titleOfObject(int $objectId): string

@@ -330,6 +330,28 @@ final class LifeformBonusResolver
         return $this->technologyContributions($userId) ?? [];
     }
 
+    /**
+     * L Intelligence en essaim efficace des Kaelesh (14213) est la seule technologie dont le fichier maitre dit
+     * qu elle accelere « regular AND lifeform research » : sa part, en fraction, vaut pour les recherches de formes
+     * de vie ; les autres reductions de temps de recherche (IA de recherche, Laboratoire ameliore…) ne parlent que
+     * des recherches classiques (audit des effets, journal §157).
+     */
+    public const int EFFICIENT_SWARM_INTELLIGENCE = 14213;
+
+    public function lifeformResearchTimeReductionOf(int $userId): float
+    {
+        $part = 0.0;
+        foreach ($this->contributionsOf($userId) as $contribution) {
+            if ($contribution->objectId === self::EFFICIENT_SWARM_INTELLIGENCE && $contribution->code === LifeformEffect::RESEARCH_TIME_REDUCTION) {
+                $part += $contribution->fraction;
+            }
+        }
+        $bonus = LifeformCatalogue::byId(self::EFFICIENT_SWARM_INTELLIGENCE)->bonus(LifeformEffect::RESEARCH_TIME_REDUCTION);
+        $plafond = $bonus === null || $bonus->max === null ? 0.99 : $bonus->max;
+
+        return min($plafond, $part);
+    }
+
     private static function applies(LifeformBonus $bonus): bool
     {
         return in_array($bonus->code, self::APPLIED, true);

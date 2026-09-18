@@ -14,6 +14,7 @@ use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\Services\LifeformInstallationService;
 use OGame\Lifeforms\Services\LifeformLevels;
+use OGame\Lifeforms\Services\LifeformQueueService;
 use OGame\Lifeforms\Species;
 use OGame\Models\FleetMission;
 use OGame\Models\Lifeforms\LifeformAccount;
@@ -25,6 +26,7 @@ use OGame\Models\Lifeforms\LifeformSpeciesProgress;
 use OGame\Models\Lifeforms\LifeformTechnologyLevel;
 use OGame\Models\Planet;
 use OGame\Models\Resource;
+use OGame\Models\Resources;
 use OGame\Models\User;
 use OGame\Services\CharacterClassService;
 use OGame\Services\FleetMissionService;
@@ -144,7 +146,7 @@ final class LifeformBonusHooksTest extends AccountTestCase
         $this->building(self::MAGMA_FORGE, 10);
         $this->building(self::DISRUPTION_CHAMBER, 10);
         $this->building(self::MINERAL_RESEARCH_CENTRE, 10);
-        $this->technology(1, self::ION_CRYSTAL_MODULES, 100);
+        $this->technology(self::ION_CRYSTAL_MODULES, 100);
         $this->planetAddUnit('crawler', 80);
 
         $mine = $planete->getObjectProductionIndex(ObjectService::getGameObjectsWithProductionByMachineName('metal_mine'));
@@ -199,10 +201,10 @@ final class LifeformBonusHooksTest extends AccountTestCase
         $this->assertGreaterThan(0, $entrepotAvant);
 
         $this->choose(Species::Humans);
-        $this->technology(5, self::ORBITAL_DEN, 5);
-        $this->technology(6, self::RESEARCH_AI, 10);
-        $this->technology(4, self::STEALTH_FIELD_GENERATOR, 10);
-        $this->technology(1, self::HIGH_PERFORMANCE_TERRAFORMER, 10);
+        $this->technology(self::ORBITAL_DEN, 5);
+        $this->technology(self::RESEARCH_AI, 10);
+        $this->technology(self::STEALTH_FIELD_GENERATOR, 10);
+        $this->technology(self::HIGH_PERFORMANCE_TERRAFORMER, 10);
 
         $planete->updateResourceStorageStats(true);
         $this->assertSame((int)floor($entrepotAvant * 1.20), (int)Planet::query()->whereKey($this->currentPlanetId)->value('metal_max'), 'Repaire orbital niveau 5 : +20 % d entrepot.');
@@ -237,10 +239,10 @@ final class LifeformBonusHooksTest extends AccountTestCase
     public function testMechasTechnologiesRaiseShipStatsSpeedFuelAndClassBonuses(): void
     {
         $this->choose(Species::Mechas);
-        $this->technology(5, self::GENERAL_OVERHAUL_LIGHT_FIGHTER, 10);
-        $this->technology(2, self::PLASMA_DRIVE, 10);
-        $this->technology(3, self::EFFICIENCY_MODULE, 10);
-        $this->technology(1, self::MECHAN_GENERAL_ENHANCEMENT, 50);
+        $this->technology(self::GENERAL_OVERHAUL_LIGHT_FIGHTER, 10);
+        $this->technology(self::PLASMA_DRIVE, 10);
+        $this->technology(self::EFFICIENCY_MODULE, 10);
+        $this->technology(self::MECHAN_GENERAL_ENHANCEMENT, 50);
 
         $joueur = $this->player();
         $chasseur = ObjectService::getShipObjectByMachineName('light_fighter');
@@ -253,7 +255,14 @@ final class LifeformBonusHooksTest extends AccountTestCase
         $this->assertContains('t_ingame.techtree.tooltip_lifeform_bonus', array_column($lignes, 'type'));
         $this->assertSame(150, ObjectService::getShipObjectByMachineName('heavy_fighter')->properties->attack->calculate($joueur)->totalValue, 'La technologie vise le chasseur leger seul.');
 
-        $this->assertSame(12750.0, (float)$chasseur->properties->speed->calculate($joueur)->totalValue, 'Propulsion a plasma niveau 10 : +2 % de vitesse.');
+        // **Les cinq caracteristiques** : le fichier maitre dit « structural integrity, shield strength, firepower, cargo
+        // capacity and basic speed » pour chaque revision generale et chaque Mk II ; le §155.5 n en appliquait que trois
+        // (audit des effets, journal §157). Vitesse : Propulsion a plasma +2 % et Revision +3 % sur la base, une seule ligne.
+        $this->assertSame(13125.0, (float)$chasseur->properties->speed->calculate($joueur)->totalValue, 'Propulsion a plasma niveau 10 (+2 %) et Revision generale niveau 10 (+3 %) : 12 500 + 625.');
+        $this->assertSame(51, $chasseur->properties->capacity->calculate($joueur)->totalValue, 'Fret du chasseur leger : 50 + 3 %, arrondi vers le bas.');
+        $this->assertSame(10200.0, (float)ObjectService::getShipObjectByMachineName('heavy_fighter')->properties->speed->calculate($joueur)->totalValue, 'Le chasseur lourd ne prend que la Propulsion a plasma : 10 000 + 2 %.');
+        // « all ships (excluding Deathstars) » : l Etoile de la mort garde sa vitesse de 100.
+        $this->assertSame(100.0, (float)ObjectService::getShipObjectByMachineName('deathstar')->properties->speed->calculate($joueur)->totalValue, 'La Propulsion a plasma exclut l Etoile de la mort.');
 
         $flotte = new UnitCollection();
         $flotte->addUnit($chasseur, 100);
@@ -270,18 +279,73 @@ final class LifeformBonusHooksTest extends AccountTestCase
         $classes = resolve(CharacterClassService::class);
         $this->assertEqualsWithDelta(0.45, $classes->getDeuteriumConsumptionMultiplier($utilisateur), 1e-9, '−50 % × 1,1 = −55 %.');
         $this->assertEqualsWithDelta(1.22, $classes->getRecyclerPathfinderCargoBonus($utilisateur), 1e-9, '+20 % × 1,1 = +22 %.');
+        // Le fret du recycleur passe par la ligne de classe en pour cent ENTIER : 1,2199999… tronque donnait 21 (audit §157).
+        $general = resolve(PlayerServiceFactory::class)->make($this->currentUserId, true); // le joueur relu avec sa classe
+        $this->assertSame(24400, ObjectService::getShipObjectByMachineName('recycler')->properties->capacity->calculate($general)->totalValue, 'Recycleur : 20 000 + 22 % de classe amplifiee = 24 400, pas 24 200.');
         $this->assertSame(1.0, $classes->getMineProductionBonus($utilisateur), 'Un General n a pas le bonus du Collecteur, amplifie ou non.');
         resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Technology, self::MECHAN_GENERAL_ENHANCEMENT, 0);
         $this->assertSame(0.5, $classes->getDeuteriumConsumptionMultiplier($utilisateur));
     }
 
+    /**
+     * 0,3 x 3 / 100 vaut 0,008999999999999999 en flottant : multiplie par 100 puis par 4 000 et arrondi vers le bas, le
+     * joueur perdait une unite de coque a de nombreux niveaux (audit des effets, journal §157). Le pour cent se pose
+     * en dixiemes exacts avant tout arrondi.
+     */
+    public function testAThreePerMilleBonusDoesNotLoseAUnitToFloatingPointNoise(): void
+    {
+        $this->choose(Species::Mechas);
+        $this->technology(self::GENERAL_OVERHAUL_LIGHT_FIGHTER, 3);
+        $joueur = $this->player();
+        $chasseur = ObjectService::getShipObjectByMachineName('light_fighter');
+        $this->assertSame(0.9, $joueur->getLifeformUnitStatsPercent($chasseur), 'Trois niveaux a 0,3 % : 0,9 exactement.');
+        $this->assertSame(4036, $chasseur->properties->structural_integrity->calculate($joueur)->totalValue, '4 000 + 0,9 % = 4 036, pas 4 035.');
+        $this->assertSame(12612.0, (float)$chasseur->properties->speed->calculate($joueur)->totalValue, '12 500 + 0,9 % = 12 612 (112,5 arrondi vers le bas).');
+    }
+
+    /**
+     * « Efficient Swarm Intelligence allows regular AND lifeform research projects to be completed much faster »
+     * (fichier maitre) : la file des recherches de formes de vie ecrit une echeance raccourcie, par le vrai chemin —
+     * la seule technologie d empire qui touche ces recherches (audit des effets, journal §157).
+     */
+    public function testEfficientSwarmIntelligenceShortensLifeformResearchThroughTheQueue(): void
+    {
+        $this->choose(Species::Kaelesh);
+        $maintenant = (int)Date::now()->timestamp;
+        $planetId = $this->currentPlanetId;
+        $niveaux = resolve(LifeformLevels::class);
+        $niveaux->setLevel($planetId, LifeformKind::Building, 14103, 1); // la Chambre du vortex ouvre l arbre
+        $niveaux->setLevel($planetId, LifeformKind::Building, 14104, 1); // les Salles forment au palier 2
+        $this->planetAddResources(new Resources(100000000, 100000000, 100000000, 0));
+        $this->placeLifeformSlot($planetId, 1, 14201, $maintenant);
+        LifeformPlanet::query()->where('planet_id', $planetId)->update(['population' => 200000000.0]);
+        $file = resolve(LifeformQueueService::class);
+
+        $sans = $file->add($this->planetService, 14201, $maintenant);
+        $dureeSans = (int)$sans->time_end - $maintenant;
+        $this->assertGreaterThan(100, $dureeSans, 'Premisse : une duree mesurable.');
+        $file->cancel($this->planetService, (int)$sans->id, $maintenant);
+
+        // L Intelligence en essaim efficace niveau 10 : -1 % (0,1 % par niveau), emplacement 13 (palier 3, position 1).
+        $niveaux->setLevel($planetId, LifeformKind::Building, 14105, 4); // le Forum forme au palier 3
+        $this->placeLifeformSlot($planetId, 13, 14213, $maintenant);
+        $niveaux->setLevel($planetId, LifeformKind::Technology, 14213, 10);
+        LifeformBonusCache::invalidate();
+        $this->assertEqualsWithDelta(0.01, resolve(LifeformBonusResolver::class)->lifeformResearchTimeReductionOf($this->currentUserId), 1e-9, 'Premisse : la part d empire vaut 1 %.');
+
+        $avec = $file->add($this->planetService, 14201, $maintenant);
+        $dureeAvec = (int)$avec->time_end - $maintenant;
+        $this->assertSame((int)floor($dureeSans * 0.99), $dureeAvec, 'L echeance ecrite dans la file est raccourcie de 1 %.');
+        $this->assertSame($sans->metal, $avec->metal, 'Le prix, lui, ne bouge pas.');
+    }
+
     public function testKaeleshTechnologiesReachCargoPhalanxAndExpeditions(): void
     {
         $this->choose(Species::Kaelesh);
-        $this->technology(6, self::NEUROMODAL_COMPRESSOR, 10);
-        $this->technology(3, self::PSIONIC_NETWORK, 10);
-        $this->technology(5, self::ENHANCED_SENSOR_TECHNOLOGY, 10);
-        $this->technology(2, self::INTERPLANETARY_ANALYSIS_NETWORK, 10);
+        $this->technology(self::NEUROMODAL_COMPRESSOR, 10);
+        $this->technology(self::PSIONIC_NETWORK, 10);
+        $this->technology(self::ENHANCED_SENSOR_TECHNOLOGY, 10);
+        $this->technology(self::INTERPLANETARY_ANALYSIS_NETWORK, 10);
 
         $joueur = $this->player();
         $transporteur = ObjectService::getShipObjectByMachineName('small_cargo');
@@ -307,6 +371,9 @@ final class LifeformBonusHooksTest extends AccountTestCase
         $poids = new ReflectionMethod($expedition, 'getOutcomeWeights');
         $attenduTrouNoir = resolve(SettingsService::class)->expeditionWeightBlackHole() * (1 - 0.005);
         $this->assertEqualsWithDelta($attenduTrouNoir, $poids->invoke($expedition, $mission)['black_hole'], 1e-9, 'Reseau psionique niveau 10 : 0,5 % de trou noir en moins.');
+        // Et le tirage LE VOIT : au dixieme de point, 0,2 et 0,199 valaient tous deux 2 (audit §157) ; au dix-millieme, 2 000 et 1 990.
+        $this->assertSame(2000, ExpeditionMission::scaledWeight(0.2), 'Le poids officiel du trou noir (0,2) en dix-milliemes.');
+        $this->assertSame(1990, ExpeditionMission::scaledWeight(0.2 * (1 - 0.005)), 'Le poids tire distingue 0,5 % de reduction ; au dixieme, 2 et 2.');
 
         $trouvaille = new ReflectionMethod(ExpeditionMission::class, 'determineMaxResourceFind');
         $this->assertSame(1.0, (float)resolve(SettingsService::class)->expeditionRewardMultiplierResources(), 'Le multiplicateur d administration vaut 1 dans ce banc.');
@@ -346,10 +413,14 @@ final class LifeformBonusHooksTest extends AccountTestCase
         resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Building, $objectId, $level);
     }
 
-    private function technology(int $slot, int $objectId, int $level): void
+    private function technology(int $objectId, int $level): void
     {
-        LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->update(['population' => 2000000.0]);
-        $this->placeLifeformSlot($this->currentPlanetId, $slot, $objectId, (int)Date::now()->timestamp);
+        // Dans l emplacement de son indice, palier ouvert par les capacites de l espece ; une population qui ouvre
+        // les dix-huit emplacements (448 M au dernier), posee — ces essais ne mesurent pas la demographie.
+        $espece = resolve(LifeformInstallationService::class)->speciesOf($this->currentUserId);
+        $this->assertNotNull($espece);
+        LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->update(['population' => 500000000.0]);
+        $this->placeLifeformTechnology($this->currentPlanetId, $espece, $objectId, (int)Date::now()->timestamp);
         resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Technology, $objectId, $level);
     }
 

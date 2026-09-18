@@ -18,13 +18,17 @@ use OGame\Models\Lifeforms\LifeformAccount;
 use OGame\Models\Lifeforms\LifeformBuildingLevel;
 use OGame\Models\Lifeforms\LifeformDiscovery;
 use OGame\Models\Lifeforms\LifeformPlanet;
+use OGame\Models\Lifeforms\LifeformSlot;
+use OGame\Models\Lifeforms\LifeformSlotChange;
 use OGame\Models\Lifeforms\LifeformSpeciesProgress;
+use OGame\Models\Lifeforms\LifeformTechnologyLevel;
 use OGame\Models\Message;
 use OGame\Models\Planet;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
 use Tests\AccountTestCase;
 use Tests\Support\PinsSettings;
+use Tests\Support\PlacesLifeformSlots;
 
 /**
  * Les vols de decouverte (tranche 4) : ouverture, quota, lancement scelle, reglement credite une fois
@@ -33,6 +37,7 @@ use Tests\Support\PinsSettings;
 final class LifeformDiscoveryTest extends AccountTestCase
 {
     use PinsSettings;
+    use PlacesLifeformSlots;
 
     private const int RESEARCH_CENTRE = 11103;
 
@@ -49,6 +54,9 @@ final class LifeformDiscoveryTest extends AccountTestCase
         $planetes = Planet::query()->where('user_id', $this->currentUserId)->pluck('id');
         LifeformDiscovery::query()->where('user_id', $this->currentUserId)->delete();
         Message::query()->where('user_id', $this->currentUserId)->where('key', 'lifeform_discovery_report')->delete();
+        LifeformSlot::query()->whereIn('planet_id', $planetes)->delete();
+        LifeformSlotChange::query()->whereIn('planet_id', $planetes)->delete();
+        LifeformTechnologyLevel::query()->whereIn('planet_id', $planetes)->delete();
         LifeformBuildingLevel::query()->whereIn('planet_id', $planetes)->delete();
         LifeformPlanet::query()->whereIn('planet_id', $planetes)->delete();
         LifeformAccount::query()->where('user_id', $this->currentUserId)->delete();
@@ -100,6 +108,38 @@ final class LifeformDiscoveryTest extends AccountTestCase
 
         $this->pinSettings(['lifeforms_enabled' => 0]);
         $this->assertRefused(fn () => $service->launch($this->planetService, $autre, $maintenant), LifeformRefused::CLOSED);
+    }
+
+    /**
+     * Les Emissaires intergalactiques raccourcissent le vol par le vrai chemin (l echeance ecrite), avec l experience de
+     * l espece de la technologie et la Metropole de la planete — ce que la fiche affichait deja — et seulement tant que
+     * leur emplacement est ouvert (audit des effets, journal §157).
+     */
+    public function testTheEnvoysShortenTheFlightWithExperienceAndMetropolisWhileTheirSlotIsOpen(): void
+    {
+        $service = resolve(LifeformDiscoveryService::class);
+        $maintenant = (int)Date::now()->timestamp;
+        $planetId = $this->currentPlanetId;
+        $depart = $this->planetService->getPlanetCoordinates();
+        $cible = new Coordinate($depart->galaxy, $depart->system, $depart->position === 1 ? 2 : 1);
+        $niveaux = resolve(LifeformLevels::class);
+        $niveaux->setLevel($planetId, LifeformKind::Building, self::RESEARCH_CENTRE, 1);
+        $niveaux->setLevel($planetId, LifeformKind::Building, 11111, 8); // Metropole : +4 %
+        LifeformSpeciesProgress::query()->updateOrCreate(['user_id' => $this->currentUserId, 'species' => Species::Humans->value], ['experience' => 3600, 'discovered_at' => $maintenant]); // niveau 4 : +0,4 %
+        LifeformPlanet::query()->where('planet_id', $planetId)->update(['population' => 250000.0]);
+        $this->placeLifeformSlot($planetId, 1, 11201, $maintenant);
+        $niveaux->setLevel($planetId, LifeformKind::Technology, 11201, 10);
+
+        $multiplicateur = resolve(LifeformResearchService::class)->technologyBonusMultiplier($this->currentUserId, Species::Humans, $niveaux->buildingLevelsOf($planetId));
+        $this->assertGreaterThan(1.04, $multiplicateur, 'Premisse : experience ET Metropole comptent (1,04 x (1 + experience)).');
+        $attendue = min(0.99, 10.0 * $multiplicateur / 100);
+        $this->assertEqualsWithDelta($attendue, $service->envoysReduction($this->currentUserId, $planetId), 1e-9, '10 % x le multiplicateur : la meme regle que la fiche et le resolveur.');
+        $vol = $service->launch($this->planetService, $cible, $maintenant);
+        $this->assertSame($maintenant + LifeformDiscoveryRules::duration(LifeformDiscoveryRules::distance($depart, $cible), $attendue, 1.0), $vol->ends_at, 'L echeance ecrite porte la reduction.');
+
+        // L emplacement se referme (population retombee) : les Emissaires ne comptent plus.
+        LifeformPlanet::query()->where('planet_id', $planetId)->update(['population' => 1000.0]);
+        $this->assertSame(0.0, $service->envoysReduction($this->currentUserId, $planetId), 'Un emplacement referme eteint l effet.');
     }
 
     public function testTheQuotaAccruesFromTheSpeciesChoiceByWholeDays(): void

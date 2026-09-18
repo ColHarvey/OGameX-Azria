@@ -325,6 +325,11 @@ class AcsDefenceUnderCombatTest extends FleetDispatchTestCase
                     return 100;
                 }
 
+                public function wreckRecoveryBonusFor(PlanetService $originBody): float
+                {
+                    return 0.0;
+                }
+
                 public function isGeneralForFleet(int $fleetMissionId, PlayerService $owner): bool
                 {
                     return false;

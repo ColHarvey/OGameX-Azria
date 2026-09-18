@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Date;
 use Illuminate\View\View;
 use OGame\Facades\AppUtil;
 use OGame\Galaxy\GalaxyHeaderCounters;
+use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
 use OGame\Lifeforms\Catalogue\LifeformAvailability;
 use OGame\Lifeforms\Catalogue\LifeformCatalogue;
 use OGame\Lifeforms\Catalogue\LifeformEffect;
@@ -61,6 +62,7 @@ final class LifeformsController extends OGameController
         private readonly LifeformResearchService $research,
         private readonly LifeformDiscoveryService $discoveries,
         private readonly LifeformBonusPage $bonusPage,
+        private readonly LifeformBonusResolver $resolver,
     ) {
     }
 
@@ -362,6 +364,8 @@ final class LifeformsController extends OGameController
         $centreOuvert = $this->queue->requirementsMet(LifeformCatalogue::technologiesOf($espece)[0], $niveaux);
         $vacances = $player->isInVacationMode();
         $autresEspeces = array_values(array_filter($this->research->discoveredSpeciesOf($player->getId()), fn (Species $s) => $s !== $espece));
+        // La part d empire qui raccourcit les recherches de formes de vie (Intelligence en essaim efficace, §157).
+        $essaim = $this->resolver->lifeformResearchTimeReductionOf($player->getId());
 
         $paliers = [];
         foreach ([1, 2, 3] as $palier) {
@@ -383,7 +387,7 @@ final class LifeformsController extends OGameController
                 $peutRechercher = false;
                 if ($objet !== null && $ouvert && $centreOuvert && !$filePleine && !$vacances && !$enCoursIci) {
                     $cible = $niveau + $enFile->where('object_id', $objet->id)->count() + 1;
-                    $devis = LifeformQuote::for($objet, $cible, $niveaux, 0, 0, $vitesses);
+                    $devis = LifeformQuote::for($objet, $cible, $niveaux, 0, 0, $vitesses, $essaim);
                     $peutRechercher = $planet->hasResources($devis->price);
                 }
                 $lignes[] = [
@@ -532,7 +536,7 @@ final class LifeformsController extends OGameController
         $enFile = $this->queue->queued($planet->getPlanetId(), LifeformKind::Technology);
         $enCours = $enFile->firstWhere('status', 'running');
         $cible = $niveau + $enFile->where('object_id', $objet->id)->count() + 1;
-        $devis = LifeformQuote::for($objet, $cible, $niveaux, 0, 0, $vitesses);
+        $devis = LifeformQuote::for($objet, $cible, $niveaux, 0, 0, $vitesses, $this->resolver->lifeformResearchTimeReductionOf($player->getId()));
         $multiplicateur = $this->research->technologyBonusMultiplier($player->getId(), $objet->species, $niveaux);
         $ouvert = $this->research->isUnlocked((int)$emplacement->slot, $etat, $profil, $reduction);
 
@@ -543,7 +547,7 @@ final class LifeformsController extends OGameController
             }
             $effets[] = [
                 'code' => $bonus->code,
-                'label' => __('t_lifeforms_ui.effects.' . $bonus->code, ['target' => $bonus->target === null ? '' : __('t_resources.' . $bonus->target . '.title')]),
+                'label' => LifeformEffectPresenter::labelOf($bonus),
                 'now' => self::pourcent(LifeformFormulas::technologyBonusPercent($bonus, $niveau, $multiplicateur - 1)),
                 'next' => self::pourcent(LifeformFormulas::technologyBonusPercent($bonus, $cible, $multiplicateur - 1)),
             ];
