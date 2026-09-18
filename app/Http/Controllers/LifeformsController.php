@@ -101,9 +101,6 @@ final class LifeformsController extends OGameController
             'choisie' => $choisie,
             'chosen_at' => $compte === null ? null : (int)$compte->chosen_at,
             'planet_name' => $player->planets->current()->getPlanetName(),
-            // L en-tete : sans image, la regle generique `#planet{height:300px}` laisse un trou de 300 px, car
-            // l image officielle vient de `#netz #planet` et ce fork n a pas de `#netz` (journal §155.23).
-            'header_filename' => $this->headerOf($player->planets->current()),
             'lifeforms_error' => session('lifeforms_error'),
         ]);
     }
@@ -196,6 +193,8 @@ final class LifeformsController extends OGameController
             'tiles' => $tuiles,
             'queue_active' => $enCours,
             'queue_waiting' => $enAttente,
+            // La file de l autre genre : les deux boites vivent cote a cote sur chaque page, comme l officiel.
+            'other_queue_active' => $this->queue->queued($planet->getPlanetId(), LifeformKind::Technology)->firstWhere('status', 'running'),
             'is_in_vacation_mode' => $vacances,
             'held' => $this->banner->heldOn($planet),
         ]);
@@ -408,6 +407,8 @@ final class LifeformsController extends OGameController
             'other_species' => $autresEspeces,
             'queue_active' => $enCours,
             'queue_waiting' => $enFile->where('status', 'waiting')->values(),
+            'other_queue_active' => $this->queue->queued($planet->getPlanetId(), LifeformKind::Building)->firstWhere('status', 'running'),
+            'other_queue_waiting' => $this->queue->queued($planet->getPlanetId(), LifeformKind::Building)->where('status', 'waiting')->values(),
             'is_in_vacation_mode' => $vacances,
             'lifeforms_error' => session('lifeforms_error'),
         ]);

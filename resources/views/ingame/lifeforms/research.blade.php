@@ -93,8 +93,18 @@
                 @endforeach
             </div>
 
-            <div id="productionboxlfresearchcomponent" class="productionboxlfresearch injectedComponent parent lfresearch" style="width: 654px; margin: 0 auto;">
-                @include('ingame.lifeforms.partials.queue', ['queue_active' => $queue_active, 'queue_waiting' => $queue_waiting, 'kind' => 'technology'])
+            {{-- Les deux boites de file cote a cote, batiments puis recherches, comme la page officielle. --}}
+            <div id="productionboxBottom" style="margin: 0 auto;">
+                <div class="productionBoxBuildings boxColumn building">
+                    <div id="productionboxlfbuildingcomponent" class="productionboxlfbuilding injectedComponent parent lfresearch">
+                        @include('ingame.lifeforms.partials.queue', ['queue_active' => $other_queue_active, 'queue_waiting' => $other_queue_waiting, 'kind' => 'building'])
+                    </div>
+                </div>
+                <div class="productionBoxResearch boxColumn research">
+                    <div id="productionboxlfresearchcomponent" class="productionboxlfresearch injectedComponent parent lfresearch">
+                        @include('ingame.lifeforms.partials.queue', ['queue_active' => $queue_active, 'queue_waiting' => $queue_waiting, 'kind' => 'technology'])
+                    </div>
+                </div>
             </div>
         </div>
     </div>

@@ -81,8 +81,19 @@
                 </ul>
             </div>
 
-            <div id="productionboxlfbuildingcomponent" class="productionboxlfbuilding injectedComponent parent supplies">
-                @include('ingame.lifeforms.partials.queue', ['queue_active' => $queue_active, 'queue_waiting' => $queue_waiting, 'kind' => 'building'])
+            {{-- Les deux boites de file cote a cote, batiments puis recherches : `#productionboxBottom` (670 px, flex)
+                 est ce que la page officielle des batiments de formes de vie montre sous sa grille. --}}
+            <div id="productionboxBottom">
+                <div class="productionBoxBuildings boxColumn building">
+                    <div id="productionboxlfbuildingcomponent" class="productionboxlfbuilding injectedComponent parent supplies">
+                        @include('ingame.lifeforms.partials.queue', ['queue_active' => $queue_active, 'queue_waiting' => $queue_waiting, 'kind' => 'building'])
+                    </div>
+                </div>
+                <div class="productionBoxResearch boxColumn research">
+                    <div id="productionboxlfresearchcomponent" class="productionboxlfresearch injectedComponent parent supplies">
+                        @include('ingame.lifeforms.partials.queue', ['queue_active' => $other_queue_active, 'queue_waiting' => [], 'kind' => 'technology'])
+                    </div>
+                </div>
             </div>
         </div>
     </div>

@@ -9,15 +9,17 @@
     cadre), `.lfsettingsContent` (640 px), `.lifeform-item` avec son icone de 77 px tiree du sprite officiel et son
     bouton vert `a.select-button` place en bas a droite par la feuille.
 
-    **Deux pieges mesures a l ecran** (journal §155.23) :
+    **Deux pieges mesures a l ecran** (journal §155.23, §155.25) :
 
     - l en-tete officiel tient son image de `#netz #planet`, et ce fork n a pas de `#netz` : seule la regle
-      generique `#planet{width:654px;height:300px}` s appliquait, donc un trou de 300 px sans image. L image est
-      donc posee ici, comme les autres pages de formes de vie le font deja (biome de la planete courante) ;
-    - les classes d etat officielles (`lifeformclaimed`, `lifeformcanclaim`, `lifeformnotclaim`) apportent un
-      morceau de cadre en sprite dont la geometrie suppose un DOM que ce fork n a pas : rendu, il laisse un panneau
-      clair qui deborde et une languette orpheline en haut a droite. L etat vit donc dans `data-state`, qui ne
-      dessine rien.
+      generique `#planet{width:654px;height:300px}` s appliquait, donc un trou de 300 px sans image. L image
+      officielle (654 x 250) est donc posee ici, a sa hauteur ;
+    - le cadre officiel d une fiche (`lifeformclaimed` / `lifeformcanclaim` / `lifeformnotclaim` sur la fiche,
+      `.lifeform-item-wrapper` et `.lifeform-item-bottom` dedans) est un sprite de 1166 x 98 : capot de 620 px
+      avec son encoche en haut a droite, colonne de corps de 520 px en `repeat-y`, barre basse de 519 px. Le corps
+      ne couvre PAS les 100 derniers pixels de la fiche : c est ainsi dans le jeu (mesure sur une capture officielle,
+      rgb(33,42,52) puis rgb(13,16,20) a droite du texte). Sans le wrapper et la barre, le capot seul paraissait
+      une languette orpheline (§155.23) ; avec eux, la fiche est celle du jeu.
 --}}
 
 @section('content')
@@ -30,8 +32,11 @@
 
     <div id="lfsettingscomponent" class="maincontent">
         <div id="lfsettings">
+            {{-- L illustration officielle de la page des especes (654 x 250, celle que `#netz #planet` pose dans le
+                 jeu ; ce fork n a pas de `#netz`, elle est posee ici, a sa hauteur). Les pages des batiments et des
+                 recherches gardent le biome de la planete, comme leurs captures officielles le montrent. --}}
             <header id="planet" data-anchor="technologyDetails"
-                    style="background-image:url({{ asset('img/headers/resources/' . $header_filename) }}.jpg);">
+                    style="background-image:url({{ asset('img/icons/6dafcd306b27d77508ef115722b6b0.jpg') }}); height: 250px;">
                 <h2>{{ __('t_lifeforms_ui.page.title') }} - {{ $planet_name }}</h2>
             </header>
 
@@ -65,7 +70,8 @@
                     @endphp
                     <div class="lfsettingsContentWrapper">
                         <div class="lfsettingsContent">
-                            <div class="lifeform-item lifeform-species lifeform-species-{{ $s->machineName() }}" data-species="{{ $n }}" data-state="{{ $etat }}" style="position: relative; min-height: 190px;">
+                            <div class="lifeform-item lifeform-species lifeform-species-{{ $s->machineName() }} {{ ['chosen' => 'lifeformclaimed', 'can-choose' => 'lifeformcanclaim', 'other' => 'lifeformnotclaim'][$etat] }}" data-species="{{ $n }}" data-state="{{ $etat }}">
+                            <div class="lifeform-item-wrapper" style="position: relative; min-height: 190px;">
                                 {{-- Aucun style en ligne : `.lifeform-item-icon` porte deja le sprite du jeu, et
                                      `.lifeformN` la position de l espece. --}}
                                 <div class="lifeform-item-icon lifeform{{ $n }}" role="img" aria-label="{{ $espece['name'] }}"></div>
@@ -105,6 +111,8 @@
                                         <p class="smallFont" style="margin: 0 0 6px 0;">{{ __('t_lifeforms_ui.selection.other_species') }}</p>
                                     @endif
                                 </div>
+                            </div>
+                            <div class="lifeform-item-bottom"></div>
                             </div>
 
                             {{-- **Les deux listes de l espece prennent les barres du jeu** (`.lifeformTechnology > h1`,

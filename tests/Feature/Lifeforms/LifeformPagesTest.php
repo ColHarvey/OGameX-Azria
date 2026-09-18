@@ -149,6 +149,9 @@ final class LifeformPagesTest extends AccountTestCase
         $page->assertSee(route('lifeforms.buildings.ajax'), false);
         $page->assertSee(route('lifeforms.buildings.addbuildrequest.post'), false);
         $page->assertSee('id="productionboxlfbuildingcomponent"', false);
+        // Les deux boites de file, cote a cote sous la grille, comme la capture officielle des batiments.
+        $page->assertSee('id="productionboxlfresearchcomponent"', false);
+        $page->assertSee('<div id="productionboxBottom">', false);
 
         // **La page vit dans le conteneur que la feuille taille pour elle** (`#lfbuildings` : grille en
         // `space-between`, remplisseur de 422 px), pas dans celui de la page des ressources (journal §155.23).
@@ -252,11 +255,15 @@ final class LifeformPagesTest extends AccountTestCase
         $sansEspece->assertStatus(200);
         $sansEspece->assertSee('id="lfsettingscomponent"', false);
         $sansEspece->assertSee('class="lfsettingsContentWrapper"', false);
-        // L etat vit dans `data-state` : les classes officielles `lifeformcanclaim` / `lifeformclaimed` /
-        // `lifeformnotclaim` peignent un cadre en sprite (`e3e67150...png`, bande de corps large de 526 px) dont la
-        // geometrie suppose un DOM que ce fork n a pas — rendu ici, il laissait un panneau clair qui debordait de
-        // 114 px et une languette orpheline en haut a droite (mesure a l ecran, journal §155.23).
-        $sansEspece->assertSee('class="lifeform-item lifeform-species lifeform-species-humans" data-species="1" data-state="can-choose"', false);
+        // **Le cadre officiel d une fiche** : la classe d etat sur la fiche, le wrapper et la barre basse dedans —
+        // c est cette structure a trois pieces que le sprite (`e3e67150...png`) habille, et une capture officielle
+        // (Interface_graphique_exemple/Nuova-immagine-bitmap-3.png) montre exactement ce rendu, encoche comprise
+        // (journal §155.25). Le capot seul, sans wrapper ni barre, paraissait une languette orpheline (§155.23).
+        $sansEspece->assertSee('class="lifeform-item lifeform-species lifeform-species-humans lifeformcanclaim" data-species="1" data-state="can-choose"', false);
+        $this->assertSame(4, substr_count((string)$sansEspece->getContent(), '<div class="lifeform-item-wrapper"'), 'Quatre fiches, quatre wrappers.');
+        $this->assertSame(4, substr_count((string)$sansEspece->getContent(), '<div class="lifeform-item-bottom"></div>'), 'Quatre fiches, quatre barres basses.');
+        // L en-tete est l illustration officielle de la page des especes, a sa hauteur de 250 px.
+        $sansEspece->assertSee('img/icons/6dafcd306b27d77508ef115722b6b0.jpg); height: 250px;', false);
         $sansEspece->assertSee('class="select-button"', false);
         $sansEspece->assertDontSee('class="content-box-s"', false);
 
@@ -264,8 +271,8 @@ final class LifeformPagesTest extends AccountTestCase
 
         $avecEspece = $this->get(route('lifeforms.index'));
         $avecEspece->assertStatus(200);
-        $avecEspece->assertSee('data-species="2" data-state="chosen"', false);
-        $avecEspece->assertSee('data-species="1" data-state="other"', false);
+        $avecEspece->assertSee('lifeform-species-rocktal lifeformclaimed" data-species="2" data-state="chosen"', false);
+        $avecEspece->assertSee('lifeform-species-humans lifeformnotclaim" data-species="1" data-state="other"', false);
         $avecEspece->assertDontSee('class="select-button"', false);
         $avecEspece->assertDontSee('class="content-box-s"', false);
 

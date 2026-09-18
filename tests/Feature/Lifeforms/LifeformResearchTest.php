@@ -87,6 +87,9 @@ final class LifeformResearchTest extends AccountTestCase
         $this->assertSame(18, substr_count((string)$page->getContent(), 'research-locked'), 'Sans population, les dix-huit emplacements sont fermes.');
         $page->assertSee(route('lifeforms.research.ajax'), false);
         $page->assertSee('id="productionboxlfresearchcomponent"', false);
+        // Les deux boites de file, cote a cote, comme la capture officielle des recherches.
+        $page->assertSee('id="productionboxlfbuildingcomponent"', false);
+        $page->assertSee('<div id="productionboxBottom"', false);
 
         $this->pinSettings(['lifeforms_enabled' => 0]);
         $this->get(route('lifeforms.research'))->assertStatus(404);
