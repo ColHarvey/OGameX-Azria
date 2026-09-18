@@ -1,0 +1,1 @@
+Icones Lucide Static 0.468.0 (licence ISC, LICENSE.txt), figees depuis https://cdn.jsdelivr.net/npm/lucide-static@0.468.0/icons/ pour le chat Azria (kit de Codex du 15 septembre 2026). Le jeu les integre en SVG en ligne depuis `resources/js/ingame/chat.js` (dictionnaire `ogame.chat.azriaIcons`), jamais depuis une adresse reseau ; ces fichiers sont la source et la provenance.

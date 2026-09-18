@@ -74125,6 +74125,56 @@ ogame.chat = {
     playerList: null,
     isLoadingPlayerList: false,
     playerListSelector: new Array,
+    /**
+     * Les icones du chat Azria : douze SVG Lucide Static 0.468.0 (licence ISC, `public/img/chat-azria/LICENSE.txt`),
+     * figees dans le bundle et rendues en ligne pour heriter de la couleur CSS — jamais chargees depuis le reseau,
+     * jamais depuis un contenu fourni par un joueur (kit de Codex, 15 septembre 2026).
+     */
+    azriaIcons: {
+        'radio-tower': '<path d="M4.9 16.1C1 12.2 1 5.8 4.9 1.9"/> <path d="M7.8 4.7a6.14 6.14 0 0 0-.8 7.5"/> <circle cx="12" cy="9" r="2"/> <path d="M16.2 4.8c2 2 2.26 5.11.8 7.47"/> <path d="M19.1 1.9a9.96 9.96 0 0 1 0 14.1"/> <path d="M9.5 18h5"/> <path d="m8 22 4-11 4 11"/>',
+        'message-square': '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+        'shield': '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>',
+        'orbit': '<circle cx="12" cy="12" r="3"/> <circle cx="19" cy="5" r="2"/> <circle cx="5" cy="19" r="2"/> <path d="M10.4 21.9a10 10 0 0 0 9.941-15.416"/> <path d="M13.5 2.1a10 10 0 0 0-9.841 15.416"/>',
+        'crosshair': '<circle cx="12" cy="12" r="10"/> <line x1="22" x2="18" y1="12" y2="12"/> <line x1="6" x2="2" y1="12" y2="12"/> <line x1="12" x2="12" y1="6" y2="2"/> <line x1="12" x2="12" y1="22" y2="18"/>',
+        'sparkles': '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/> <path d="M20 3v4"/> <path d="M22 5h-4"/> <path d="M4 17v2"/> <path d="M5 18H3"/>',
+        'moon': '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+        'send': '<path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/> <path d="m21.854 2.147-10.94 10.939"/>',
+        'minus': '<path d="M5 12h14"/>',
+        'x': '<path d="M18 6 6 18"/> <path d="m6 6 12 12"/>',
+        'chevron-up': '<path d="m18 15-6-6-6 6"/>',
+        'chevron-down': '<path d="m6 9 6 6 6-6"/>',
+    },
+    /**
+     * Une icone du dictionnaire, en SVG en ligne (decoratif : aria-hidden ; le nom accessible est porte par le bouton).
+     */
+    azriaIcon: function (name, size) {
+        var d = ogame.chat.azriaIcons[name];
+        if (!d) {
+            return '';
+        }
+        var s = size || 16;
+        return '<svg class="az-svg az-svg-' + name + '" xmlns="http://www.w3.org/2000/svg" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' + d + '</svg>';
+    },
+    /**
+     * Le theme Azria du chat est-il pose sur la barre ? (classe opt-in `azria-chat` sur #chatBar : sans elle, les
+     * fabriques rendent exactement ce qu elles rendaient.)
+     */
+    azriaActive: function () {
+        return $('#chatBar').hasClass('azria-chat');
+    },
+    /**
+     * Un libelle du chat : la clef de `chatLoca` posee par le gabarit, sinon la clef elle-meme — visible, donc reperable.
+     */
+    loca: function (key) {
+        return (typeof chatLoca !== 'undefined' && chatLoca[key] !== undefined) ? chatLoca[key] : key;
+    },
+    /**
+     * L initiale sure d un nom, pour un avatar CSS (texte, jamais du HTML).
+     */
+    azriaInitial: function (name) {
+        var t = $.trim(String(name || ''));
+        return t.length ? t.charAt(0).toUpperCase() : '?';
+    },
     initConnection: function () {
         var c = ogame.chat;
         if (c.connecting || c.connected || c.isMobile) {
@@ -74637,8 +74687,13 @@ ogame.chat = {
         g.data.playerId = f;
         var e = $('<li class="chat_bar_list_item open" data-playerid="' + f + '"></li>');
         e.append('<span class="playerstatus ' + h.playerstatus + '"></span>');
-        e.append('<span class="cb_playername">' + h.playerName + "</span>");
-        e.append('<span class="icon icon_close fright"></span>');
+        if (g.azriaActive()) {
+            e.append('<span class="az-tab-icon">' + g.azriaIcon('message-square') + '</span>');
+            e.append($('<span class="cb_playername"></span>').text(h.playerName));
+        } else {
+            e.append('<span class="cb_playername">' + h.playerName + "</span>");
+        }
+        e.append(g.azriaActive() ? $('<span class="icon icon_close fright"></span>').attr('title', g.loca('CLOSE_CONVERSATION')).html(g.azriaIcon('x')) : '<span class="icon icon_close fright"></span>');
         e.prepend(g.createChatBox(f));
         return e
     },
@@ -74652,9 +74707,12 @@ ogame.chat = {
         var e = $('<li class="chat_bar_list_item open" data-associationid="' + f + '"></li>');
         e.append('<span class="playerstatus ' + h.playerstatus + '"></span>');
         e.append('<span class="chatstatus cs_new fleft"></span>');
-        e.append('<span class="cb_playername" data-associationid="' + f + '">Alliance Chat</span>');
+        if (g.azriaActive()) {
+            e.append('<span class="az-tab-icon">' + g.azriaIcon('shield') + '</span>');
+        }
+        e.append($('<span class="cb_playername" data-associationid="' + f + '"></span>').text(g.loca('ALLIANCE_CHAT')));
         e.append('<span class="new_msg_count noMessage" data-associationid="' + f + '" data-new-messages="0">0</span>');
-        e.append('<span class="icon icon_close fright"></span>');
+        e.append(g.azriaActive() ? $('<span class="icon icon_close fright"></span>').attr('title', g.loca('CLOSE_CONVERSATION')).html(g.azriaIcon('x')) : '<span class="icon icon_close fright"></span>');
         e.prepend(g.createChatBoxForAssociations(f));
         return e
     },
@@ -74811,8 +74869,8 @@ ogame.chat = {
         }
         var p = n.data[l];
         var r = $('<div class="chat_box_title"></div>');
-        r.append('<span class="icon icon_close fright"></span>');
-        r.append('<span class="icon icon_maximize fright"></span>');
+        r.append(n.azriaTitleButtons());
+        n.azriaTitleIdentity(r, p.playerName, p.playerstatus, n.azriaInitial(p.playerName));
         var m = $('<div class="chat_box_ctn"><ul class="chat clearfix"></ul></div>');
         var k = {};
         for (var q = 0; q < p.chatItemsByDateAsc.length; q++) {
@@ -74823,6 +74881,7 @@ ogame.chat = {
         o.append(r);
         o.append(m);
         o.append('<textarea name="text" class="chat_box_textarea"></textarea>');
+        n.azriaSendButton(o);
         return o
     },
     createChatBoxForAssociations: function (r) {
@@ -74832,8 +74891,8 @@ ogame.chat = {
         }
         var p = n.data.association[r];
         var k = $('<div class="chat_box_title"></div>');
-        k.append('<span class="icon icon_close fright"></span>');
-        k.append('<span class="icon icon_maximize fright"></span>');
+        k.append(n.azriaTitleButtons());
+        n.azriaTitleIdentity(k, p.associationName || n.loca('ALLIANCE_CHAT'), 'alliance', null);
         var m = $('<div class="chat_box_ctn"><ul class="chat clearfix" data-foreign-association-id="' + r + '"></ul></div>');
         var l = {};
         for (var q = 0; q < p.chatItemsByDateAsc.length; q++) {
@@ -74844,7 +74903,60 @@ ogame.chat = {
         o.append(k);
         o.append(m);
         o.append('<textarea name="text" class="chat_box_textarea"></textarea>');
+        n.azriaSendButton(o);
         return o
+    },
+    /**
+     * Les boutons de l en-tete d une fenetre : fermer et ouvrir la messagerie (les accroches historiques `.icon_close` et
+     * `.icon_maximize`, avec leur icone Lucide et un nom accessible sous le theme Azria), plus « reduire » sous le theme.
+     */
+    azriaTitleButtons: function () {
+        var n = ogame.chat;
+        if (!n.azriaActive()) {
+            return [$('<span class="icon icon_close fright"></span>'), $('<span class="icon icon_maximize fright"></span>')];
+        }
+        var close = $('<span class="icon icon_close fright az-icon" role="button" tabindex="0"></span>').attr('title', n.loca('CLOSE_CONVERSATION')).attr('aria-label', n.loca('CLOSE_CONVERSATION')).html(n.azriaIcon('x'));
+        var minimize = $('<span class="icon icon_minimize fright az-icon" role="button" tabindex="0"></span>').attr('title', n.loca('MINIMIZE_CONVERSATION')).attr('aria-label', n.loca('MINIMIZE_CONVERSATION')).html(n.azriaIcon('minus'));
+        var maximize = $('<span class="icon icon_maximize fright az-icon" role="button" tabindex="0"></span>').attr('title', n.loca('OPEN_MESSAGING')).attr('aria-label', n.loca('OPEN_MESSAGING')).html(n.azriaIcon('message-square'));
+        return [close, minimize, maximize];
+    },
+    /**
+     * L identite de l en-tete sous le theme Azria : un avatar (initiale sure, ou le bouclier pour l alliance), le nom en
+     * texte, et la presence telle que le serveur la connait — jamais inventee.
+     */
+    azriaTitleIdentity: function (title, name, status, initial) {
+        var n = ogame.chat;
+        if (!n.azriaActive()) {
+            return;
+        }
+        var avatar = $('<span class="az-avatar" aria-hidden="true"></span>');
+        if (initial === null) {
+            avatar.addClass('az-avatar-alliance').html(n.azriaIcon('shield', 19));
+        } else {
+            avatar.text(initial);
+        }
+        var label = $('<span class="az-title"></span>').text(name);
+        var small = $('<small></small>');
+        if (status === 'alliance') {
+            small.text(n.loca('ALLIANCE_CHANNEL'));
+        } else if (status === 'online' || status === 'offline') {
+            small.append($('<span class="az-status-dot"></span>').addClass(status)).append(document.createTextNode(n.loca(status === 'online' ? 'STATUS_ONLINE' : 'STATUS_OFFLINE')));
+        } else {
+            small.text(n.loca('PRIVATE_CONVERSATION'));
+        }
+        label.append(small);
+        title.prepend(label).prepend(avatar);
+    },
+    /**
+     * Le bouton Envoyer d une fenetre (theme Azria) : il prend exactement le chemin de la touche Entree —
+     * `submitChatBarMsg` avec le code 13 —, jamais une requete a part.
+     */
+    azriaSendButton: function (box) {
+        var n = ogame.chat;
+        if (!n.azriaActive()) {
+            return;
+        }
+        box.append($('<button type="button" class="az-send"></button>').attr('title', n.loca('SEND')).attr('aria-label', n.loca('SEND')).html(n.azriaIcon('send')));
     },
     createChatItem: function (m) {
         if (!m) {
@@ -74852,7 +74964,13 @@ ogame.chat = {
             return
         }
         var g = $('<div class="msg_head"></div>');
-        g.append('<span class="msg_date fright">' + getFormatedDate(m.date, "[d].[m].[Y] <span>[H]:[i]:[s]</span>") + "</span>");
+        // Le serveur date chaque message en SECONDES (created_at->timestamp, envoi, historique et diffusion) ; getFormatedDate
+        // attend des millisecondes : chaque message s affichait en janvier 1970. Une valeur deja en millisecondes passe telle quelle.
+        var horodatage = Number(m.date);
+        if (!isNaN(horodatage) && horodatage > 0 && horodatage < 100000000000) {
+            horodatage = horodatage * 1000
+        }
+        g.append('<span class="msg_date fright">' + getFormatedDate(horodatage, "[d].[m].[Y] <span>[H]:[i]:[s]</span>") + "</span>");
         g.append('<span class="msg_title blue_txt ' + m.newClass + '">' + m.playerName + "</span>");
         var h = $('<li class="chat_msg ' + m.altClass + '" data-chat-id="' + m.chatID + '"></li>');
         h.append(g);
@@ -74911,11 +75029,45 @@ ogame.chat = {
             c.updateChatBar()
         });
         $(".chat_bar_list").on("click.chatBar", "#chatBarPlayerList", function (a) {
-            if ($(a.target).attr("id") !== "chatBarPlayerList" && !$(a.target).hasClass("onlineCount")) {
+            // L onglet porte une icone et un compteur sous le theme Azria : le clic sur l un d eux est un clic sur l onglet.
+            if ($(a.target).attr("id") !== "chatBarPlayerList" && !$(a.target).closest(".onlineCount").length) {
                 return
             }
             $(".cb_playerlist_box").toggle();
             c.updateCustomScrollbar($(".scrollContainer"), true);
+            c.updateVisibleState()
+        }).on("click.chatBar", ".cb_playerlist_box .az-collapse", function (a) {
+            // Replier le panneau des contacts : la meme chose que fermer l onglet.
+            a.stopPropagation();
+            $(".cb_playerlist_box").hide();
+            c.updateVisibleState()
+        }).on("click.chatBar", ".cb_playerlist_box .az-filter button", function (a) {
+            // Les trois filtres du panneau posent les deux cases que `filterPlayerlist` lit deja : en ligne, tous, discussions.
+            a.stopPropagation();
+            var mode = $(this).data("filter");
+            $("[id=playerlistFilters] [id=filteronline]").prop("checked", mode === "online");
+            $("[id=playerlistFilters] [id=filterchatactive]").prop("checked", mode === "active");
+            $(this).closest(".az-filter").find("button").attr("aria-pressed", "false");
+            $(this).attr("aria-pressed", "true");
+            c.filterPlayerlist();
+            c.updateCustomScrollbar($(".scrollContainer"), true)
+        }).on("click.chatBar", ".chat_box .chat_box_title .icon_minimize", function (a) {
+            // Reduire : la fenetre se cache, l onglet reste, le brouillon aussi (le DOM n est pas detruit).
+            a.stopPropagation();
+            var item = $(this).closest(".chat_bar_list_item");
+            item.children(".chat_box").hide();
+            item.removeClass("open");
+            c.updateChatBar();
+            c.updateVisibleState()
+        }).on("click.chatBar", ".chat_box .az-send", function (a) {
+            // Envoyer : le chemin de la touche Entree, et rien d autre. Un texte vide ne part pas ; un texte deja parti a
+            // vide la zone, donc un second clic n envoie rien.
+            a.stopPropagation();
+            var t = $(this).siblings(".chat_box_textarea");
+            if ($.trim(t.val()).length > 0) {
+                c.submitChatBarMsg(t, 13, false, t[0].scrollHeight)
+            }
+            t.focus()
         }).on("click.chatBar", ".chat_bar_list_item", function (a) {
             a.stopPropagation();
             if (!isNaN($(this).data("playerid"))) {
@@ -75065,7 +75217,13 @@ ogame.chat = {
     },
     toggleChatBox: function (f, l) {
         var h = ogame.chat;
-        if (f.parents(".chat_box").length && !f.hasClass("icon_close")) {
+        // Le clic peut tomber sur le SVG d une icone : on regarde l icone, pas le noeud touche.
+        if (f.parents(".chat_box").length && !f.closest(".icon_close").length) {
+            return
+        }
+        if (h.azriaActive() && f.closest(".chat_box_title .icon_close").length) {
+            // Sous le theme, « Fermer » dans l en-tete ferme la conversation (l onglet part) ; « Reduire » la cache.
+            l.children(".icon_close").trigger("click");
             return
         }
         var k = l.children(".chat_box");
@@ -75076,6 +75234,13 @@ ogame.chat = {
             if (!l.hasClass("more_chat_bar_items")) {
                 l.addClass("open");
                 h.updateChatBar()
+            }
+            if (h.azriaActive() && $("body").innerWidth() < 620) {
+                // Petit ecran : une seule fenetre ouverte a la fois, les autres se reduisent (leur brouillon reste).
+                $(".chat_bar_list > .chat_bar_list_item.open").not(l).each(function () {
+                    $(this).children(".chat_box").hide();
+                    $(this).removeClass("open")
+                })
             }
             k.show();
             var g = k.find(".chat_box_ctn");
@@ -75127,13 +75292,26 @@ ogame.chat = {
         var v = $(".more_chat_bar_items").length;
         var m = $(".chat_bar_list").children().length - o - v;
         var u = 190;
-        var w = 270;
+        var w = r.azriaActive() ? 350 : 270;
         var q = 190;
         var s = $("body").innerWidth();
         if (n) {
             o++
         }
         var p = u * m + w * o + q * v;
+        if (r.azriaActive() && s < 620) {
+            // Petit ecran sous le theme : pas de boite « plus » (les onglets se rangent en flex), une seule fenetre ouverte,
+            // bornee par l ecran par la feuille.
+            if (n) {
+                $(".chat_bar_list > .chat_bar_list_item.open").each(function () {
+                    $(this).children(".chat_box").hide();
+                    $(this).removeClass("open")
+                });
+                n.insertAfter("#chatBarPlayerList");
+                r.updateCustomScrollbar(n.find(".chat_box_ctn"))
+            }
+            return
+        }
         if (p >= s) {
             r.handleTooMuchWindows(o, m, w, u, q, s)
         } else {
@@ -75198,10 +75376,10 @@ ogame.chat = {
                         var statusClass, statusTitle;
                         if (isStranger) {
                             statusClass = 'disallowed';
-                            statusTitle = 'Status not visible';
+                            statusTitle = c.loca('STATUS_HIDDEN');
                         } else {
                             statusClass = player.isOnline ? 'online' : 'offline';
-                            statusTitle = player.isOnline ? 'online' : 'offline';
+                            statusTitle = c.loca(player.isOnline ? 'STATUS_ONLINE' : 'STATUS_OFFLINE');
                         }
                         var li = '<li class="playerlist_item ' + (index % 2 !== 0 ? 'odd' : '') + '" data-playerid="' + player.id + '" data-filterchatactive="' + filterChatActive + '" data-filteronline="' + filterOnline + '">';
                         li += '<p class="playername">';
@@ -75215,23 +75393,23 @@ ogame.chat = {
 
                     // Build the HTML for the player list matching original game structure
                     var html = '<div class="js_playerlist pl_container contentbox fleft">';
-                    html += '<h2 class="header"><span class="c-right"></span><span class="c-left"></span>Player list</h2>';
+                    html += '<h2 class="header"><span class="c-right"></span><span class="c-left"></span>' + c.loca('PLAYER_LIST') + '</h2>';
                     html += '<div class="content">';
 
                     // Filter checkboxes
                     html += '<form id="playerlistFilters">';
-                    html += '<p class="overlay pl_filter_title">Filter by:</p>';
+                    html += '<p class="overlay pl_filter_title">' + c.loca('FILTER_BY') + '</p>';
                     html += '<fieldset class="pl_filter_set">';
-                    html += '<input id="filteronline" class="fleft" type="checkbox"><label for="filteronline" class="pl_filter">Online chats </label>';
+                    html += '<input id="filteronline" class="fleft" type="checkbox"><label for="filteronline" class="pl_filter">' + c.loca('FILTER_ONLINE') + ' </label>';
                     html += '</fieldset>';
                     html += '<fieldset class="pl_filter_set">';
-                    html += '<input id="filterchatactive" class="fleft" type="checkbox"><label for="filterchatactive" class="pl_filter">Active chats </label>';
+                    html += '<input id="filterchatactive" class="fleft" type="checkbox"><label for="filterchatactive" class="pl_filter">' + c.loca('FILTER_ACTIVE') + ' </label>';
                     html += '</fieldset>';
                     html += '</form>';
 
                     // Buddies section
                     html += '<div class="playerlist_box js_accordion" style="overflow: hidden;">';
-                    html += '<h3>Buddies</h3>';
+                    html += '<h3>' + c.loca('BUDDIES') + '</h3>';
                     html += '<div>';
                     html += '<div class="playerlist_top_box"></div>';
                     html += '<div class="scrollContainer"><ul class="playerlist">';
@@ -75241,7 +75419,7 @@ ogame.chat = {
                             html += playerItem(buddy, index, buddy.hasActiveChat ? 'on' : 'off', buddy.isOnline ? 'on' : 'off');
                         });
                     } else {
-                        html += '<li class="no_buddies">No buddies</li>';
+                        html += '<li class="no_buddies">' + c.loca('NO_BUDDIES') + '</li>';
                     }
 
                     html += '</ul></div></div></div>';
@@ -75249,12 +75427,12 @@ ogame.chat = {
                     // Alliance section
                     if (response.alliance) {
                         html += '<div class="playerlist_box js_accordion" style="overflow: hidden;">';
-                        html += '<h3>Alliance</h3>';
+                        html += '<h3>' + c.loca('ALLIANCE') + '</h3>';
                         html += '<div>';
                         html += '<div class="playerlist_top_box">';
                         html += '<div class="playerlist openAssociationChat" data-associationid="' + response.alliance.id + '">';
                         html += '<span title="" class="playerstatus tooltip blank"></span>';
-                        html += '<span style="color: orange">Alliance Chat</span>';
+                        html += '<span style="color: orange">' + c.loca('ALLIANCE_CHAT') + '</span>';
                         html += '<span class="new_msg_count noMessage" data-new-messages="0" data-associationid="' + response.alliance.id + '">0</span>';
                         html += '<span class="chatstatus cs_active fright"></span>';
                         html += '</div>';
@@ -75273,7 +75451,7 @@ ogame.chat = {
                     // Strangers section
                     if (response.recentPartners && response.recentPartners.length > 0) {
                         html += '<div class="playerlist_box js_accordion" style="overflow: hidden;">';
-                        html += '<h3>Strangers</h3>';
+                        html += '<h3>' + c.loca('STRANGERS') + '</h3>';
                         html += '<div>';
                         html += '<div class="playerlist_top_box"></div>';
                         html += '<div class="scrollContainer"><ul class="playerlist">';
@@ -75291,13 +75469,15 @@ ogame.chat = {
 
                     // IMPORTANT: Always set playerList so initChatBar() can be called
                     c.playerList = html;
+                    c.playerListAzria = c.azriaRoster(response);
                     c.isLoadingPlayerList = false;
                     c._showPlayerList()
                 },
                 error: function (f, a, b) {
                     console.error('showPlayerList() - Error loading buddies:', a, b);
                     c.isLoadingPlayerList = false;
-                    c.playerList = '<div class="content"><p>Error loading buddies</p></div>';
+                    c.playerList = '<div class="content"><p>' + c.loca('LOAD_ERROR') + '</p></div>';
+                    c.playerListAzria = null;
                     c._showPlayerList()
                 }
             })
@@ -75308,8 +75488,129 @@ ogame.chat = {
     _showPlayerList: function () {
         var b = ogame.chat;
         $.each(b.playerListSelector, function (a, d) {
-            $(d).html(b.playerList)
+            // La barre prend le panneau Azria quand le theme est pose ; le panneau lateral de la page de chat garde le sien.
+            if (b.azriaActive() && b.playerListAzria && $(d).closest('#chatBar').length) {
+                $(d).empty().append(b.playerListAzria.clone(true))
+            } else {
+                $(d).html(b.playerList)
+            }
         })
+    },
+    /**
+     * Le panneau des contacts sous le theme Azria, construit en DOM (les noms sont du texte, jamais du HTML), sur les
+     * memes accroches que le panneau historique : `.js_playerlist`, `#playerlistFilters` et ses deux cases (lues par
+     * `filterPlayerlist`), `.playerlist_item[data-playerid]` avec ses filtres, `.openAssociationChat`, `.new_msg_count`,
+     * `.playerstatus`, `.scrollContainer`. Les donnees viennent de `/buddies/online` ; aucun statut n est invente : une
+     * pastille verte seulement quand le serveur dit « en ligne », rien pour un inconnu dont le statut n est pas visible.
+     */
+    azriaRoster: function (response) {
+        var c = ogame.chat;
+        var buddies = (response.success && response.buddies) ? response.buddies : [];
+        var members = response.allianceMembers || [];
+        var strangers = response.recentPartners || [];
+        var known = buddies.concat(members);
+        var online = 0;
+        for (var i = 0; i < known.length; i++) {
+            if (known[i].isOnline) {
+                online++;
+            }
+        }
+        var root = $('<div class="js_playerlist pl_container az-roster"></div>');
+        var header = $('<div class="az-header"></div>');
+        header.append('<span class="az-symbol" aria-hidden="true">' + c.azriaIcon('radio-tower') + '</span>');
+        var title = $('<div class="az-title"></div>').text(c.loca('COMMUNICATIONS'));
+        var sub = $('<small></small>');
+        if (online > 0) {
+            sub.append('<span class="az-status-dot online"></span>');
+        }
+        sub.append(document.createTextNode(c.loca('CONTACTS_ONLINE_SHORT').replace('#+#', String(online))));
+        title.append(sub);
+        header.append(title);
+        header.append($('<button type="button" class="az-icon az-collapse"></button>').attr('title', c.loca('COLLAPSE_CONTACTS')).attr('aria-label', c.loca('COLLAPSE_CONTACTS')).html(c.azriaIcon('chevron-down')));
+        root.append(header);
+        // Les filtres : trois boutons qui posent les deux cases historiques (cachees) ; « tous » les decoche.
+        var filters = $('<form id="playerlistFilters" class="az-filter"></form>').attr('aria-label', c.loca('FILTER_BY'));
+        filters.append('<input id="filteronline" type="checkbox" class="az-hidden" tabindex="-1" aria-hidden="true">');
+        filters.append('<input id="filterchatactive" type="checkbox" class="az-hidden" tabindex="-1" aria-hidden="true">');
+        $.each([['online', 'FILTER_ONLINE'], ['all', 'FILTER_ALL'], ['active', 'FILTER_ACTIVE']], function (i, def) {
+            filters.append($('<button type="button"></button>').attr('data-filter', def[0]).attr('aria-pressed', def[0] === 'all' ? 'true' : 'false').text(c.loca(def[1])));
+        });
+        root.append(filters);
+        var scroll = $('<div class="scrollContainer"></div>');
+        function row(player, index, filterChatActive, filterOnline, isStranger) {
+            var li = $('<li class="playerlist_item"></li>').addClass(index % 2 !== 0 ? 'odd' : '');
+            li.attr('data-playerid', player.id).attr('data-filterchatactive', filterChatActive).attr('data-filteronline', filterOnline);
+            li.append($('<span class="az-avatar" aria-hidden="true"></span>').text(c.azriaInitial(player.username)));
+            var label = $('<span class="az-label"></span>');
+            var name = $('<p class="playername"></p>');
+            var statusClass = isStranger ? 'disallowed' : (player.isOnline ? 'online' : 'offline');
+            var statusTitle = c.loca(isStranger ? 'STATUS_HIDDEN' : (player.isOnline ? 'STATUS_ONLINE' : 'STATUS_OFFLINE'));
+            name.append($('<span class="playerstatus tooltip"></span>').addClass(statusClass).attr('data-tooltip-title', statusTitle));
+            name.append(document.createTextNode(player.username));
+            label.append(name);
+            var small = $('<small></small>');
+            if (!isStranger && player.isOnline) {
+                small.append('<span class="az-status-dot online"></span>');
+            }
+            small.append(document.createTextNode(statusTitle));
+            label.append(small);
+            li.append(label);
+            li.append($('<span class="new_msg_count noMessage" data-new-messages="0">0</span>').attr('data-playerid', player.id));
+            if (player.hasActiveChat) {
+                li.append('<span class="az-active-mark" aria-hidden="true">' + c.azriaIcon('message-square') + '</span>');
+            }
+            li.append('<span class="chatstatus cs_active fright"></span>');
+            return li;
+        }
+        function category(key) {
+            return $('<div class="az-category"></div>').text(c.loca(key));
+        }
+        if (response.alliance) {
+            scroll.append(category('ALLIANCE'));
+            var top = $('<div class="playerlist_top_box"></div>');
+            var channel = $('<div class="playerlist openAssociationChat az-channel"></div>').attr('data-associationid', response.alliance.id);
+            channel.append('<span class="az-avatar az-avatar-alliance" aria-hidden="true">' + c.azriaIcon('shield', 19) + '</span>');
+            var clabel = $('<span class="az-label"></span>');
+            if (response.alliance.tag) {
+                clabel.append($('<span class="az-tag"></span>').text(response.alliance.tag));
+            }
+            clabel.append($('<span class="az-name"></span>').text(response.alliance.name || c.loca('ALLIANCE_CHAT')));
+            clabel.append($('<small></small>').text(c.loca('ALLIANCE_CHANNEL')));
+            channel.append(clabel);
+            channel.append($('<span class="new_msg_count noMessage" data-new-messages="0">0</span>').attr('data-associationid', response.alliance.id));
+            channel.append('<span class="chatstatus cs_active fright"></span>');
+            top.append(channel);
+            scroll.append(top);
+            var mlist = $('<ul class="playerlist"></ul>');
+            $.each(members, function (i, m) {
+                mlist.append(row(m, i, m.hasActiveChat ? 'on' : 'off', m.isOnline ? 'on' : 'off', false));
+            });
+            scroll.append(mlist);
+        }
+        scroll.append(category('BUDDIES'));
+        var blist = $('<ul class="playerlist"></ul>');
+        if (buddies.length) {
+            $.each(buddies, function (i, b) {
+                blist.append(row(b, i, b.hasActiveChat ? 'on' : 'off', b.isOnline ? 'on' : 'off', false));
+            });
+        } else {
+            blist.append($('<li class="no_buddies"></li>').text(c.loca('NO_BUDDIES')));
+        }
+        scroll.append(blist);
+        if (strangers.length) {
+            scroll.append(category('STRANGERS'));
+            var slist = $('<ul class="playerlist"></ul>');
+            $.each(strangers, function (i, p) {
+                slist.append(row(p, i, 'on', 'off', true));
+            });
+            scroll.append(slist);
+        }
+        root.append(scroll);
+        var foot = $('<div class="az-roster-foot"></div>');
+        foot.append($('<span></span>').text(c.loca('CONTACTS_NETWORK')));
+        foot.append($('<span></span>').text(c.loca('ONLINE_RATIO').replace('#online#', String(online)).replace('#total#', String(known.length))));
+        root.append(foot);
+        return root;
     }
 };;
 /**

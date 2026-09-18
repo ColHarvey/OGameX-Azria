@@ -1053,6 +1053,32 @@
                     'LOCA_ALL_ERROR_NOTACTIVATED' => __('t_ingame.layout.chat_not_activated'),
                     'X_NEW_CHATS'              => __('t_ingame.layout.chat_new_chats'),
                     'MORE_USERS'               => __('t_ingame.layout.chat_more_users'),
+                    // Le panneau des contacts et les fenetres du chat (design Azria, kit de Codex) : aucun libelle en dur dans chat.js.
+                    'PLAYER_LIST'              => __('t_ingame.chat.player_list'),
+                    'FILTER_BY'                => __('t_ingame.chat.filter_by'),
+                    'FILTER_ONLINE'            => __('t_ingame.chat.filter_online'),
+                    'FILTER_ALL'               => __('t_ingame.chat.filter_all'),
+                    'FILTER_ACTIVE'            => __('t_ingame.chat.filter_active'),
+                    'BUDDIES'                  => __('t_ingame.chat.buddies'),
+                    'NO_BUDDIES'               => __('t_ingame.chat.no_buddies'),
+                    'ALLIANCE'                 => __('t_ingame.chat.alliance'),
+                    'ALLIANCE_CHAT'            => __('t_ingame.chat.alliance_chat'),
+                    'ALLIANCE_CHANNEL'         => __('t_ingame.chat.alliance_channel'),
+                    'STRANGERS'                => __('t_ingame.chat.strangers'),
+                    'STATUS_ONLINE'            => __('t_ingame.chat.status_online'),
+                    'STATUS_OFFLINE'           => __('t_ingame.chat.status_offline'),
+                    'STATUS_HIDDEN'            => __('t_ingame.chat.status_hidden'),
+                    'COMMUNICATIONS'           => __('t_ingame.chat.communications'),
+                    'CONTACTS_ONLINE_SHORT'    => __('t_ingame.chat.contacts_online_short'),
+                    'CONTACTS_NETWORK'         => __('t_ingame.chat.contacts_network'),
+                    'ONLINE_RATIO'             => __('t_ingame.chat.online_ratio'),
+                    'COLLAPSE_CONTACTS'        => __('t_ingame.chat.collapse_contacts'),
+                    'PRIVATE_CONVERSATION'     => __('t_ingame.chat.private_conversation'),
+                    'MINIMIZE_CONVERSATION'    => __('t_ingame.chat.minimize_conversation'),
+                    'CLOSE_CONVERSATION'       => __('t_ingame.chat.close_conversation'),
+                    'OPEN_MESSAGING'           => __('t_ingame.chat.open_messaging'),
+                    'SEND'                     => __('t_ingame.chat.submit'),
+                    'LOAD_ERROR'               => __('t_ingame.chat.load_error'),
                 ]) !!};
                 var eventboxLoca = {!! json_encode([
                     'mission'      => __('t_ingame.layout.eventbox_mission'),
@@ -1951,13 +1977,20 @@ However, the Space Dock's engineers think that some of the remains can be salvag
 </div>
 
 <!-- Chat Bar -->
-<div id="chatBar">
+{{-- Le design Azria du chat et des contacts (kit de Codex, 15 septembre 2026) : la classe `azria-chat` est l interrupteur
+     visuel, lue par `resources/css/ingame/chat-azria.css` et par les fabriques de `chat.js`. Sans elle : le rendu historique. --}}
+<div id="chatBar" class="azria-chat">
     <ul class="chat_bar_list">
         <li id="chatBarPlayerList" class="chat_bar_pl_list_item">
             <div class="cb_playerlist_box"
                  style="display:none;">
             </div>
-            <span class="onlineCount">{{ __('t_ingame.layout.contacts_online', ['count' => $onlineBuddiesCount]) }}</span>
+            <span class="onlineCount" title="{{ __('t_ingame.layout.contacts_online', ['count' => $onlineBuddiesCount]) }}">
+                <svg class="az-svg" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4.9 16.1C1 12.2 1 5.8 4.9 1.9"/><path d="M7.8 4.7a6.14 6.14 0 0 0-.8 7.5"/><circle cx="12" cy="9" r="2"/><path d="M16.2 4.8c2 2 2.26 5.11.8 7.47"/><path d="M19.1 1.9a9.96 9.96 0 0 1 0 14.1"/><path d="M9.5 18h5"/><path d="m8 22 4-11 4 11"/></svg>
+                <span class="az-tab-label">{{ __('t_ingame.chat.contacts') }}</span>
+                <span class="az-count">{{ $onlineBuddiesCount }}</span>
+                <svg class="az-svg" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m18 15-6-6-6 6"/></svg>
+            </span>
         </li>
     </ul><!-- END Chat Bar List -->
 </div>

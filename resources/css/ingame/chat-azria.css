@@ -1,0 +1,704 @@
+/*
+ * Le chat et les contacts, au design approuve par Keven (kit de Codex du 15 septembre 2026).
+ *
+ * ## Isole sous `#chatBar.azria-chat`, et rien d autre
+ *
+ * La classe `azria-chat` est posee sur `#chatBar` par le gabarit : sans elle, la barre garde le rendu historique. Aucune
+ * regle ici ne touche `#sideBar` ni la page complete de chat. Les accroches de `chat.js` (`.chat_bar_list_item`, `.open`,
+ * `.chat_box`, `.chat_box_title`, `.icon_close`, `.icon_maximize`, `.chat_box_textarea`, `.playerlist_item`,
+ * `.openAssociationChat`, `.new_msg_count`, `.playerstatus`, `.scrollContainer`, `#playerlistFilters`) sont habillees, jamais
+ * renommees ; les elements `az-*` sont decoratifs et viennent des fabriques de `chat.js`.
+ *
+ * ## Ce que la feuille historique impose, et qu on neutralise ici, regle par regle
+ *
+ * `469500b3….css` pose un sprite de fond sur les onglets, les titres et les bulles (`d03835718066a5a592a6426736e019.png`),
+ * 28 px de haut, 270 px pour une fenetre ouverte, 250 px de hauteur minimale, une zone de saisie de 248 px, des lignes de
+ * contacts de 22 px et de 148 px, des sprites de presence de 13 px. Chaque regle qui suit gagne par la specificite de
+ * `#chatBar.azria-chat` (un identifiant plus une classe), jamais par `!important`. Pas d `overflow: hidden` sur les onglets :
+ * leurs fenetres en depassent.
+ *
+ * Palette du kit : fond #0b1722, fond des messages #142638, cadre #3c566c, titre #8cb1d0, onglets #273f55 → #102435,
+ * bleu actif #7197b6. Les cadres sont entierement en CSS. Les onglets du bas ont un rayon de 8 px, les lignes de contacts et
+ * le canal 7 px, les icones 3 px sans coin coupe. Une pastille verte n apparait que pour une presence que le serveur connait.
+ */
+#chatBar.azria-chat {
+    --az-border: #3c566c;
+    --az-blue: #8cb1d0;
+    --az-active: #7197b6;
+    --az-dark: #0b1722;
+    --az-message: #142638;
+    --az-text: #bdcfdd;
+    --az-tab-height: 32px;
+    height: var(--az-tab-height);
+    font: 11px Arial, sans-serif;
+    color: var(--az-text);
+}
+#chatBar.azria-chat *,
+#chatBar.azria-chat *::before,
+#chatBar.azria-chat *::after {
+    box-sizing: border-box;
+}
+#chatBar.azria-chat .az-svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    vertical-align: middle;
+}
+#chatBar.azria-chat .az-hidden {
+    display: none !important; /* les deux cases historiques des filtres restent dans le DOM pour filterPlayerlist() */
+}
+#chatBar.azria-chat .az-status-dot {
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #84d3b4;
+    box-shadow: 0 0 6px #84d3b455;
+    margin-right: 5px;
+    vertical-align: middle;
+}
+
+/* ---------------------------------------------------------------- les onglets du bas : contacts et conversations */
+#chatBar.azria-chat .chat_bar_list {
+    display: flex;
+    flex-direction: row-reverse;
+    align-items: flex-end;
+    gap: 7px;
+    padding: 0 8px 0 0;
+}
+#chatBar.azria-chat .chat_bar_pl_list_item,
+#chatBar.azria-chat .chat_bar_list_item {
+    background: linear-gradient(#273f55, #102435);
+    border: 1px solid var(--az-border);
+    border-radius: 8px;
+    box-shadow: inset 0 1px #6c879933;
+    color: #a9c5dc;
+    float: none;
+    height: var(--az-tab-height);
+    line-height: calc(var(--az-tab-height) - 2px);
+    min-width: 0;
+    padding: 0 12px;
+    font-size: 10px;
+    letter-spacing: .3px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    position: relative;
+    cursor: pointer;
+}
+#chatBar.azria-chat .chat_bar_list_item.open,
+#chatBar.azria-chat .chat_bar_pl_list_item.open {
+    border-color: #6a8798;
+    box-shadow: inset 0 2px #a3c9db33;
+    color: #d6eaf4;
+}
+#chatBar.azria-chat .chat_bar_list_item:hover,
+#chatBar.azria-chat .chat_bar_pl_list_item:hover {
+    filter: brightness(1.18);
+}
+#chatBar.azria-chat .chat_bar_list_item.open {
+    width: 350px; /* la largeur que chat.js suppose sous le theme (updateChatBar) */
+}
+/* L onglet des contacts prend la largeur de son panneau quand il est ouvert : le panneau (266 px) ne recouvre plus la
+   conversation voisine. Ferme, le panneau porte un style en ligne display:none (gabarit) ou display: none (jQuery) ;
+   ouvert, jQuery retire ce style — c est cette absence qui est lue. */
+#chatBar.azria-chat .chat_bar_pl_list_item:has(> .cb_playerlist_box:not([style*="display:none"]):not([style*="display: none"])) {
+    width: 266px;
+    justify-content: flex-end;
+}
+#chatBar.azria-chat .chat_bar_list_item .az-tab-icon,
+#chatBar.azria-chat .onlineCount .az-svg {
+    color: #9fb6c6;
+    display: inline-flex;
+}
+#chatBar.azria-chat .chat_bar_list_item .cb_playername {
+    float: none;
+    width: auto;
+    max-width: 180px;
+    flex: 1;
+    text-transform: uppercase;
+}
+#chatBar.azria-chat .chat_bar_list_item .playerstatus,
+#chatBar.azria-chat .chat_bar_list_item .chatstatus {
+    float: none;
+    margin: 0;
+    background-image: none;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #4b6072;
+    flex-shrink: 0;
+}
+#chatBar.azria-chat .chat_bar_list_item .playerstatus.online {
+    background: #84d3b4;
+    box-shadow: 0 0 6px #84d3b455;
+}
+#chatBar.azria-chat .chat_bar_list_item .playerstatus.blank,
+#chatBar.azria-chat .chat_bar_list_item .playerstatus.disallowed,
+#chatBar.azria-chat .chat_bar_list_item .chatstatus {
+    display: none;
+}
+#chatBar.azria-chat .chat_bar_list_item > .icon_close,
+#chatBar.azria-chat .chat_bar_list_item > .icon {
+    float: none;
+    margin: 0;
+    background-image: none;
+    width: 16px;
+    height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #9fb6c6;
+    border-radius: 3px;
+}
+#chatBar.azria-chat .chat_bar_list_item > .icon_close:hover {
+    color: #ffffff;
+    background: #ffffff14;
+}
+#chatBar.azria-chat .chat_bar_list_item .new_msg_count {
+    position: static;
+    float: none;
+    margin: 0;
+}
+#chatBar.azria-chat .onlineCount {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    text-transform: uppercase;
+}
+#chatBar.azria-chat .az-count {
+    background: #0c1d2c;
+    padding: 0 5px;
+    line-height: 16px;
+    border: 1px solid #3f586d;
+    border-radius: 3px;
+    color: #a1bdd4;
+    font-size: 10px;
+}
+#chatBar.azria-chat .more_chat_bar_items {
+    padding: 0 12px;
+}
+#chatBar.azria-chat .more_chat_bar_items .chat_bar_list_item {
+    width: auto;
+    min-width: 0;
+    margin: 4px 0;
+}
+
+/* ---------------------------------------------------------------- les fenetres : contacts et conversations */
+#chatBar.azria-chat .cb_playerlist_box,
+#chatBar.azria-chat .chat_box {
+    background: var(--az-dark);
+    border: 1px solid #344d62;
+    border-radius: 3px 3px 0 0;
+    box-shadow: 0 12px 28px #000a, 0 0 0 2px #03090f;
+    bottom: calc(var(--az-tab-height) + 3px);
+    left: auto;
+    right: -1px;
+    min-height: 0;
+    padding: 0;
+    cursor: default;
+    line-height: normal;
+    font-size: 11px;
+    text-transform: none;
+    letter-spacing: 0;
+}
+#chatBar.azria-chat .cb_playerlist_box {
+    width: 266px;
+}
+#chatBar.azria-chat .chat_box {
+    width: 350px;
+}
+#chatBar.azria-chat .more_chat_bar_items .chat_box {
+    width: 220px;
+    height: auto;
+    max-height: 255px;
+}
+
+/* l en-tete d une fenetre (contacts : .az-header ; conversation : .chat_box_title) */
+#chatBar.azria-chat .az-header,
+#chatBar.azria-chat .chat_box_title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    min-height: 56px;
+    height: auto;
+    width: auto;
+    line-height: normal;
+    background: linear-gradient(#263c50 0%, #1c3042 36%, #0c1c2a 40%, #14283a 88%, #091622 100%);
+    border-bottom: 1px solid #2c465c;
+    box-shadow: inset 0 1px #54708755;
+    border-radius: 3px 3px 0 0;
+}
+#chatBar.azria-chat .az-header .az-title,
+#chatBar.azria-chat .chat_box_title .az-title {
+    flex: 1;
+    min-width: 0;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 1.4px;
+    color: var(--az-blue);
+    text-transform: uppercase;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#chatBar.azria-chat .az-title small {
+    display: block;
+    font-size: 10px;
+    font-weight: 400;
+    letter-spacing: .2px;
+    text-transform: none;
+    color: #92a9bc;
+    margin-top: 5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#chatBar.azria-chat .az-symbol {
+    width: 32px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #8fb2cd;
+    border: 1px solid #304b61;
+    border-radius: 3px;
+    background: linear-gradient(#243e54, #102131);
+    box-shadow: inset 0 0 0 3px #102131;
+    flex-shrink: 0;
+}
+#chatBar.azria-chat .az-avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 36px;
+    flex-shrink: 0;
+    color: #abc4d7;
+    border: 1px solid #3c566d;
+    border-radius: 3px;
+    background: linear-gradient(145deg, #36536c, #152637 70%);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0;
+}
+#chatBar.azria-chat .az-avatar .az-svg {
+    width: 19px;
+    height: 19px;
+}
+#chatBar.azria-chat .az-avatar-alliance {
+    background: linear-gradient(145deg, #35516a, #132435);
+    border-color: #476078;
+    color: #a4c2db;
+}
+#chatBar.azria-chat .az-icon,
+#chatBar.azria-chat .chat_box_title .icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 26px;
+    margin: 0;
+    padding: 0;
+    float: none;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    color: #9fb6c6;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+#chatBar.azria-chat .az-icon:hover,
+#chatBar.azria-chat .chat_box_title .icon:hover {
+    color: #ffffff;
+    background: #ffffff14;
+}
+#chatBar.azria-chat .az-icon:focus-visible,
+#chatBar.azria-chat .chat_box_title .icon:focus-visible,
+#chatBar.azria-chat .az-send:focus-visible,
+#chatBar.azria-chat .az-filter button:focus-visible,
+#chatBar.azria-chat .chat_box_textarea:focus-visible {
+    outline: 2px solid #e8be6a;
+    outline-offset: 2px;
+}
+/* l ordre des boutons de l en-tete d une conversation : reduire, ouvrir la messagerie, fermer (flottants neutralises) */
+#chatBar.azria-chat .chat_box_title .icon_minimize { order: 2; }
+#chatBar.azria-chat .chat_box_title .icon_maximize { order: 3; }
+#chatBar.azria-chat .chat_box_title .icon_close { order: 4; }
+#chatBar.azria-chat .chat_box_title .az-avatar { order: 0; }
+#chatBar.azria-chat .chat_box_title .az-title { order: 1; }
+
+/* ---------------------------------------------------------------- le panneau des contacts */
+#chatBar.azria-chat .az-roster {
+    margin: 0;
+    width: 100%;
+    float: none;
+    color: var(--az-text);
+}
+#chatBar.azria-chat .az-filter {
+    display: flex;
+    background: #0e1e2c;
+    border-bottom: 1px solid #263f54;
+    padding: 0 9px;
+    margin: 0;
+    color: var(--az-text);
+}
+#chatBar.azria-chat .az-filter button {
+    flex: 1;
+    padding: 11px 3px 9px;
+    background: transparent;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    color: #94abba;
+    font: 10px Arial, sans-serif;
+    cursor: pointer;
+    letter-spacing: .3px;
+}
+#chatBar.azria-chat .az-filter button:hover {
+    filter: brightness(1.18);
+}
+#chatBar.azria-chat .az-filter button[aria-pressed="true"] {
+    background: linear-gradient(#192d40, #213c53);
+    border-bottom-color: var(--az-active);
+    color: #a9c4db;
+}
+#chatBar.azria-chat .scrollContainer {
+    margin: 0;
+    padding: 0 0 4px;
+    max-height: 320px;
+}
+#chatBar.azria-chat .az-category {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #829cab;
+    font-size: 9px;
+    letter-spacing: 1.7px;
+    text-transform: uppercase;
+    padding: 14px 12px 6px;
+}
+#chatBar.azria-chat .az-category::after {
+    content: '';
+    height: 1px;
+    background: #273d4c;
+    flex: 1;
+}
+#chatBar.azria-chat .playerlist {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+#chatBar.azria-chat .playerlist_top_box {
+    margin: 0;
+    padding: 0;
+}
+#chatBar.azria-chat .playerlist_item,
+#chatBar.azria-chat .az-channel {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: calc(100% - 14px);
+    height: auto;
+    line-height: normal;
+    margin: 4px 7px;
+    padding: 9px 10px;
+    border: 0;
+    border-left: 2px solid transparent;
+    border-radius: 7px;
+    background: var(--az-dark);
+    color: #d1e0e9;
+    font-size: 11px;
+    text-align: left;
+    position: relative;
+    cursor: pointer;
+}
+#chatBar.azria-chat .playerlist_item.odd {
+    background: var(--az-dark);
+}
+#chatBar.azria-chat .playerlist_item:hover,
+#chatBar.azria-chat .az-channel:hover {
+    background: #1c3348;
+}
+#chatBar.azria-chat .playerlist_item.active {
+    background: linear-gradient(90deg, #223c53, #122537);
+    border-left-color: var(--az-active);
+}
+#chatBar.azria-chat .az-channel {
+    background: linear-gradient(110deg, #20364a, #102131);
+    border: 1px solid #354e63;
+    border-radius: 7px;
+    width: calc(100% - 14px);
+}
+#chatBar.azria-chat .playerlist_item .az-label,
+#chatBar.azria-chat .az-channel .az-label {
+    flex: 1;
+    min-width: 0;
+}
+#chatBar.azria-chat .playerlist_item .playername {
+    float: none;
+    width: auto;
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #d1e0e9;
+}
+#chatBar.azria-chat .playerlist_item .playerstatus,
+#chatBar.azria-chat .az-channel .playerstatus {
+    display: none; /* la presence se lit sous le nom, en pastille et en toutes lettres */
+}
+#chatBar.azria-chat .az-label small {
+    display: block;
+    font-size: 10px;
+    color: #90adbf;
+    margin-top: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#chatBar.azria-chat .az-tag {
+    display: block;
+    color: #8eafcb;
+    font-size: 9px;
+    letter-spacing: 1px;
+    margin-bottom: 3px;
+    text-transform: uppercase;
+}
+#chatBar.azria-chat .az-name {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#chatBar.azria-chat .playerlist_item .new_msg_count,
+#chatBar.azria-chat .az-channel .new_msg_count {
+    position: static;
+    float: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 4px;
+    border-radius: 3px;
+    border: 1px solid #9c7f43;
+    background: #4c4029;
+    color: #ffe7ae;
+    font-size: 10px;
+    box-shadow: none;
+    flex-shrink: 0;
+}
+#chatBar.azria-chat .new_msg_count.noMessage {
+    display: none;
+}
+#chatBar.azria-chat .playerlist_item .chatstatus,
+#chatBar.azria-chat .az-channel .chatstatus {
+    display: none;
+}
+#chatBar.azria-chat .az-active-mark {
+    color: #9fb6c6;
+    display: inline-flex;
+    flex-shrink: 0;
+}
+#chatBar.azria-chat .no_buddies {
+    padding: 10px 19px;
+    color: #90adbf;
+    font-size: 10px;
+}
+#chatBar.azria-chat .az-roster-foot,
+#chatBar.azria-chat .az-chat-foot {
+    background: #102131;
+    border-top: 1px solid #30485d;
+    padding: 10px 12px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: #9db4c4;
+}
+
+/* ---------------------------------------------------------------- une conversation */
+#chatBar.azria-chat .chat_box_ctn {
+    background: linear-gradient(#091520, #101f2d);
+    padding: 12px 12px 4px;
+    height: 230px;
+}
+#chatBar.azria-chat .chat_box .chat_msg {
+    max-width: 91%;
+    margin: 0 0 14px;
+    padding: 0 0 0 10px;
+    border-left: 2px solid #3a5268;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #c7d9e5;
+    overflow-wrap: anywhere;
+    list-style: none;
+}
+#chatBar.azria-chat .chat_box .chat_msg.odd {
+    margin: 0 0 14px 20px;
+    padding: 9px 12px;
+    border: 1px solid #314b62;
+    border-left: 2px solid #7399b8;
+    border-radius: 3px;
+    background: linear-gradient(100deg, #1c344a, var(--az-message));
+}
+#chatBar.azria-chat .chat_box .msg_head {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 9px;
+    margin-bottom: 5px;
+    color: #8eafca;
+    letter-spacing: .3px;
+    padding: 0;
+    line-height: normal;
+}
+#chatBar.azria-chat .chat_box .msg_head .msg_title {
+    order: 1;
+    color: #8eafca;
+    text-transform: uppercase;
+    background: none;
+    width: auto;
+    float: none;
+    padding: 0;
+}
+#chatBar.azria-chat .chat_box .msg_head .msg_date {
+    order: 2;
+    color: #7895a8;
+    float: none;
+    margin: 0;
+    white-space: nowrap;
+}
+#chatBar.azria-chat .chat_box .chat_msg.odd .msg_head .msg_title {
+    color: #bed7e6;
+}
+#chatBar.azria-chat .chat_box .msg_content {
+    display: block;
+    color: #c7d9e5;
+    background: none;
+    padding: 0;
+}
+#chatBar.azria-chat .chat_box .speechbubble_arrow {
+    display: none;
+    background: none;
+}
+#chatBar.azria-chat .chat_box .referenceMsg {
+    margin: 0 0 6px;
+    padding: 4px 8px;
+    border-left: 2px solid #3d6079;
+    color: #8aafc6;
+    font-size: 10px;
+}
+#chatBar.azria-chat .chat_box .sys_msg {
+    color: #8aafc6;
+    font-size: 10px;
+    cursor: pointer;
+}
+/* la zone de saisie et le bouton Envoyer, dans un pied de 61 px reserve par le remplissage bas de la fenetre */
+#chatBar.azria-chat .chat_box {
+    padding-bottom: 61px;
+}
+#chatBar.azria-chat .chat_box::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 61px;
+    background: #102131;
+    border-top: 1px solid #30485d;
+    pointer-events: none;
+}
+#chatBar.azria-chat .chat_box .chat_box_textarea {
+    position: absolute;
+    left: 12px;
+    bottom: 12px;
+    z-index: 1;
+    width: calc(100% - 70px);
+    max-width: none;
+    min-height: 36px;
+    height: 36px;
+    max-height: 72px;
+    margin: 0;
+    padding: 9px 10px;
+    line-height: 16px;
+    background: #081623;
+    color: #dfebf2;
+    border: 1px solid #395467;
+    border-radius: 3px;
+    box-shadow: inset 0 2px 5px #0005;
+    font: 12px Arial, sans-serif;
+    resize: none;
+}
+#chatBar.azria-chat .chat_box .chat_box_textarea::placeholder {
+    color: #809caf;
+}
+#chatBar.azria-chat .chat_box .az-send {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 39px;
+    height: 36px;
+    border: 1px solid #506e86;
+    border-radius: 3px;
+    background: linear-gradient(#35536d, #192f43);
+    color: #b3cde0;
+    cursor: pointer;
+    padding: 0;
+}
+#chatBar.azria-chat .chat_box .az-send:hover {
+    filter: brightness(1.18);
+}
+#chatBar.azria-chat .more_chat_bar_items .chat_box {
+    padding-bottom: 0;
+}
+#chatBar.azria-chat .more_chat_bar_items .chat_box::after {
+    display: none;
+}
+#chatBar.azria-chat .more_items {
+    list-style: none;
+    margin: 0;
+    padding: 6px;
+}
+
+/* ---------------------------------------------------------------- petits ecrans et toucher */
+@media (max-width: 620px) {
+    #chatBar.azria-chat .chat_bar_list {
+        flex-wrap: wrap-reverse;
+        justify-content: flex-start;
+        max-width: calc(100vw - 8px);
+    }
+    #chatBar.azria-chat .chat_bar_list_item.open,
+    #chatBar.azria-chat .chat_box {
+        width: min(350px, calc(100vw - 16px));
+    }
+    #chatBar.azria-chat .cb_playerlist_box {
+        width: min(266px, calc(100vw - 16px));
+    }
+    #chatBar.azria-chat .chat_bar_list_item .cb_playername {
+        max-width: 110px;
+    }
+    #chatBar.azria-chat .chat_box_ctn {
+        height: 190px;
+    }
+    #chatBar.azria-chat .scrollContainer {
+        max-height: 240px;
+    }
+}
+@media (pointer: coarse) {
+    #chatBar.azria-chat .az-icon,
+    #chatBar.azria-chat .chat_box_title .icon {
+        width: 35px;
+        height: 40px;
+    }
+    #chatBar.azria-chat .az-filter button {
+        min-height: 44px;
+    }
+    #chatBar.azria-chat .chat_box .chat_box_textarea {
+        font-size: 16px;
+    }
+}
