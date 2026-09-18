@@ -165,6 +165,8 @@ final class LifeformsController extends OGameController
         $vitesses = $this->revisions->live();
         $vacances = $player->isInVacationMode();
 
+        // Les prerequis se jugent avec la file, comme le service les juge (audit, journal §155.27).
+        $niveauxAvecFile = $this->queue->buildingLevelsWithQueue($planet->getPlanetId(), $niveaux);
         $tuiles = [];
         foreach (LifeformCatalogue::buildingsOf($espece) as $batiment) {
             $niveau = $niveaux[$batiment->id] ?? 0;
@@ -179,7 +181,7 @@ final class LifeformsController extends OGameController
                 'building_now' => $enCours !== null && (int)$enCours->object_id === $batiment->id,
                 'building_target' => $enCours !== null && (int)$enCours->object_id === $batiment->id ? (int)$enCours->target_level : null,
                 'available' => LifeformAvailability::isAvailable($batiment),
-                'requirements_met' => $this->queue->requirementsMet($batiment, $niveaux),
+                'requirements_met' => $this->queue->requirementsMet($batiment, $niveauxAvecFile),
                 'population_met' => $this->queue->populationMet($batiment, $cible, $etat),
                 'enough_resources' => $planet->hasResources($devis->price),
                 'queue_full' => $filePleine,
@@ -231,20 +233,24 @@ final class LifeformsController extends OGameController
         $devis = LifeformQuote::for($objet, $cible, $niveaux, $planet->getObjectLevel('robot_factory'), $planet->getObjectLevel('nano_factory'), $vitesses);
         $populationExigee = LifeformFormulas::populationRequired($objet, $cible);
 
+        // Les prerequis se jugent avec la file, comme le service les juge (audit, journal §155.27).
+        $niveauxAvecFile = $this->queue->buildingLevelsWithQueue($planet->getPlanetId(), $niveaux);
         $prerequis = [];
         foreach ($objet->requirements as $exige => $niveauExige) {
             $prerequis[] = [
                 'title' => __('t_lifeforms.' . LifeformCatalogue::byId($exige)->machineName . '.title'),
                 'level' => $niveauExige,
-                'met' => ($niveaux[$exige] ?? 0) >= $niveauExige,
+                'met' => ($niveauxAvecFile[$exige] ?? 0) >= $niveauExige,
             ];
         }
 
         // Un objet indisponible n a ni bouton ni raison : le panneau le dit en clair a la place des effets (§155.26).
+        // L ordre des raisons est celui du service (vacances, prerequis, population, file pleine, puis les ressources,
+        // que le service ne refuse pas mais dont le depart a besoin) : vignette, fiche et refus disent la meme chose.
         $raison = null;
         if ($player->isInVacationMode()) {
             $raison = __('t_ingame.ajax_object.vacation_mode');
-        } elseif (!$this->queue->requirementsMet($objet, $niveaux)) {
+        } elseif (!$this->queue->requirementsMet($objet, $niveauxAvecFile)) {
             $raison = __('t_ingame.buildings.requirements_not_met');
         } elseif (!$this->queue->populationMet($objet, $cible, $etat)) {
             $raison = __('t_lifeforms_ui.buildings.population_not_met', ['required' => AppUtil::formatNumber((int)ceil($populationExigee))]);
@@ -272,6 +278,8 @@ final class LifeformsController extends OGameController
             'reason' => $raison,
             'available' => LifeformAvailability::isAvailable($objet),
             'active_item' => $enCours !== null && (int)$enCours->object_id === $objet->id ? $enCours : null,
+            // Un travail court deja sur la planete : le bouton dit « Dans la file », comme la fiche classique.
+            'queue_busy' => $enCours !== null,
         ])->render();
 
         return response()->json([
@@ -382,6 +390,7 @@ final class LifeformsController extends OGameController
                     'slot' => $slot,
                     'position' => LifeformSlotRules::positionOf($slot),
                     'unlocked' => $ouvert,
+                    'queue_full' => $filePleine,
                     'available' => $objet === null || LifeformAvailability::isAvailable($objet),
                     'required' => AppUtil::formatNumber((int)ceil(LifeformSlotRules::populationRequired($slot, $reduction))),
                     'object' => $objet,
@@ -397,6 +406,13 @@ final class LifeformsController extends OGameController
             $paliers[$palier] = [
                 'slots' => $lignes,
                 'population' => AppUtil::formatNumber((int)floor($this->research->tierPopulationOf(LifeformSlotRules::slotOf($palier, 1), $etat, $profil))),
+                // Le sous-titre est celui de l officiel (« Population : N ») ; l infobulle dit ce que N est — la population
+                // de la planete au palier 1, les individus formes au palier 2 ou 3 et leur plafond (adaptation Azria).
+                'population_tooltip' => match ($palier) {
+                    1 => __('t_lifeforms_ui.research.population_tier1_tooltip'),
+                    2 => __('t_lifeforms_ui.research.population_tier_tooltip', ['tier' => 2, 'capacity' => AppUtil::formatNumber((int)floor($profil->tier2Capacity))]),
+                    default => __('t_lifeforms_ui.research.population_tier_tooltip', ['tier' => 3, 'capacity' => AppUtil::formatNumber((int)floor($profil->tier3Capacity))]),
+                },
                 'can_reset' => $objetsDuPalier !== [] && !$rechercheDuPalier && ($dernierReset === 0 || $maintenant - $dernierReset >= LifeformResearchService::RESET_COOLDOWN),
                 'reset_available_at' => $dernierReset === 0 ? null : $dernierReset + LifeformResearchService::RESET_COOLDOWN,
                 'can_restore' => $objetsDuPalier === [] && $precedents && $dernierReset > 0 && $maintenant - $dernierReset <= LifeformResearchService::RESTORE_WINDOW,
@@ -565,6 +581,8 @@ final class LifeformsController extends OGameController
             'reason' => $raison,
             'available' => LifeformAvailability::isAvailable($objet),
             'active_item' => $enCours !== null && (int)$enCours->object_id === $objet->id ? $enCours : null,
+            // Un travail court deja sur la planete : le bouton dit « Dans la file », comme la fiche classique.
+            'queue_busy' => $enCours !== null,
         ])->render();
 
         return response()->json(['target' => 'technologydetails', 'content' => ['technologydetails' => $html], 'files' => ['js' => [], 'css' => []], 'newAjaxToken' => csrf_token()]);

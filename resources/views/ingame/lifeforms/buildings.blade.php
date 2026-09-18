@@ -49,12 +49,12 @@
                             @elseif (!$tile['population_met'])
                                 data-status="disabled"
                                 title="{{ $tile['title'] }}<br/>{{ __('t_lifeforms_ui.buildings.population_short') }}"
-                            @elseif (!$tile['enough_resources'])
-                                data-status="disabled"
-                                title="{{ $tile['title'] }}<br/>{{ __('t_ingame.buildings.not_enough_resources') }}"
                             @elseif ($tile['queue_full'])
                                 data-status="disabled"
                                 title="{{ $tile['title'] }}<br/>{{ __('t_ingame.buildings.queue_full') }}"
+                            @elseif (!$tile['enough_resources'])
+                                data-status="disabled"
+                                title="{{ $tile['title'] }}<br/>{{ __('t_ingame.buildings.not_enough_resources') }}"
                             @else
                                 data-status="on"
                                 title="{{ $tile['title'] }}"

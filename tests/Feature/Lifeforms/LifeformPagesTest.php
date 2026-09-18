@@ -271,17 +271,26 @@ final class LifeformPagesTest extends AccountTestCase
         // (Interface_graphique_exemple/Nuova-immagine-bitmap-3.png) montre exactement ce rendu, encoche comprise
         // (journal §155.25). Le capot seul, sans wrapper ni barre, paraissait une languette orpheline (§155.23).
         $sansEspece->assertSee('class="lifeform-item lifeform-species lifeform-species-humans lifeformcanclaim" data-species="1" data-state="can-choose"', false);
-        // **Le cadre v3, couche par couche** (capture de Keven : capot expose, texte qui deborde, journal §155.26) : le
-        // wrapper porte la colonne de corps decalee (sa bordure droite au bord de la fiche), un enfant absolu la repose a
-        // gauche clippee a 513 px (sa bordure droite traversait la fiche a 515 px), le capot de 620 x 66 par-dessus, le
-        // texte a 492 px au-dessus des couches, la barre basse en deux morceaux jusqu au bord.
+        // **La fiche officielle, telle que la feuille l habille** (audit contre la capture officielle, journal §155.27) :
+        // une seule boite ; sur chaque fiche la classe d etat pose le capot, le portrait est absolu dans le puits, le texte
+        // (marge gauche 100) porte le titre puis le wrapper (la colonne de corps de 519 px, a droite du puits) puis la barre
+        // basse ; le bouton vert est un enfant de la fiche, que la feuille ancre en bas a droite. Aucun fond en ligne : les
+        // deux versions precedentes texturaient toute la largeur, et c etait faux (rgb(13,16,20) sous le portrait).
         $html = (string)$sansEspece->getContent();
-        $this->assertSame(4, substr_count($html, '<div class="lifeform-item-wrapper" style="position: relative; min-height: 190px; background: url('), 'Quatre fiches, quatre wrappers.');
-        $this->assertSame(4, preg_match_all('#<div class="lifeform-item-wrapper" style="[^"]*e3e67150390416129bbbc8696f7b91\.png\'\) -539px 0 repeat-y;"#', $html), 'Le wrapper porte la colonne decalee.');
-        $this->assertSame(4, preg_match_all('#<div class="lifeform-item-body" aria-hidden="true" style="position: absolute; top: 0; bottom: 0; left: 0; width: 513px; background: url\([^)]*e3e67150390416129bbbc8696f7b91\.png\x27\) -640px 0 repeat-y; pointer-events: none;"#', $html), 'Quatre corps clippes a 513 px.');
-        $this->assertSame(4, preg_match_all('#<div class="lifeform-item-cap" aria-hidden="true" style="position: absolute; top: 0; left: 0; width: 620px; height: 66px; background: url\([^)]*e3e67150390416129bbbc8696f7b91\.png\x27\) 0 0 no-repeat; pointer-events: none;"#', $html), 'Quatre capots.');
-        $this->assertSame(4, substr_count($html, '<div class="lifeform-item-text" style="width: 492px; position: relative;">'), 'Le texte au-dessus des couches, dans la largeur du corps.');
-        $this->assertSame(4, preg_match_all('#<div class="lifeform-item-bottom" style="width: 620px; background: url\([^)]*\) -100px -85px no-repeat, url\([^)]*\) 0 -85px no-repeat;"></div>#', $html), 'Quatre fiches, quatre barres basses en deux morceaux.');
+        $this->assertSame(1, substr_count($html, 'class="lfsettingsContentWrapper"'), 'Une seule boite, comme l officiel.');
+        $this->assertSame(4, preg_match_all('#<div class="lifeform-item lifeform-species lifeform-species-[a-z]+ lifeformcanclaim" data-species="[1-4]" data-state="can-choose">\s*<div class="lifeform-item-icon lifeform[1-4]"#', $html), 'Quatre fiches, chacune ouvrant sur son portrait.');
+        $this->assertSame(4, preg_match_all('#<div class="lifeform-item-text">\s*<h3 style="margin: 4px 115px 6px 15px; font-weight: 600;">[^<]+</h3>\s*<div class="lifeform-item-wrapper">#', $html), 'Le titre puis le wrapper dans le texte.');
+        $this->assertSame(4, preg_match_all('#</div>\s*<div class="lifeform-item-bottom"></div>\s*</div>\s*<form method="post" action="[^"]+" class="lifeform-select-form"#', $html), 'La barre basse ferme le texte ; le formulaire et le bouton sont hors du texte, dans la fiche.');
+        $this->assertSame(4, substr_count($html, '<a class="select-button" href="#"'), 'Quatre boutons verts, ancres par la feuille.');
+        $this->assertSame(0, preg_match('#<div class="lifeform-item[^"]*"[^>]*style="[^"]*background#', $html), 'Aucun fond en ligne sur une fiche.');
+        $this->assertStringNotContainsString('lifeform-item-cap', $html);
+        $this->assertStringNotContainsString('lifeform-item-body', $html);
+        // L anneau du jeu : l arc en style, le disque ombre qui porte le niveau.
+        $this->assertSame(4, preg_match_all('#<circle class="progress-ring__circle" cx="44" cy="44" r="38" fill="transparent" stroke="\#99cc00" stroke-width="5"\s*style="stroke-dasharray: 238\.76 238\.76; stroke-dashoffset: [0-9.]+;">#', $html), 'L arc de rayon 38, pose en style.');
+        $this->assertSame(4, substr_count($html, '<div class="outer"><div class="inner"><span class="currentlevel">'), 'Le disque ombre du jeu porte le niveau.');
+        $this->assertStringNotContainsString('stroke-dasharray="', $html, 'Jamais en attribut : la feuille le battrait.');
+        // Le titre de l en-tete est celui de l officiel, sans le nom de la planete.
+        $this->assertStringContainsString('<h2>' . e(__('t_lifeforms_ui.page.title')) . '</h2>', $html);
         // L en-tete est l illustration officielle de la page des especes, a sa hauteur de 250 px.
         $sansEspece->assertSee('img/icons/6dafcd306b27d77508ef115722b6b0.jpg); height: 250px;', false);
         $sansEspece->assertSee('class="select-button"', false);

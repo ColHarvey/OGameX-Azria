@@ -184,7 +184,8 @@ final class LifeformAvailabilityTest extends AccountTestCase
         $this->assertStringContainsString('name="choice" value="local"', $html, 'La technologie locale, elle, se choisit.');
         $this->assertSame(2, substr_count($html, 'class="overmark lifeform_unavailable"'), 'La fiche mecha et le tirage portent la mention.');
         $this->assertStringNotContainsString('select-button-artifacts', $html, 'Ni bouton d achat, ni bouton grise : la fiche ne se vend pas.');
-        $this->assertSame(2, substr_count($html, 'lifeformnotclaim'), 'Les deux fiches fermees sont eteintes.');
+        $this->assertSame(1, substr_count($html, 'lifeformnotclaim'), 'La fiche mecha est eteinte ; le tirage n est pas une fiche mais un bouton de l en-tete.');
+        $this->assertStringNotContainsString('id="selectChance"', $html, 'Aucun bouton de tirage.');
 
         // Le service : refus direct, refus du tirage, et pas un artefact debite.
         $this->assertRefused(fn () => $recherche->choose($planetId, $this->currentUserId, self::SLOT, (string)self::SLINGSHOT_AUTOPILOT, $maintenant), LifeformRefused::NOT_AVAILABLE);
@@ -201,6 +202,8 @@ final class LifeformAvailabilityTest extends AccountTestCase
         $this->discover(Species::Rocktal, $maintenant);
         $html = (string)$this->get(route('lifeforms.research.slot.overlay', ['slot' => self::SLOT]))->getContent();
         $this->assertStringContainsString('name="choice" value="random"', $html);
+        $this->assertStringContainsString('<a class="select-button" id="selectChance"', $html, 'Le tirage est le bouton de l en-tete, comme le bundle officiel le lie.');
+        $this->assertSame(3, substr_count($html, 'class="lifeform-item lifeform-choice'), 'Trois fiches — la locale, la mecha fermee, la rock tal —, et pas une pour le tirage.');
         $this->assertStringContainsString('name="choice" value="' . self::ROCKTAL_TIER2_POSITION4 . '"', $html);
         $this->assertStringNotContainsString('name="choice" value="' . self::SLINGSHOT_AUTOPILOT . '"', $html);
         $this->assertSame(1, substr_count($html, 'class="overmark lifeform_unavailable"'), 'Seule la fiche mecha reste fermee.');

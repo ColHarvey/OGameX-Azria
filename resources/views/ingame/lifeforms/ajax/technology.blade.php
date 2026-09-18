@@ -51,7 +51,7 @@
             <div class="build-it_wrap">
                 <div class="ipiHintable" data-ipi-hint="ipiTechnologyUpgradeLifeform{{ $object->id }}">
                     <button class="upgrade" data-technology="{{ $object->id }}" @if (!$can_build) disabled @endif>
-                        <span class="label tooltip" title="{{ $reason ?? '' }}">{{ __('t_lifeforms_ui.research.research') }}</span>
+                        <span class="label tooltip" title="{{ $reason ?? '' }}">{{ !empty($queue_busy) ? __('t_ingame.ajax_object.in_queue') : __('t_lifeforms_ui.research.research') }}</span>
                         <span class="label_bg"></span>
                     </button>
                 </div>

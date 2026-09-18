@@ -21,18 +21,24 @@
                 @foreach ($tiers as $tier => $palier)
                     <div class="tier{{ $tier }}Container">
                         <h3>{{ __('t_lifeforms_ui.research.tier_title', ['tier' => $tier]) }}</h3>
-                        <div class="populationSubHeading"><span>{{ __('t_lifeforms_ui.research.population', ['population' => $palier['population']]) }}</span></div>
+                        <div class="populationSubHeading"><span class="tooltip" title="{{ $palier['population_tooltip'] }}">{{ __('t_lifeforms_ui.research.population', ['population' => $palier['population']]) }}</span></div>
                         <ul class="icons">
                             @foreach ($palier['slots'] as $s)
-                                @if (!$s['unlocked'])
+                                @if (!$s['unlocked'] && $s['object'] === null)
                                     <li class="technology tooltip hideTooltipOnMouseenter js_hideTipOnMobile" data-slot="{{ $s['slot'] }}"
                                         title="{{ __('t_lifeforms_ui.research.requires', ['population' => $s['required'], 'tier' => $tier]) }}"><span class="icon medium research-locked"></span></li>
                                 @elseif ($s['object'] === null)
                                     {{-- Un emplacement libre ouvre la FENETRE du choix (`a.overlay`, comme l attaque de missiles), la
                                          couche officielle `lfresearchlayer` ; il n a pas de panneau de detail (journal §155.26). --}}
+                                    {{-- Le choix reste permis sans centre et en vacances (seule la recherche les exige) : l icone
+                                         hachuree (research-disallowed, feuille officielle) le dit, et l infobulle dit POURQUOI (audit,
+                                         §155.27). Le cadenas noir de l emplacement libre (research-allowed, image officielle) etait
+                                         invisible sur le fond #0d1014 (contraste 1,1:1) : un fond de vignette, le ton de survol de la
+                                         feuille (#29313d), le rend lisible — adaptation Azria, l officiel n en montre aucune capture. --}}
+                                    @php $refusLibre = $is_in_vacation_mode ? __('t_ingame.buildings.vacation_mode_error') : (!$s['centre_open'] ? __('t_lifeforms_ui.research.centre_needed') : null); @endphp
                                     <li class="technology tooltip hideTooltipOnMouseenter js_hideTipOnMobile tpd-hideOnClickOutside lifeform-slot-empty" data-slot="{{ $s['slot'] }}"
                                         data-technology="{{ 9000 + $s['slot'] }}" data-status="on" data-is-spaceprovider=""
-                                        aria-label="{{ __('t_lifeforms_ui.research.slot_empty') }}" title="{{ __('t_lifeforms_ui.research.slot_empty') }}"><a class="overlay" href="{{ route('lifeforms.research.slot.overlay', ['slot' => $s['slot']]) }}" data-overlay-modal="true" data-overlay-class="lfresearchlayer" data-overlay-width="670" data-overlay-title="{{ __('t_lifeforms_ui.research.choose_title', ['slot' => $s['slot'], 'tier' => $tier, 'position' => $s['position']]) }}" style="display: block; width: 100px; height: 100px;"><span class="icon medium {{ $is_in_vacation_mode || !$s['centre_open'] ? 'research-disallowed' : 'research-allowed' }}" style="display: block;"></span></a></li>
+                                        aria-label="{{ __('t_lifeforms_ui.research.slot_empty') }}" title="{{ __('t_lifeforms_ui.research.slot_empty') }}@if ($refusLibre !== null)<br/>{{ $refusLibre }}@endif"><a class="overlay" href="{{ route('lifeforms.research.slot.overlay', ['slot' => $s['slot']]) }}" data-overlay-modal="true" data-overlay-class="lfresearchlayer" data-overlay-width="702" data-overlay-title="{{ __('t_lifeforms_ui.research.choose_title', ['slot' => $s['slot'], 'tier' => $tier, 'position' => $s['position']]) }}" style="display: block; width: 100px; height: 100px;"><span class="icon medium {{ $refusLibre !== null ? 'research-disallowed' : 'research-allowed' }}" style="display: block;{{ $refusLibre === null ? ' background-color: #29313d;' : '' }}"></span></a></li>
                                 @else
                                     @php $objet = $s['object']; @endphp
                                     <li class="technology lifeformTech{{ $objet->id }} hasDetails tooltip hideTooltipOnMouseenter js_hideTipOnMobile tpd-hideOnClickOutside" data-slot="{{ $s['slot'] }}"
@@ -41,10 +47,16 @@
                                             data-status="off" data-unavailable="1" title="{{ $s['title'] }}<br/>{{ __('t_lifeforms_ui.refused.not_available') }}"
                                         @elseif ($s['building_now'])
                                             data-status="active" title="{{ $s['title'] }}<br/>{{ __('t_ingame.buildings.under_construction') }}"
+                                        @elseif (!$s['unlocked'])
+                                            {{-- La population du palier est retombee sous le seuil (pertes, famine) : la technologie reste
+                                                 visible, avec son niveau, eteinte et dite — un cadenas la faisait disparaitre (audit, §155.27). --}}
+                                            data-status="off" data-relocked="1" title="{{ $s['title'] }}<br/>{{ __('t_lifeforms_ui.research.requires', ['population' => $s['required'], 'tier' => $tier]) }}"
                                         @elseif ($is_in_vacation_mode)
                                             data-status="disabled" title="{{ $s['title'] }}<br/>{{ __('t_ingame.buildings.vacation_mode_error') }}"
                                         @elseif (!$s['centre_open'])
                                             data-status="off" title="{{ $s['title'] }}<br/>{{ __('t_lifeforms_ui.research.centre_needed') }}"
+                                        @elseif ($s['queue_full'])
+                                            data-status="disabled" title="{{ $s['title'] }}<br/>{{ __('t_ingame.buildings.queue_full') }}"
                                         @elseif (!$s['can_research'])
                                             data-status="disabled" title="{{ $s['title'] }}<br/>{{ __('t_ingame.buildings.not_enough_resources') }}"
                                         @else

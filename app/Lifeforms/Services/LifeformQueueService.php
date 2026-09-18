@@ -93,14 +93,7 @@ final class LifeformQueueService
             $dejaEnFile = $enFile->where('object_id', $objet->id)->count();
             $cible = $niveauCourant + $dejaEnFile + 1;
 
-            // Les prerequis se lisent avec la file : un batiment en attente compte pour son niveau cible.
-            $niveauxAvecFile = $niveauxBatiments;
-            foreach ($enFile as $element) {
-                if ($element->kind === LifeformKind::Building->value) {
-                    $niveauxAvecFile[(int)$element->object_id] = max($niveauxAvecFile[(int)$element->object_id] ?? 0, (int)$element->target_level);
-                }
-            }
-            $this->requireRequirements($objet, $niveauxAvecFile);
+            $this->requireRequirements($objet, $this->buildingLevelsWithQueue($planet->getPlanetId(), $niveauxBatiments));
             $this->requirePopulation($objet, $cible, $etat);
             if (!$this->researchable($objet, $planet->getPlanetId(), $etat, $niveauxBatiments)) {
                 throw new LifeformRefused(LifeformRefused::SLOT_LOCKED, $objet->machineName);
@@ -285,6 +278,26 @@ final class LifeformQueueService
     /**
      * @param array<int, int> $buildingLevels
      */
+    /**
+     * Les niveaux des batiments **avec la file** : un batiment en attente compte pour son niveau cible.
+     *
+     * C est ainsi que la file juge les prerequis (et la page classique du jeu aussi) ; les vignettes et les fiches
+     * lisaient les niveaux construits seuls, et refusaient d un oeil ce que la file acceptait — le joueur ne pouvait
+     * pas enchainer un prerequis et son batiment en une visite (audit, journal §155.27). Une seule lecture, ici.
+     *
+     * @param array<int, int>|null $builtLevels les niveaux construits, s ils sont deja lus
+     * @return array<int, int>
+     */
+    public function buildingLevelsWithQueue(int $planetId, array|null $builtLevels = null): array
+    {
+        $niveaux = $builtLevels ?? $this->levels->buildingLevelsOf($planetId);
+        foreach ($this->queued($planetId, LifeformKind::Building) as $element) {
+            $niveaux[(int)$element->object_id] = max($niveaux[(int)$element->object_id] ?? 0, (int)$element->target_level);
+        }
+
+        return $niveaux;
+    }
+
     public function requirementsMet(LifeformObject $object, array $buildingLevels): bool
     {
         if ($object->kind === LifeformKind::Technology) {

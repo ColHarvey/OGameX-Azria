@@ -112,7 +112,7 @@ final class LifeformResearchTest extends AccountTestCase
 
         // La vignette libre ouvre la FENETRE du jeu (`a.overlay`, comme l attaque de missiles), plus un panneau de detail
         // entasse dans 300 px (capture de Keven, journal §155.26) ; l ancienne adresse du panneau ne repond plus au choix.
-        $page->assertSee('<a class="overlay" href="' . route('lifeforms.research.slot.overlay', ['slot' => 1]) . '" data-overlay-modal="true" data-overlay-class="lfresearchlayer" data-overlay-width="670"', false);
+        $page->assertSee('<a class="overlay" href="' . route('lifeforms.research.slot.overlay', ['slot' => 1]) . '" data-overlay-modal="true" data-overlay-class="lfresearchlayer" data-overlay-width="702"', false);
         $this->get(route('lifeforms.research.ajax', ['technology' => 9001]))->assertStatus(404);
         $choix = $this->get(route('lifeforms.research.slot.overlay', ['slot' => 1]));
         $choix->assertStatus(200);
@@ -426,16 +426,25 @@ final class LifeformResearchTest extends AccountTestCase
 
         // Le choix d un emplacement : la fenetre du jeu, la couche officielle, les fiches dans le cadre des especes et
         // le bouton vert que la feuille place (`.lfresearchlayer a.select-button`).
-        $this->assertStringContainsString('<a class="overlay" href="' . route('lifeforms.research.slot.overlay', ['slot' => 1]) . '" data-overlay-modal="true" data-overlay-class="lfresearchlayer" data-overlay-width="670"', $html);
+        // La fenetre fait 702 px : la couche officielle `.lfResearchLayerContent` en fait 690 plus le cadre du dialogue.
+        $this->assertStringContainsString('<a class="overlay" href="' . route('lifeforms.research.slot.overlay', ['slot' => 1]) . '" data-overlay-modal="true" data-overlay-class="lfresearchlayer" data-overlay-width="702"', $html);
         $choix = (string)$this->get(route('lifeforms.research.slot.overlay', ['slot' => 1]))->getContent();
         $this->assertStringContainsString('<div class="lfresearchlayer" id="lifeform-slot-choice" data-slot="1">', $choix);
+        // **La structure que la feuille attend** (audit §155.27) : l en-tete `.lfResearchLayerContent > .holder`, puis les
+        // fiches — portrait absolu, texte (titre, wrapper, barre basse), bouton absolu enfant de la fiche. Aucun fond en ligne.
+        $this->assertSame(1, preg_match('#<div class="lfResearchLayerContent">\s*<div class="holder">\s*<h2>[^<]+</h2>\s*<div class="main-text">#', $choix), 'L en-tete officiel de la couche.');
+        $this->assertStringContainsString('<div class="sub-text">' . e(__('t_lifeforms_ui.research.no_other_species')) . '</div>', $choix, 'Sans espece decouverte, pas de tirage : la couche le dit.');
+        $this->assertStringNotContainsString('id="selectChance"', $choix);
+        $this->assertSame(1, substr_count($choix, 'class="lifeform-item lifeform-choice'), 'Une seule fiche : la technologie locale.');
         $this->assertStringContainsString('<div class="lifeform-item-holder">', $choix);
-        $this->assertStringContainsString('class="lifeform-item lifeform-choice lifeformcanclaim"', $choix);
-        $this->assertStringContainsString('class="lifeform-research-item-icon lifeform-item-icon lifeform1"', $choix, 'Le portrait de l espece : la classe qui porte le sprite.');
-        $this->assertStringContainsString('<a class="select-button"', $choix);
+        $this->assertSame(1, preg_match('#<div class="lifeform-item lifeform-choice lifeformcanclaim" data-choice="local">\s*<div class="lifeform-research-item-icon lifeform-item-icon lifeform1"[^>]*></div>\s*<div class="lifeform-item-text">\s*<h3>[^<]+</h3>\s*<div class="lifeform-item-wrapper" style="padding-bottom: 56px;">#', $choix), 'La fiche locale : portrait, titre, wrapper (le bas reserve au bouton).');
+        $this->assertSame(1, preg_match('#<div class="lifeform-item-bottom"></div>\s*</div>\s*<form method="post"[^>]*id="lifeform-choice-local">#', $choix), 'La barre basse ferme le texte, le formulaire suit dans la fiche.');
+        $this->assertStringContainsString('<a class="select-button-100" id="selectTechnology" href="#"', $choix, 'Le bouton de la fiche locale est celui que le bundle officiel lie.');
+        $this->assertSame(0, preg_match('#class="lifeform-item lifeform-choice[^"]*"[^>]*style=#', $choix), 'Aucun style en ligne sur une fiche : la feuille les habille.');
+        $this->assertStringNotContainsString('background', $choix, 'Aucun fond en ligne nulle part dans la fenetre.');
+        $this->assertStringNotContainsString('e3e67150390416129bbbc8696f7b91', $choix, 'Le sprite du cadre vient de la feuille, jamais du gabarit.');
         $this->assertStringNotContainsString('btn_blue', $choix);
         $this->assertStringNotContainsString('technologydetails', $choix, 'Une fenetre, pas un panneau.');
-        $this->assertStringNotContainsString('lifeform-slot-choice lfresearchlayer', $choix);
 
         // Une technologie placee : la remise a zero devient possible, en vert.
         resolve(LifeformResearchService::class)->choose($this->currentPlanetId, $this->currentUserId, 1, 'local', (int)Date::now()->timestamp);

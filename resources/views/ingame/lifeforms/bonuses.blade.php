@@ -9,7 +9,7 @@
 @section('content')
 
     <div id="lfbonusescomponent" class="maincontent">
-        <div id="lifeforms">
+        <div id="lfbonuses">
             <header id="planet" class="shortHeader" data-anchor="technologyDetails">
                 <h2>{{ __('t_lifeforms_ui.bonuses.title') }}</h2>
             </header>
