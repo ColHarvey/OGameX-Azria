@@ -12,6 +12,7 @@ use OGame\Combat\Services\EngagedFleetCheck;
 use OGame\Combat\Services\FleetDispositionRegistry;
 use OGame\Combat\Services\FleetMovementGate;
 use OGame\Combat\Services\MissileArrivalGate;
+use OGame\Enums\FleetMissionStatus;
 use OGame\Enums\FleetSpeedType;
 use OGame\Factories\GameMissionFactory;
 use OGame\Factories\PlanetServiceFactory;
@@ -516,26 +517,36 @@ class FleetMissionService
     }
 
     /**
-     * Returns whether the current user is under attack.
+     * Le joueur est-il vise par un vol hostile encore en cours ?
      *
-     * @return bool
+     * La meme regle que la boite d'evenements (`FleetMissionStatus::HOSTILE_MISSION_TYPES`, missions ni
+     * traitees ni rappelees) : l'alarme du bandeau et le compte des vols hostiles disent la meme chose.
+     * Avant, l'alarme ignorait les missiles et les rappels (journal §156).
      */
     public function currentPlayerUnderAttack(): bool
     {
+        return self::playerIsUnderAttack($this->player);
+    }
+
+    /**
+     * La meme question pour un joueur donne, sans instance du service : le bandeau des ressources
+     * (`/ajax/resourcebox`, hors `globalgame`) la pose pour le compte de la session.
+     */
+    public static function playerIsUnderAttack(PlayerService $player): bool
+    {
         $planetIds = [];
-        foreach ($this->player->planets->all() as $planet) {
+        foreach ($player->planets->all() as $planet) {
             $planetIds[] = $planet->getPlanetId();
         }
+        if ($planetIds === []) {
+            return false;
+        }
 
-        // Mission types that are considered hostile:
-        // 1: Attack
-        // 2: ACS Attack
-        // 6: Espionage
-        // 9: Moon Destruction
-        return $this->model->whereIn('planet_id_to', $planetIds)
-            ->where('user_id', '!=', $this->player->getId())
-            ->whereIn('mission_type', [1, 2, 6, 9])
+        return FleetMission::query()->whereIn('planet_id_to', $planetIds)
+            ->where('user_id', '!=', $player->getId())
+            ->whereIn('mission_type', FleetMissionStatus::HOSTILE_MISSION_TYPES)
             ->where('processed', 0)
+            ->where('canceled', 0)
             ->exists();
     }
 

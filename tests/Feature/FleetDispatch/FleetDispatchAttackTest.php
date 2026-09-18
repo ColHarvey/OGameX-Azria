@@ -867,11 +867,10 @@ class FleetDispatchAttackTest extends FleetDispatchTestCase
         $response = $this->get('/overview');
         $response->assertStatus(200);
 
-        // Check that the class "noAttack" is present in the response which indicates we're not under attack.
-        $this->assertStringContainsString('noAttack', (string)$response->getContent(), 'We are under attack while we should not be.');
-
-        // Check that no title warning is shown.
-        $this->assertStringNotContainsString('You are under attack!', (string)$response->getContent(), 'You are under attack warning title is shown while we should not be under attack.');
+        // L alarme est lue sur SA boite (`#attack_alert`) : depuis que la page la tient a jour sans se recharger
+        // (journal §156), le script porte les mots « noAttack » et le titre en clair, quel que soit l etat.
+        $this->assertSame(1, preg_match('#<div id="attack_alert" class="\s*noAttack\s*"\s*>#', (string)$response->getContent()), 'We are under attack while we should not be.');
+        $this->assertSame(0, preg_match('#<div id="attack_alert"[^>]*title=#', (string)$response->getContent()), 'You are under attack warning title is shown while we should not be under attack.');
 
         // Get foreign planet.
         $foreignPlanet = $this->getNearbyForeignCleanPlanet();
@@ -889,9 +888,8 @@ class FleetDispatchAttackTest extends FleetDispatchTestCase
         $response = $this->get('/overview');
         $response->assertStatus(200);
 
-        $this->assertStringNotContainsString('noAttack', (string)$response->getContent(), 'We are not under attack while we should be. Check if the under attack warning works correctly.');
-        $this->assertStringContainsString('soon', (string)$response->getContent(), 'We are under attack but no warning is shown. Check if the under attack warning works correctly.');
-        $this->assertStringContainsString('You are under attack!', (string)$response->getContent(), 'You are under attack warning title is not shown while we should be under attack. Check if the under attack warning works correctly.');
+        $this->assertSame(0, preg_match('#<div id="attack_alert" class="\s*noAttack\s*"#', (string)$response->getContent()), 'We are not under attack while we should be. Check if the under attack warning works correctly.');
+        $this->assertSame(1, preg_match('#<div id="attack_alert" class="\s*soon\s*"\s*title="You are under attack!"#', (string)$response->getContent()), 'We are under attack but no warning is shown. Check if the under attack warning works correctly.');
     }
 
     /**

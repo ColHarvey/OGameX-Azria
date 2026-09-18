@@ -4,6 +4,7 @@ namespace OGame\ViewModels;
 
 use OGame\Facades\AppUtil;
 use OGame\Lifeforms\Presentation\LifeformBanner;
+use OGame\Services\FleetMissionService;
 use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
 use stdClass;
@@ -67,6 +68,10 @@ final class ResourceBarViewModel
         // **La cle a molette de la liste des planetes voyage avec le bandeau** : la page l amorce, la veille la
         // relit par la meme route, qui n ecrit rien. Voir `PlanetListConstructionViewModel`.
         $ticker['planetList'] = PlanetListConstructionViewModel::of($player);
+        // L'alarme d'attaque du bandeau suit ce meme objet : la page la pose, la resynchronisation la tient a jour
+        // (annonce d'un mouvement de flotte par Echo, ou veille de trente secondes), sans passer par `globalgame`
+        // — une lecture, comme tout ce que ce point d'entree rend (journal §156).
+        $ticker['attack'] = ['hostile' => FleetMissionService::playerIsUnderAttack($player)];
 
         return new self($resources, $ticker);
     }

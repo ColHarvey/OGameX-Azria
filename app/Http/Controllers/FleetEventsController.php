@@ -621,27 +621,7 @@ class FleetEventsController extends OGameController
      */
     private function determineFriendly(FleetMission $mission, PlayerService $player): FleetMissionStatus
     {
-        // Determine if the next mission is a friendly, hostile or neutral mission
-        if ($mission->user_id != $player->getId()) {
-            // Not from the current player, check mission type.
-            switch ($mission->mission_type) {
-                case 1:
-                case 2:
-                case 6:
-                case 9:
-                case 10: // Missile attack
-                    // Hostile
-                    return FleetMissionStatus::Hostile;
-                case 3:
-                    // Neutral;
-                    return FleetMissionStatus::Neutral;
-                case 5: // ACS Defend
-                    // Neutral (displays as "friendly" in UI with gold color)
-                    return FleetMissionStatus::Neutral;
-            }
-        }
-
-        // From current player, it is a friendly mission.
-        return FleetMissionStatus::Friendly;
+        // La regle de camp vit dans l'enum : l'alarme du bandeau et la Galaxie lisent la meme.
+        return FleetMissionStatus::ofMissionType((int)$mission->mission_type, (int)$mission->user_id === $player->getId());
     }
 }

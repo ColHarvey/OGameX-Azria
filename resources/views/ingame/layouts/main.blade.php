@@ -446,11 +446,15 @@
                     }
                 @endphp
 
-                <div id="attack_alert" class="@if ($underAttack) soon @elseif (!empty($playerWreckFields) && !$underAttack) wreckField @else noAttack @endif"
+                {{-- L'alarme d'attaque vit TOUJOURS dans la page : la classe `soon` la montre (icone rouge qui bat, feuille
+                     officielle), `noAttack` la cache, `wreckField` montre l'epave. Le bandeau des ressources la tient a jour
+                     sans recharger la page (script sous le bloc), et un clic ouvre la liste des evenements du jeu — l'ancre
+                     portait une adresse « TODO » (journal §156). --}}
+                <div id="attack_alert" class="@if ($underAttack) soon @elseif (!empty($playerWreckFields)) wreckField @else noAttack @endif"
                      @if ($underAttack) title="{{ __('t_ingame.layout.under_attack') }}" @endif>
-                    @if ($underAttack)
-                        <a href="#TODO_componentOnly&amp;component=eventList" class=" tooltipHTML js_hideTipOnMobile"></a>
-                    @elseif (!empty($playerWreckFields))
+                    <a href="javascript:void(0);" id="attackAlertLink" class="tooltipHTML js_hideTipOnMobile" title="{{ __('t_ingame.layout.under_attack') }}" onclick="toggleEvents(); return false;"@if (!$underAttack) style="display: none;"@endif></a>
+                    @if (!empty($playerWreckFields))
+                        <span id="attackAlertWreckField"@if ($underAttack) style="display: none;"@endif>
                         @php
                             // Fix time calculation - use proper timezone
                             if (!empty($playerWreckFields[0])) {
@@ -540,8 +544,47 @@
                             }
                             </script>
                         @endif
+                        </span>
                     @endif
                 </div>
+                <script type="text/javascript">
+                    {{-- L'alarme suit UNE lecture que la page fait deja : le bandeau des ressources (`ogamex:resourcebox`, annonce
+                         d'un mouvement de flotte par Echo ou veille de trente secondes, hors `globalgame`), qui porte la meme regle
+                         que la page (`FleetMissionService::playerIsUnderAttack()`). Pas le compte de vols hostiles de la boite
+                         d'evenements : il ne compte que lorsqu'une echeance reste a venir, et une attaque arrivee dont le combat
+                         dure (bataille durable) y vaut zero alors que le joueur est bien attaque. --}}
+                    (function () {
+                        var alarme = document.getElementById('attack_alert');
+                        var lien = document.getElementById('attackAlertLink');
+                        var epave = document.getElementById('attackAlertWreckField');
+                        var titre = @json(__('t_ingame.layout.under_attack'));
+                        if (!alarme || !lien) {
+                            return;
+                        }
+                        function poserAlarme(hostile) {
+                            var attaque = hostile === true || parseInt(hostile, 10) > 0;
+                            if (attaque === alarme.classList.contains('soon')) {
+                                return;
+                            }
+                            alarme.className = attaque ? 'soon' : (epave ? 'wreckField' : 'noAttack');
+                            if (attaque) {
+                                alarme.setAttribute('title', titre);
+                            } else {
+                                alarme.removeAttribute('title');
+                            }
+                            lien.style.display = attaque ? '' : 'none';
+                            if (epave) {
+                                epave.style.display = attaque ? 'none' : '';
+                            }
+                        }
+                        document.addEventListener('ogamex:resourcebox', function (evenement) {
+                            var lu = evenement.detail;
+                            if (lu && lu.attack && typeof lu.attack.hostile !== 'undefined') {
+                                poserAlarme(lu.attack.hostile);
+                            }
+                        });
+                    })();
+                </script>
             </div>
         </div>
 

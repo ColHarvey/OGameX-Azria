@@ -82,7 +82,9 @@ class ResourceBarTest extends AccountTestCase
         $this->assertStringContainsString(AppUtil::formatNumber($joueur->getDarkMatter()), $charge['resources']['darkmatter']['tooltip'], 'L infobulle de la matiere noire ne porte pas son montant.');
 
         // `planetList` : la cle a molette de la liste des planetes voyage avec le bandeau (`PlanetListConstructionViewModel`).
-        $this->assertSame(['resources', 'techs', 'honorScore', 'planetList'], array_keys($charge));
+        $this->assertSame(['resources', 'techs', 'honorScore', 'planetList', 'attack'], array_keys($charge));
+        // L alarme d attaque du bandeau voyage avec le meme objet (journal §156) : un booleen, jamais un compte ni une echeance.
+        $this->assertSame(['hostile' => false], $charge['attack']);
         $this->assertSame([], $charge['techs']);
     }
 

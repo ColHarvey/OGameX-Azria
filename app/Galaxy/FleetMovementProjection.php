@@ -144,14 +144,6 @@ final class FleetMovementProjection
      */
     private function sideOf(FleetMission $mission): FleetMissionStatus
     {
-        if ((int)$mission->user_id === $this->player->getId()) {
-            return FleetMissionStatus::Friendly;
-        }
-
-        return match ((int)$mission->mission_type) {
-            1, 2, 6, 9, 10 => FleetMissionStatus::Hostile,
-            3, 5 => FleetMissionStatus::Neutral,
-            default => FleetMissionStatus::Friendly,
-        };
+        return FleetMissionStatus::ofMissionType((int)$mission->mission_type, (int)$mission->user_id === $this->player->getId());
     }
 }
