@@ -3,9 +3,11 @@
 namespace Tests\Feature\Lifeforms;
 
 use Illuminate\Support\Facades\Date;
+use InvalidArgumentException;
 use OGame\Factories\GameMessageFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\Lifeforms\Catalogue\LifeformKind;
+use OGame\Lifeforms\Discovery\LifeformDiscoveryOdds;
 use OGame\Lifeforms\Discovery\LifeformDiscoveryOutcome;
 use OGame\Lifeforms\Discovery\LifeformDiscoveryRules;
 use OGame\Lifeforms\LifeformRefused;
@@ -26,9 +28,11 @@ use OGame\Models\Message;
 use OGame\Models\Planet;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
+use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
 use Tests\Support\PinsSettings;
 use Tests\Support\PlacesLifeformSlots;
+use UnexpectedValueException;
 
 /**
  * Les vols de decouverte (tranche 4) : ouverture, quota, lancement scelle, reglement credite une fois
@@ -235,6 +239,113 @@ final class LifeformDiscoveryTest extends AccountTestCase
         $this->assertStringContainsString('nouvelle espèce', $rapport->getBody());
         $this->assertStringNotContainsString('t_messages', $rapport->getBody());
         $this->assertStringNotContainsString('t_lifeforms', $rapport->getBody());
+    }
+
+    /**
+     * **Les cotes d artefacts sont un reglage d administration, lues au lancement et scellees avec le vol** (journal §159).
+     * Sans reglage, exactement le comportement d avant ; un changement entre le depart et le reglement ne touche ni
+     * l issue ni le credit ; le vol suivant part sous les nouvelles cotes ; un vol ancien sans photographie se regle
+     * comme avant ; la reserve borne aussi une grande trouvaille reglee.
+     */
+    public function testTheOddsAreReadAtLaunchSealedOnTheFlightAndAChangeOnlyReachesTheNextFlight(): void
+    {
+        $service = resolve(LifeformDiscoveryService::class);
+        $maintenant = (int)Date::now()->timestamp;
+        $joueur = resolve(PlayerServiceFactory::class)->make($this->currentUserId, true);
+        resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Building, self::RESEARCH_CENTRE, 1);
+        $depart = $this->planetService->getPlanetCoordinates();
+        // La meme suite de tirages pour chaque vol : 74 sur cent (artefacts sous les cotes de depart comme sous celles
+        // d apres), puis 1 sur cent (la grande trouvaille dans les deux cas).
+        $suite = [];
+        $service->useDraw(static function (int $borne) use (&$suite): int {
+            if ($suite === []) {
+                $suite = [74, 1];
+            }
+            $v = array_shift($suite);
+            if ($v === null || $v >= $borne) {
+                throw new InvalidArgumentException("Tirage hors de $borne.");
+            }
+
+            return $v;
+        });
+
+        // 1. Sans reglage : les cotes de depart, photographiees sur le vol, et l issue qu elles donnent (50).
+        $premier = $service->launch($this->planetService, new Coordinate($depart->galaxy, $depart->system, $depart->position === 1 ? 2 : 1), $maintenant);
+        $this->assertSame(LifeformDiscoveryOdds::defaults()->toStorage(), $premier->odds, 'Le vol photographie les cotes de son depart.');
+        $this->assertSame(50, LifeformDiscoveryOutcome::fromStorage($premier->outcome)->artifacts);
+
+        // 2. L administration change les cotes pendant que le vol est en l air.
+        $this->pinSettings([
+            'lifeform_discovery_artifact_chance' => 60,
+            'lifeform_discovery_artifacts_small' => 10,
+            'lifeform_discovery_artifacts_medium' => 40,
+            'lifeform_discovery_artifacts_large' => 100,
+            'lifeform_discovery_artifacts_medium_chance' => 20,
+            'lifeform_discovery_artifacts_large_chance' => 5,
+        ]);
+        $nouvelles = new LifeformDiscoveryOdds(60, 10, 40, 100, 20, 5);
+        $this->assertTrue(resolve(SettingsService::class)->lifeformDiscoveryOdds()->equals($nouvelles));
+
+        // 3. Le reglement credite l issue scellee — 50, pas 100 — et la photographie ne bouge pas.
+        $this->assertSame(1, $service->settleDue($joueur, (int)$premier->ends_at));
+        $this->assertSame(50, (int)LifeformAccount::query()->where('user_id', $this->currentUserId)->value('artifacts'), 'Le vol parti garde ses regles et son issue.');
+        $premier->refresh();
+        $this->assertSame(LifeformDiscoveryOdds::defaults()->toStorage(), $premier->odds);
+        $this->assertSame(50, LifeformDiscoveryOutcome::fromStorage($premier->outcome)->artifacts);
+
+        // 4. Le vol suivant part sous les nouvelles cotes : meme suite de tirages, grande trouvaille de 100.
+        $second = $service->launch($this->planetService, new Coordinate($depart->galaxy, $depart->system, $depart->position === 3 ? 4 : 3), $maintenant + 10);
+        $this->assertSame($nouvelles->toStorage(), $second->odds);
+        $this->assertSame(100, LifeformDiscoveryOutcome::fromStorage($second->outcome)->artifacts);
+        $this->assertSame(1, $service->settleDue($joueur, (int)$second->ends_at));
+        $this->assertSame(150, (int)LifeformAccount::query()->where('user_id', $this->currentUserId)->value('artifacts'));
+
+        // 5. Un vol ancien, sans photographie, se regle comme avant et garde son absence de photographie.
+        $ancien = $this->aDueFlight(new LifeformDiscoveryOutcome(LifeformDiscoveryOutcome::ARTIFACTS, null, 25, 0), $maintenant + 20);
+        $this->assertNull($ancien->odds);
+        $this->assertSame(1, $service->settleDue($joueur, $maintenant + 20));
+        $ancien->refresh();
+        $this->assertNull($ancien->odds);
+        $this->assertSame(175, (int)LifeformAccount::query()->where('user_id', $this->currentUserId)->value('artifacts'));
+
+        // 6. La reserve borne aussi une grande trouvaille venue d un reglage : a 3 599 elle credite (depassement par la
+        //    derniere trouvaille), a 3 600 elle refuse, et le quota n a pas bouge pour autant.
+        LifeformAccount::query()->where('user_id', $this->currentUserId)->update(['artifacts' => LifeformDiscoveryRules::ARTIFACT_CAP - 1]);
+        $this->aDueFlight(new LifeformDiscoveryOutcome(LifeformDiscoveryOutcome::ARTIFACTS, null, 3600, 0), $maintenant + 30);
+        $this->assertSame(1, $service->settleDue($joueur, $maintenant + 30));
+        $this->assertSame(LifeformDiscoveryRules::ARTIFACT_CAP - 1 + 3600, (int)LifeformAccount::query()->where('user_id', $this->currentUserId)->value('artifacts'));
+        $refuse = $this->aDueFlight(new LifeformDiscoveryOutcome(LifeformDiscoveryOutcome::ARTIFACTS, null, 3600, 0), $maintenant + 40);
+        $this->assertSame(1, $service->settleDue($joueur, $maintenant + 40));
+        $this->assertSame(LifeformDiscoveryRules::ARTIFACT_CAP - 1 + 3600, (int)LifeformAccount::query()->where('user_id', $this->currentUserId)->value('artifacts'));
+        $refuse->refresh();
+        $this->assertSame(0, LifeformDiscoveryOutcome::fromStorage($refuse->outcome)->artifacts);
+        $this->assertSame(LifeformDiscoveryRules::QUOTA_PER_DAY - 2, (int)LifeformAccount::query()->where('user_id', $this->currentUserId)->value('discoveries_available'), 'Deux lancements, deux unites de quota ; les reglements n en consomment aucune.');
+    }
+
+    /**
+     * Un reglage stocke illisible ou incoherent est refuse au lancement, jamais ramene en silence, et rien n est ecrit.
+     */
+    public function testAnUnreadableStoredOddIsRefusedAtLaunchAndWritesNothing(): void
+    {
+        $service = resolve(LifeformDiscoveryService::class);
+        $maintenant = (int)Date::now()->timestamp;
+        resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Building, self::RESEARCH_CENTRE, 1);
+        $depart = $this->planetService->getPlanetCoordinates();
+        $cible = new Coordinate($depart->galaxy, $depart->system, $depart->position === 1 ? 2 : 1);
+        $metalAvant = (int)Planet::query()->whereKey($this->currentPlanetId)->value('metal');
+
+        foreach ([['lifeform_discovery_artifact_chance' => 'abc'], ['lifeform_discovery_artifact_chance' => '76'], ['lifeform_discovery_artifacts_medium' => '5']] as $faute) {
+            $this->pinSettings($faute);
+            try {
+                $service->launch($this->planetService, $cible, $maintenant);
+                $this->fail('Un reglage illisible devait etre refuse : ' . json_encode($faute));
+            } catch (UnexpectedValueException|InvalidArgumentException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+        $this->assertSame(0, LifeformDiscovery::query()->where('user_id', $this->currentUserId)->count(), 'Aucun vol ecrit.');
+        $this->assertSame($metalAvant, (int)Planet::query()->whereKey($this->currentPlanetId)->value('metal'), 'Rien de debite.');
+        $this->assertSame(LifeformDiscoveryRules::QUOTA_PER_DAY, (int)$service->accrueQuota($this->currentUserId, $maintenant)?->discoveries_available, 'Le quota du jour du choix est intact.');
     }
 
     public function testThePageShowsTheQuotaAndLaunchesAFlight(): void

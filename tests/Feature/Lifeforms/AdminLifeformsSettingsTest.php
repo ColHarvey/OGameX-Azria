@@ -3,6 +3,8 @@
 namespace Tests\Feature\Lifeforms;
 
 use Illuminate\Support\Facades\DB;
+use OGame\Lifeforms\Discovery\LifeformDiscoveryOdds;
+use OGame\Models\Lifeforms\LifeformDiscoveryOddsRevision;
 use OGame\Models\Lifeforms\LifeformRuleRevision;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
@@ -21,11 +23,14 @@ final class AdminLifeformsSettingsTest extends AccountTestCase
 
     private int $revisionsAvant = 0;
 
+    private int $oddsRevisionsAvant = 0;
+
     protected function setUp(): void
     {
         parent::setUp();
         $this->reglagesAvant = DB::table('settings')->pluck('value', 'key')->map(static fn ($v): string => (string)$v)->all();
         $this->revisionsAvant = (int)(LifeformRuleRevision::query()->max('id') ?? 0);
+        $this->oddsRevisionsAvant = (int)(LifeformDiscoveryOddsRevision::query()->max('id') ?? 0);
 
         $user = auth()->user();
         if ($user === null) {
@@ -41,6 +46,7 @@ final class AdminLifeformsSettingsTest extends AccountTestCase
         }
         DB::table('settings')->whereNotIn('key', array_keys($this->reglagesAvant))->delete();
         LifeformRuleRevision::query()->where('id', '>', $this->revisionsAvant)->delete();
+        LifeformDiscoveryOddsRevision::query()->where('id', '>', $this->oddsRevisionsAvant)->delete();
         parent::tearDown();
     }
 
@@ -135,6 +141,96 @@ final class AdminLifeformsSettingsTest extends AccountTestCase
         $this->assertSame(1.0, $reglages->lifeformsBuildSpeedMultiplier());
     }
 
+    /**
+     * **Les cotes d artefacts des vols de decouverte sont un reglage d administration** (journal §159) : six entiers sur
+     * la page, aux valeurs de depart qui sont le comportement d avant (4,59 par vol) ; un enregistrement les ecrit et
+     * laisse une revision datee et signee, une seule tant que rien ne change ; un champ absent revient a sa valeur de
+     * depart.
+     */
+    public function testTheDiscoveryOddsAreOnThePageWrittenBySavingAndRecordedOnce(): void
+    {
+        $page = $this->get(route('admin.serversettings.index'));
+        $page->assertStatus(200);
+        foreach (SettingsService::DISCOVERY_ODDS_KEYS as $clef => $depart) {
+            $largeur = str_ends_with($clef, '_chance') ? 3 : 4;
+            $page->assertSee('value="' . $depart . '" size="5" maxlength="' . $largeur . '" name="' . $clef . '"', false);
+        }
+        $page->assertSee('4,59', false);
+        $page->assertSee(__('t_ingame.admin.lifeform_discovery_artifact_chance'));
+        $this->assertTrue(resolve(SettingsService::class)->lifeformDiscoveryOdds()->equals(LifeformDiscoveryOdds::defaults()), 'Sans reglage, les cotes de depart.');
+
+        $reponse = $this->post(route('admin.serversettings.update'), $this->formulaire([
+            'lifeform_discovery_artifact_chance' => '60',
+            'lifeform_discovery_artifacts_small' => '10',
+            'lifeform_discovery_artifacts_medium' => '40',
+            'lifeform_discovery_artifacts_large' => '100',
+            'lifeform_discovery_artifacts_medium_chance' => '20',
+            'lifeform_discovery_artifacts_large_chance' => '5',
+        ]));
+        $reponse->assertRedirect(route('admin.serversettings.index'));
+        $reponse->assertSessionHasNoErrors();
+        $cotes = resolve(SettingsService::class)->lifeformDiscoveryOdds();
+        $this->assertSame(['artifact_chance' => 60, 'small' => 10, 'medium' => 40, 'large' => 100, 'medium_chance' => 20, 'large_chance' => 5], $cotes->toStorage());
+        $revisions = LifeformDiscoveryOddsRevision::query()->where('id', '>', $this->oddsRevisionsAvant)->get();
+        $this->assertCount(1, $revisions);
+        $revision = $revisions->first();
+        $this->assertNotNull($revision);
+        $this->assertSame([60, 10, 40, 100, 20, 5], [$revision->artifact_chance, $revision->small, $revision->medium, $revision->large, $revision->medium_chance, $revision->large_chance]);
+        $this->assertSame(auth()->id(), $revision->changed_by);
+        $this->assertSame('administration', $revision->note);
+        $this->get(route('admin.serversettings.index'))->assertSee('12,30', false);
+
+        // Le meme formulaire ne date rien de plus ; une cote qui change, si ; les champs absents reviennent au depart.
+        $this->post(route('admin.serversettings.update'), $this->formulaire([
+            'lifeform_discovery_artifact_chance' => '60', 'lifeform_discovery_artifacts_small' => '10', 'lifeform_discovery_artifacts_medium' => '40',
+            'lifeform_discovery_artifacts_large' => '100', 'lifeform_discovery_artifacts_medium_chance' => '20', 'lifeform_discovery_artifacts_large_chance' => '5',
+        ]));
+        $this->assertSame(1, LifeformDiscoveryOddsRevision::query()->where('id', '>', $this->oddsRevisionsAvant)->count());
+        $this->post(route('admin.serversettings.update'), $this->formulaire([]));
+        $this->assertTrue(resolve(SettingsService::class)->lifeformDiscoveryOdds()->equals(LifeformDiscoveryOdds::defaults()));
+        $this->assertSame(2, LifeformDiscoveryOddsRevision::query()->where('id', '>', $this->oddsRevisionsAvant)->count(), 'Le retour aux valeurs de depart est une revision aussi.');
+    }
+
+    /**
+     * Une cote qui n est pas un entier dans ses bornes, ou un ensemble incoherent (parts au-dela de cent, trouvailles
+     * desordonnees, chance au-dela de ce que l experience et l espece laissent), est refuse : rien n est ecrit, pas
+     * meme un reglage voisin du meme formulaire, et aucune revision n est datee.
+     */
+    public function testAnInvalidOrIncoherentOddIsRefusedAndNothingIsWritten(): void
+    {
+        $avant = DB::table('settings')->pluck('value', 'key')->all();
+        // Chaque faute et le champ qui porte son erreur ; une incoherence d ensemble est portee par la chance.
+        $fautes = [
+            [['lifeform_discovery_artifact_chance' => '-1'], 'lifeform_discovery_artifact_chance'],
+            [['lifeform_discovery_artifact_chance' => '76'], 'lifeform_discovery_artifact_chance'],
+            [['lifeform_discovery_artifact_chance' => 'abc'], 'lifeform_discovery_artifact_chance'],
+            [['lifeform_discovery_artifact_chance' => '4.5'], 'lifeform_discovery_artifact_chance'],
+            [['lifeform_discovery_artifacts_small' => '0'], 'lifeform_discovery_artifacts_small'],
+            [['lifeform_discovery_artifacts_large' => '3601'], 'lifeform_discovery_artifacts_large'],
+            [['lifeform_discovery_artifacts_small' => '30'], 'lifeform_discovery_artifact_chance'],
+            [['lifeform_discovery_artifacts_medium_chance' => '60', 'lifeform_discovery_artifacts_large_chance' => '41'], 'lifeform_discovery_artifact_chance'],
+            [['lifeform_discovery_artifacts_large_chance' => '101'], 'lifeform_discovery_artifacts_large_chance'],
+        ];
+        $vitesseAvant = (string)($avant['fleet_speed_war'] ?? '1');
+        foreach ($fautes as [$faute, $champ]) {
+            // Le formulaire refuse porte aussi un reglage ordinaire change : lui non plus ne doit pas s ecrire.
+            $reponse = $this->from(route('admin.serversettings.index'))->post(route('admin.serversettings.update'), $this->formulaire($faute + [
+                'lifeforms_enabled' => '1',
+                'fleet_speed_war' => (string)((int)$vitesseAvant + 3),
+                'lifeform_discovery_artifact_chance' => '45', 'lifeform_discovery_artifacts_small' => '8', 'lifeform_discovery_artifacts_medium' => '25',
+                'lifeform_discovery_artifacts_large' => '50', 'lifeform_discovery_artifacts_medium_chance' => '8', 'lifeform_discovery_artifacts_large_chance' => '2',
+            ]));
+            $reponse->assertRedirect(route('admin.serversettings.index'));
+            $reponse->assertSessionHasErrors($champ);
+            if ($faute === ['lifeform_discovery_artifact_chance' => '76']) {
+                $reponse->assertSessionHasErrors(['lifeform_discovery_artifact_chance' => __('t_ingame.admin.lifeforms_invalid_odds')], null, 'default');
+            }
+        }
+        $this->assertSame($vitesseAvant, (string)resolve(SettingsService::class)->get('fleet_speed_war', '1'), 'Le reglage ordinaire du formulaire refuse n est pas ecrit.');
+        $this->assertSame($avant, DB::table('settings')->pluck('value', 'key')->all(), 'Un refus ne change aucun reglage, pas meme l interrupteur.');
+        $this->assertSame(0, LifeformDiscoveryOddsRevision::query()->where('id', '>', $this->oddsRevisionsAvant)->count());
+    }
+
     public function testAnInvalidMultiplierIsRefusedAndNothingIsWritten(): void
     {
         $avant = DB::table('settings')->pluck('value', 'key')->all();
@@ -177,6 +273,12 @@ final class AdminLifeformsSettingsTest extends AccountTestCase
             $courant['lifeforms_research_speed_multiplier'],
             $courant['lifeforms_discovery_speed_multiplier'],
             $courant['lifeform_population_loss_rate'],
+            $courant['lifeform_discovery_artifact_chance'],
+            $courant['lifeform_discovery_artifacts_small'],
+            $courant['lifeform_discovery_artifacts_medium'],
+            $courant['lifeform_discovery_artifacts_large'],
+            $courant['lifeform_discovery_artifacts_medium_chance'],
+            $courant['lifeform_discovery_artifacts_large_chance'],
         );
 
         return array_merge($courant, $champs);

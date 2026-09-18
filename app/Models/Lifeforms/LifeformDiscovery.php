@@ -23,6 +23,7 @@ use Illuminate\Support\Carbon;
  * @property string $status
  * @property int|null $settled_at
  * @property int $rules_version
+ * @property array<string, mixed>|null $odds
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  * @method static Builder|LifeformDiscovery newModelQuery()
@@ -30,7 +31,7 @@ use Illuminate\Support\Carbon;
  * @method static Builder|LifeformDiscovery query()
  * @mixin \Eloquent
  */
-#[Fillable(['user_id', 'planet_id', 'galaxy', 'system', 'position', 'started_at', 'ends_at', 'outcome', 'status', 'settled_at', 'rules_version'])]
+#[Fillable(['user_id', 'planet_id', 'galaxy', 'system', 'position', 'started_at', 'ends_at', 'outcome', 'status', 'settled_at', 'rules_version', 'odds'])]
 #[Table(name: 'lifeform_discoveries')]
 class LifeformDiscovery extends Model
 {
@@ -48,5 +49,6 @@ class LifeformDiscovery extends Model
         'outcome' => 'array',
         'settled_at' => 'integer',
         'rules_version' => 'integer',
+        'odds' => 'array',
     ];
 }

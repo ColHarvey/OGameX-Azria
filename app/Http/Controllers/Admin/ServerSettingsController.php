@@ -5,10 +5,16 @@ namespace OGame\Http\Controllers\Admin;
 use Cache;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Date;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
+use InvalidArgumentException;
 use OGame\Enums\HighscoreTypeEnum;
 use OGame\Http\Controllers\OGameController;
+use OGame\Lifeforms\Discovery\LifeformDiscoveryOdds;
+use OGame\Lifeforms\Discovery\LifeformDiscoveryRules;
+use OGame\Lifeforms\Rules\LifeformDiscoveryOddsRevisions;
 use OGame\Lifeforms\Rules\LifeformRuleRevisions;
+use OGame\Models\Lifeforms\LifeformDiscoveryOddsRevision;
 use OGame\Models\Lifeforms\LifeformRuleRevision;
 use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
@@ -73,6 +79,14 @@ class ServerSettingsController extends OGameController
             'lifeforms_effective_build_speed' => $settingsService->economySpeed() * $settingsService->lifeformsBuildSpeedMultiplier(),
             'lifeforms_effective_research_speed' => $settingsService->economySpeed() * $settingsService->researchSpeed() * $settingsService->lifeformsResearchSpeedMultiplier(),
             'lifeforms_revision_count' => LifeformRuleRevision::query()->count(),
+            // Les cotes d artefacts des vols de decouverte (journal §159) : les six valeurs, l esperance par vol qu elles
+            // composent, et le nombre de revisions datees.
+            'lifeform_discovery_odds' => $settingsService->lifeformDiscoveryOdds(),
+            'lifeform_discovery_odds_defaults' => LifeformDiscoveryOdds::defaults(),
+            'lifeform_discovery_max_chance' => LifeformDiscoveryOdds::MAX_ARTIFACT_CHANCE,
+            'lifeform_discovery_experience_weight' => LifeformDiscoveryRules::EXPERIENCE_WEIGHT,
+            'lifeform_discovery_species_weight' => LifeformDiscoveryRules::SPECIES_WEIGHT,
+            'lifeform_discovery_odds_revision_count' => LifeformDiscoveryOddsRevision::query()->count(),
             'newbie_protection_enabled' => $settingsService->newbieProtectionEnabled(),
             'alliance_offensive_protection_enabled' => $settingsService->allianceOffensiveProtectionEnabled(),
             'patrol_manoeuvre_delay_seconds' => $settingsService->patrolManoeuvreDelaySeconds(),
@@ -114,7 +128,7 @@ class ServerSettingsController extends OGameController
      * @param SettingsService $settingsService
      * @return RedirectResponse
      */
-    public function update(SettingsService $settingsService, LifeformRuleRevisions $lifeformRevisions): RedirectResponse
+    public function update(SettingsService $settingsService, LifeformRuleRevisions $lifeformRevisions, LifeformDiscoveryOddsRevisions $oddsRevisions): RedirectResponse
     {
         // Formes de vie : les coefficients sont valides au serveur avant toute ecriture — un nombre
         // fini strictement positif, au plus 100 — et un refus ne change aucun reglage.
@@ -135,6 +149,30 @@ class ServerSettingsController extends OGameController
             'integer' => __('t_ingame.admin.lifeforms_invalid_loss_rate'),
             'between' => __('t_ingame.admin.lifeforms_invalid_loss_rate'),
         ]);
+
+        // Les cotes d artefacts des vols de decouverte (journal §159) : six entiers, chacun dans ses bornes, puis la
+        // coherence de l ensemble (`LifeformDiscoveryOdds` refuse une repartition qui ne tient pas dans cent ou des
+        // trouvailles desordonnees). Un refus ne change aucun reglage. Un champ absent revient a sa valeur de depart.
+        $cotes = request()->validate([
+            'lifeform_discovery_artifact_chance' => ['nullable', 'integer', 'between:0,' . LifeformDiscoveryOdds::MAX_ARTIFACT_CHANCE],
+            'lifeform_discovery_artifacts_small' => ['nullable', 'integer', 'between:1,3600'],
+            'lifeform_discovery_artifacts_medium' => ['nullable', 'integer', 'between:1,3600'],
+            'lifeform_discovery_artifacts_large' => ['nullable', 'integer', 'between:1,3600'],
+            'lifeform_discovery_artifacts_medium_chance' => ['nullable', 'integer', 'between:0,100'],
+            'lifeform_discovery_artifacts_large_chance' => ['nullable', 'integer', 'between:0,100'],
+        ], [
+            'integer' => __('t_ingame.admin.lifeforms_invalid_odds'),
+            'between' => __('t_ingame.admin.lifeforms_invalid_odds'),
+        ]);
+        $valeurs = [];
+        foreach (SettingsService::DISCOVERY_ODDS_KEYS as $clef => $depart) {
+            $valeurs[$clef] = (int)($cotes[$clef] ?? $depart);
+        }
+        try {
+            new LifeformDiscoveryOdds(...array_values($valeurs));
+        } catch (InvalidArgumentException $faute) {
+            throw ValidationException::withMessages(['lifeform_discovery_artifact_chance' => __('t_ingame.admin.lifeforms_incoherent_odds') . ' ' . $faute->getMessage()]);
+        }
 
         $settingsService->set('fleet_speed_war', request('fleet_speed_war'));
         $settingsService->set('fleet_speed_holding', request('fleet_speed_holding'));
@@ -191,6 +229,11 @@ class ServerSettingsController extends OGameController
         $settingsService->set('lifeform_population_loss_rate', (string)(int)($morts['lifeform_population_loss_rate'] ?? 25));
         $administrateur = auth()->id();
         $lifeformRevisions->recordIfChanged((int)Date::now()->timestamp, is_int($administrateur) ? $administrateur : null, 'administration');
+        // Les six cotes, telles que `LifeformDiscoveryOdds` les a acceptees, puis une revision datee si l une a change.
+        foreach ($valeurs as $clef => $valeur) {
+            $settingsService->set($clef, (string)$valeur);
+        }
+        $oddsRevisions->recordIfChanged((int)Date::now()->timestamp, is_int($administrateur) ? $administrateur : null, 'administration');
         $settingsService->set('newbie_protection_enabled', request('newbie_protection_enabled', 0));
         $settingsService->set('alliance_offensive_protection_enabled', request('alliance_offensive_protection_enabled', 0));
         $settingsService->set('patrol_manoeuvre_delay_seconds', request('patrol_manoeuvre_delay_seconds', 60));

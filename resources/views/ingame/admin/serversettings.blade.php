@@ -554,6 +554,35 @@
                             <div class="fieldwrapper">
                                 <div class="smallFont">{{ __('t_ingame.admin.lifeforms_revisions_desc', ['count' => $lifeforms_revision_count]) }}</div>
                             </div>
+                            {{-- Les cotes d artefacts des vols de decouverte (journal §159) : six entiers, validees au serveur,
+                                 valeurs de depart = le comportement d avant ; un vol lance garde les siennes. --}}
+                            <div class="fieldwrapper">
+                                <label class="styled textBeefy">{{ __('t_ingame.admin.lifeform_discovery_artifact_chance') }}</label>
+                                <div class="thefield">
+                                    <input type="text" pattern="[0-9]*" class="textInput w50 textCenter textBeefy" value="{{ $lifeform_discovery_odds->artifactChance }}" size="5" maxlength="3" name="lifeform_discovery_artifact_chance">
+                                </div>
+                                <div class="smallFont">{{ __('t_ingame.admin.lifeform_discovery_artifact_chance_desc', ['max' => $lifeform_discovery_max_chance, 'nothing' => $lifeform_discovery_odds->nothingChance(), 'experience' => $lifeform_discovery_experience_weight, 'species' => $lifeform_discovery_species_weight, 'default' => $lifeform_discovery_odds_defaults->artifactChance]) }}</div>
+                            </div>
+                            <div class="fieldwrapper">
+                                <label class="styled textBeefy">{{ __('t_ingame.admin.lifeform_discovery_artifact_sizes') }}</label>
+                                <div class="thefield">
+                                    <input type="text" pattern="[0-9]*" class="textInput w50 textCenter textBeefy" value="{{ $lifeform_discovery_odds->small }}" size="5" maxlength="4" name="lifeform_discovery_artifacts_small">
+                                    <input type="text" pattern="[0-9]*" class="textInput w50 textCenter textBeefy" value="{{ $lifeform_discovery_odds->medium }}" size="5" maxlength="4" name="lifeform_discovery_artifacts_medium">
+                                    <input type="text" pattern="[0-9]*" class="textInput w50 textCenter textBeefy" value="{{ $lifeform_discovery_odds->large }}" size="5" maxlength="4" name="lifeform_discovery_artifacts_large">
+                                </div>
+                                <div class="smallFont">{{ __('t_ingame.admin.lifeform_discovery_artifact_sizes_desc', ['default' => $lifeform_discovery_odds_defaults->small . ' / ' . $lifeform_discovery_odds_defaults->medium . ' / ' . $lifeform_discovery_odds_defaults->large]) }}</div>
+                            </div>
+                            <div class="fieldwrapper">
+                                <label class="styled textBeefy">{{ __('t_ingame.admin.lifeform_discovery_artifact_size_chances') }}</label>
+                                <div class="thefield">
+                                    <input type="text" pattern="[0-9]*" class="textInput w50 textCenter textBeefy" value="{{ $lifeform_discovery_odds->mediumChance }}" size="5" maxlength="3" name="lifeform_discovery_artifacts_medium_chance">
+                                    <input type="text" pattern="[0-9]*" class="textInput w50 textCenter textBeefy" value="{{ $lifeform_discovery_odds->largeChance }}" size="5" maxlength="3" name="lifeform_discovery_artifacts_large_chance">
+                                </div>
+                                <div class="smallFont">{{ __('t_ingame.admin.lifeform_discovery_artifact_size_chances_desc', ['small' => $lifeform_discovery_odds->smallChance(), 'default' => $lifeform_discovery_odds_defaults->mediumChance . ' / ' . $lifeform_discovery_odds_defaults->largeChance]) }}</div>
+                            </div>
+                            <div class="fieldwrapper">
+                                <div class="smallFont">{{ __('t_ingame.admin.lifeform_discovery_odds_summary', ['mean' => number_format($lifeform_discovery_odds->meanPerFlight(), 2, ',', ' '), 'default_mean' => number_format($lifeform_discovery_odds_defaults->meanPerFlight(), 2, ',', ' '), 'count' => $lifeform_discovery_odds_revision_count]) }}</div>
+                            </div>
                             {{-- La protection des debutants : son propre interrupteur, desarme par defaut. --}}
                             <div class="fieldwrapper">
                                 <label class="styled textBeefy">{{ __('t_ingame.admin.newbie_protection_enabled') }}</label>

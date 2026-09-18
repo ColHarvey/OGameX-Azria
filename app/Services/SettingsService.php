@@ -4,6 +4,7 @@ namespace OGame\Services;
 
 use Illuminate\Support\Facades\Date;
 use OGame\Factories\GameMissionFactory;
+use OGame\Lifeforms\Discovery\LifeformDiscoveryOdds;
 use OGame\Models\Setting;
 use UnexpectedValueException;
 
@@ -981,6 +982,42 @@ class SettingsService
         }
 
         return (int)$texte;
+    }
+
+    /**
+     * Les six clefs des cotes d artefacts des vols de decouverte, avec leur valeur de depart.
+     *
+     * @var array<string, int>
+     */
+    public const array DISCOVERY_ODDS_KEYS = [
+        'lifeform_discovery_artifact_chance' => 45,
+        'lifeform_discovery_artifacts_small' => 8,
+        'lifeform_discovery_artifacts_medium' => 25,
+        'lifeform_discovery_artifacts_large' => 50,
+        'lifeform_discovery_artifacts_medium_chance' => 8,
+        'lifeform_discovery_artifacts_large_chance' => 2,
+    ];
+
+    /**
+     * Les cotes d artefacts des vols de decouverte **a venir** (journal §159) : chance qu un vol en trouve,
+     * trois tailles de trouvaille et leur repartition. Sans reglage, exactement le comportement d avant
+     * (`LifeformDiscoveryOdds::defaults()`). Un vol deja lance garde les cotes qu il a photographiees.
+     *
+     * La porte d administration refuse tout formulaire incoherent ; un reglage stocke qui n est pas un
+     * entier, ou qui compose des cotes incoherentes, ne vient pas du jeu et est refuse plutot que ramene.
+     */
+    public function lifeformDiscoveryOdds(): LifeformDiscoveryOdds
+    {
+        $valeurs = [];
+        foreach (self::DISCOVERY_ODDS_KEYS as $clef => $depart) {
+            $texte = trim($this->get($clef, (string)$depart));
+            if ($texte === '' || !ctype_digit($texte)) {
+                throw new UnexpectedValueException('Le reglage ' . $clef . ' vaut « ' . $texte . ' » et non un entier positif.');
+            }
+            $valeurs[] = (int)$texte;
+        }
+
+        return new LifeformDiscoveryOdds(...$valeurs);
     }
 
     /**

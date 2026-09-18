@@ -2,6 +2,7 @@
 
 namespace OGame\Lifeforms\Services;
 
+use Closure;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use OGame\GameMessages\LifeformDiscoveryReport;
@@ -41,9 +42,22 @@ use OGame\Services\SettingsService;
  * atomique ; l issue est tiree et ecrite dans la meme transaction. Regler verrouille la ligne du vol,
  * la relit `running`, credite, envoie le rapport et pose `settled_at` : un second passage ne trouve
  * plus rien a faire.
+ *
+ * ## Les cotes d artefacts sont lues au lancement, et scellees avec le vol
+ *
+ * `SettingsService::lifeformDiscoveryOdds()` (journal §159) est lu une fois, dans la transaction du
+ * lancement ; l issue est tiree sous ces cotes et le vol les photographie (`odds`). Un changement
+ * d administration entre le depart et le reglement ne touche donc ni l issue ni le credit : le
+ * reglement ne relit jamais un reglage. Les vols anciens, sans photographie, ont ete tires sous les
+ * valeurs de depart.
  */
 final class LifeformDiscoveryService
 {
+    /**
+     * @var (Closure(int): int)|null la source des tirages ; nulle, `random_int` (couture d essai)
+     */
+    private Closure|null $draw = null;
+
     public function __construct(
         private readonly SettingsService $settings,
         private readonly LifeformLevels $levels,
@@ -51,6 +65,16 @@ final class LifeformDiscoveryService
         private readonly LifeformRuleRevisions $revisions,
         private readonly MessageService $messages,
     ) {
+    }
+
+    /**
+     * Impose la source des tirages du lancement ; `$draw(int $bound)` rend un entier de 0 a bound − 1. Essais seulement.
+     *
+     * @param Closure(int): int $draw
+     */
+    public function useDraw(Closure $draw): void
+    {
+        $this->draw = $draw;
     }
 
     /**
@@ -84,8 +108,10 @@ final class LifeformDiscoveryService
             throw new LifeformRefused(LifeformRefused::NOT_A_PLANET);
         }
         $this->requireCoordinates($target);
+        // Les cotes du vol se lisent avant tout debit : un reglage illisible refuse le lancement sans rien ecrire.
+        $cotes = $this->settings->lifeformDiscoveryOdds();
 
-        return DB::transaction(function () use ($planet, $joueur, $target, $now): LifeformDiscovery {
+        return DB::transaction(function () use ($planet, $joueur, $target, $now, $cotes): LifeformDiscovery {
             $compte = LifeformAccount::query()->where('user_id', $joueur->getId())->lockForUpdate()->first();
             if ($compte === null) {
                 throw new LifeformRefused(LifeformRefused::NO_SPECIES);
@@ -115,7 +141,7 @@ final class LifeformDiscoveryService
             $compte->discoveries_available = (int)$compte->discoveries_available - 1;
             $compte->save();
 
-            $issue = LifeformDiscoveryRules::draw($this->research->discoveredSpeciesOf($joueur->getId()));
+            $issue = LifeformDiscoveryRules::draw($this->research->discoveredSpeciesOf($joueur->getId()), $this->draw, $cotes);
             $duree = LifeformDiscoveryRules::duration(
                 LifeformDiscoveryRules::distance($planet->getPlanetCoordinates(), $target),
                 $this->envoysReduction($joueur->getId(), $planet->getPlanetId()),
@@ -133,6 +159,7 @@ final class LifeformDiscoveryService
                 'outcome' => $issue->toStorage(),
                 'status' => 'running',
                 'rules_version' => LifeformDiscoveryRules::VERSION,
+                'odds' => $cotes->toStorage(),
             ]);
         });
     }

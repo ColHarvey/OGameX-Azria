@@ -32,6 +32,9 @@ use OGame\Models\Resources;
  *   cas, ou 50 dans 2 %), experience 22 % (40 a 80 points pour une espece decouverte tiree au sort,
  *   la sienne comprise), **espece nouvelle 3 %** (tant qu il en reste ; sinon ce poids va a
  *   l experience), avec 100 points de bienvenue.
+ * - La chance d artefacts et les trois trouvailles sont un **reglage d administration**
+ *   (`LifeformDiscoveryOdds`, journal §159) dont les valeurs de depart sont celles-ci ; un changement
+ *   ne prend et ne rend qu a « rien », et ne vaut que pour les vols lances ensuite.
  */
 final class LifeformDiscoveryRules
 {
@@ -48,13 +51,20 @@ final class LifeformDiscoveryRules
     public const int NEW_SPECIES_EXPERIENCE = 100;
 
     /**
-     * @var array<string, int> poids des issues, en pour cent
+     * Les deux parts qu aucun reglage ne bouge (voir `LifeformDiscoveryOdds`).
+     */
+    public const int EXPERIENCE_WEIGHT = 22;
+
+    public const int SPECIES_WEIGHT = 3;
+
+    /**
+     * @var array<string, int> poids des issues de depart, en pour cent
      */
     public const array WEIGHTS = [
         LifeformDiscoveryOutcome::NOTHING => 30,
         LifeformDiscoveryOutcome::ARTIFACTS => 45,
-        LifeformDiscoveryOutcome::EXPERIENCE => 22,
-        LifeformDiscoveryOutcome::SPECIES => 3,
+        LifeformDiscoveryOutcome::EXPERIENCE => self::EXPERIENCE_WEIGHT,
+        LifeformDiscoveryOutcome::SPECIES => self::SPECIES_WEIGHT,
     ];
 
     public static function cost(): Resources
@@ -95,19 +105,21 @@ final class LifeformDiscoveryRules
 
     /**
      * Tire une issue. `$draw(int $bound)` rend un entier de 0 a bound − 1 ; injectable pour les essais.
+     * Sans cotes, celles de depart.
      *
      * @param array<int, Species> $discovered les especes deja decouvertes (la sienne comprise)
      * @param (Closure(int): int)|null $draw
      */
-    public static function draw(array $discovered, Closure|null $draw = null): LifeformDiscoveryOutcome
+    public static function draw(array $discovered, Closure|null $draw = null, LifeformDiscoveryOdds|null $odds = null): LifeformDiscoveryOutcome
     {
         $draw ??= static fn (int $bound): int => random_int(0, $bound - 1);
+        $odds ??= LifeformDiscoveryOdds::defaults();
         if ($discovered === []) {
             throw new InvalidArgumentException('Un compte sans espece ne decouvre rien.');
         }
         $restantes = array_values(array_filter(Species::cases(), fn (Species $s) => !in_array($s, $discovered, true)));
 
-        $poids = self::WEIGHTS;
+        $poids = $odds->weights();
         if ($restantes === []) {
             $poids[LifeformDiscoveryOutcome::EXPERIENCE] += $poids[LifeformDiscoveryOutcome::SPECIES];
             $poids[LifeformDiscoveryOutcome::SPECIES] = 0;
@@ -124,7 +136,7 @@ final class LifeformDiscoveryRules
         }
 
         return match ($genre) {
-            LifeformDiscoveryOutcome::ARTIFACTS => new LifeformDiscoveryOutcome($genre, null, self::artifactsFound($draw(100)), 0),
+            LifeformDiscoveryOutcome::ARTIFACTS => new LifeformDiscoveryOutcome($genre, null, $odds->artifactsFound($draw(100)), 0),
             LifeformDiscoveryOutcome::EXPERIENCE => new LifeformDiscoveryOutcome($genre, self::oneOf($discovered, $draw(count($discovered))), 0, 40 + $draw(41)),
             LifeformDiscoveryOutcome::SPECIES => new LifeformDiscoveryOutcome($genre, self::oneOf($restantes, $draw(count($restantes))), 0, self::NEW_SPECIES_EXPERIENCE),
             default => new LifeformDiscoveryOutcome(LifeformDiscoveryOutcome::NOTHING, null, 0, 0),
@@ -148,17 +160,10 @@ final class LifeformDiscoveryRules
     }
 
     /**
-     * Les artefacts d une trouvaille, selon un tirage de 0 a 99 : 8 (90 %), 25 (8 %) ou 50 (2 %).
+     * Les artefacts d une trouvaille selon un tirage de 0 a 99, aux cotes de depart : 8 (90 %), 25 (8 %) ou 50 (2 %).
      */
     public static function artifactsFound(int $roll): int
     {
-        if ($roll < 2) {
-            return 50;
-        }
-        if ($roll < 10) {
-            return 25;
-        }
-
-        return 8;
+        return LifeformDiscoveryOdds::defaults()->artifactsFound($roll);
     }
 }
