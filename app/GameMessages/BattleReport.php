@@ -2,6 +2,8 @@
 
 namespace OGame\GameMessages;
 
+use OGame\Combat\Presentation\BattleReportParticipants;
+use OGame\Combat\Presentation\BattleReportParticipantsView;
 use OGame\Facades\AppUtil;
 use OGame\GameMessages\Abstracts\GameMessage;
 use OGame\GameMissions\BattleEngine\Models\BattleResultRound;
@@ -419,6 +421,15 @@ class BattleReport extends GameMessage
         // This is used to show only the relevant wreckage section to each player.
         $viewerIsAttacker = (int)$this->message->user_id === (int)($battleReportModel->attacker['player_id'] ?? 0);
 
+        // **Chaque participant, avec ses propres caracteristiques** (journal §161) : le bloc gele au reglement quand le
+        // rapport le porte ; un rapport plus ancien garde son effectif additionne, sans rien recalculer ni inventer.
+        $participants = BattleReportParticipantsView::compose(
+            BattleReportParticipants::fromStorage($battleReportModel->participants),
+            $rounds,
+            ['name' => $attacker_name, 'player_id' => (int)$attackerPlayerId, 'coords' => (string)$attacker_planet_coords, 'planet_type' => $attacker_planet_type === 'Moon' ? 3 : 1, 'planet_name' => (string)$attacker_planet_name, 'character_class' => $battleReportModel->attacker['character_class'] ?? null, 'weapons' => $attacker_weapons, 'shields' => $attacker_shields, 'armor' => $attacker_armor, 'units' => $attacker_units],
+            ['name' => $defender_name, 'player_id' => (int)($battleReportModel->planet_user_id ?? 0), 'coords' => $defenderPlanetCoords, 'planet_type' => (int)$battleReportModel->planet_type, 'planet_name' => $defenderPlanetName, 'character_class' => $battleReportModel->defender['character_class'] ?? null, 'weapons' => $defender_weapons, 'shields' => $defender_shields, 'armor' => $defender_armor, 'units' => $defender_units],
+        );
+
         // Recit d'un raid de faction hostile. La cle n'existe que pour ces combats-la, donc
         // le gabarit reste muet pour tout affrontement entre joueurs. Elle n'est montree
         // qu'au defenseur : c'est a lui que la faction s'adresse, et l'attaquant d'un
@@ -494,6 +505,14 @@ class BattleReport extends GameMessage
             'attacker_units_start' => $attacker_units,
             'defender_units_start' => $defender_units,
             'rounds' => $rounds,
+            'participants' => $participants,
+            'report_id' => (int)$battleReportModel->id,
+            'message_id' => (int)$this->message->id,
+            'defender_planet_galaxy' => $defenderPlanetGalaxy,
+            'defender_planet_system' => $defenderPlanetSystem,
+            'defender_planet_position' => $defenderPlanetPos,
+            'defender_planet_type_id' => (int)$battleReportModel->planet_type,
+            'combat_data' => $participants['combat_data'],
         ];
     }
 }

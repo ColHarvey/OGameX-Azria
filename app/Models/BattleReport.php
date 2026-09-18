@@ -45,6 +45,7 @@ use Illuminate\Support\Carbon;
  * @method static Builder|BattleReport whereUpdatedAt($value)
  * @method static Builder|BattleReport whereWreckage($value)
  * @property int $planet_type
+ * @property array<string, mixed>|null $participants
  * @method static Builder<static>|BattleReport wherePlanetType($value)
  * @mixin \Eloquent
  */
@@ -59,6 +60,7 @@ class BattleReport extends Model
         'debris' => 'array',
         'repaired_defenses' => 'array',
         'wreckage' => 'array',
+        'participants' => 'array',
     ];
 
     /**

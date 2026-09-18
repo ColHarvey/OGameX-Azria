@@ -17,6 +17,7 @@ use OGame\Combat\MoonDestruction\FrozenMoonIdentity;
 use OGame\Combat\MoonDestruction\MoonDestructionCandidate;
 use OGame\Combat\MoonDestruction\MoonDestructionRolls;
 use OGame\Combat\MoonDestruction\MoonDestructionRuleRegistry;
+use OGame\Combat\Presentation\BattleReportParticipants;
 use OGame\Combat\Presentation\CombatPresentationTimelineWriter;
 use OGame\Combat\Replay\BattleResultCodec;
 use OGame\Combat\Replay\CombatResultIdentity;
@@ -208,6 +209,12 @@ final class CombatEngagementService
             // **Le taux de morts aussi** : lu a l ouverture, jamais le reglage du moment (journal §155.20).
             OpeningStateRecorder::openingLifeformLossPercentOf($combat)
         )->toStorage();
+
+        // **Les participants du rapport, geles ici avec la bataille** (journal §161) : chaque flotte des deux camps avec
+        // les niveaux, la classe et les caracteristiques par type d unite que ces combattants geles ont employes. Le
+        // reglement ne les relit jamais sur les comptes vivants — une recherche finie entre la cloture et l echeance
+        // entrerait dans le rapport d une bataille deja jouee.
+        $combat->report_participants = BattleReportParticipants::freeze($effectif->attackers, $effectif->defenders, $resultat, $this->faits);
 
         // **Le resultat part avec son identite** : ce combat, cette cible, ces participants — inscrits
         // juste avant, sous les memes verrous —, la photographie de l'ouverture et les cinq versions.

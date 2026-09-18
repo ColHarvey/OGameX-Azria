@@ -336,6 +336,8 @@ final class CombatSettlementService
                 $allocation,
                 $contexte,
                 $planLune,
+                // Le bloc des participants gele a la cloture (journal §161) ; nul pour un combat clos avant la colonne.
+                is_array($combat->report_participants) ? $combat->report_participants : null,
             );
 
             $this->moveTo($combat, CombatState::Resolved);

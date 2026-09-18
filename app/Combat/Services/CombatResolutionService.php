@@ -9,6 +9,7 @@ use OGame\Combat\Application\CombatApplicationContext;
 use OGame\Combat\Enums\ActorKind;
 use OGame\Combat\MoonDestruction\FrozenMoonDestructionPlan;
 use OGame\Combat\MoonDestruction\MoonDestructionOutcome;
+use OGame\Combat\Presentation\BattleReportParticipants;
 use OGame\Combat\Support\ActorKindResolver;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\ResourceNormalizationDiagnostics;
@@ -114,6 +115,10 @@ class CombatResolutionService
      *        monde courant, le combat durable la photographie prise a la cloture, sans quoi ce qui
      *        change pendant la bataille en changerait l issue. **Aucun repli** : chaque appelant
      *        nomme sa source, et l oublier est une erreur de type et non un comportement silencieux.
+     * @param array<string, mixed>|false|null $reportParticipants Le bloc des participants du rapport (journal §161) :
+     *        `false` — le compose maintenant depuis les flottes recues (chemin instantane : leurs joueurs sont ceux de la
+     *        bataille) ; un bloc — celui que la cloture a gele (combat durable : les flottes recues portent des comptes
+     *        vivants) ; `null` — aucun bloc (combat clos avant la colonne), le rapport n en aura pas.
      * @return CombatResolutionOutcome Ce que l application du resultat a rencontre — distinct du
      *         resultat lui-meme, qui reste fige tel que le moteur l a calcule.
      */
@@ -131,6 +136,7 @@ class CombatResolutionService
         FrozenLootAllocation $allocation,
         CombatApplicationContext $context,
         FrozenMoonDestructionPlan|null $moonPlan = null,
+        array|false|null $reportParticipants = false,
     ): CombatResolutionOutcome {
         // Ce que l'application du resultat rencontre lui appartient : le `BattleResult` reste tel
         // que le moteur l'a fige.
@@ -597,7 +603,7 @@ class CombatResolutionService
         // traitement. Le chemin est unique pour les deux moteurs.
         resolve(MilitaryBattleTally::class)->record($battleResult, CombatParticipantKey::forBody($defenderPlanet), $mission, $context->applicationInstant());
 
-        $reportId = $this->createBattleReport($attackerPlayer, $defenderPlanet, $battleResult, $collectedDebris, $attackerCollectedDebris, $defenderCollectedDebris, $context);
+        $reportId = $this->createBattleReport($attackerPlayer, $defenderPlanet, $battleResult, $collectedDebris, $attackerCollectedDebris, $defenderCollectedDebris, $context, $reportParticipants === false ? BattleReportParticipants::freeze($attackerFleets, $defenders, $battleResult, $context) : $reportParticipants);
 
         // Le recit d'un raid de faction se depose ici, dans le rapport, et jamais avant
         // l'attaque : un raid pirate doit rester indiscernable d'une attaque humaine tant
@@ -859,7 +865,10 @@ class CombatResolutionService
      * @param Resources $defenderCollectedDebris Debris collected by defender's Reaper ships.
      * @return int
      */
-    private function createBattleReport(PlayerService $attackPlayer, PlanetService $defenderPlanet, BattleResult $battleResult, Resources $collectedDebris, Resources $attackerCollectedDebris, Resources $defenderCollectedDebris, CombatApplicationContext $context): int
+    /**
+     * @param array<string, mixed>|null $reportParticipants le bloc des participants, ou null pour un rapport sans bloc
+     */
+    private function createBattleReport(PlayerService $attackPlayer, PlanetService $defenderPlanet, BattleResult $battleResult, Resources $collectedDebris, Resources $attackerCollectedDebris, Resources $defenderCollectedDebris, CombatApplicationContext $context, array|null $reportParticipants): int
     {
         $defenderPlayer = $defenderPlanet->getPlayer();
         if ($defenderPlayer === null) {
@@ -908,15 +917,9 @@ class CombatResolutionService
             'character_class' => $attackerCharacterClass?->getName(),
         ];
 
-        // TODO: Enhance battle reports to show individual participating fleets/defenders
-        // Currently shows aggregated defender data (combined units, planet owner's tech, single player_id)
-        // Should show:
-        // - Combined fleet totals (current behavior)
-        // - Dropdown/expandable sections for each participating fleet:
-        //   - Planet owner's stationary forces (ships + defenses with their tech levels)
-        //   - Each ACS Defend fleet (units, owner, tech levels)
-        // - Per-fleet losses and survivors
-        // Data available in: $battleResult->defenderFleetResults
+        // L effectif additionne et les niveaux du proprietaire restent pour les lecteurs anciens ; **chaque participant**,
+        // avec ses propres niveaux, sa classe, ses unites et les caracteristiques que la bataille a employees, est gele
+        // dans `participants` (journal §161).
         $report->defender = [
             'player_id' => $defenderPlayer->getId(),
             'resource_loss' => $battleResult->defenderResourceLoss->sum(),
@@ -950,6 +953,7 @@ class CombatResolutionService
         ];
 
         $report->repaired_defenses = $battleResult->repairedDefenses->toArray();
+        $report->participants = $reportParticipants;
 
         // Save defender's wreck field data (ships recoverable via Space Dock)
         if (!empty($battleResult->wreckField) && ($battleResult->wreckField['formed'] ?? false)) {

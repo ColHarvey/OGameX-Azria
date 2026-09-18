@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Log;
 use OGame\Combat\Enums\CombatState;
 use OGame\Combat\Exceptions\CorruptedFrozenApplicationContext;
 use OGame\Combat\Policies\CargoWeightedV1;
+use OGame\Combat\Presentation\BattleReportParticipants;
 use OGame\Combat\Replay\BattleResultCodec;
 use OGame\Combat\Services\CombatOpeningService;
 use OGame\Combat\Services\CombatResolutionService;
@@ -377,6 +378,42 @@ final class ClassIdentityFrozenAtAdmissionTest extends FleetDispatchTestCase
             $this->reportOf($combat)->attacker['character_class'] ?? null,
             'The report names the class the account had when the battle was computed, not at the admission.'
         );
+    }
+
+    /**
+     * **Le bloc des participants d un combat durable gele ce que la bataille a employe** (journal §161) : la classe de
+     * General prise entre l arrivee et le traitement (l admission lit l historique a l arrivee) et six niveaux d armes
+     * finis entre la cloture et le reglement n atteignent ni ses niveaux, ni ses caracteristiques par type d unite, ni
+     * ses niveaux de classe — le rapport lit le combattant gele, jamais le compte au moment du reglement.
+     */
+    public function testTheParticipantsBlockFreezesWhatTheAttackerHadAtItsAdmission(): void
+    {
+        $entree = 3;
+        [$combat] = $this->aLoneAttackProcessedLate(CharacterClass::COLLECTOR, function (): void {
+            $this->recordCharacterClass($this->currentUserId, CharacterClass::GENERAL);
+        }, [], null, false, function () use ($entree): void {
+            $this->playerSetResearchLevel('weapon_technology', $entree);
+        });
+
+        // --- Le compte bouge entre la cloture (bataille calculee) et le reglement (rapport ecrit) ---
+        $this->playerSetResearchLevel('weapon_technology', $entree + 6);
+        $this->assertSame($entree + 6, resolve(PlayerServiceFactory::class)->make($this->currentUserId, true)->getResearchLevel('weapon_technology'), 'The premise is missing: the research did not change.');
+
+        $this->settleFromStorage($combat);
+
+        $bloc = BattleReportParticipants::fromStorage($this->reportOf($combat)->participants);
+        $this->assertNotNull($bloc, 'The settlement froze no participants block.');
+        $this->assertCount(1, $bloc['attackers']);
+        $attaquant = $bloc['attackers'][0];
+        $this->assertSame($this->currentUserId, $attaquant['player_id']);
+        $this->assertSame($entree, $attaquant['weapon_technology'], 'The block reads the research finished after the admission.');
+        $this->assertSame(0, $attaquant['class_combat_levels'], 'The block reads the class bought after the admission.');
+        $this->assertSame(CharacterClass::COLLECTOR->getName(), $attaquant['character_class']);
+        $base = ObjectService::getUnitObjectByMachineName('light_fighter')->properties->attack->rawValue;
+        $this->assertSame($base + intdiv($base * $entree * 10, 100), $attaquant['unit_characteristics']['light_fighter']['weapon'], 'The weapon of the light fighter is the one the battle used.');
+        $this->assertSame(350, $attaquant['units_start']['light_fighter']);
+        $this->assertSame(BattleReportParticipants::GARRISON_KEY, $bloc['defenders'][0]['key']);
+        $this->assertSame('garrison', $bloc['defenders'][0]['kind']);
     }
 
     /**
