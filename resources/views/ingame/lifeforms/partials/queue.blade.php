@@ -37,14 +37,17 @@
                 </tr>
                 <tr class="data">
                     <td class="desc timer">
-                        <time class="countdown lfBuildingCountdown" data-segments="2">{{ \OGame\Facades\AppUtil::formatTimeDuration($reste) }}</time>
+                        {{-- Une classe de minuterie PAR GENRE : `CountdownTimer` ecrit dans tous les `time.<classe>` de la page, et
+                             les deux boites en portaient une seule — un batiment a 10 min et une recherche a 60 min affichaient
+                             tous deux 60 min, vignette active comprise (releve de Codex, journal §155.26). --}}
+                        <time class="countdown {{ $kind === 'building' ? 'lfBuildingCountdown' : 'lfResearchCountdown' }}" data-segments="2">{{ \OGame\Facades\AppUtil::formatTimeDuration($reste) }}</time>
                     </td>
                 </tr>
                 </tbody>
             </table>
             <script type="text/javascript">
                 var cancelBuildListEntryUrl = '{{ $cancelRoute }}';
-                new CountdownTimer('lfBuildingCountdown', {{ $reste }}, '{{ url()->current() }}', null, true, 3)
+                new CountdownTimer('{{ $kind === 'building' ? 'lfBuildingCountdown' : 'lfResearchCountdown' }}', {{ $reste }}, '{{ url()->current() }}', null, true, 3)
                 function cancelbuilding(id, listId, question) {
                     {{-- @json, jamais {{ json_encode }} : dans un script, les guillemets echappes en &quot; ne sont pas
                          decodes et cassaient tout le bloc — ni compte a rebours, ni annulation (relevé de Codex). --}}

@@ -2,11 +2,7 @@
 
 @section('content')
 
-    @if (session('status'))
-        <div class="alert alert-success">
-            {{ session('status') }}
-        </div>
-    @endif
+    @include('ingame.lifeforms.partials.flash')
 
     <div id="lfresearchcomponent" class="maincontent">
         <div id="lfresearch">
@@ -32,14 +28,18 @@
                                     <li class="technology tooltip hideTooltipOnMouseenter js_hideTipOnMobile" data-slot="{{ $s['slot'] }}"
                                         title="{{ __('t_lifeforms_ui.research.requires', ['population' => $s['required'], 'tier' => $tier]) }}"><span class="icon medium research-locked"></span></li>
                                 @elseif ($s['object'] === null)
-                                    <li class="technology hasDetails tooltip hideTooltipOnMouseenter js_hideTipOnMobile tpd-hideOnClickOutside lifeform-slot-empty" data-slot="{{ $s['slot'] }}"
+                                    {{-- Un emplacement libre ouvre la FENETRE du choix (`a.overlay`, comme l attaque de missiles), la
+                                         couche officielle `lfresearchlayer` ; il n a pas de panneau de detail (journal §155.26). --}}
+                                    <li class="technology tooltip hideTooltipOnMouseenter js_hideTipOnMobile tpd-hideOnClickOutside lifeform-slot-empty" data-slot="{{ $s['slot'] }}"
                                         data-technology="{{ 9000 + $s['slot'] }}" data-status="on" data-is-spaceprovider=""
-                                        aria-label="{{ __('t_lifeforms_ui.research.slot_empty') }}" title="{{ __('t_lifeforms_ui.research.slot_empty') }}"><span class="icon medium {{ $is_in_vacation_mode || !$s['centre_open'] ? 'research-disallowed' : 'research-allowed' }}"></span></li>
+                                        aria-label="{{ __('t_lifeforms_ui.research.slot_empty') }}" title="{{ __('t_lifeforms_ui.research.slot_empty') }}"><a class="overlay" href="{{ route('lifeforms.research.slot.overlay', ['slot' => $s['slot']]) }}" data-overlay-modal="true" data-overlay-class="lfresearchlayer" data-overlay-width="670" data-overlay-title="{{ __('t_lifeforms_ui.research.choose_title', ['slot' => $s['slot'], 'tier' => $tier, 'position' => $s['position']]) }}" style="display: block; width: 100px; height: 100px;"><span class="icon medium {{ $is_in_vacation_mode || !$s['centre_open'] ? 'research-disallowed' : 'research-allowed' }}" style="display: block;"></span></a></li>
                                 @else
                                     @php $objet = $s['object']; @endphp
                                     <li class="technology lifeformTech{{ $objet->id }} hasDetails tooltip hideTooltipOnMouseenter js_hideTipOnMobile tpd-hideOnClickOutside" data-slot="{{ $s['slot'] }}"
                                         data-technology="{{ $objet->id }}" data-is-spaceprovider="" aria-label="{{ $s['title'] }}"
-                                        @if ($s['building_now'])
+                                        @if (!$s['available'])
+                                            data-status="off" data-unavailable="1" title="{{ $s['title'] }}<br/>{{ __('t_lifeforms_ui.refused.not_available') }}"
+                                        @elseif ($s['building_now'])
                                             data-status="active" title="{{ $s['title'] }}<br/>{{ __('t_ingame.buildings.under_construction') }}"
                                         @elseif ($is_in_vacation_mode)
                                             data-status="disabled" title="{{ $s['title'] }}<br/>{{ __('t_ingame.buildings.vacation_mode_error') }}"
@@ -60,7 +60,7 @@
                                         @if ($s['building_now'])
                                             <span class="targetlevel" data-value="{{ $s['building_target'] }}" data-bonus="0">{{ $s['building_target'] }}</span>
                                             <div class="cooldownBackground"></div>
-                                            <time-counter><time class="countdown lfBuildingCountdown" data-segments="2">...</time></time-counter>
+                                            <time-counter><time class="countdown lfResearchCountdown" data-segments="2">...</time></time-counter>
                                         @endif
                                         <span class="level" data-value="{{ $s['level'] }}" data-bonus="0">
                                             <span class="stockAmount">{{ $s['level'] }}</span>

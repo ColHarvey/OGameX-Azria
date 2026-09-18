@@ -10,11 +10,7 @@
 
 @section('content')
 
-    @if (session('status'))
-        <div class="alert alert-success">
-            {{ session('status') }}
-        </div>
-    @endif
+    @include('ingame.lifeforms.partials.flash')
 
     <div id="lfsettingscomponent" class="maincontent">
         <div id="lfsettings">

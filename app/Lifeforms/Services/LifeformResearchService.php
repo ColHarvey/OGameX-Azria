@@ -4,6 +4,7 @@ namespace OGame\Lifeforms\Services;
 
 use Illuminate\Support\Facades\DB;
 use OGame\Lifeforms\Bonuses\LifeformBonusCache;
+use OGame\Lifeforms\Catalogue\LifeformAvailability;
 use OGame\Lifeforms\Catalogue\LifeformCatalogue;
 use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Catalogue\LifeformFormulas;
@@ -245,7 +246,12 @@ final class LifeformResearchService
                 if ($autres === []) {
                     throw new LifeformRefused(LifeformRefused::NO_DISCOVERED_SPECIES);
                 }
-                $objet = self::technologyAt($autres[random_int(0, count($autres) - 1)], $palier, $position);
+                // Le tirage ne tire pas une technologie indisponible : le joueur paierait un objet sans effet.
+                $tirables = array_values(array_filter($autres, fn (Species $s) => LifeformAvailability::isAvailable(self::technologyAt($s, $palier, $position))));
+                if ($tirables === []) {
+                    throw new LifeformRefused(LifeformRefused::NOT_AVAILABLE, self::technologyAt($autres[0], $palier, $position)->machineName);
+                }
+                $objet = self::technologyAt($tirables[random_int(0, count($tirables) - 1)], $palier, $position);
             } else {
                 if (!ctype_digit($choice) || !LifeformCatalogue::has((int)$choice)) {
                     throw new LifeformRefused(LifeformRefused::UNKNOWN_OBJECT, $choice);
@@ -263,6 +269,12 @@ final class LifeformResearchService
                 } else {
                     $via = 'local';
                 }
+            }
+
+            // Un objet dont l effet n est pas applique ne se place pas — quel que soit le chemin —, et ne se paie donc pas :
+            // le debit d artefacts vit dans cette transaction, un refus le defait (journal §155.26).
+            if (!LifeformAvailability::isAvailable($objet)) {
+                throw new LifeformRefused(LifeformRefused::NOT_AVAILABLE, $objet->machineName);
             }
 
             // La meme technologie ne peut pas occuper deux emplacements de la planete.

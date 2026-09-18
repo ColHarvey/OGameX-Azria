@@ -4,6 +4,7 @@ namespace OGame\Lifeforms\Services;
 
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
+use OGame\Lifeforms\Catalogue\LifeformAvailability;
 use OGame\Lifeforms\Catalogue\LifeformCatalogue;
 use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Catalogue\LifeformFormulas;
@@ -66,6 +67,10 @@ final class LifeformQueueService
             throw new LifeformRefused(LifeformRefused::UNKNOWN_OBJECT, (string)$objectId);
         }
         $objet = LifeformCatalogue::byId($objectId);
+        // Un objet dont l effet n est pas applique ne se construit ni ne se recherche (journal §155.26).
+        if (!LifeformAvailability::isAvailable($objet)) {
+            throw new LifeformRefused(LifeformRefused::NOT_AVAILABLE, $objet->machineName);
+        }
 
         return DB::transaction(function () use ($planet, $objet, $now): LifeformQueue {
             Planet::query()->whereKey($planet->getPlanetId())->lockForUpdate()->first();

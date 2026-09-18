@@ -107,6 +107,7 @@ Route::middleware(['auth', 'banned', 'globalgame', 'locale', 'firstlogin'])->gro
     Route::post('/lifeforms/buildings/cancel-buildrequest', [LifeformsController::class, 'cancelBuildRequest'])->name('lifeforms.buildings.cancelbuildrequest');
     Route::get('/lifeforms/research', [LifeformsController::class, 'research'])->name('lifeforms.research');
     Route::get('/ajax/lifeforms/research', [LifeformsController::class, 'researchAjax'])->name('lifeforms.research.ajax');
+    Route::get('/overlay/lifeforms/slot', [LifeformsController::class, 'slotOverlay'])->name('lifeforms.research.slot.overlay');
     Route::post('/lifeforms/research/choose', [LifeformsController::class, 'chooseSlot'])->name('lifeforms.research.choose');
     Route::post('/lifeforms/research/reset', [LifeformsController::class, 'resetTier'])->name('lifeforms.research.reset');
     Route::post('/lifeforms/research/restore', [LifeformsController::class, 'restoreTier'])->name('lifeforms.research.restore');

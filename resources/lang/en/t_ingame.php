@@ -432,6 +432,7 @@ return [
         'fleet_send_failed'                 => 'The fleet could not be sent. Please try again.',
         'discoveries'                  => 'Discoveries',
         'discoveries_tooltip'          => 'Launch a discovery mission to all possible locations',
+        'discoveries_list_view'        => 'Send a flight: list view',
 
         // Header stats row labels
         'probes_short'                 => 'Esp.Probe',

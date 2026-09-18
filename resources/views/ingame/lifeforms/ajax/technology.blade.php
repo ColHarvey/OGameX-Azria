@@ -47,6 +47,7 @@
                 </ul>
             </div>
 
+            @if ($available)
             <div class="build-it_wrap">
                 <div class="ipiHintable" data-ipi-hint="ipiTechnologyUpgradeLifeform{{ $object->id }}">
                     <button class="upgrade" data-technology="{{ $object->id }}" @if (!$can_build) disabled @endif>
@@ -55,6 +56,7 @@
                     </button>
                 </div>
             </div>
+            @endif
         </div>
 
     </div>
@@ -63,6 +65,10 @@
          sur 95 px de haut et toute la largeur (`#technologydetails>.description`). Dedans, le tableau des effets
          puis le texte, comme la page officielle range son `.txt_box`. --}}
     <div class="description">
+        @if (!$available)
+            {{-- L effet n est pas applique : aucun bonus promis, l indisponibilite en clair (journal §155.26). --}}
+            <p class="overmark lifeform_unavailable" style="margin: 0 0 6px 0;">{{ __('t_lifeforms_ui.refused.not_available') }}</p>
+        @else
         <div class="lifeform_effects">
             <table class="lifeform_effects_table smallFont" style="width: 100%; border-collapse: collapse;">
                 <thead>
@@ -83,6 +89,7 @@
                 </tbody>
             </table>
         </div>
+        @endif
 
         <div class="txt_box">
             <span class="text smallFont">{{ $description }}</span>

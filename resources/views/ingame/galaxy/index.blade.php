@@ -458,6 +458,11 @@
                             </div>
                             <div id="galaxyHeaderDiscoveryCount">
                                 {{ $lifeform_discovery_header }}
+                                @if ($lifeform_discoveries_enabled)
+                                    {{-- L icone ADN vit dans la vue liste ; la carte tactique, vue par defaut, ne la porte pas encore
+                                         (JavaScript du front, build en CI). Le lien mene le joueur la ou l action existe (§155.26). --}}
+                                    · <a href="#" id="galaxyHeaderDiscoveryListLink" onclick="document.getElementById('gtViewList').click(); return false;">{{ __('t_ingame.galaxy.discoveries_list_view') }}</a>
+                                @endif
                             </div>
                         </div>
 

@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Date;
 use Illuminate\View\View;
 use OGame\Facades\AppUtil;
 use OGame\Galaxy\GalaxyHeaderCounters;
+use OGame\Lifeforms\Catalogue\LifeformAvailability;
 use OGame\Lifeforms\Catalogue\LifeformCatalogue;
 use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Catalogue\LifeformFormulas;
@@ -177,6 +178,7 @@ final class LifeformsController extends OGameController
                 'target_level' => $cible,
                 'building_now' => $enCours !== null && (int)$enCours->object_id === $batiment->id,
                 'building_target' => $enCours !== null && (int)$enCours->object_id === $batiment->id ? (int)$enCours->target_level : null,
+                'available' => LifeformAvailability::isAvailable($batiment),
                 'requirements_met' => $this->queue->requirementsMet($batiment, $niveaux),
                 'population_met' => $this->queue->populationMet($batiment, $cible, $etat),
                 'enough_resources' => $planet->hasResources($devis->price),
@@ -195,6 +197,8 @@ final class LifeformsController extends OGameController
             'queue_waiting' => $enAttente,
             // La file de l autre genre : les deux boites vivent cote a cote sur chaque page, comme l officiel.
             'other_queue_active' => $this->queue->queued($planet->getPlanetId(), LifeformKind::Technology)->firstWhere('status', 'running'),
+            // Les recherches en attente aussi : une liste vide les cachait depuis cette page (releve de Codex, §155.26).
+            'other_queue_waiting' => $this->queue->queued($planet->getPlanetId(), LifeformKind::Technology)->where('status', 'waiting')->values(),
             'is_in_vacation_mode' => $vacances,
             'held' => $this->banner->heldOn($planet),
         ]);
@@ -236,6 +240,7 @@ final class LifeformsController extends OGameController
             ];
         }
 
+        // Un objet indisponible n a ni bouton ni raison : le panneau le dit en clair a la place des effets (§155.26).
         $raison = null;
         if ($player->isInVacationMode()) {
             $raison = __('t_ingame.ajax_object.vacation_mode');
@@ -265,6 +270,7 @@ final class LifeformsController extends OGameController
             'planet' => $planet,
             'can_build' => $raison === null,
             'reason' => $raison,
+            'available' => LifeformAvailability::isAvailable($objet),
             'active_item' => $enCours !== null && (int)$enCours->object_id === $objet->id ? $enCours : null,
         ])->render();
 
@@ -376,6 +382,7 @@ final class LifeformsController extends OGameController
                     'slot' => $slot,
                     'position' => LifeformSlotRules::positionOf($slot),
                     'unlocked' => $ouvert,
+                    'available' => $objet === null || LifeformAvailability::isAvailable($objet),
                     'required' => AppUtil::formatNumber((int)ceil(LifeformSlotRules::populationRequired($slot, $reduction))),
                     'object' => $objet,
                     'title' => $objet === null ? null : __('t_lifeforms.' . $objet->machineName . '.title'),
@@ -415,8 +422,71 @@ final class LifeformsController extends OGameController
     }
 
     /**
-     * Le detail d une technologie d un emplacement, ou le choix d un emplacement vide (identifiants
-     * 9001 a 9018).
+     * La fenetre superposee du choix d une technologie pour un emplacement ouvert et vide — la couche
+     * `lfresearchlayer` du jeu officiel, que la feuille habille (fiches d espece, boutons verts). Le tile l ouvre
+     * par `a.overlay` ; le panneau de detail de 300 px ne la contient plus (capture de Keven, journal §155.26).
+     */
+    public function slotOverlay(Request $request, PlayerService $player): View
+    {
+        $this->requireOpen();
+        $planet = $player->planets->current();
+        $espece = $this->installation->speciesOf($player->getId());
+        $etat = $espece === null || !$planet->isPlanet() ? null : $this->stateOf($planet);
+        if ($espece === null || $etat === null) {
+            abort(404, __('t_lifeforms_ui.refused.no_species'));
+        }
+        $slot = (int)$request->input('slot');
+        if ($slot < 1 || $slot > LifeformSlotRules::SLOTS) {
+            abort(404, __('t_lifeforms_ui.refused.slot_locked'));
+        }
+        $niveaux = $this->levels->buildingLevelsOf($planet->getPlanetId());
+        $vitesses = $this->revisions->live();
+        $profil = PlanetLifeformProfile::fromLevels($espece, $niveaux, $vitesses->demography());
+        $reduction = $this->research->requirementReduction($espece, $niveaux);
+        $ligne = $this->research->slotsOf($planet->getPlanetId())[$slot];
+        if ($ligne->object_id !== null || !$this->research->isUnlocked($slot, $etat, $profil, $reduction)) {
+            abort(404, __('t_lifeforms_ui.refused.slot_locked'));
+        }
+        $palier = LifeformSlotRules::tierOf($slot);
+        $position = LifeformSlotRules::positionOf($slot);
+        $compte = $this->installation->accountOf($player->getId());
+        $autres = [];
+        foreach ($this->research->discoveredSpeciesOf($player->getId()) as $decouverte) {
+            if ($decouverte === $espece) {
+                continue;
+            }
+            $technologie = LifeformResearchService::technologyAt($decouverte, $palier, $position);
+            $autres[] = [
+                'species' => $decouverte,
+                'species_name' => __('t_lifeforms.species.' . $decouverte->machineName()),
+                'object' => $technologie,
+                'title' => __('t_lifeforms.' . $technologie->machineName . '.title'),
+                'description' => __('t_lifeforms.' . $technologie->machineName . '.description'),
+                'taken' => $this->research->slotHolding($planet->getPlanetId(), $technologie->id) !== null,
+                'available' => LifeformAvailability::isAvailable($technologie),
+            ];
+        }
+        $locale = LifeformResearchService::technologyAt($espece, $palier, $position);
+
+        return view('ingame.lifeforms.overlay.slot', [
+            'slot' => $slot,
+            'tier' => $palier,
+            'position' => $position,
+            'local' => $locale,
+            'local_title' => __('t_lifeforms.' . $locale->machineName . '.title'),
+            'local_description' => __('t_lifeforms.' . $locale->machineName . '.description'),
+            'local_taken' => $this->research->slotHolding($planet->getPlanetId(), $locale->id) !== null,
+            'local_available' => LifeformAvailability::isAvailable($locale),
+            'others' => $autres,
+            // Le tirage ne se propose que s il peut tirer quelque chose : le service ne tire pas une technologie indisponible.
+            'random_available' => array_filter($autres, fn (array $autre): bool => $autre['available']) !== [],
+            'artifact_cost' => LifeformSlotRules::ARTIFACT_COST[$palier],
+            'artifacts' => $compte === null ? 0 : (int)$compte->artifacts,
+        ]);
+    }
+
+    /**
+     * Le detail d une technologie d un emplacement.
      */
     public function researchAjax(Request $request, PlayerService $player): JsonResponse
     {
@@ -432,47 +502,6 @@ final class LifeformsController extends OGameController
         $vitesses = $this->revisions->live();
         $profil = PlanetLifeformProfile::fromLevels($espece, $niveaux, $vitesses->demography());
         $reduction = $this->research->requirementReduction($espece, $niveaux);
-
-        if ($id >= 9001 && $id <= 9000 + LifeformSlotRules::SLOTS) {
-            $slot = $id - 9000;
-            $ligne = $this->research->slotsOf($planet->getPlanetId())[$slot];
-            if ($ligne->object_id !== null || !$this->research->isUnlocked($slot, $etat, $profil, $reduction)) {
-                return response()->json(['success' => false, 'message' => __('t_lifeforms_ui.refused.slot_locked')], 404);
-            }
-            $palier = LifeformSlotRules::tierOf($slot);
-            $position = LifeformSlotRules::positionOf($slot);
-            $compte = $this->installation->accountOf($player->getId());
-            $autres = [];
-            foreach ($this->research->discoveredSpeciesOf($player->getId()) as $decouverte) {
-                if ($decouverte === $espece) {
-                    continue;
-                }
-                $technologie = LifeformResearchService::technologyAt($decouverte, $palier, $position);
-                $autres[] = [
-                    'species' => $decouverte,
-                    'species_name' => __('t_lifeforms.species.' . $decouverte->machineName()),
-                    'object' => $technologie,
-                    'title' => __('t_lifeforms.' . $technologie->machineName . '.title'),
-                    'description' => __('t_lifeforms.' . $technologie->machineName . '.description'),
-                    'taken' => $this->research->slotHolding($planet->getPlanetId(), $technologie->id) !== null,
-                ];
-            }
-            $locale = LifeformResearchService::technologyAt($espece, $palier, $position);
-            $html = view('ingame.lifeforms.ajax.slot', [
-                'slot' => $slot,
-                'tier' => $palier,
-                'position' => $position,
-                'local' => $locale,
-                'local_title' => __('t_lifeforms.' . $locale->machineName . '.title'),
-                'local_description' => __('t_lifeforms.' . $locale->machineName . '.description'),
-                'local_taken' => $this->research->slotHolding($planet->getPlanetId(), $locale->id) !== null,
-                'others' => $autres,
-                'artifact_cost' => LifeformSlotRules::ARTIFACT_COST[$palier],
-                'artifacts' => $compte === null ? 0 : (int)$compte->artifacts,
-            ])->render();
-
-            return response()->json(['target' => 'technologydetails', 'content' => ['technologydetails' => $html], 'files' => ['js' => [], 'css' => []], 'newAjaxToken' => csrf_token()]);
-        }
 
         if (!LifeformCatalogue::has($id)) {
             return response()->json(['success' => false, 'message' => __('t_lifeforms_ui.refused.unknown_object')], 404);
@@ -504,6 +533,7 @@ final class LifeformsController extends OGameController
             ];
         }
 
+        // Un objet indisponible n a ni bouton ni raison : le panneau le dit en clair a la place des effets (§155.26).
         $raison = null;
         if ($player->isInVacationMode()) {
             $raison = __('t_ingame.ajax_object.vacation_mode');
@@ -533,6 +563,7 @@ final class LifeformsController extends OGameController
             'planet' => $planet,
             'can_build' => $raison === null,
             'reason' => $raison,
+            'available' => LifeformAvailability::isAvailable($objet),
             'active_item' => $enCours !== null && (int)$enCours->object_id === $objet->id ? $enCours : null,
         ])->render();
 

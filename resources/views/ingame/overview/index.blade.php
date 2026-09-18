@@ -323,7 +323,7 @@
                 @if (!empty($lifeforms['species']) && !empty($lifeform_queues))
                 {{-- Formes de vie : la recherche en cours de la planete courante (emplacements : tranche 3). --}}
                 <div id="productionboxlfresearchcomponent" class="productionboxlfresearch injectedComponent parent overview">
-                    @include('ingame.lifeforms.partials.queue', ['queue_active' => $lifeform_queues['research_active'], 'queue_waiting' => [], 'kind' => 'technology'])
+                    @include('ingame.lifeforms.partials.queue', ['queue_active' => $lifeform_queues['research_active'], 'queue_waiting' => $lifeform_queues['research_queue'], 'kind' => 'technology'])
                 </div>
                 @endif
                 <script type="text/javascript">

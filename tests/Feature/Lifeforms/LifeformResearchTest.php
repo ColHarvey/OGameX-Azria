@@ -110,11 +110,31 @@ final class LifeformResearchTest extends AccountTestCase
         $page->assertSee('data-technology="9001"', false);
         $this->assertSame(17, substr_count((string)$page->getContent(), 'research-locked'));
 
-        $choix = $this->get(route('lifeforms.research.ajax', ['technology' => 9001]));
+        // La vignette libre ouvre la FENETRE du jeu (`a.overlay`, comme l attaque de missiles), plus un panneau de detail
+        // entasse dans 300 px (capture de Keven, journal §155.26) ; l ancienne adresse du panneau ne repond plus au choix.
+        $page->assertSee('<a class="overlay" href="' . route('lifeforms.research.slot.overlay', ['slot' => 1]) . '" data-overlay-modal="true" data-overlay-class="lfresearchlayer" data-overlay-width="670"', false);
+        $this->get(route('lifeforms.research.ajax', ['technology' => 9001]))->assertStatus(404);
+        $choix = $this->get(route('lifeforms.research.slot.overlay', ['slot' => 1]));
         $choix->assertStatus(200);
-        $this->assertStringContainsString('name="choice" value="local"', (string)$choix->json('content.technologydetails'));
+        $this->assertStringContainsString('name="choice" value="local"', (string)$choix->getContent());
+        $this->get(route('lifeforms.research.slot.overlay', ['slot' => 2]))->assertStatus(404); // Un emplacement ferme n a pas de fenetre.
+        $this->get(route('lifeforms.research.slot.overlay', ['slot' => 19]))->assertStatus(404);
 
-        $this->post(route('lifeforms.research.choose'), ['slot' => 1, 'choice' => 'local'])->assertRedirect(route('lifeforms.research'));
+        // Le message du choix est celui du jeu (`fadeBox`), pas un texte brut au-dessus de l en-tete qui deformait la
+        // page (capture de Keven, journal §155.26).
+        $apres = $this->followingRedirects()->post(route('lifeforms.research.choose'), ['slot' => 1, 'choice' => 'local']);
+        $apres->assertStatus(200);
+        // Les drapeaux de `@json` (balises, apostrophes, esperluettes et guillemets en \uXXXX) : du JSON sur, sans entite.
+        $apres->assertSee('fadeBox(' . json_encode(__('t_lifeforms_ui.research.chosen_done', ['slot' => 1]), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) . ', false);', false);
+        $apres->assertDontSee('alert alert-success', false);
+        LifeformPagesTest::assertScriptsCarryNoHtmlEntity((string)$apres->getContent());
+        // Les messages du jeu n ont ni guillemet ni esperluette : `{{ }}` et `@json` les rendraient pareil. Un message de
+        // banc qui en porte montre que le script recoit du JSON, pas des entites.
+        $piege = 'Prudence : l\'emplacement "1" & <b>';
+        $page = $this->withSession(['status' => $piege])->get(route('lifeforms.research'));
+        $page->assertSee('fadeBox(' . json_encode($piege, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) . ', false);', false);
+        LifeformPagesTest::assertScriptsCarryNoHtmlEntity((string)$page->getContent());
+        $this->get(route('lifeforms.research.slot.overlay', ['slot' => 1]))->assertStatus(404); // Un emplacement pris n a plus de fenetre.
         $emplacement = LifeformSlot::query()->where('planet_id', $planetId)->where('slot', 1)->first();
         $this->assertNotNull($emplacement);
         $this->assertSame(self::ENVOYS, $emplacement->object_id, 'La technologie locale de la position 1 : les Emissaires.');
@@ -404,12 +424,18 @@ final class LifeformResearchTest extends AccountTestCase
         $this->assertSame(1, substr_count($html, 'research-allowed'), 'Centre ouvert : l emplacement libre invite a choisir.');
         $this->assertSame(0, substr_count($html, 'research-disallowed'));
 
-        // Le choix d un emplacement : la couche officielle et ses boutons verts.
-        $choix = (string)$this->get(route('lifeforms.research.ajax', ['technology' => 9001]))->json('content.technologydetails');
-        $this->assertStringContainsString('class="lifeform-slot-choice lfresearchlayer"', $choix);
+        // Le choix d un emplacement : la fenetre du jeu, la couche officielle, les fiches dans le cadre des especes et
+        // le bouton vert que la feuille place (`.lfresearchlayer a.select-button`).
+        $this->assertStringContainsString('<a class="overlay" href="' . route('lifeforms.research.slot.overlay', ['slot' => 1]) . '" data-overlay-modal="true" data-overlay-class="lfresearchlayer" data-overlay-width="670"', $html);
+        $choix = (string)$this->get(route('lifeforms.research.slot.overlay', ['slot' => 1]))->getContent();
+        $this->assertStringContainsString('<div class="lfresearchlayer" id="lifeform-slot-choice" data-slot="1">', $choix);
+        $this->assertStringContainsString('<div class="lifeform-item-holder">', $choix);
+        $this->assertStringContainsString('class="lifeform-item lifeform-choice lifeformcanclaim"', $choix);
+        $this->assertStringContainsString('class="lifeform-research-item-icon lifeform-item-icon lifeform1"', $choix, 'Le portrait de l espece : la classe qui porte le sprite.');
         $this->assertStringContainsString('<a class="select-button"', $choix);
         $this->assertStringNotContainsString('btn_blue', $choix);
-        $this->assertStringContainsString('padding: 30px 8px 8px 8px;', $choix, 'Le contenu degage les 26 px du titre absolu.');
+        $this->assertStringNotContainsString('technologydetails', $choix, 'Une fenetre, pas un panneau.');
+        $this->assertStringNotContainsString('lifeform-slot-choice lfresearchlayer', $choix);
 
         // Une technologie placee : la remise a zero devient possible, en vert.
         resolve(LifeformResearchService::class)->choose($this->currentPlanetId, $this->currentUserId, 1, 'local', (int)Date::now()->timestamp);

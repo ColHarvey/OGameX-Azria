@@ -172,6 +172,7 @@ return [
         'wrong_species' => 'Cet objet n’appartient pas à votre espèce.',
         'not_a_planet' => 'Les formes de vie ne s’installent pas sur les lunes.',
         'unknown_object' => 'Objet inconnu.',
+        'not_available' => 'Indisponible sur Azria pour le moment : son effet n’est pas encore appliqué.',
         'queue_full' => 'La file est pleine.',
         'requirements_unmet' => 'Les prérequis ne sont pas remplis.',
         'population_unmet' => 'La population de la planète est insuffisante pour ce niveau.',

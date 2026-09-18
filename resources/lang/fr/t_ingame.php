@@ -322,6 +322,7 @@ return [
         'fleet_send_failed' => 'L’envoi de la flotte a échoué. Réessayez.',
         'discoveries' => 'Découvertes',
         'discoveries_tooltip' => 'Lancez une mission de découverte dans tous les endroits possibles',
+        'discoveries_list_view' => 'Lancer un vol : vue liste',
         'probes_short' => 'Esp.Sonde',
         'recycler_short' => 'Récy.',
         'ipm_short' => 'IPM.',

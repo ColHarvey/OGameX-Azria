@@ -172,6 +172,7 @@ return [
         'wrong_species' => 'This object does not belong to your species.',
         'not_a_planet' => 'Lifeforms do not settle on moons.',
         'unknown_object' => 'Unknown object.',
+        'not_available' => 'Not available on Azria yet: its effect is not applied.',
         'queue_full' => 'The queue is full.',
         'requirements_unmet' => 'The requirements are not met.',
         'population_unmet' => 'The planet population is too small for this level.',

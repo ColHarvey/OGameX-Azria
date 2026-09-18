@@ -2,11 +2,7 @@
 
 @section('content')
 
-    @if (session('status'))
-        <div class="alert alert-success">
-            {{ session('status') }}
-        </div>
-    @endif
+    @include('ingame.lifeforms.partials.flash')
 
     <div id="lfbuildingscomponent" class="maincontent">
         {{-- `#lfbuildings` est le conteneur que la feuille du jeu taille pour CETTE page : meme cadre que `#supplies`,
@@ -37,7 +33,11 @@
                             data-technology="{{ $objet->id }}"
                             data-is-spaceprovider=""
                             aria-label="{{ $tile['title'] }}"
-                            @if ($tile['building_now'])
+                            @if (!$tile['available'])
+                                {{-- L effet n est pas applique : on ne vend pas un bonus qu on ne rend pas (journal §155.26). --}}
+                                data-status="off" data-unavailable="1"
+                                title="{{ $tile['title'] }}<br/>{{ __('t_lifeforms_ui.refused.not_available') }}"
+                            @elseif ($tile['building_now'])
                                 data-status="active"
                                 title="{{ $tile['title'] }}<br/>{{ __('t_ingame.buildings.under_construction') }}"
                             @elseif ($tile['vacation'])
@@ -60,7 +60,7 @@
                                 title="{{ $tile['title'] }}"
                             @endif
                         ><span class="icon lifeformsprite sprite_medium medium lifeformTech{{ $objet->id }}">
-                            @if (!$tile['building_now'] && !$tile['vacation'] && $tile['requirements_met'] && $tile['population_met'] && $tile['enough_resources'] && !$tile['queue_full'])
+                            @if ($tile['available'] && !$tile['building_now'] && !$tile['vacation'] && $tile['requirements_met'] && $tile['population_met'] && $tile['enough_resources'] && !$tile['queue_full'])
                                 <button class="upgrade tooltip hideOthers js_hideTipOnMobile"
                                         aria-label="{{ __('t_ingame.buildings.expand_button', ['title' => $tile['title'], 'level' => $tile['target_level']]) }}"
                                         title="{{ __('t_ingame.buildings.expand_button', ['title' => $tile['title'], 'level' => $tile['target_level']]) }}"
@@ -91,7 +91,7 @@
                 </div>
                 <div class="productionBoxResearch boxColumn research">
                     <div id="productionboxlfresearchcomponent" class="productionboxlfresearch injectedComponent parent supplies">
-                        @include('ingame.lifeforms.partials.queue', ['queue_active' => $other_queue_active, 'queue_waiting' => [], 'kind' => 'technology'])
+                        @include('ingame.lifeforms.partials.queue', ['queue_active' => $other_queue_active, 'queue_waiting' => $other_queue_waiting, 'kind' => 'technology'])
                     </div>
                 </div>
             </div>

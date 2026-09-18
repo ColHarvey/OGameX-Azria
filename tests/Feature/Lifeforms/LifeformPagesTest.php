@@ -6,15 +6,23 @@ use DOMDocument;
 use DOMElement;
 use DOMXPath;
 use Illuminate\Support\Facades\Date;
+use OGame\Facades\AppUtil;
 use OGame\Factories\PlayerServiceFactory;
+use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\Presentation\LifeformBanner;
 use OGame\Lifeforms\Services\LifeformInstallationService;
+use OGame\Lifeforms\Services\LifeformLevels;
+use OGame\Lifeforms\Services\LifeformQueueService;
+use OGame\Lifeforms\Services\LifeformResearchService;
 use OGame\Lifeforms\Species;
 use OGame\Models\Lifeforms\LifeformAccount;
 use OGame\Models\Lifeforms\LifeformBuildingLevel;
 use OGame\Models\Lifeforms\LifeformPlanet;
 use OGame\Models\Lifeforms\LifeformQueue;
+use OGame\Models\Lifeforms\LifeformSlot;
+use OGame\Models\Lifeforms\LifeformSlotChange;
 use OGame\Models\Lifeforms\LifeformSpeciesProgress;
+use OGame\Models\Lifeforms\LifeformTechnologyLevel;
 use OGame\Models\Lifeforms\LifeformWelcome;
 use OGame\Models\Planet;
 use OGame\Models\Resources;
@@ -33,6 +41,9 @@ final class LifeformPagesTest extends AccountTestCase
     {
         $planetes = Planet::query()->where('user_id', $this->currentUserId)->pluck('id');
         LifeformQueue::query()->whereIn('planet_id', $planetes)->delete();
+        LifeformSlot::query()->whereIn('planet_id', $planetes)->delete();
+        LifeformSlotChange::query()->whereIn('planet_id', $planetes)->delete();
+        LifeformTechnologyLevel::query()->whereIn('planet_id', $planetes)->delete();
         LifeformBuildingLevel::query()->whereIn('planet_id', $planetes)->delete();
         LifeformPlanet::query()->whereIn('planet_id', $planetes)->delete();
         LifeformAccount::query()->where('user_id', $this->currentUserId)->delete();
@@ -260,8 +271,17 @@ final class LifeformPagesTest extends AccountTestCase
         // (Interface_graphique_exemple/Nuova-immagine-bitmap-3.png) montre exactement ce rendu, encoche comprise
         // (journal §155.25). Le capot seul, sans wrapper ni barre, paraissait une languette orpheline (§155.23).
         $sansEspece->assertSee('class="lifeform-item lifeform-species lifeform-species-humans lifeformcanclaim" data-species="1" data-state="can-choose"', false);
-        $this->assertSame(4, substr_count((string)$sansEspece->getContent(), '<div class="lifeform-item-wrapper"'), 'Quatre fiches, quatre wrappers.');
-        $this->assertSame(4, substr_count((string)$sansEspece->getContent(), '<div class="lifeform-item-bottom"></div>'), 'Quatre fiches, quatre barres basses.');
+        // **Le cadre v3, couche par couche** (capture de Keven : capot expose, texte qui deborde, journal §155.26) : le
+        // wrapper porte la colonne de corps decalee (sa bordure droite au bord de la fiche), un enfant absolu la repose a
+        // gauche clippee a 513 px (sa bordure droite traversait la fiche a 515 px), le capot de 620 x 66 par-dessus, le
+        // texte a 492 px au-dessus des couches, la barre basse en deux morceaux jusqu au bord.
+        $html = (string)$sansEspece->getContent();
+        $this->assertSame(4, substr_count($html, '<div class="lifeform-item-wrapper" style="position: relative; min-height: 190px; background: url('), 'Quatre fiches, quatre wrappers.');
+        $this->assertSame(4, preg_match_all('#<div class="lifeform-item-wrapper" style="[^"]*e3e67150390416129bbbc8696f7b91\.png\'\) -539px 0 repeat-y;"#', $html), 'Le wrapper porte la colonne decalee.');
+        $this->assertSame(4, preg_match_all('#<div class="lifeform-item-body" aria-hidden="true" style="position: absolute; top: 0; bottom: 0; left: 0; width: 513px; background: url\([^)]*e3e67150390416129bbbc8696f7b91\.png\x27\) -640px 0 repeat-y; pointer-events: none;"#', $html), 'Quatre corps clippes a 513 px.');
+        $this->assertSame(4, preg_match_all('#<div class="lifeform-item-cap" aria-hidden="true" style="position: absolute; top: 0; left: 0; width: 620px; height: 66px; background: url\([^)]*e3e67150390416129bbbc8696f7b91\.png\x27\) 0 0 no-repeat; pointer-events: none;"#', $html), 'Quatre capots.');
+        $this->assertSame(4, substr_count($html, '<div class="lifeform-item-text" style="width: 492px; position: relative;">'), 'Le texte au-dessus des couches, dans la largeur du corps.');
+        $this->assertSame(4, preg_match_all('#<div class="lifeform-item-bottom" style="width: 620px; background: url\([^)]*\) -100px -85px no-repeat, url\([^)]*\) 0 -85px no-repeat;"></div>#', $html), 'Quatre fiches, quatre barres basses en deux morceaux.');
         // L en-tete est l illustration officielle de la page des especes, a sa hauteur de 250 px.
         $sansEspece->assertSee('img/icons/6dafcd306b27d77508ef115722b6b0.jpg); height: 250px;', false);
         $sansEspece->assertSee('class="select-button"', false);
@@ -432,6 +452,60 @@ final class LifeformPagesTest extends AccountTestCase
         self::assertSame(1, preg_match('#<a class="menubutton[^"]*"\s+href="([^"]+)"#', $menu, $m), 'Le bouton principal du menu est absent.');
 
         return $m[1] ?? '';
+    }
+
+    /**
+     * **Les deux boites de file gardent chacune leur minuterie, et la recherche en attente se voit partout** (releve
+     * de Codex, journal §155.26). `CountdownTimer(nom)` ecrit dans tous les `time.<nom>` de la page : les deux boites
+     * portaient `lfBuildingCountdown`, et un batiment a 14 h et une recherche a 2 min affichaient tous deux la meme
+     * duree, vignette active comprise. Et la page des batiments passait une liste vide pour les recherches en attente.
+     */
+    public function testTheTwoQueueBoxesKeepTheirOwnCountdownAndShowTheWaitingResearchEverywhere(): void
+    {
+        $this->pinSettings(['lifeforms_enabled' => 1, 'economy_speed' => 8, 'research_speed' => 1]);
+        $maintenant = (int)Date::now()->timestamp;
+        $planetId = $this->currentPlanetId;
+        resolve(LifeformInstallationService::class)->chooseSpecies($this->currentUserId, Species::Humans, $maintenant);
+        $this->planetAddResources(new Resources(1000000, 1000000, 1000000, 0));
+        $niveaux = resolve(LifeformLevels::class);
+        $niveaux->setLevel($planetId, LifeformKind::Building, 11103, 1);
+        LifeformPlanet::query()->where('planet_id', $planetId)->update(['population' => 400000.0]);
+        $recherche = resolve(LifeformResearchService::class);
+        $recherche->choose($planetId, $this->currentUserId, 1, 'local', $maintenant);
+        $recherche->choose($planetId, $this->currentUserId, 2, 'local', $maintenant);
+
+        $file = resolve(LifeformQueueService::class);
+        $batiment = $file->add($this->planetService, 11101, $maintenant);
+        $enCours = $file->add($this->planetService, 11201, $maintenant);
+        $enAttente = $file->add($this->planetService, 11202, $maintenant);
+        $this->assertSame('running', $batiment->status);
+        $this->assertSame('running', $enCours->status);
+        $this->assertSame('waiting', $enAttente->status);
+        $resteBatiment = AppUtil::formatTimeDuration((int)$batiment->time_end - $maintenant);
+        $resteRecherche = AppUtil::formatTimeDuration((int)$enCours->time_end - $maintenant);
+        $this->assertNotSame($resteBatiment, $resteRecherche, 'Premisse : deux durees differentes, sinon l essai ne distingue rien.');
+
+        foreach (['lifeforms.buildings', 'lifeforms.research', 'overview.index'] as $route) {
+            $html = (string)$this->get(route($route))->assertStatus(200)->getContent();
+            // Une minuterie par genre, chacune sur sa boite, avec la duree de SON travail.
+            $this->assertSame(1, substr_count($html, "new CountdownTimer('lfBuildingCountdown', "), "$route : une minuterie de batiment.");
+            $this->assertSame(1, substr_count($html, "new CountdownTimer('lfResearchCountdown', "), "$route : une minuterie de recherche.");
+            $this->assertSame(1, preg_match('#<td class="desc timer">\s*<time class="countdown lfBuildingCountdown" data-segments="2">([^<]*)</time>#', $html, $boiteBatiment), "$route : la boite des batiments porte sa minuterie.");
+            $this->assertSame(1, preg_match('#<td class="desc timer">\s*<time class="countdown lfResearchCountdown" data-segments="2">([^<]*)</time>#', $html, $boiteRecherche), "$route : la boite des recherches porte la sienne.");
+            $this->assertSame($resteBatiment, $boiteBatiment[1] ?? null, "$route : la boite des batiments montre la duree du batiment.");
+            $this->assertSame($resteRecherche, $boiteRecherche[1] ?? null, "$route : la boite des recherches montre la duree de la recherche.");
+            // La recherche en attente, dans la boite des recherches, sur les trois pages.
+            $this->assertStringContainsString('lifeformqueuetiny lifeformTech11202', $html, "$route : la recherche en attente se voit.");
+            $this->assertStringNotContainsString('lifeformqueuetiny lifeformTech11101', $html, "$route : rien n attend derriere le batiment.");
+        }
+        // Les vignettes actives suivent la minuterie de leur genre.
+        $batiments = (string)$this->get(route('lifeforms.buildings'))->getContent();
+        $this->assertSame(1, preg_match('#data-technology="11101"[^>]*data-status="active"#', $batiments));
+        $this->assertSame(2, substr_count($batiments, 'class="countdown lfBuildingCountdown"'), 'La boite et la vignette du batiment.');
+        $recherches = (string)$this->get(route('lifeforms.research'))->getContent();
+        $this->assertSame(1, preg_match('#data-technology="11201"[^>]*data-status="active"#', $recherches));
+        $this->assertSame(2, substr_count($recherches, 'class="countdown lfResearchCountdown"'), 'La boite et la vignette de la recherche.');
+        $this->assertSame(1, substr_count($recherches, 'class="countdown lfBuildingCountdown"'), 'La boite des batiments seulement : aucune vignette de batiment ici.');
     }
 
     /**

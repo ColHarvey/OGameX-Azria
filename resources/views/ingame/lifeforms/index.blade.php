@@ -24,11 +24,7 @@
 
 @section('content')
 
-    @if (session('status'))
-        <div class="alert alert-success">
-            {{ session('status') }}
-        </div>
-    @endif
+    @include('ingame.lifeforms.partials.flash')
 
     <div id="lfsettingscomponent" class="maincontent">
         <div id="lfsettings">
@@ -70,8 +66,19 @@
                     @endphp
                     <div class="lfsettingsContentWrapper">
                         <div class="lfsettingsContent">
-                            <div class="lifeform-item lifeform-species lifeform-species-{{ $s->machineName() }} {{ ['chosen' => 'lifeformclaimed', 'can-choose' => 'lifeformcanclaim', 'other' => 'lifeformnotclaim'][$etat] }}" data-species="{{ $n }}" data-state="{{ $etat }}">
-                            <div class="lifeform-item-wrapper" style="position: relative; min-height: 190px;">
+                            {{-- **Le cadre officiel, piece par piece** (journal §155.26). Le sprite `e3e67150…png` (1166 x 98)
+                                 porte un capot de 620 px (puits de l icone, bandeau clair, encoche en haut a droite), une colonne
+                                 de corps de 520 px en `repeat-y` a partir de x = 640, et une barre basse. La feuille pose le capot
+                                 sur la fiche et la colonne sur le wrapper : sur une fiche de 620 px, la colonne s arretait a 520
+                                 et le capot ressortait a droite, sous le texte (capture de Keven). La capture OFFICIELLE montre la
+                                 texture sur toute la largeur, le bandeau et l encoche PAR-DESSUS : c est ce que ces couches
+                                 rendent — deux colonnes de corps (la seconde decalee couvre la droite), le capot en surcouche de
+                                 66 px, la barre basse en deux morceaux jusqu au bord. Tout en ligne : aucun asset a reconstruire. --}}
+                            <div class="lifeform-item lifeform-species lifeform-species-{{ $s->machineName() }} {{ ['chosen' => 'lifeformclaimed', 'can-choose' => 'lifeformcanclaim', 'other' => 'lifeformnotclaim'][$etat] }}" data-species="{{ $n }}" data-state="{{ $etat }}" style="width: 620px; margin-left: 7px;">
+                            <div class="lifeform-item-wrapper" style="position: relative; min-height: 190px; background: url('{{ asset('img/icons/e3e67150390416129bbbc8696f7b91.png') }}') -539px 0 repeat-y;">
+                                {{-- La colonne de corps, clippee a 513 px : sa bordure droite reste hors de sa boite (§155.26). --}}
+                                <div class="lifeform-item-body" aria-hidden="true" style="position: absolute; top: 0; bottom: 0; left: 0; width: 513px; background: url('{{ asset('img/icons/e3e67150390416129bbbc8696f7b91.png') }}') -640px 0 repeat-y; pointer-events: none;"></div>
+                                <div class="lifeform-item-cap" aria-hidden="true" style="position: absolute; top: 0; left: 0; width: 620px; height: 66px; background: url('{{ asset('img/icons/e3e67150390416129bbbc8696f7b91.png') }}') 0 0 no-repeat; pointer-events: none;"></div>
                                 {{-- Aucun style en ligne : `.lifeform-item-icon` porte deja le sprite du jeu, et
                                      `.lifeformN` la position de l espece. --}}
                                 <div class="lifeform-item-icon lifeform{{ $n }}" role="img" aria-label="{{ $espece['name'] }}"></div>
@@ -86,7 +93,7 @@
                                     </svg>
                                     <span class="currentlevel">{{ $espece['experience_level'] }}</span>
                                 </div>
-                                <div class="lifeform-item-text">
+                                <div class="lifeform-item-text" style="width: 492px; position: relative;">
                                     <h3>{{ $espece['name'] }}@if ($espece['chosen']) — {{ __('t_lifeforms_ui.selection.chosen_badge') }}@endif</h3>
                                     <p style="margin: 0 0 6px 0;">{{ $espece['lore'] }}</p>
                                     <p class="smallFont" style="margin: 0 0 6px 0;"><strong>{{ __('t_lifeforms_ui.selection.usage') }}</strong> {{ $espece['usage'] }}</p>
@@ -112,7 +119,7 @@
                                     @endif
                                 </div>
                             </div>
-                            <div class="lifeform-item-bottom"></div>
+                            <div class="lifeform-item-bottom" style="width: 620px; background: url('{{ asset('img/icons/e3e67150390416129bbbc8696f7b91.png') }}') -100px -85px no-repeat, url('{{ asset('img/icons/e3e67150390416129bbbc8696f7b91.png') }}') 0 -85px no-repeat;"></div>
                             </div>
 
                             {{-- **Les deux listes de l espece prennent les barres du jeu** (`.lifeformTechnology > h1`,

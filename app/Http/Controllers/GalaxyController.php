@@ -82,6 +82,8 @@ class GalaxyController extends OGameController
             $system = (int)$system_qs;
         }
 
+        $decouvertes = app(GalaxyDiscoveries::class)->forSystem($player, $galaxy, $system, (int)Date::now()->timestamp);
+
         return view('ingame.galaxy.index')->with([
             'current_galaxy' => $galaxy,
             'current_system' => $system,
@@ -115,7 +117,8 @@ class GalaxyController extends OGameController
             // un chantier eteint et le serveur refusait au devis : le joueur composait une flotte
             // pour rien. Une action ne s offre que si l ordre qu elle prepare peut aboutir.
             'patrols_enabled' => $settingsService->patrolsEnabled(),
-            'lifeform_discovery_header' => app(GalaxyDiscoveries::class)->forSystem($player, $galaxy, $system, (int)Date::now()->timestamp)['header'],
+            'lifeform_discovery_header' => $decouvertes['header'],
+            'lifeform_discoveries_enabled' => $decouvertes['enabled'],
         ]);
     }
 

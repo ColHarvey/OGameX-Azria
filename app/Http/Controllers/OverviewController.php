@@ -117,6 +117,7 @@ class OverviewController extends OGameController
                 'buildings_active' => $lifeformQueue->running($planet->getPlanetId(), LifeformKind::Building),
                 'buildings_queue' => $lifeformQueue->queued($planet->getPlanetId(), LifeformKind::Building)->where('status', 'waiting')->values()->all(),
                 'research_active' => $lifeformQueue->running($planet->getPlanetId(), LifeformKind::Technology),
+                'research_queue' => $lifeformQueue->queued($planet->getPlanetId(), LifeformKind::Technology)->where('status', 'waiting')->values()->all(),
             ];
         }
 

@@ -60,6 +60,7 @@ final class LifeformGalaxyDiscoveryTest extends AccountTestCase
         $page->assertStatus(200);
         $page->assertSee('"lifeformEnabled": false', false);
         $page->assertSee('"discover": ' . GalaxyDiscoveries::MISSION_TYPE, false);
+        $page->assertDontSee('galaxyHeaderDiscoveryListLink', false); // Sans espece, rien a lancer : pas de lien.
 
         $charge = $this->systemeAjax();
         $this->assertFalse($charge['lifeformEnabled']);
@@ -111,6 +112,10 @@ final class LifeformGalaxyDiscoveryTest extends AccountTestCase
         $page->assertSee('id="galaxyHeaderDiscoveryCount">', false);
         $page->assertSee(__('t_ingame.galaxy.discoveries') . ': ' . LifeformDiscoveryRules::QUOTA_PER_DAY, false);
         $page->assertSee('var showDiscoveryWarning = false;', false);
+        // L icone ADN vit dans la vue liste ; la carte tactique, vue par defaut, ne la porte pas encore. L en-tete mene
+        // le joueur a la vue liste par le bouton que la page porte deja (releve de Codex, journal §155.26).
+        $page->assertSee('<a href="#" id="galaxyHeaderDiscoveryListLink" onclick="document.getElementById(\'gtViewList\').click(); return false;">' . e(__('t_ingame.galaxy.discoveries_list_view')) . '</a>', false);
+        $page->assertSee('id="gtViewList"', false); // Premisse : le bouton vise existe.
         LifeformPagesTest::assertScriptsCarryNoHtmlEntity((string)$page->getContent());
     }
 
