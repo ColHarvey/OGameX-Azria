@@ -32,9 +32,14 @@ function unMonde(cookie) {
 
     // jsdom ne met rien en page : `offsetWidth` vaut toujours zero, et le `:visible` de jQuery — dont
     // `updateVisibleState()` se sert pour savoir ce qui est ouvert — serait toujours faux. On rend donc la seule
-    // chose que jQuery regarde : une boite a zero quand elle est masquee, non nulle sinon.
+    // chose que jQuery regarde : une boite a zero quand elle est masquee, non nulle sinon — et pour une fenetre de
+    // conversation, sa vraie largeur sous le theme (350 px, comme la feuille la pose), puisque `azriaDeck()` s en
+    // sert pour ranger les fenetres cote a cote.
     Object.defineProperty(window.HTMLElement.prototype, 'offsetWidth', {
-        get() { return this.style.display === 'none' ? 0 : 120; }
+        get() {
+            if (this.style.display === 'none') { return 0; }
+            return this.classList.contains('chat_box') ? 350 : 120;
+        }
     });
     Object.defineProperty(window.HTMLElement.prototype, 'offsetHeight', {
         get() { return this.style.display === 'none' ? 0 : 24; }
@@ -129,6 +134,49 @@ test('une conversation deja ouverte n est pas redemandee, et la memoire est born
     const ids = monde.requetes.map((r) => r.donnees.playerId).filter((id) => id !== undefined);
     assert.ok(!ids.includes(7), 'La conversation deja dans la barre n est pas redemandee.');
     assert.equal(monde.requetes.length, 5, 'Au plus cinq conversations repartent : une page ne lance pas dix requetes.');
+});
+
+test('le X ferme une conversation meme quand un style en ligne la tenait ouverte', () => {
+    const monde = unMonde(undefined);
+    const $ = monde.window.$;
+    // `showChat()` et `setVisibilityState()` posent ce style en ligne ; il bat n importe quelle feuille, et sans
+    // l effacer l onglet marque « ferme » restait visible — le X semblait ne rien faire (constat de Keven).
+    $('.chat_bar_list').append('<li class="chat_bar_list_item open" data-playerid="7" style="display: inline;"><div class="chat_box"></div></li>');
+
+    monde.chat.closeChatBox(7, undefined);
+
+    const onglet = $('.chat_bar_list_item[data-playerid="7"]');
+    assert.ok(onglet.hasClass('outOfChatbar'), 'L onglet est marque ferme.');
+    assert.ok(!onglet.hasClass('open'), 'Il n est plus ouvert.');
+    assert.equal(onglet[0].style.display, '', 'Le style en ligne est efface : la feuille peut enfin le cacher.');
+    assert.equal(onglet.children('.chat_box')[0].style.display, 'none', 'La fenetre est cachee avec lui.');
+});
+
+test('ouvrir une conversation deja ouverte ne la referme pas', () => {
+    const monde = unMonde(undefined);
+    const $ = monde.window.$;
+    $('.chat_bar_list').append('<li class="chat_bar_list_item open" data-playerid="7" style="display: inline;"><div class="chat_box" style="display: inline;"></div></li>');
+
+    monde.chat.showChat({ playerId: 7 });
+
+    const onglet = $('.chat_bar_list_item[data-playerid="7"]');
+    assert.ok(onglet.hasClass('open'), 'La conversation reste ouverte.');
+    assert.notEqual(onglet.children('.chat_box')[0].style.display, 'none', 'Cliquer le nom d un ami deja ouvert ne ferme pas sa fenetre.');
+});
+
+test('les fenetres se rangent cote a cote, et non sur leur onglet', () => {
+    const monde = unMonde(undefined);
+    const $ = monde.window.$;
+    $('.chat_bar_list').append('<li class="chat_bar_list_item open" data-playerid="7"><div class="chat_box"></div></li>');
+    $('.chat_bar_list').append('<li class="chat_bar_list_item open" data-associationid="42"><div class="chat_box"></div></li>');
+
+    monde.chat.azriaDeck();
+
+    const places = $('.chat_bar_list .chat_box').map(function () { return this.style.getPropertyValue('--az-window-right'); }).get();
+    assert.equal(places.length, 2);
+    assert.notEqual(places[0], places[1], 'Deux fenetres ouvertes ne se superposent pas.');
+    assert.equal(places[0], '8px', 'La premiere se colle au bord droit de la barre.');
+    assert.equal(places[1], '365px', 'La seconde se range a sa gauche, d une largeur de fenetre plus l ecart.');
 });
 
 test('ce que le jeu memorise est bien ce qu il relit', () => {

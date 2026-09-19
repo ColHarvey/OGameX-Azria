@@ -77,6 +77,10 @@
     height: var(--az-tab-height);
     line-height: calc(var(--az-tab-height) - 2px);
     min-width: 0;
+    /* L onglet se dimensionne sur son contenu : la feuille historique lui imposait 270 px, et le theme 350 quand il
+       etait ouvert — la largeur de sa fenetre, puisque la fenetre etait posee dessus. Elles sont desormais rangees le
+       long de la barre (voir `--az-window-right`), donc l onglet redevient un onglet. */
+    width: auto;
     padding: 0 12px;
     font-size: 10px;
     letter-spacing: .3px;
@@ -105,14 +109,17 @@
 #chatBar.azria-chat .chat_bar_pl_list_item:hover {
     filter: brightness(1.18);
 }
-#chatBar.azria-chat .chat_bar_list_item.open {
-    width: 350px; /* la largeur que chat.js suppose sous le theme (updateChatBar) */
-}
-/* Le pont de la maquette : l onglet CONTACTS reste compact, et quand son panneau (266 px) est ouvert, chaque fenetre de
-   conversation ouverte se decale a gauche du panneau, a 14 px, au lieu de passer dessous. Le decalage est mesure par chat.js
-   (`azriaDeck()` : 266 + 14 − largeur de l onglet − 7 d ecart, zero sous 620 px ou panneau ferme) et pose sur la barre. */
-#chatBar.azria-chat .chat_bar_list_item.open > .chat_box {
-    right: calc(-1px + var(--az-deck-shift, 0px));
+/* **Les fenetres se rangent le long de la barre, les onglets restent compacts** (constat de Keven, 19 septembre 2026 :
+   « ca m elargit la box avec le nom du joueur en bas »). Une fenetre etait posee SUR son onglet, donc l onglet devait
+   faire la largeur de la fenetre — 350 px pour un nom de dix lettres. Les fenetres sont desormais placees par rapport
+   a l ecran (la barre elle-meme est fixe), cote a cote depuis la droite : `azriaDeck()` pose la place de chacune dans
+   `--az-window-right`, en tenant compte du panneau des contacts quand il est ouvert. L onglet reprend sa largeur
+   naturelle, comme celui des contacts. */
+#chatBar.azria-chat .chat_bar_list > .chat_bar_list_item.open > .chat_box {
+    position: fixed;
+    right: var(--az-window-right, 8px);
+    /* La barre est fixe a 19 px du bas et haute d un onglet ; la fenetre se pose 3 px au-dessus d elle. */
+    bottom: calc(var(--az-tab-height) + 22px);
 }
 #chatBar.azria-chat .chat_bar_list_item .az-tab-icon,
 #chatBar.azria-chat .onlineCount .az-svg {

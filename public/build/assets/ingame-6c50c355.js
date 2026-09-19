@@ -74846,16 +74846,26 @@ ogame.chat = {
         e.prepend(g.createChatBoxForAssociations(f));
         return e
     },
+    /**
+     * Fermer une conversation : l onglet quitte la barre, et la fenetre avec lui — elle vit dedans.
+     *
+     * **Le style en ligne doit partir** (constat de Keven, 19 septembre 2026) : `showChat()` et
+     * `setVisibilityState()` posent `style="display: inline"` sur l onglet, et un style en ligne bat n importe
+     * quelle feuille. Sans l effacer, un onglet marque `outOfChatbar` restait visible — le X semblait ne rien
+     * faire sur une conversation rouverte depuis les contacts.
+     */
     closeChatBox: function (f, d) {
         var e = $(".chat_bar_list_item");
+        var fermer = function (a) {
+            $(a).addClass("outOfChatbar").removeClass("open").children(".chat_box").hide();
+            a.style.display = ""
+        };
         $.each(e, function (b, a) {
             if (f !== undefined && $(a).data("playerid") == f) {
-                $(a).addClass("outOfChatbar");
-                $(a).removeClass("open")
+                fermer(a)
             } else {
                 if (d !== undefined && $(a).data("associationid") == d) {
-                    $(a).addClass("outOfChatbar");
-                    $(a).removeClass("open")
+                    fermer(a)
                 }
             }
         })
@@ -74893,9 +74903,12 @@ ogame.chat = {
         return l
     },
     /**
-     * Le pont de la maquette (theme Azria) : l onglet CONTACTS reste compact ; quand son panneau est ouvert, les fenetres de
-     * conversation ouvertes se decalent a gauche du panneau, a 14 px, au lieu de passer dessous. La valeur est posee sur la
-     * barre (`--az-deck-shift`), la feuille l applique ; zero sous 620 px (une seule fenetre) ou panneau ferme.
+     * La place de chaque fenetre de conversation le long de la barre (theme Azria).
+     *
+     * Les fenetres ne sont plus posees sur leur onglet — c est ce qui obligeait l onglet a faire leur largeur
+     * (constat de Keven, 19 septembre 2026). Elles se rangent cote a cote depuis le bord droit, a la suite du
+     * panneau des contacts quand il est ouvert. La barre etant en `flex-direction: row-reverse`, le premier onglet
+     * du DOM est le plus a droite : l ordre des fenetres suit celui des onglets.
      */
     azriaDeck: function () {
         var bar = $('#chatBar');
@@ -74905,9 +74918,17 @@ ogame.chat = {
         var panel = $('#chatBarPlayerList > .cb_playerlist_box');
         var shift = 0;
         if (panel.length && panel.is(':visible') && $('body').innerWidth() >= 620) {
-            shift = Math.max(0, panel.outerWidth() + 14 - ($('#chatBarPlayerList').outerWidth() + 7));
+            shift = panel.outerWidth() + 7;
         }
-        bar[0].style.setProperty('--az-deck-shift', shift + 'px');
+        var droite = 8 + shift;
+        $('.chat_bar_list > .chat_bar_list_item.open').each(function () {
+            var box = $(this).children('.chat_box');
+            if (!box.length) {
+                return;
+            }
+            box[0].style.setProperty('--az-window-right', droite + 'px');
+            droite += (box.outerWidth() || 350) + 7;
+        });
     },
     setVisibilityState: function () {
         var n = ogame.chat;
@@ -75310,7 +75331,10 @@ ogame.chat = {
                 if (a.hasClass("outOfChatbar")) {
                     a.removeClass("outOfChatbar")
                 }
-                if (!a.hasClass("open")) {
+                // **Ouvrir ce qui est deja ouvert ne le referme pas** (constat de Keven, 19 septembre 2026) :
+                // `a.click()` BASCULE la fenetre, donc cliquer le nom d un ami dont la conversation etait ouverte
+                // la fermait. On ne clique que si la fenetre n est pas visible.
+                if (!a.hasClass("open") || !a.children(".chat_box").is(":visible")) {
                     a.click();
                     a[0].style.display = "inline"
                 } else {

@@ -165,7 +165,10 @@ class ChatBarDesignTest extends AccountTestCase
 
         $servie = $this->feuilleServie();
         $this->assertStringContainsString('#chatBar.azria-chat', $servie, 'La feuille servie ne porte pas le theme : le jeu servirait l ancien rendu.');
-        $this->assertStringContainsString('#chatBar.azria-chat .chat_bar_list_item.open{width:350px}', $servie, 'La largeur de 350 px que chat.js suppose sous le theme.');
+        // L onglet ne porte plus la largeur de sa fenetre : les fenetres se rangent le long de la barre (§169).
+        $this->assertStringNotContainsString('#chatBar.azria-chat .chat_bar_list_item.open{width:350px}', $servie, 'L onglet ouvert ne prend plus 350 px.');
+        [, $declarationsOnglets] = $this->regleContenant($servie, '#chatBar.azria-chat .chat_bar_list_item{');
+        $this->assertStringContainsString('width:auto', $declarationsOnglets, 'Un onglet se dimensionne sur son contenu.');
         $this->assertStringContainsString('#chatBar.azria-chat .cb_playerlist_box{width:266px}', $servie);
     }
 
@@ -303,12 +306,16 @@ class ChatBarDesignTest extends AccountTestCase
         // Un message recu vise l onglet, jamais la ligne du panneau qui porte le meme identifiant (la fenetre s ouvre en direct).
         $this->assertStringContainsString("find(\".chat_bar_list_item[data-playerid='\" + F + \"']\")", $js);
         $this->assertStringNotContainsString("find(\"[data-playerid='\" + F + \"']\")", $js, 'Le selecteur lache attrapait la ligne du panneau des contacts.');
-        // Le pont : l onglet des contacts reste compact, la conversation se decale par une variable posee par chat.js.
-        $this->assertStringContainsString("style.setProperty('--az-deck-shift'", $js);
-        $regle = '.chat_bar_list_item.open > .chat_box { right: calc(-1px + var(--az-deck-shift, 0px)); }';
+        // **Les fenetres se rangent le long de la barre**, et l onglet garde sa largeur naturelle : une fenetre posee
+        // sur son onglet obligeait l onglet a faire 350 px (constat de Keven, 19 septembre 2026).
+        $this->assertStringContainsString("style.setProperty('--az-window-right'", $js, 'chat.js place chaque fenetre.');
         $source = (string)preg_replace('/\s+/', ' ', (string)file_get_contents(resource_path('css/ingame/chat-azria.css')));
-        $this->assertStringContainsString('#chatBar.azria-chat ' . $regle, $source, 'La feuille source lit le decalage du pont.');
-        $this->assertStringContainsString('#chatBar.azria-chat .chat_bar_list_item.open>.chat_box{right:calc(-1px + var(--az-deck-shift,0px))}', $this->feuilleServie(), 'La feuille servie porte la regle du pont telle que Vite l ecrit.');
+        $this->assertStringContainsString('#chatBar.azria-chat .chat_bar_list > .chat_bar_list_item.open > .chat_box { position: fixed; right: var(--az-window-right, 8px);', $source, 'La feuille source place la fenetre par rapport a l ecran.');
+        $this->assertStringNotContainsString('.chat_bar_list_item.open { width: 350px', $source, 'L onglet ouvert ne prend plus la largeur de la fenetre.');
+        // Sur la feuille servie, l ordre des declarations est celui du minifieur : on lit la regle, pas une chaine.
+        [, $declarationsFenetre] = $this->regleContenant($this->feuilleServie(), '#chatBar.azria-chat .chat_bar_list>.chat_bar_list_item.open>.chat_box');
+        $this->assertStringContainsString('position:fixed', $declarationsFenetre, 'La fenetre se place par rapport a l ecran.');
+        $this->assertStringContainsString('right:var(--az-window-right,8px)', $declarationsFenetre, 'Et a la place que chat.js lui donne.');
         $this->assertStringNotContainsString(':has(', (string)file_get_contents(resource_path('css/ingame/chat-azria.css')), 'Aucun elargissement de l onglet des contacts.');
     }
 }
