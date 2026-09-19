@@ -7,7 +7,9 @@ use Illuminate\Support\Facades\DB;
 use OGame\History\ClassHistoryReader;
 use OGame\History\ClassHistoryRecorder;
 use Tests\AccountTestCase;
+use Tests\RecordsClassHistory;
 use Tests\Support\BackdatesTheBirthOfBenchAccounts;
+use Tests\Support\DetachesFromAnyAlliance;
 
 /**
  * **La naissance d un compte du banc n est pas un fait de jeu** — et la reparer ne doit effacer aucun fait.
@@ -26,6 +28,35 @@ use Tests\Support\BackdatesTheBirthOfBenchAccounts;
 final class BenchAccountBirthTest extends AccountTestCase
 {
     use BackdatesTheBirthOfBenchAccounts;
+    use DetachesFromAnyAlliance;
+    use RecordsClassHistory;
+
+    /**
+     * Les comptes dont cette classe a contredit l historique, pour que le dernier temoin relise ce qu elle laisse.
+     *
+     * Statique : `AccountTestCase` cree un compte par methode, et c est justement l etat **laisse par les methodes
+     * precedentes** qu il faut relire.
+     *
+     * @var list<int>
+     */
+    private static array $comptesContredits = [];
+
+    /**
+     * **Cette classe contredit volontairement l historique : elle le remet en accord.**
+     *
+     * Ses scenarios effacent les lignes d un compte pour eprouver les frontieres de la reparation — et ce compte, avec
+     * ses deux planetes, reste dans la base du processus, ou `getNearbyForeignPlanetFor()` peut l elire comme voisin
+     * etranger pendant une quinzaine de classes. Un compte sans aucune ligne est precisement ce que l aide **refuse**
+     * de reparer : il ferait suspendre la fermeture d un ralliement voisin, et la classe qui ferme ce defaut-la
+     * l aurait introduit ailleurs. Les deux aides du depot remettent la derniere ligne en accord avec la colonne.
+     */
+    protected function tearDown(): void
+    {
+        $this->leaveTheClassHistoryCoherentFor($this->currentUserId);
+        $this->leaveTheMembershipHistoryCoherentFor($this->currentUserId);
+
+        parent::tearDown();
+    }
 
     /**
      * Une naissance posterieure a l instant recule d une seconde avant lui, sans changer de valeur — et la classe
@@ -72,6 +103,7 @@ final class BenchAccountBirthTest extends AccountTestCase
     public function testARealDecisionDatedTooLateIsNeverMoved(): void
     {
         $compte = $this->currentUserId;
+        self::$comptesContredits[] = $compte;
         $instant = (int)Date::now()->timestamp;
         DB::table('character_class_history')->where('user_id', $compte)->delete();
         DB::table('alliance_membership_history')->where('user_id', $compte)->delete();
@@ -95,6 +127,7 @@ final class BenchAccountBirthTest extends AccountTestCase
     public function testNothingIsInventedWhenThereIsNoHistoryAtAll(): void
     {
         $compte = $this->currentUserId;
+        self::$comptesContredits[] = $compte;
         $instant = (int)Date::now()->timestamp;
         DB::table('character_class_history')->where('user_id', $compte)->delete();
         DB::table('alliance_membership_history')->where('user_id', $compte)->delete();
@@ -104,6 +137,29 @@ final class BenchAccountBirthTest extends AccountTestCase
         $this->assertSame(0, DB::table('character_class_history')->where('user_id', $compte)->count());
         $this->assertSame(0, DB::table('alliance_membership_history')->where('user_id', $compte)->count());
         $this->assertFalse(resolve(ClassHistoryReader::class)->personalClassAt($compte, $instant)->isKnown());
+    }
+
+    /**
+     * **Le monde que cette classe laisse derriere elle est lisible** — la moitie que seul un voisin verrait.
+     *
+     * Les scenarios ci-dessus contredisent volontairement l historique de leur compte, et ce compte, avec ses deux
+     * planetes, reste dans la base du processus : `getNearbyForeignPlanetFor()` peut l elire comme voisin etranger
+     * pendant une quinzaine de classes, dont la fermeture se suspendrait alors. Le retour vit dans `tearDown()`, donc
+     * il s execute entre deux methodes : ce temoin, declare en dernier, relit les comptes que les precedents ont
+     * contredits. Sans lui, retirer le retour ne casserait rien **ici** et casserait tout **ailleurs** — exactement le
+     * defaut que cette classe ferme (revue du candidat, journal §166.2).
+     */
+    public function testTheWorldThisClassLeavesBehindStaysReadable(): void
+    {
+        $this->assertNotSame([], self::$comptesContredits, 'Premisse : aucun compte contredit, ce temoin ne prouverait rien.');
+
+        $lecteur = resolve(ClassHistoryReader::class);
+        $plusTard = (int)Date::now()->timestamp + 86400;
+
+        foreach (self::$comptesContredits as $compte) {
+            $this->assertTrue($lecteur->personalClassAt($compte, $plusTard)->isKnown(), 'Le compte ' . $compte . ' reste sans classe lisible : un ralliement voisin se suspendrait.');
+            $this->assertTrue($lecteur->membershipAt($compte, $plusTard)->isKnown(), 'Le compte ' . $compte . ' reste sans appartenance lisible.');
+        }
     }
 
     /**

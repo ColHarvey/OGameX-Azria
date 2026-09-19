@@ -4,6 +4,7 @@ namespace OGame\Combat\Presentation;
 
 use InvalidArgumentException;
 use OGame\Combat\Application\CombatApplicationContext;
+use OGame\Combat\Exceptions\IncoherentRoundAttribution;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleetResult;
@@ -126,7 +127,16 @@ final class BattleReportParticipants
     public static function roundsOf(array $attackerKeys, array $defenderKeys, BattleResult $result): array
     {
         $rounds = [];
-        foreach ($result->rounds as $round) {
+        foreach ($result->rounds as $rang => $round) {
+            // **Ce que le moteur attribue a une flotte absente du bloc ne se perd pas en silence.** En demandant a chaque
+            // participant ce qu il a perdu, cette derivation ne voit plus ce que le moteur attribuerait a un
+            // identifiant inconnu : la perte disparaitrait du document gele sans un mot. Le chemin Rust refuse deja ce
+            // cas (`RustRoundShape`) ; le meme refus vaut ici, pour le moteur PHP comme pour tout appelant qui
+            // reconstruirait la liste des flottes au lieu de passer celle que le moteur a recue (revue du candidat,
+            // journal §166.2).
+            self::refuseALossAttributedToSomeoneAbsent($rang + 1, 'attaquant', $round->attackerLossesInRoundPerFleet, $attackerKeys);
+            self::refuseALossAttributedToSomeoneAbsent($rang + 1, 'defenseur', $round->defenderLossesInRoundPerFleet, $defenderKeys);
+
             $pertes = [];
             foreach ($attackerKeys as $missionId => $clef) {
                 $pertes[$clef] = isset($round->attackerLossesInRoundPerFleet[$missionId]) ? $round->attackerLossesInRoundPerFleet[$missionId]->toArray() : [];
@@ -138,6 +148,25 @@ final class BattleReportParticipants
         }
 
         return $rounds;
+    }
+
+    /**
+     * Refuse une perte attribuee par le moteur a une flotte que le bloc ne connait pas.
+     *
+     * Elle ne pourrait aller nulle part : la derivation interroge les participants, et une carte qui nomme un autre
+     * identifiant verrait sa perte disparaitre. Refuser plutot que completer, comme partout ailleurs sur ce chemin
+     * (`IncoherentRoundAttribution`) : completer rendrait le defaut invisible.
+     *
+     * @param array<int, UnitCollection> $parFlotte
+     * @param array<int, string> $clefs
+     */
+    private static function refuseALossAttributedToSomeoneAbsent(int $round, string $camp, array $parFlotte, array $clefs): void
+    {
+        foreach ($parFlotte as $missionId => $unites) {
+            if (!array_key_exists((int)$missionId, $clefs) && $unites->getAmount() > 0) {
+                throw IncoherentRoundAttribution::inRound($round, $camp, [$camp . ':' . $missionId => $unites->getAmount()], []);
+            }
+        }
     }
 
     /**

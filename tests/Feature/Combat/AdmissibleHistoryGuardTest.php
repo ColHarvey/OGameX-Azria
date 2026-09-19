@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use OGame\Enums\CharacterClass;
+use OGame\History\ClassHistoryReader;
 use OGame\Models\User;
 use OGame\Services\AllianceService;
 use PHPUnit\Framework\AssertionFailedError;
@@ -70,6 +71,27 @@ final class AdmissibleHistoryGuardTest extends FleetDispatchTestCase
 
         $this->requireAnAdmissibleHistoryFor($compte, $this->instant(), 'le compte propre');
         $this->addToAssertionCount(1);
+    }
+
+    /**
+     * **Une naissance posterieure a l instant est ramenee par la garde elle-meme, et le compte passe.**
+     *
+     * C est un artefact d horloge du banc : les essais ne partagent pas la meme, et le voisin etranger est partage par
+     * tout le processus (journal §166.2). La reparation vit dans la garde et non chez l appelant, parce que six
+     * montages l appellent et qu un seul la faisait — la repartition en processus decidait lequel rencontrait le
+     * probleme. Sans ce temoin, retirer la reparation ne casserait rien ici.
+     */
+    public function testALateBirthIsBroughtBackByTheGuardItself(): void
+    {
+        $compte = $this->unCompte();
+        $instant = $this->instant();
+        DB::table('character_class_history')->where('user_id', $compte)->update(['changed_at' => $instant + 3600]);
+        DB::table('alliance_membership_history')->where('user_id', $compte)->update(['changed_at' => $instant + 3600]);
+        $this->assertFalse(resolve(ClassHistoryReader::class)->personalClassAt($compte, $instant)->isKnown(), 'Premisse : ne apres l instant, le compte est illisible.');
+
+        $this->requireAnAdmissibleHistoryFor($compte, $instant, 'le compte ne trop tard');
+
+        $this->assertSame($instant - 1, (int)DB::table('character_class_history')->where('user_id', $compte)->value('changed_at'), 'La garde a ramene la naissance avant l instant.');
     }
 
     public function testAClassWrittenAloneIsRefusedWithTheReadersReason(): void

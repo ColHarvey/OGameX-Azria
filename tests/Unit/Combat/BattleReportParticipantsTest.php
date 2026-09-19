@@ -3,6 +3,7 @@
 namespace Tests\Unit\Combat;
 
 use InvalidArgumentException;
+use OGame\Combat\Exceptions\IncoherentRoundAttribution;
 use OGame\Combat\Presentation\BattleReportParticipants;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
@@ -64,6 +65,61 @@ final class BattleReportParticipantsTest extends UnitTestCase
         $this->assertSame(['rocket_launcher' => 2], $rounds[0]['losses'][BattleReportParticipants::GARRISON_KEY]);
         $this->assertSame([], $rounds[0]['losses'][CombatParticipantKey::forFleet(18)], 'Un participant sans perte figure au round, les mains vides.');
         $this->assertSame(['light_fighter' => 1], $rounds[1]['losses'][CombatParticipantKey::forFleet(18)]);
+    }
+
+    /**
+     * **Une perte attribuee a une flotte absente du bloc arrete la derivation** — elle ne disparait pas.
+     *
+     * Le bloc interroge les participants au lieu de recopier la carte du moteur : ce qu un moteur attribuerait a un
+     * identifiant inconnu n irait donc nulle part. Le chemin Rust refuse deja ce cas (`RustRoundShape`) ; le meme refus
+     * vaut ici, pour le moteur PHP comme pour un appelant qui reconstruirait la liste des flottes au lieu de passer
+     * celle que le moteur a recue (revue du candidat, journal §166.2).
+     */
+    public function testALossAttributedToAFleetTheBlockDoesNotKnowIsRefused(): void
+    {
+        $perdu = new UnitCollection();
+        $perdu->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 2);
+
+        $round = new BattleResultRound();
+        $round->attackerLossesInRoundPerFleet = [19 => new UnitCollection()];
+        $round->defenderLossesInRoundPerFleet = [0 => new UnitCollection(), 99 => $perdu];
+
+        $resultat = new BattleResult();
+        $resultat->rounds = [$round];
+
+        try {
+            BattleReportParticipants::roundsOf(
+                [19 => CombatParticipantKey::forFleet(19)],
+                [0 => BattleReportParticipants::GARRISON_KEY],
+                $resultat
+            );
+            $this->fail('Une perte attribuee a une flotte inconnue du bloc a ete acceptee, et elle aurait disparu.');
+        } catch (IncoherentRoundAttribution $refus) {
+            $this->assertStringContainsString('99', $refus->getMessage(), 'Le refus ne nomme pas la flotte fautive.');
+            $this->assertStringContainsString('defenseur', $refus->getMessage());
+        }
+    }
+
+    /**
+     * Mais une entree **vide** sous un identifiant inconnu ne refuse rien : elle ne porte aucune perte, donc rien ne se
+     * perdrait. Sans ce second cas, un refus trop large passerait pour juste.
+     */
+    public function testAnEmptyEntryUnderAnUnknownFleetRefusesNothing(): void
+    {
+        $round = new BattleResultRound();
+        $round->attackerLossesInRoundPerFleet = [19 => new UnitCollection()];
+        $round->defenderLossesInRoundPerFleet = [0 => new UnitCollection(), 99 => new UnitCollection()];
+
+        $resultat = new BattleResult();
+        $resultat->rounds = [$round];
+
+        $rounds = BattleReportParticipants::roundsOf(
+            [19 => CombatParticipantKey::forFleet(19)],
+            [0 => BattleReportParticipants::GARRISON_KEY],
+            $resultat
+        );
+
+        $this->assertSame([CombatParticipantKey::forFleet(19), BattleReportParticipants::GARRISON_KEY], array_keys($rounds[0]['losses']));
     }
 
     public function testANullBlockIsAnOldReport(): void

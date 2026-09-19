@@ -279,6 +279,12 @@ abstract class FleetDispatchTestCase extends MoonTestCase
      */
     protected function requireAnAdmissibleHistoryFor(int $playerId, int $instant, string $role): void
     {
+        // **La naissance d un compte de banc se ramene ici, pas chez l appelant.** Six montages appellent cette garde
+        // et un seul reparait : la repartition en processus decide lequel rencontre un compte ne sous une horloge
+        // avancee, et le rouge revient alors sous un autre nom (revue du candidat, journal §166.2). La reparation reste
+        // etroite — voir `BackdatesTheBirthOfBenchAccounts` : une ligne de creation posterieure, rien d autre.
+        $this->backdateTheBirthOfABenchAccount($playerId, $instant);
+
         $lecteur = resolve(ClassHistoryReader::class);
 
         $lectures = [
@@ -293,12 +299,13 @@ abstract class FleetDispatchTestCase extends MoonTestCase
 
         foreach ($lectures as $quoi => $valeur) {
             if (!$valeur->isKnown()) {
-                $naissance = DB::table('character_class_history')->where('user_id', $playerId)->orderBy('changed_at')->orderBy('id')->first();
+                $table = $quoi === 'appartenance' ? 'alliance_membership_history' : 'character_class_history';
+                $naissance = DB::table($table)->where('user_id', $playerId)->orderBy('changed_at')->orderBy('id')->first();
                 $this->fail(
                     'Premisse du montage : ' . $role . ' (compte ' . $playerId . ') n a pas d historique admissible a l instant '
                     . $instant . ' ; la fermeture se suspendrait pour cela, pas pour ce que l essai mesure. '
                     . ucfirst($quoi) . ' : ' . $valeur->reason
-                    . ' Naissance du compte : ' . ($naissance === null ? 'aucune ligne' : $naissance->changed_at . ' (cause ' . $naissance->cause . ')')
+                    . ' Premiere ligne de ' . $table . ' : ' . ($naissance === null ? 'aucune' : $naissance->changed_at . ' (cause ' . $naissance->cause . ')')
                     . ' — un compte de banc ne apres cet instant est un artefact d horloge, pas un fait de jeu.'
                 );
             }

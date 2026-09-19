@@ -104,12 +104,9 @@ trait OpensARallyWithAWindow
         $ouvreuse = $this->lastMissionDispatched();
         $ouverture = (int)$ouvreuse->time_arrival;
 
-        // **Le montage exige ce que la fermeture exigera** : voir `requireAnAdmissibleHistoryFor()`. La naissance des
-        // comptes du banc est d abord ramenee avant l ouverture : le voisin etranger est partage par tout le processus,
-        // et un essai qui a avance l horloge avant de le faire naitre le laisserait ne apres ce ralliement (journal §166).
+        // **Le montage exige ce que la fermeture exigera** : voir `requireAnAdmissibleHistoryFor()`, qui ramene aussi
+        // la naissance d un compte de banc ne sous une horloge avancee (journal §166.2).
         $proprietaire = (int)DB::table('planets')->where('id', $cible->getPlanetId())->value('user_id');
-        $this->backdateTheBirthOfABenchAccount($proprietaire, $ouverture);
-        $this->backdateTheBirthOfABenchAccount($this->currentUserId, $ouverture);
         $this->requireAnAdmissibleHistoryFor($proprietaire, $ouverture, 'le proprietaire de la cible');
         $this->requireAnAdmissibleHistoryFor($this->currentUserId, $ouverture, 'l attaquant');
 
