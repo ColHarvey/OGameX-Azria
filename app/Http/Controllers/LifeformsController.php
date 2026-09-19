@@ -548,8 +548,8 @@ final class LifeformsController extends OGameController
             $effets[] = [
                 'code' => $bonus->code,
                 'label' => LifeformEffectPresenter::labelOf($bonus),
-                'now' => self::pourcent(LifeformFormulas::technologyBonusPercent($bonus, $niveau, $multiplicateur - 1)),
-                'next' => self::pourcent(LifeformFormulas::technologyBonusPercent($bonus, $cible, $multiplicateur - 1)),
+                'now' => LifeformEffectPresenter::percentOf($bonus->code, LifeformFormulas::technologyBonusPercent($bonus, $niveau, $multiplicateur - 1)),
+                'next' => LifeformEffectPresenter::percentOf($bonus->code, LifeformFormulas::technologyBonusPercent($bonus, $cible, $multiplicateur - 1)),
             ];
         }
 
@@ -632,14 +632,6 @@ final class LifeformsController extends OGameController
         }
 
         return redirect()->route('lifeforms.research')->with('status', __('t_lifeforms_ui.research.restore_done', ['tier' => (int)$valide['tier']]));
-    }
-
-    private static function pourcent(float $valeur): string
-    {
-        $arrondi = round($valeur, 2);
-        $texte = rtrim(rtrim(number_format($arrondi, 2, '.', ''), '0'), '.');
-
-        return ($arrondi > 0 ? '+' : '') . $texte . ' %';
     }
 
     private function requireOpen(): void

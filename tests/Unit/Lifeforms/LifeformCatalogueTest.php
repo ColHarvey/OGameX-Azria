@@ -2,6 +2,7 @@
 
 namespace Tests\Unit\Lifeforms;
 
+use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
 use OGame\Lifeforms\Catalogue\LifeformCatalogue;
 use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Catalogue\LifeformKind;
@@ -195,5 +196,23 @@ final class LifeformCatalogueTest extends UnitTestCase
         }
 
         return $rangees;
+    }
+
+    /**
+     * **Les vaisseaux civils** : les sept du jeu officiel (l Eclaireur est de combat), une seule liste pour le fret et la
+     * vitesse des formes de vie ET pour les non-combattants du General (audit des bonus, journal §164) — deux ecritures
+     * divergeaient au premier oubli, et retirer le Recycleur passait la suite.
+     */
+    public function testTheCivilShipsAreTheSevenOfTheOfficialGame(): void
+    {
+        $this->assertSame(['small_cargo', 'large_cargo', 'colony_ship', 'recycler', 'espionage_probe', 'solar_satellite', 'crawler'], LifeformBonusResolver::CIVIL_SHIPS);
+        $civils = [];
+        foreach (ObjectService::getShipObjects() as $vaisseau) {
+            if (LifeformBonusResolver::isCivilShip($vaisseau->machine_name)) {
+                $civils[] = $vaisseau->id;
+            }
+        }
+        sort($civils);
+        $this->assertSame([202, 203, 208, 209, 210, 212, 217], $civils, 'Petit et Grand transporteur, Colonisation, Recycleur, Sonde, Satellite, Foreuse.');
     }
 }

@@ -40,6 +40,7 @@ use OGame\Services\CharacterClassService;
 use OGame\Services\FleetMissionService;
 use OGame\Services\MessageService;
 use OGame\Services\ObjectService;
+use OGame\Services\PhalanxService;
 use OGame\Services\PlayerService;
 use OGame\Services\ResearchQueueService;
 use OGame\Services\SettingsService;
@@ -93,6 +94,24 @@ final class LifeformEffectWitnessesTest extends AccountTestCase
     private const int TELEKINETIC_TRACTOR_BEAM = 14204;
 
     private const int GRAVITATION_SENSORS = 14215;
+
+    /** Propulsion a plasma, Mechas : +0,2 % de vitesse par niveau. */
+    private const int PLASMA_DRIVE = 13202;
+
+    /** Revision generale du croiseur, Mechas : +0,3 % par niveau. */
+    private const int GENERAL_OVERHAUL_CRUISER = 13209;
+
+    /** Compresseur neuromodal, Kaelesh : +0,4 % de fret des civils par niveau. */
+    private const int NEUROMODAL_COMPRESSOR = 14206;
+
+    /** Amelioration du Decouvreur, Kaelesh : +0,2 % des bonus de classe par niveau. */
+    private const int KAELESH_DISCOVERER_ENHANCEMENT = 14218;
+
+    /** Laboratoire de biotechnologie, Humains : +5 % de nourriture par niveau. */
+    private const int BIOTECH_LAB = 11110;
+
+    /** Chaine de montage de micropuces, Mechas : +2 % de nourriture et +2 points de croissance par niveau. */
+    private const int MICROCHIP_ASSEMBLY_LINE = 13108;
 
     protected function setUp(): void
     {
@@ -341,6 +360,24 @@ final class LifeformEffectWitnessesTest extends AccountTestCase
         // La ligne de classe du fret est un pour cent ENTIER (CapacityPropertyService : intdiv(base × pour cent, 100)) : 27,5 % → 27 %.
         $this->assertSame(5000 + intdiv(5000 * 27, 100), ObjectService::getShipObjectByMachineName('small_cargo')->properties->capacity->calculate($collecteur)->totalValue, 'Petit transporteur : 5 000 + 27 % (27,5 % arrondi a l entier de la ligne de classe).');
 
+        // La vitesse des transporteurs : la ligne de classe est un pour cent ENTIER, arrondi avant l entier (§164). Au niveau 25
+        // (+5 %), 100 % × 1,05 = 105 % — le bruit flottant de (2,05 − 1) × 100 donnait 104.
+        resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Technology, self::ROCKTAL_COLLECTOR_ENHANCEMENT, 25);
+        LifeformBonusCache::invalidate();
+        $multiplicateur = $classes->getTransporterSpeedBonus(User::query()->findOrFail($this->currentUserId));
+        $this->assertSame(104, (int)(($multiplicateur - 1.0) * 100), 'Premisse : le transtypage seul perd un point a ce niveau.');
+        $collecteur = resolve(PlayerServiceFactory::class)->make($this->currentUserId, true);
+        $ligne = null;
+        $lignes = ObjectService::getShipObjectByMachineName('small_cargo')->properties->speed->calculate($collecteur)->breakdown['bonuses'] ?? [];
+        $this->assertIsArray($lignes);
+        foreach ($lignes as $bonus) {
+            if (is_array($bonus) && ($bonus['type'] ?? null) === 't_ingame.techtree.tooltip_character_class_bonus') {
+                $ligne = $bonus;
+            }
+        }
+        $this->assertNotNull($ligne, 'La ligne de classe de la vitesse.');
+        $this->assertSame(105, (int)$ligne['percentage'], 'Petit transporteur : +105 %, et non +104 %.');
+
         $this->recordCharacterClass($this->currentUserId, CharacterClass::GENERAL);
         $this->assertSame(1.0, $classes->getMineProductionBonus(User::query()->findOrFail($this->currentUserId)), 'Un General n a pas le bonus du Collecteur.');
     }
@@ -422,6 +459,24 @@ final class LifeformEffectWitnessesTest extends AccountTestCase
         resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Technology, self::TELEKINETIC_TRACTOR_BEAM, 0);
         LifeformBonusCache::invalidate();
         $this->assertSame(100000, $trouvaille->invoke($expedition, $mission));
+
+        // Les Capteurs gravitationnels au point de credit : la matiere noire CREDITEE, pas seulement le multiplicateur
+        // (audit des bonus, journal §164). Trouvaille ordinaire, recompense fixee a 1 000 : 1 050 credites.
+        $this->pinSettings(['expedition_dark_matter_min_no_pathfinder' => 1000, 'expedition_dark_matter_max_no_pathfinder' => 1000, 'expedition_dark_matter_multiplier' => 1, 'expedition_reward_multiplier_dark_matter' => 1]);
+        $ordinaire = new class (resolve(FleetMissionService::class), resolve(MessageService::class), resolve(PlanetServiceFactory::class), resolve(PlayerServiceFactory::class), resolve(SettingsService::class)) extends ExpeditionMission {
+            protected function selectExpeditionFindVariant(): array
+            {
+                return ['variant' => 'normal', 'multiplier' => 1];
+            }
+        };
+        $credit = new ReflectionMethod(ExpeditionMission::class, 'processExpeditionGainDarkMatterOutcome');
+        $avant = (int)User::query()->whereKey($this->currentUserId)->value('dark_matter');
+        $credit->invoke($ordinaire, $mission);
+        $this->assertSame($avant + 1050, (int)User::query()->whereKey($this->currentUserId)->value('dark_matter'), 'Capteurs gravitationnels 50 : +5 % de matiere noire creditee.');
+        resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Technology, self::GRAVITATION_SENSORS, 0);
+        LifeformBonusCache::invalidate();
+        $credit->invoke($ordinaire, $mission);
+        $this->assertSame($avant + 1050 + 1000, (int)User::query()->whereKey($this->currentUserId)->value('dark_matter'), 'Sans les Capteurs : 1 000.');
     }
 
     /**
@@ -437,6 +492,136 @@ final class LifeformEffectWitnessesTest extends AccountTestCase
         ksort($actifs);
 
         return $actifs;
+    }
+
+    /**
+     * **Une part de formes de vie est un nombre entier d unites, sans bruit flottant** (audit des bonus, journal §164).
+     * 50 × 4,6 vaut 229,99999999999997 en flottant : floor() rendait 229 de vitesse la ou 230 est du. Propulsion a plasma
+     * niveau 23 (+4,6 %) sur la vitesse, Revision generale du croiseur niveau 29 (+8,7 %) sur sa coque : 27 000 × 8,7 %
+     * = 2 349, et non 2 348.
+     */
+    public function testSpeedAndCombatPartsAreWholeUnitsWithoutFloatingNoise(): void
+    {
+        $this->choose(Species::Mechas);
+        $this->technology(self::PLASMA_DRIVE, 23);
+        $this->technology(self::GENERAL_OVERHAUL_CRUISER, 29);
+        $joueur = $this->player();
+
+        $vitesse = ObjectService::getShipObjectByMachineName('small_cargo')->properties->speed->calculate($joueur);
+        $base = (int)$vitesse->breakdown['rawValue'];
+        $this->assertNotSame(intdiv($base * 46, 1000), (int)floor(($base / 100) * 4.6), 'Premisse : sur cette base, le flottant perd une unite.');
+        $this->assertSame(intdiv($base * 46, 1000), $this->lifeformLineOf($vitesse->breakdown), 'Petit transporteur : +4,6 % de sa vitesse de base, en unites entieres.');
+
+        $coque = ObjectService::getShipObjectByMachineName('cruiser')->properties->structural_integrity->calculate($joueur);
+        $this->assertSame(2348, (int)floor(27000 * 8.7 / 100), 'Premisse : le flottant rend 2 348.');
+        $this->assertSame(2349, $this->lifeformLineOf($coque->breakdown), 'Croiseur : 27 000 × 8,7 % = 2 349.');
+    }
+
+    /**
+     * Le fret : Compresseur neuromodal niveau 23 (+9,2 % des civils) sur le Grand transporteur (25 000) : 2 300, pas 2 299.
+     */
+    public function testTheCivilCargoPartIsAWholeUnitWithoutFloatingNoise(): void
+    {
+        $this->choose(Species::Kaelesh);
+        $this->technology(self::NEUROMODAL_COMPRESSOR, 23);
+        $fret = ObjectService::getShipObjectByMachineName('large_cargo')->properties->capacity->calculate($this->player());
+        $this->assertSame(2299, (int)floor(25000 * 9.2 / 100), 'Premisse : le flottant rend 2 299.');
+        $this->assertSame(2300, $this->lifeformLineOf($fret->breakdown), 'Grand transporteur : 25 000 × 9,2 % = 2 300.');
+    }
+
+    /**
+     * **Les cinq bonus du Decouvreur sont amplifies par l Amelioration des Kaelesh** (audit des bonus, journal §164) :
+     * aucun temoin ne les tenait — un appel retire ou une classe erronee passait la suite. Niveau 50 = +10 %.
+     */
+    public function testTheKaeleshDiscovererEnhancementAmplifiesEveryDiscovererBonus(): void
+    {
+        $this->choose(Species::Kaelesh);
+        $this->technology(self::KAELESH_DISCOVERER_ENHANCEMENT, 50); // 0,2 % par niveau : +10 %
+        $classes = resolve(CharacterClassService::class);
+        $this->assertSame(1.0, $classes->getResearchTimeMultiplier(User::query()->findOrFail($this->currentUserId)), 'Sans classe, rien a amplifier.');
+
+        $this->recordCharacterClass($this->currentUserId, CharacterClass::DISCOVERER);
+        $utilisateur = User::query()->findOrFail($this->currentUserId);
+        $this->assertEqualsWithDelta(0.725, $classes->getResearchTimeMultiplier($utilisateur), 1e-9, 'Recherche −25 % × 1,1 = −27,5 %.');
+        $this->assertEqualsWithDelta(7.75, $classes->getExpeditionResourceMultiplier($utilisateur, 5.0), 1e-9, 'Ressources d expedition +50 % × 1,1 = +55 %, fois la vitesse economique 5.');
+        $this->assertEqualsWithDelta(1.11, $classes->getPlanetSizeBonus($utilisateur), 1e-9, 'Taille des planetes +10 % × 1,1.');
+        $this->assertEqualsWithDelta(0.45, $classes->getExpeditionEnemyChanceMultiplier($utilisateur), 1e-9, 'Chance de rencontre −50 % × 1,1 = −55 %.');
+        $this->assertEqualsWithDelta(1.22, $classes->getPhalanxRangeBonus($utilisateur), 1e-9, 'Portee de phalange +20 % × 1,1.');
+        $this->assertSame(29, resolve(PhalanxService::class)->calculatePhalanxRange(5, $this->currentUserId), 'Phalange niveau 5 : (int)(24 × 1,22) = 29.');
+
+        resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Technology, self::KAELESH_DISCOVERER_ENHANCEMENT, 0);
+        LifeformBonusCache::invalidate();
+        $utilisateur = User::query()->findOrFail($this->currentUserId);
+        $this->assertEqualsWithDelta(0.75, $classes->getResearchTimeMultiplier($utilisateur), 1e-9, 'Sans l Amelioration : −25 %.');
+        $this->assertSame(28, resolve(PhalanxService::class)->calculatePhalanxRange(5, $this->currentUserId), 'Sans l Amelioration : (int)(24 × 1,2) = 28.');
+
+        $this->recordCharacterClass($this->currentUserId, CharacterClass::COLLECTOR);
+        $this->assertSame(1.0, $classes->getResearchTimeMultiplier(User::query()->findOrFail($this->currentUserId)), 'Un Collecteur n a pas le bonus du Decouvreur.');
+    }
+
+    /**
+     * **Le pour cent de production de nourriture** (Laboratoire de biotechnologie, Chaine de montage de micropuces) : applique,
+     * et tenu par aucun temoin — une mutation qui le retirait passait la suite (audit des bonus, journal §164).
+     */
+    public function testTheBiotechLabAndTheMicrochipLineRaiseTheFoodProduction(): void
+    {
+        $humains = [11101 => 21, 11102 => 22];
+        $sans = PlanetLifeformProfile::fromLevels(Species::Humans, $humains, 1.0);
+        $avec = PlanetLifeformProfile::fromLevels(Species::Humans, $humains + [self::BIOTECH_LAB => 10], 1.0);
+        $this->assertGreaterThan(0.0, $sans->foodProductionPerHour, 'Premisse : la ferme produit — sinon juste et faux coincident.');
+        $this->assertEqualsWithDelta($sans->foodProductionPerHour * 1.50, $avec->foodProductionPerHour, 1e-6, 'Laboratoire de biotechnologie 10 : +50 %.');
+        $this->assertSame($sans->livingSpace, $avec->livingSpace, 'Le laboratoire ne touche que la nourriture produite.');
+        $this->assertEqualsWithDelta($sans->growthPerHour, $avec->growthPerHour, 1e-9);
+        $double = PlanetLifeformProfile::fromLevels(Species::Humans, $humains + [self::BIOTECH_LAB => 10], 2.0);
+        $this->assertEqualsWithDelta(PlanetLifeformProfile::fromLevels(Species::Humans, $humains, 2.0)->foodProductionPerHour * 1.50, $double->foodProductionPerHour, 1e-6, 'Le pour cent s applique apres la vitesse.');
+
+        $mechas = [13101 => 21, 13102 => 22];
+        $sans = PlanetLifeformProfile::fromLevels(Species::Mechas, $mechas, 1.0);
+        $avec = PlanetLifeformProfile::fromLevels(Species::Mechas, $mechas + [self::MICROCHIP_ASSEMBLY_LINE => 5], 1.0);
+        $this->assertEqualsWithDelta($sans->foodProductionPerHour * 1.10, $avec->foodProductionPerHour, 1e-6, 'Chaine de montage de micropuces 5 : +10 % de nourriture.');
+        $logement = LifeformCatalogue::byId(13101)->bonus(LifeformEffect::GROWTH_RATE);
+        $this->assertNotNull($logement);
+        $bonusLogement = (21 ** $logement->factor) * $logement->base;
+        $this->assertEqualsWithDelta($sans->growthPerHour / (1 + $bonusLogement / 100) * (1 + ($bonusLogement + 10) / 100), $avec->growthPerHour, 1e-6, '+10 points de croissance.');
+    }
+
+    /**
+     * **L espace de vie en pour cent** (Gratte-ciel, Hall de production, Accelerateur de chrysalide) : l unique temoin
+     * n exigeait qu un « plus grand que », qu un / 100 de trop passait (audit des bonus, journal §164).
+     */
+    public function testTheLivingSpacePercentRaisesTheLivingSpaceExactly(): void
+    {
+        foreach ([[Species::Humans, [11101 => 40, 11102 => 40], 11109, 10, 1.15], [Species::Mechas, [13101 => 40, 13102 => 40], 13109, 5, 1.10], [Species::Kaelesh, [14101 => 40, 14102 => 40], 14108, 5, 1.10]] as [$espece, $niveaux, $batiment, $niveau, $facteur]) {
+            $sans = PlanetLifeformProfile::fromLevels($espece, $niveaux, 1.0);
+            $avec = PlanetLifeformProfile::fromLevels($espece, $niveaux + [$batiment => $niveau], 1.0);
+            $this->assertSame((int)floor($sans->livingSpace * $facteur), $avec->livingSpace, $espece->name . ' : espace de vie × ' . $facteur . '.');
+        }
+    }
+
+    /**
+     * **Le stock de nourriture, en nombre** : base × (N + 1) × facteur^N a partir de la ferme niveau 1, rien sans ferme
+     * — regle Azria mesuree sur le code (aucune page officielle ne donne un stock), jamais epinglee (journal §164).
+     */
+    public function testTheFoodStorageFollowsItsFormulaAndIsZeroWithoutAFarm(): void
+    {
+        $this->assertSame(0.0, PlanetLifeformProfile::fromLevels(Species::Humans, [11101 => 2, 11102 => 0], 1.0)->foodStorage, 'Sans ferme, aucun stock.');
+        $this->assertSame(22.0, PlanetLifeformProfile::fromLevels(Species::Humans, [11101 => 2, 11102 => 1], 1.0)->foodStorage, 'Ferme 1 : floor(10 × 2 × 1,14) = 22.');
+        $this->assertSame(38.0, PlanetLifeformProfile::fromLevels(Species::Humans, [11101 => 2, 11102 => 2], 1.0)->foodStorage, 'Ferme 2 : floor(10 × 3 × 1,14²) = 38.');
+    }
+
+    /**
+     * La ligne « Bonus de forme de vie » d une decomposition de propriete.
+     *
+     * @param array<string, mixed> $breakdown
+     */
+    private function lifeformLineOf(array $breakdown): int
+    {
+        foreach ($breakdown['bonuses'] ?? [] as $ligne) {
+            if (($ligne['type'] ?? null) === 't_ingame.techtree.tooltip_lifeform_bonus') {
+                return (int)$ligne['value'];
+            }
+        }
+        $this->fail('Aucune ligne de forme de vie dans la decomposition.');
     }
 
     private function choose(Species $species): void

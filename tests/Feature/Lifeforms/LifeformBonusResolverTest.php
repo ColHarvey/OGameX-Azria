@@ -10,6 +10,7 @@ use OGame\Lifeforms\Catalogue\LifeformCatalogue;
 use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Catalogue\LifeformFormulas;
 use OGame\Lifeforms\Catalogue\LifeformKind;
+use OGame\Lifeforms\Demography\PlanetLifeformProfile;
 use OGame\Lifeforms\Discovery\LifeformDiscoveryOutcome;
 use OGame\Lifeforms\Discovery\LifeformDiscoveryRules;
 use OGame\Lifeforms\LifeformRefused;
@@ -48,6 +49,16 @@ final class LifeformBonusResolverTest extends AccountTestCase
     private const int VOLCANIC_BATTERIES = 12201;
 
     private const int PSIONIC_NETWORK = 14203;
+
+    private const int PLASMA_DRIVE = 13202;
+
+    /** Production de puces en masse, Mechas : +0,4 % a toutes les technologies de la planete par niveau. */
+    private const int CHIP_MASS_PRODUCTION = 13111;
+
+    private const int PSIONIC_MODULATOR = 14110;
+
+    /** Recuperation de chaleur, Kaelesh : la technologie de l emplacement 1. */
+    private const int HEAT_RECOVERY = 14201;
 
     protected function setUp(): void
     {
@@ -185,6 +196,55 @@ final class LifeformBonusResolverTest extends AccountTestCase
         $this->technology($this->currentPlanetId, 3, self::PSIONIC_NETWORK, 700);
         $this->technology($seconde, 3, self::PSIONIC_NETWORK, 700);
         $this->assertEqualsWithDelta(0.50, $resolveur->forPlayer($this->currentUserId)->fraction(LifeformEffect::EXPEDITION_FLEET_LOSS_REDUCTION), 1e-9, '2 × 35 % plafonnes a 50 %.');
+    }
+
+    /**
+     * **Le bonus « toutes les technologies » d un batiment ne multiplie que les technologies de SA planete** (audit des
+     * bonus, journal §164) : Propulsion a plasma 10 sur deux planetes (+2 % chacune), Production de puces en masse 10 sur
+     * la premiere seulement (+4 %) : 2 % × 1,04 + 2 % = 4,08 % — ni 4,16 % (le batiment partout), ni 4 % (nulle part).
+     */
+    public function testTheAllTechnologiesBonusOfABuildingOnlyMultipliesTheTechnologiesOfItsPlanet(): void
+    {
+        $resolveur = resolve(LifeformBonusResolver::class);
+        $this->choose(Species::Mechas);
+        $seconde = $this->secondPlanet();
+        $this->technology($this->currentPlanetId, 2, self::PLASMA_DRIVE, 10);
+        $this->technology($seconde, 2, self::PLASMA_DRIVE, 10);
+        $this->assertEqualsWithDelta(0.04, $resolveur->forPlayer($this->currentUserId)->fraction(LifeformEffect::SHIP_SPEED), 1e-9, 'Premisse : 2 % + 2 %.');
+
+        $this->building($this->currentPlanetId, self::CHIP_MASS_PRODUCTION, 10);
+        LifeformBonusCache::invalidate();
+        $this->assertEqualsWithDelta(0.0408, $resolveur->forPlayer($this->currentUserId)->fraction(LifeformEffect::SHIP_SPEED), 1e-9, '2 % × 1,04 + 2 %.');
+        $parts = [];
+        foreach ($resolveur->contributionsOf($this->currentUserId) as $part) {
+            if ($part->code === LifeformEffect::SHIP_SPEED) {
+                $parts[$part->planetId] = $part->fraction;
+            }
+        }
+        $this->assertCount(2, $parts, 'Une contribution par planete.');
+        $this->assertEqualsWithDelta(0.0208, $parts[$this->currentPlanetId] ?? 0.0, 1e-9, 'La planete du batiment : × 1,04.');
+        $this->assertEqualsWithDelta(0.02, $parts[$seconde] ?? 0.0, 1e-9, 'L autre planete : rien du batiment.');
+    }
+
+    /**
+     * **Le Modulateur psionique abaisse la population qu exige un emplacement** — prouve par le chemin de l ordre
+     * (`mayResearch()`), pas par la seule formule (audit des bonus, journal §164) : niveau 15 = 30 %, l emplacement 1
+     * s ouvre a 140 000 habitants au lieu de 200 000.
+     */
+    public function testThePsionicModulatorLowersThePopulationASlotNeeds(): void
+    {
+        $this->choose(Species::Kaelesh);
+        $this->placeLifeformSlot($this->currentPlanetId, 1, self::HEAT_RECOVERY, (int)Date::now()->timestamp);
+        LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->update(['population' => 150000.0]);
+        $etat = LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->firstOrFail();
+        $service = resolve(LifeformResearchService::class);
+        $objet = LifeformCatalogue::byId(self::HEAT_RECOVERY);
+        $profil = PlanetLifeformProfile::fromLevels(Species::Kaelesh, [], 1.0);
+
+        $this->assertFalse($service->mayResearch($objet, $this->currentPlanetId, $etat, $profil, Species::Kaelesh, []), 'Sans Modulateur : 150 000 < 200 000.');
+        $this->assertEqualsWithDelta(0.30, $service->requirementReduction(Species::Kaelesh, [self::PSIONIC_MODULATOR => 15]), 1e-9, '2 % par niveau, plafonne a 30 %.');
+        $this->assertTrue($service->mayResearch($objet, $this->currentPlanetId, $etat, $profil, Species::Kaelesh, [self::PSIONIC_MODULATOR => 15]), 'Modulateur 15 : 150 000 ≥ 140 000.');
+        $this->assertFalse($service->mayResearch($objet, $this->currentPlanetId, $etat, $profil, Species::Kaelesh, [self::PSIONIC_MODULATOR => 1]), 'Modulateur 1 : 150 000 < 196 000.');
     }
 
     public function testATechnologyOnlyCountsWhileItsSlotIsOpenAndTheCacheFollowsTheWrites(): void

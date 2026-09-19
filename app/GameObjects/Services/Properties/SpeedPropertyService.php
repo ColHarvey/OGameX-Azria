@@ -9,6 +9,7 @@ use OGame\GameObjects\Models\Fields\GameObjectSpeedUpgrade;
 use OGame\GameObjects\Services\Properties\Abstracts\ObjectPropertyService;
 use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
 use OGame\Lifeforms\Catalogue\LifeformEffect;
+use OGame\Lifeforms\Catalogue\LifeformFormulas;
 use OGame\Services\AllianceClassService;
 use OGame\Services\CharacterClassService;
 use OGame\Services\PlayerService;
@@ -95,7 +96,7 @@ class SpeedPropertyService extends ObjectPropertyService
         }
         $lifeformPercentage = round($lifeformPercentage + $player->getLifeformUnitStatsPercent($this->parent_object), 6);
         if ($lifeformPercentage > 0) {
-            $lifeformValue = floor(($effectiveBase / 100) * $lifeformPercentage);
+            $lifeformValue = LifeformFormulas::partOf((int)$effectiveBase, $lifeformPercentage);
             $totalValue += $lifeformValue;
 
             $breakdown['bonuses'][] = [
@@ -234,15 +235,16 @@ class SpeedPropertyService extends ObjectPropertyService
         if ($object->id === 202 || $object->id === 203) {
             $multiplier = $characterClassService->getTransporterSpeedBonus($user);
             if ($multiplier > 1.0) {
-                return (int)(($multiplier - 1.0) * 100);
+                // Amplifie par les formes de vie, bruit flottant : arrondi avant l entier, comme la ligne du fret (journal §164).
+                return (int)round(($multiplier - 1.0) * 100, 6);
             }
         }
 
         // General: +100% combat ship speed (all military ships except Espionage Probe: 210)
         if ($object->type === GameObjectType::Ship) {
-            // Check if it's a military ship (not transporter, recycler, colony ship, solar satellite, crawler, espionage probe)
-            $nonCombatShips = [202, 203, 208, 209, 210, 212, 217]; // Small/Large Cargo, Colony Ship, Recycler, Espionage Probe, Solar Satellite, Crawler
-            if (!in_array($object->id, $nonCombatShips)) {
+            // Check if it's a military ship (not transporter, recycler, colony ship, solar satellite, crawler, espionage probe) :
+            // les vaisseaux civils, une seule liste avec celle des formes de vie (audit des bonus, journal §164).
+            if (!LifeformBonusResolver::isCivilShip($object->machine_name)) {
                 $multiplier = $characterClassService->getCombatShipSpeedBonus($user);
                 if ($multiplier > 1.0) {
                     return (int)(($multiplier - 1.0) * 100);

@@ -187,6 +187,12 @@ class ResourcesController extends AbstractBuildingsController
 
         $production_factor = $this->planet->getResourceProductionFactor();
 
+        // Formes de vie : leurs batiments consomment l energie de la planete (PlanetService), sur leur ligne ; et le total
+        // d energie est le bilan de la planete — celui du bandeau —, foreuses et batiments de formes de vie compris : la page
+        // annoncait une energie que le bandeau n avait pas (audit des bonus, journal §164).
+        $energieBatimentsFormesDeVie = $this->planet->isPlanet() ? app(LifeformBonusResolver::class)->buildingEnergyOf($this->planet->getPlanetId()) : 0;
+        $productionindex_total->total->energy->set($this->planet->energy()->get());
+
         $productionindex_total->total->metal->set($this->planet->getMetalProductionPerHour());
         $productionindex_total->total->crystal->set($this->planet->getCrystalProductionPerHour());
         $productionindex_total->total->deuterium->set($this->planet->getDeuteriumProductionPerHour());
@@ -212,6 +218,7 @@ class ResourcesController extends AbstractBuildingsController
         return view('ingame.resources.settings')->with([
             'currentPlayer' => $player,
             'lifeform_species' => $espece,
+            'lifeform_buildings_energy' => $energieBatimentsFormesDeVie,
             'lifeform_species_name' => is_string($nomEspece) ? $nomEspece : null,
             'basic_income' => $this->planet->getPlanetBasicIncome(),
             'planet_name' => $this->planet->getPlanetName(),

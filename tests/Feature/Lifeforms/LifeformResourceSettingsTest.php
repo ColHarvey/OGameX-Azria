@@ -4,6 +4,7 @@ namespace Tests\Feature\Lifeforms;
 
 use Illuminate\Support\Facades\Date;
 use OGame\Lifeforms\Bonuses\LifeformBonusCache;
+use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
 use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\Services\LifeformInstallationService;
 use OGame\Lifeforms\Services\LifeformLevels;
@@ -35,6 +36,9 @@ final class LifeformResourceSettingsTest extends AccountTestCase
     private const int MAGMA_FORGE = 12106;
 
     private const int DISRUPTION_CHAMBER = 12107;
+
+    /** Centre de recherche minerale : un gros consommateur d energie (120 × 1,3^niveau). */
+    private const int MINERAL_RESEARCH_CENTRE = 12111;
 
     protected function setUp(): void
     {
@@ -91,6 +95,35 @@ final class LifeformResourceSettingsTest extends AccountTestCase
         $this->assertSame((int)$planete->getMetalProductionPerHour(), $total[0]);
         $sansFormesDeVie = (int)$planete->getMetalProductionPerHour() - $metalAttendu;
         $this->assertGreaterThan($sansFormesDeVie, $total[0], 'Le total compte la ligne ; sans elle, les lignes visibles ne le faisaient pas.');
+    }
+
+    /**
+     * **L energie que consomment les batiments de formes de vie a sa ligne, et le total d energie est celui du bandeau**
+     * (audit des bonus, journal §164). Le bilan de la planete retirait cette energie (bandeau, facteur de production) ; la
+     * page n avait aucune ligne pour elle et son total ne la comptait pas, pas plus que celle des foreuses : le joueur lisait
+     * une energie positive la ou le bandeau disait la penurie.
+     */
+    public function testTheLifeformBuildingsEnergyHasItsRowAndTheEnergyTotalIsTheBanners(): void
+    {
+        $planete = $this->planetService;
+        $this->planetSetObjectLevel('metal_mine', 10);
+        $this->planetSetObjectLevel('solar_plant', 40);
+        resolve(LifeformInstallationService::class)->chooseSpecies($this->currentUserId, Species::Rocktal, (int)Date::now()->timestamp);
+        resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Building, self::MAGMA_FORGE, 10);
+        resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Building, self::MINERAL_RESEARCH_CENTRE, 10);
+        LifeformBonusCache::invalidate();
+        $planete->updateResourceProductionStats(true);
+        $consommation = resolve(LifeformBonusResolver::class)->buildingEnergyOf($this->currentPlanetId);
+        $this->assertGreaterThan(0, $consommation, 'Premisse : les batiments de formes de vie consomment de l energie.');
+
+        $page = (string)$this->get('/resources/settings')->assertStatus(200)->getContent();
+        $ligne = $this->ligne($page, __('t_ingame.resource_settings.lifeform_buildings_energy'));
+        $this->assertNotSame('', $ligne, 'La page a une ligne pour l energie des batiments de formes de vie.');
+        $this->assertSame([0, 0, 0, -$consommation], $this->valeurs($ligne), 'Rien en ressources, et l energie consommee.');
+
+        $bandeau = Planet::query()->whereKey($this->currentPlanetId)->firstOrFail();
+        $total = $this->valeurs($this->ligne($page, __('t_ingame.resource_settings.total_per_hour')));
+        $this->assertSame((int)$bandeau->energy_max - (int)$bandeau->energy_used, $total[3], 'Le total d energie de la page est celui du bandeau.');
     }
 
     public function testWithoutASpeciesTheRowIsGreyedAndEmpty(): void

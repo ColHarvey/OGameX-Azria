@@ -110,6 +110,15 @@ final class LifeformEffectPresenter
     }
 
     /**
+     * Un pour cent d effet, avec son signe : « −10 % » pour une reduction, « +10 % » pour une hausse — la fiche d un
+     * batiment et celle d une technologie ecrivent de meme (audit des bonus, journal §164).
+     */
+    public static function percentOf(string $code, float $valeur): string
+    {
+        return LifeformEffect::isReduction($code) ? self::reduction($valeur) : self::pourcent($valeur);
+    }
+
+    /**
      * Une reduction s ecrit avec son signe : « −10 % » et non « +10 % » sous un libelle qui dit « Reduction » (audit §157).
      */
     private static function reduction(float $valeur): string

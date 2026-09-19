@@ -30,7 +30,8 @@ namespace OGame\Lifeforms\Demography;
  *    suivent la vitesse : l equilibre (combien la ferme nourrit) ne depend pas de la vitesse, seul
  *    le rythme en depend. Calibrage de la consommation : une ferme de niveau 1 nourrit 588 habitants,
  *    la page reelle en montrait 590.
- * 5. **Stock de nourriture** = base × (N + 1) × facteur^N de la ferme, × (1 + bonus), plafonne.
+ * 5. **Stock de nourriture** = base × (N + 1) × facteur^N de la ferme, × (1 + bonus), plafonne ; **sans ferme (N = 0), aucun
+ *    stock** — la formule ne s applique qu a partir du niveau 1 (le code le fait, la regle ne le disait pas, journal §164).
  * 6. **Famine** : quand le stock est a zero et que la consommation depasse la production, la
  *    population redescend **aussitot** a ce que la production nourrit (jamais sous la population de
  *    base), et la croissance s arrete tant que la production ne depasse pas la consommation.

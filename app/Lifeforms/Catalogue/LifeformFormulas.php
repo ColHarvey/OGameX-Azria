@@ -99,6 +99,16 @@ final class LifeformFormulas
     }
 
     /**
+     * La part qu un pour cent de formes de vie ajoute a une valeur de base entiere, tronquee a l unite.
+     */
+    public static function partOf(int $base, float $percent): int
+    {
+        // En entiers : 5 000 × 4,6 / 100 vaut 229,99999999999997 en flottant, et floor() rendait 229 (audit des bonus, journal
+        // §164). Le pour cent est deja exact au millionieme ; la part se calcule en millioniemes, puis se tronque.
+        return intdiv($base * (int)round($percent * 1_000_000), 100_000_000);
+    }
+
+    /**
      * Le bonus d une technologie a un niveau, en pour cent, experience comprise et plafonne.
      */
     public static function technologyBonusPercent(LifeformBonus $bonus, int $level, float $experienceFraction = 0.0): float

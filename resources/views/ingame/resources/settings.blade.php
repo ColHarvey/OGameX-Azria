@@ -524,6 +524,29 @@
                             <td>
                             </td>
                         </tr>
+                        {{-- L energie que consomment les batiments de formes de vie de la planete : le bilan la retire, la ligne la
+                             montre, et le total d energie est celui du bandeau (audit des bonus, journal §164). --}}
+                        <tr class="alt">
+                            <td colspan="2" class="label">
+                                {{ __('t_ingame.resource_settings.lifeform_buildings_energy') }}
+                            </td>
+                            <td class="normalmark">
+                                <span class="tooltipCustom {{ $lifeform_buildings_energy > 0 ? '' : 'disabled' }}" title="0">0</span>
+                            </td>
+                            <td class="normalmark">
+                                <span class="tooltipCustom {{ $lifeform_buildings_energy > 0 ? '' : 'disabled' }}" title="0">0</span>
+                            </td>
+                            <td class="normalmark">
+                                <span class="tooltipCustom {{ $lifeform_buildings_energy > 0 ? '' : 'disabled' }}" title="0">0</span>
+                            </td>
+                            <td class="{{ $lifeform_buildings_energy > 0 ? 'overmark' : 'normalmark' }}">
+                                <span class="tooltipCustom {{ $lifeform_buildings_energy > 0 ? '' : 'disabled' }}" title="{{ \OGame\Facades\AppUtil::formatNumber(-$lifeform_buildings_energy) }}">
+                                    {{ \OGame\Facades\AppUtil::formatNumberLong(-$lifeform_buildings_energy) }}
+                                </span>
+                            </td>
+                            <td>
+                            </td>
+                        </tr>
                         <tr class="alt">
                             <td colspan="2" class="label">{{ __('t_ingame.resource_settings.storage_capacity') }}</td>
                             <td class="{{ $metal >= $metal_storage ? 'overmark' : 'normalmark' }} left2">

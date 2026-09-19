@@ -404,7 +404,8 @@ class FleetMissionService
         $consumptionMultiplier = $characterClassService->getDeuteriumConsumptionMultiplier($player->getUser());
         $consumption = (int)($consumption * $consumptionMultiplier);
 
-        // Formes de vie : Recuperation de chaleur, Module d efficacite (plafonnes a 30 % chacun).
+        // Formes de vie : Recuperation de chaleur, Module d efficacite — plafonnes a 30 % AU TOTAL (le resolveur plafonne la
+        // somme d un code d effet ; l espece unique par compte n en porte jamais qu une, journal §164).
         $reductionFormesDeVie = $player->lifeformBonuses()->reduction(LifeformEffect::FUEL_CONSUMPTION_REDUCTION);
         if ($reductionFormesDeVie > 0) {
             $consumption = (int)floor($consumption * (1 - $reductionFormesDeVie));

@@ -31,8 +31,10 @@ use RuntimeException;
  *
  * ## Ce qui n est pas fixe ici, et le dire
  *
- * La technologie hyperespace, qui agrandit le fret, se lit sur le compte quand la bataille se calcule, et la
- * duree du retour sur un compte vivant. Ce sont des points distincts, que ce combattant ne tranche pas.
+ * La technologie hyperespace, qui agrandit le fret, se lit sur le compte quand la bataille se calcule — comme le
+ * fret des vaisseaux civils que les formes de vie ajoutent (Extension des soutes, Compresseur neuromodal : decision du
+ * §157, point 10) —, et la duree du retour sur un compte vivant. Ce sont des points distincts, que ce combattant ne
+ * tranche pas.
  *
  * ## Le bonus n est compte qu une fois
  *

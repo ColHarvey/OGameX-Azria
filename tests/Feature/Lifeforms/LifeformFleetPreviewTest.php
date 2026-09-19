@@ -19,6 +19,7 @@ use OGame\Models\Lifeforms\LifeformSlotChange;
 use OGame\Models\Lifeforms\LifeformSpeciesProgress;
 use OGame\Models\Lifeforms\LifeformTechnologyLevel;
 use OGame\Models\Planet;
+use OGame\Models\Planet\Coordinate;
 use OGame\Services\FleetMissionService;
 use OGame\Services\ObjectService;
 use Tests\AccountTestCase;
@@ -116,6 +117,15 @@ final class LifeformFleetPreviewTest extends AccountTestCase
         $ecrite = $service->durationOverDistance($joueur, $flotte, 20000, $expedition, 10, 1.10);
         $this->assertSame((int)max(round((35000 / 10 * sqrt(20000 * 10 / 12500) + 10) / 1 / 1.10), 1), $ecrite, 'La formule de l apercu, evaluee ici, rend l echeance que le serveur ecrit.');
         $this->assertLessThan($service->durationOverDistance($joueur, $flotte, 20000, $expedition, 10, 1.0), $ecrite);
+
+        // Et le serveur l applique a une expedition, et a elle seule (audit des bonus, journal §164) : retirer le
+        // multiplicateur de calculateFleetMissionDuration() passait la suite.
+        $depart = $this->planetService->getPlanetCoordinates();
+        $cible = new Coordinate($depart->galaxy, $depart->system, 16);
+        $distance = $service->calculateFleetMissionDistance($this->planetService, $cible);
+        $this->assertSame($service->durationOverDistance($joueur, $flotte, $distance, $expedition, 10, 1.10), $service->calculateFleetMissionDuration($this->planetService, $cible, $flotte, $expedition), 'L echeance d une expedition porte la Propulsion telekinetique.');
+        $transport = GameMissionFactory::getMissionById(3, []);
+        $this->assertSame($service->durationOverDistance($joueur, $flotte, $distance, $transport, 10, 1.0), $service->calculateFleetMissionDuration($this->planetService, $cible, $flotte, $transport), 'Un transport n en profite pas.');
     }
 
     /**

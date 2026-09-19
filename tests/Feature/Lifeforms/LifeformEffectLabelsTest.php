@@ -116,6 +116,12 @@ final class LifeformEffectLabelsTest extends AccountTestCase
         resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Building, 11106, 10);
         $fonderie = (string)$this->get(route('lifeforms.buildings.ajax', ['technology' => 11106]))->json('content.technologydetails');
         $this->assertSame(1, preg_match('#data-effect="metal_production">\s*<td>[^<]*</td>\s*<td[^>]*>\+[0-9.]+ %</td>#', $fonderie), 'Une hausse (Fonderie a haute energie) garde son « + ».');
+        // La fiche d une TECHNOLOGIE aussi (audit des bonus, journal §164) : les Emissaires intergalactiques ecrivaient
+        // « Reduction de la duree des decouvertes +1 % ».
+        LifeformPlanet::query()->where('planet_id', $this->currentPlanetId)->update(['population' => 500000000.0]);
+        $this->placeLifeformSlot($this->currentPlanetId, 1, 11201, $maintenant); // Les Emissaires : emplacement 1, niveau 0.
+        $emissaires = (string)$this->get(route('lifeforms.research.ajax', ['technology' => 11201]))->json('content.technologydetails');
+        $this->assertSame(1, preg_match('#data-effect="discovery_duration_reduction">\s*<td>[^<]*</td>\s*<td[^>]*>0 %</td>\s*<td[^>]*>−1 %</td>#', $emissaires), 'Emissaires intergalactiques, niveau 1 : « −1 % », pas « +1 % ».');
         $this->assertTrue(LifeformEffect::isReduction(LifeformEffect::FOOD_CONSUMPTION_REDUCTION));
         $this->assertTrue(LifeformEffect::isReduction(LifeformEffect::EXPEDITION_FLEET_LOSS_REDUCTION));
         $this->assertFalse(LifeformEffect::isReduction(LifeformEffect::FOOD_STORAGE_PERCENT));

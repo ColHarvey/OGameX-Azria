@@ -113,6 +113,7 @@ return [
         'commanding_staff' => 'État-major',
         'lifeform' => 'Formes de vie',
         'lifeform_tooltip' => 'Bâtiments de forme de vie de la planète et technologies de forme de vie du compte',
+        'lifeform_buildings_energy' => 'Bâtiments de formes de vie (énergie)',
         'storage_capacity' => 'Capacité de stockage',
         'total_per_hour' => 'Total par heure :',
         'total_per_day' => 'Total par jour',

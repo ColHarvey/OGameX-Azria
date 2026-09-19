@@ -132,6 +132,27 @@ final class LifeformBonusHooksTest extends AccountTestCase
         $this->assertTrue((new NPCPlayerService('pirate', 0, 0, 0))->lifeformBonuses()->isEmpty());
     }
 
+    /**
+     * **La production de formes de vie s additionne a la classe, sur la meme assiette** (audit des bonus, journal §164) :
+     * 20 % de la mine et de la case, jamais de la part du Collecteur. Les temoins tournaient sans classe, ou juste et faux
+     * coincident.
+     */
+    public function testTheLifeformProductionAddsToTheClassOnTheSameBase(): void
+    {
+        $this->planetSetObjectLevel('metal_mine', 10);
+        $this->choose(Species::Rocktal);
+        $this->building(self::MAGMA_FORGE, 10);
+        $this->recordCharacterClass($this->currentUserId, CharacterClass::COLLECTOR);
+        LifeformBonusCache::invalidate();
+        $planete = resolve(PlanetServiceFactory::class)->make($this->currentPlanetId, true);
+        $this->assertNotNull($planete);
+        $mine = $planete->getObjectProductionIndex(ObjectService::getGameObjectsWithProductionByMachineName('metal_mine'));
+        $this->assertGreaterThan(0, $mine->character_class->metal->get(), 'Premisse : le Collecteur ajoute sa part.');
+        $assiette = $mine->mine->metal->get() + $mine->planet_slot->metal->get();
+        $this->assertEquals(floor($assiette * 0.20), $mine->lifeform->metal->get(), 'Forge de magma niveau 10 : 20 % de la mine et de la case.');
+        $this->assertNotEquals(floor(($assiette + $mine->character_class->metal->get()) * 0.20), $mine->lifeform->metal->get(), 'Jamais 20 % de la part de classe.');
+    }
+
     public function testRocktalBuildingsRaiseProductionCutMineCostsAndConsumeEnergy(): void
     {
         $planete = $this->planetService;
@@ -228,10 +249,13 @@ final class LifeformBonusHooksTest extends AccountTestCase
         // Terraformeur : −1 % de prix, −2 % de temps ; la fabrique de robots ne bouge pas.
         $brutTerra = ObjectService::getObjectRawPrice('terraformer', 1);
         $prixTerra = ObjectService::getObjectPrice('terraformer', $planete);
-        $this->assertEquals(floor($brutTerra->metal->get() * 0.99), $prixTerra->metal->get());
+        $this->assertSame(0.0, (float)$brutTerra->metal->get(), 'Premisse : le Terraformeur ne coute pas de metal — le comparer a 0 ne prouvait rien (§164).');
+        $this->assertGreaterThan(0.0, (float)$brutTerra->crystal->get());
+        $this->assertEquals(floor($brutTerra->crystal->get() * 0.99), $prixTerra->crystal->get(), 'Le cristal du Terraformeur : −1 %.');
+        $this->assertEquals(floor($brutTerra->deuterium->get() * 0.99), $prixTerra->deuterium->get());
         $robots = $planete->getObjectLevel('robot_factory');
         $nanites = $planete->getObjectLevel('nano_factory');
-        $tempsTerra = (int)(((($prixTerra->metal->get() + $prixTerra->crystal->get()) / (2500 * max(4 - (1 / 2), 1) * (1 + $robots) * 1 * (2 ** $nanites)))) * 3600);
+        $tempsTerra = (int)((((floor($brutTerra->metal->get() * 0.99) + floor($brutTerra->crystal->get() * 0.99)) / (2500 * max(4 - (1 / 2), 1) * (1 + $robots) * 1 * (2 ** $nanites)))) * 3600);
         $this->assertSame((int)floor($tempsTerra * 0.98), $planete->getBuildingConstructionTime('terraformer'));
         $this->assertEquals(ObjectService::getObjectRawPrice('robot_factory', $robots + 1)->metal->get(), ObjectService::getObjectPrice('robot_factory', $planete)->metal->get());
     }

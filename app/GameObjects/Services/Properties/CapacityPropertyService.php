@@ -6,6 +6,7 @@ use OGame\GameObjects\Models\Fields\GameObjectPropertyDetails;
 use OGame\GameObjects\Services\Properties\Abstracts\ObjectPropertyService;
 use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
 use OGame\Lifeforms\Catalogue\LifeformEffect;
+use OGame\Lifeforms\Catalogue\LifeformFormulas;
 use OGame\Services\CharacterClassService;
 use OGame\Services\PlayerService;
 
@@ -69,7 +70,7 @@ class CapacityPropertyService extends ObjectPropertyService
         }
         {
             if ($lifeformPercentage > 0) {
-                $lifeformValue = (int)floor($this->base_value * $lifeformPercentage / 100);
+                $lifeformValue = LifeformFormulas::partOf($this->base_value, $lifeformPercentage);
                 $totalValue += $lifeformValue;
                 $breakdown['bonuses'][] = [
                     'type' => 't_ingame.techtree.tooltip_lifeform_bonus',

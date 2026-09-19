@@ -4,6 +4,7 @@ namespace OGame\GameObjects\Services\Properties\Abstracts;
 
 use OGame\GameObjects\Models\Abstracts\GameObject;
 use OGame\GameObjects\Models\Fields\GameObjectPropertyDetails;
+use OGame\Lifeforms\Catalogue\LifeformFormulas;
 use OGame\Services\PlayerService;
 
 /**
@@ -96,7 +97,7 @@ abstract class ObjectPropertyService
         if (in_array($this->propertyName, ['attack', 'shield', 'structural_integrity'], true)) {
             $lifeformPercentage = $player->getLifeformUnitStatsPercent($this->parent_object);
             if ($lifeformPercentage > 0) {
-                $lifeformValue = (int)floor($this->base_value * $lifeformPercentage / 100);
+                $lifeformValue = LifeformFormulas::partOf($this->base_value, $lifeformPercentage);
                 $totalValue += $lifeformValue;
                 $breakdown['bonuses'][] = [
                     'type' => 't_ingame.techtree.tooltip_lifeform_bonus',
