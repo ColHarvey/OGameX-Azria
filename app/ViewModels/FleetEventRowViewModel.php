@@ -71,6 +71,12 @@ class FleetEventRowViewModel
     public bool $is_union_summary = false;
 
     /**
+     * @var bool Un vol d exploration (formes de vie), et non une mission de flotte : la liste le rend par son propre
+     *           patron (`discoveryrow.blade.php`), sans rappel ni cargaison (journal §163).
+     */
+    public bool $is_discovery = false;
+
+    /**
      * @var int|null The union ID this fleet belongs to.
      */
     public ?int $union_id = null;

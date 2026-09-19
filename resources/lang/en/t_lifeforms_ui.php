@@ -92,6 +92,8 @@ return [
         'duration_hint' => 'Duration: :same_system within this system, :same_galaxy to the next system, :other_galaxy to the next galaxy (Envoys reduction: :reduction %).',
         'launch' => 'Launch the flight',
         'launched' => 'Discovery flight launched to :coordinates, back in :duration.',
+        'launched_many' => ':count exploration ship launched in system :system.|:count exploration ships launched in system :system.',
+        'nothing_to_discover' => 'No position of this system can receive an exploration ship right now.',
         'running_title' => 'Flights under way',
         'none_running' => 'No flight under way.',
         'returns_in' => 'back in :duration',

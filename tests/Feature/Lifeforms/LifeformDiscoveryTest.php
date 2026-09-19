@@ -75,9 +75,23 @@ final class LifeformDiscoveryTest extends AccountTestCase
         $service = resolve(LifeformDiscoveryService::class);
         $maintenant = (int)Date::now()->timestamp;
         $depart = $this->planetService->getPlanetCoordinates();
-        $cible = new Coordinate($depart->galaxy, $depart->system, $depart->position === 1 ? 2 : 1);
+        // La cible est une position LIBRE de mon systeme — etablie, pas supposee : c est le cas « position vide explorable ».
+        $cible = $this->unePositionLibre(0);
+        $this->assertFalse(Planet::query()->where('galaxy', $cible->galaxy)->where('system', $cible->system)->where('planet', $cible->position)->exists(), 'Premisse : la cible est vide.');
+        // Deux colonies du compte au MEME numero de position, dans un autre systeme et dans une autre galaxie : la regle « chez
+        // soi » lit galaxie ET systeme, et le vol vers la case vide d ici part quand meme (revue de §162, journal §163).
+        $galaxies = resolve(SettingsService::class)->numberOfGalaxies();
+        $this->assertGreaterThanOrEqual(2, $galaxies, 'Premisse : au moins deux galaxies.');
+        $autreGalaxie = $depart->galaxy < $galaxies ? $depart->galaxy + 1 : $depart->galaxy - 1;
+        $autreSysteme = $depart->system < 499 ? $depart->system + 1 : $depart->system - 1;
+        foreach ([[$depart->galaxy, $autreSysteme], [$autreGalaxie, $depart->system]] as [$galaxie, $systeme]) {
+            $this->assertFalse(Planet::query()->where('galaxy', $galaxie)->where('system', $systeme)->where('planet', $cible->position)->exists(), "Premisse : $galaxie:$systeme:{$cible->position} est libre.");
+            Planet::factory()->create(['user_id' => $this->currentUserId, 'galaxy' => $galaxie, 'system' => $systeme, 'planet' => $cible->position]);
+        }
 
         $this->assertRefused(fn () => $service->launch($this->planetService, $cible, $maintenant), LifeformRefused::DISCOVERY_LOCKED, 'Sans centre de recherche, aucun vol.');
+        // « Chez soi » prime sur le centre absent, comme dans la Galaxie (§163) : la raison que le joueur lit est celle qui ne changera jamais.
+        $this->assertRefused(fn () => $service->launch($this->planetService, $depart, $maintenant), LifeformRefused::OWN_PLANET, 'Chez soi, avant le centre absent.');
         resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Building, self::RESEARCH_CENTRE, 1);
 
         $this->assertRefused(fn () => $service->launch($this->planetService, new Coordinate(1, 500, 1), $maintenant), LifeformRefused::BAD_COORDINATES);
@@ -85,6 +99,7 @@ final class LifeformDiscoveryTest extends AccountTestCase
 
         // On n explore pas chez soi (journal §162) : ni la planete de depart, ni une autre planete du compte, ni sa lune ; le
         // refus vient avant tout debit — ni vol, ni metal, ni quota.
+        $metalAvant = (int)Planet::query()->whereKey($this->currentPlanetId)->value('metal');
         $this->assertRefused(fn () => $service->launch($this->planetService, $depart, $maintenant), LifeformRefused::OWN_PLANET, 'Ma planete de depart.');
         $autrePlanete = $this->createPlanetAtSafeCoordinate($this->currentUserId);
         $this->assertRefused(fn () => $service->launch($this->planetService, $autrePlanete->getPlanetCoordinates(), $maintenant), LifeformRefused::OWN_PLANET, 'Une autre planete du compte.');
@@ -93,8 +108,8 @@ final class LifeformDiscoveryTest extends AccountTestCase
         $this->assertRefused(fn () => $service->launch($this->planetService, $lune->getPlanetCoordinates(), $maintenant), LifeformRefused::OWN_PLANET, 'La position d une lune du compte.');
         $this->assertSame(0, LifeformDiscovery::query()->where('user_id', $this->currentUserId)->count(), 'Aucun vol ecrit.');
         $this->assertSame(LifeformDiscoveryRules::QUOTA_PER_DAY, (int)$service->accrueQuota($this->currentUserId, $maintenant)?->discoveries_available, 'Le quota est intact.');
+        $this->assertSame($metalAvant, (int)Planet::query()->whereKey($this->currentPlanetId)->value('metal'), 'Le metal est intact apres les refus « chez soi ».');
 
-        $metalAvant = (int)Planet::query()->whereKey($this->currentPlanetId)->value('metal');
         $vol = $service->launch($this->planetService, $cible, $maintenant);
         $this->assertSame('running', $vol->status);
         $this->assertSame($maintenant, $vol->started_at);
@@ -109,7 +124,7 @@ final class LifeformDiscoveryTest extends AccountTestCase
         $this->assertSame(LifeformDiscoveryRules::QUOTA_PER_DAY - 1, $compte->discoveries_available, 'Le quota du jour du choix, moins ce vol.');
 
         $this->assertRefused(fn () => $service->launch($this->planetService, $cible, $maintenant + 6 * 86400), LifeformRefused::RECENTLY_EXPLORED);
-        $autre = new Coordinate($depart->galaxy, $depart->system, $depart->position === 3 ? 4 : 3);
+        $autre = $this->unePositionLibre(1);
 
         $compte->discoveries_available = 0;
         $compte->save();
@@ -371,7 +386,23 @@ final class LifeformDiscoveryTest extends AccountTestCase
         $page->assertSee(__('t_lifeforms_ui.discoveries.none_running'));
 
         $depart = $this->planetService->getPlanetCoordinates();
-        $cible = ['galaxy' => $depart->galaxy, 'system' => $depart->system, 'position' => $depart->position === 1 ? 2 : 1];
+        // Le formulaire propose la galaxie et le systeme de depart, jamais la position de la planete : on n explore pas chez
+        // soi, et une position pre-remplie par la planete courante etait refusee a chaque envoi (revue de §162, §163).
+        $page->assertSee('name="galaxy" value="' . $depart->galaxy . '"', false);
+        $page->assertSee('name="system" value="' . $depart->system . '"', false);
+        $page->assertSee('name="position" value=""', false);
+        $page->assertDontSee('name="position" value="' . $depart->position . '"', false);
+
+        // Un refus rend le formulaire tel qu il a ete envoye, avec la phrase — jamais un formulaire vide.
+        $chezMoi = ['galaxy' => $depart->galaxy, 'system' => $depart->system, 'position' => $depart->position];
+        $this->post(route('lifeforms.discoveries.launch'), $chezMoi)->assertRedirect(route('lifeforms.discoveries'));
+        $refuse = $this->get(route('lifeforms.discoveries'));
+        $refuse->assertSee(__('t_lifeforms_ui.refused.own_planet'));
+        $refuse->assertSee('name="position" value="' . $depart->position . '"', false);
+        $this->assertSame(0, LifeformDiscovery::query()->where('user_id', $this->currentUserId)->count());
+
+        $libre = $this->unePositionLibre(0);
+        $cible = ['galaxy' => $libre->galaxy, 'system' => $libre->system, 'position' => $libre->position];
         $this->post(route('lifeforms.discoveries.launch'), $cible)->assertRedirect(route('lifeforms.discoveries'));
         $this->assertSame(1, LifeformDiscovery::query()->where('user_id', $this->currentUserId)->where('status', 'running')->count());
 
@@ -390,6 +421,17 @@ final class LifeformDiscoveryTest extends AccountTestCase
         $this->pinSettings(['lifeforms_enabled' => 0]);
         $this->get(route('lifeforms.discoveries'))->assertStatus(404);
         $this->post(route('lifeforms.discoveries.launch'), $cible)->assertStatus(404);
+    }
+
+    /** La n-ieme position libre de mon systeme de depart : ni planete, ni lune, de qui que ce soit. */
+    private function unePositionLibre(int $rang): Coordinate
+    {
+        $depart = $this->planetService->getPlanetCoordinates();
+        $occupees = Planet::query()->where('galaxy', $depart->galaxy)->where('system', $depart->system)->pluck('planet')->map(static fn ($p): int => (int)$p)->all();
+        $libres = array_values(array_filter(range(1, 15), static fn (int $p): bool => !in_array($p, $occupees, true)));
+        $this->assertArrayHasKey($rang, $libres, 'Premisse : assez de positions libres dans mon systeme.');
+
+        return new Coordinate($depart->galaxy, $depart->system, $libres[$rang]);
     }
 
     private function aDueFlight(LifeformDiscoveryOutcome $issue, int $endsAt): LifeformDiscovery

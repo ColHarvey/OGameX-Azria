@@ -119,6 +119,8 @@ class GalaxyController extends OGameController
             'patrols_enabled' => $settingsService->patrolsEnabled(),
             'lifeform_discovery_header' => $decouvertes['header'],
             'lifeform_discoveries_enabled' => $decouvertes['enabled'],
+            // Le bouton « Decouvertes » de la barre : actif quand une raison generale ne ferme pas tout (journal §163).
+            'lifeform_discovery_general' => $decouvertes['general'],
         ]);
     }
 

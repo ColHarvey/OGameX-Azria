@@ -12,6 +12,7 @@ use OGame\Combat\Services\EngagedFleetCheck;
 use OGame\Enums\FleetMissionStatus;
 use OGame\Factories\PlanetServiceFactory;
 use OGame\GameMissions\PatrolMission;
+use OGame\Lifeforms\Presentation\DiscoveryFleetEvents;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\FleetUnion;
@@ -118,6 +119,17 @@ class FleetEventsController extends OGameController
             }
         }
 
+        // **Les vols d exploration** (formes de vie, journal §163) partent sans vaisseau et ne vivent pas dans
+        // `fleet_missions` : le bandeau les compte parmi les vols amis, et le plus proche est le prochain evenement
+        // s il devance toute mission.
+        $exploration = resolve(DiscoveryFleetEvents::class)->summary($player->getId(), $currentTime);
+        $friendlyMissionCount += $exploration['count'];
+        if ($exploration['next_ends_at'] !== null && ($nextEventTime === null || $exploration['next_ends_at'] < $nextEventTime)) {
+            $typeNextMission = $exploration['label'];
+            $timeNextMission = $exploration['next_ends_at'] - $currentTime;
+            $eventType = FleetMissionStatus::Friendly;
+        }
+
         // **Le bandeau ferme signale la bataille**, avec un libelle et non une couleur seule. Il ne
         // dit ni quand elle finit, ni ce qu'elle a coute : cela vit dans le deroulant, et seulement
         // pour ce que le serveur a deja publie.
@@ -192,6 +204,9 @@ class FleetEventsController extends OGameController
                 $displayedMissionIds[] = $mission->id;
             }
         }
+
+        // Les lignes des vols d exploration (journal §163) : gardees tant que leur echeance n est pas passee.
+        $displayedMissionIds = array_merge($displayedMissionIds, resolve(DiscoveryFleetEvents::class)->displayedRowIds($player->getId(), (int)$currentTime));
 
         // Determine which requested IDs should be removed from the display
         // If a mission ID is not in the displayed set, it should be removed from the DOM
@@ -596,6 +611,11 @@ class FleetEventsController extends OGameController
         }
 
         $fleet_events = $nonUnionEvents;
+
+        // Les vols d exploration (journal §163), tries avec les missions par echeance.
+        foreach (resolve(DiscoveryFleetEvents::class)->rows($player->getId()) as $vol) {
+            $fleet_events[] = $vol;
+        }
 
         // Order the fleet events by mission time arrival.
         usort($fleet_events, function ($a, $b) {

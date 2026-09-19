@@ -97,10 +97,8 @@ final class GalaxyDiscoveries
 
         $missions = [];
         for ($position = 1; $position <= 15; $position++) {
-            $raison = $generale;
-            if ($raison === null && in_array($position, $miennes, true)) {
-                $raison = (string)__('t_lifeforms_ui.refused.own_planet');
-            }
+            // « Chez soi » d abord, comme le service : cette position ne sera jamais explorable, quel que soit le quota.
+            $raison = in_array($position, $miennes, true) ? (string)__('t_lifeforms_ui.refused.own_planet') : $generale;
             if ($raison === null && isset($parPosition[$position])) {
                 $raison = (string)__($parPosition[$position] === 'running' ? 't_ingame.galaxy.discovery_underway' : 't_ingame.galaxy.discovery_unavailable');
             }

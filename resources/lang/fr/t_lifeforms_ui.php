@@ -92,6 +92,8 @@ return [
         'duration_hint' => 'Durée : :same_system dans ce système, :same_galaxy vers le système voisin, :other_galaxy vers la galaxie voisine (réduction des Émissaires : :reduction %).',
         'launch' => 'Lancer le vol',
         'launched' => 'Vol de découverte lancé vers :coordinates, retour dans :duration.',
+        'launched_many' => ':count vaisseau d’exploration lancé dans le système :system.|:count vaisseaux d’exploration lancés dans le système :system.',
+        'nothing_to_discover' => 'Aucune position de ce système ne peut recevoir de vaisseau d’exploration pour le moment.',
         'running_title' => 'Vols en cours',
         'none_running' => 'Aucun vol en cours.',
         'returns_in' => 'retour dans :duration',

@@ -766,7 +766,7 @@ final class LifeformsController extends OGameController
         try {
             $vol = $this->discoveries->launch($player->planets->current(), $cible, $maintenant);
         } catch (LifeformRefused $refus) {
-            return redirect()->route('lifeforms.discoveries')->with('lifeforms_error', __($refus->translationKey()));
+            return redirect()->route('lifeforms.discoveries')->withInput()->with('lifeforms_error', __($refus->translationKey()));
         }
 
         return redirect()->route('lifeforms.discoveries')->with('status', __('t_lifeforms_ui.discoveries.launched', [
@@ -799,7 +799,7 @@ final class LifeformsController extends OGameController
             'coordinates' => ['galaxy' => $cible->galaxy, 'system' => $cible->system, 'position' => $cible->position],
             'planetType' => 1,
             'type' => 0,
-            'shipsSent' => 0,
+            'shipsSent' => 1,
             'slots' => $compteurs['slotsUsed'],
             'probes' => $compteurs['probes'],
             'recyclers' => $compteurs['recyclers'],
@@ -829,6 +829,79 @@ final class LifeformsController extends OGameController
             'canSendDiscovery' => $etat['general'],
             'discoveryCount' => $etat['count'],
             'galaxyHeader' => ['LOCA_GALAXY_LIFEFORM_DISCOVERY_COUNT' => $etat['header']],
+        ];
+
+        return response()->json(['newAjaxToken' => csrf_token(), 'response' => $reponse]);
+    }
+
+    /**
+     * Le bouton « Decouvertes » de la barre de la Galaxie (`sendSystemDiscoveryMission()` du bundle officiel) : un vol
+     * vers chaque position du systeme affiche que la Galaxie offre — ni chez soi, ni en approche, ni exploree depuis
+     * moins de sept jours —, dans l ordre des positions, jusqu au quota ou aux ressources (journal §163). Chaque vol passe
+     * par `LifeformDiscoveryService::launch()`, qui reste le seul juge ; une raison propre a une position saute la
+     * position, une raison generale (quota, ressources, centre) arrete la salve.
+     */
+    public function discoverSystemFromGalaxy(Request $request, PlayerService $player, GalaxyDiscoveries $galaxie): JsonResponse
+    {
+        $valide = $request->validate([
+            'galaxy' => ['required', 'integer', 'min:1', 'max:' . $this->settings->numberOfGalaxies()],
+            'system' => ['required', 'integer', 'min:1', 'max:499'],
+        ]);
+        $galaxy = (int)$valide['galaxy'];
+        $system = (int)$valide['system'];
+        $maintenant = (int)Date::now()->timestamp;
+        $compteurs = GalaxyHeaderCounters::of($player);
+
+        $envoyees = [];
+        $arret = null;
+        // Une raison generale (centre, quota, module ferme) est deja portee par chaque position : rien ne part.
+        $etat = $galaxie->forSystem($player, $galaxy, $system, $maintenant);
+        foreach ($etat['missions'] as $position => $mission) {
+            if ($mission['canSend'] !== true) {
+                continue;
+            }
+            try {
+                $this->discoveries->launch($player->planets->current(), new Coordinate($galaxy, $system, (int)$position), $maintenant);
+                $envoyees[] = ['galaxy' => $galaxy, 'system' => $system, 'position' => (int)$position];
+            } catch (LifeformRefused $refus) {
+                // Une raison propre a la position (une course avec un autre onglet) saute la position ; une raison generale
+                // (quota, ressources) arrete la salve — les positions suivantes seraient refusees de la meme facon.
+                if (in_array($refus->reason, [LifeformRefused::OWN_PLANET, LifeformRefused::RECENTLY_EXPLORED, LifeformRefused::BAD_COORDINATES], true)) {
+                    continue;
+                }
+                $arret = $refus;
+                break;
+            }
+        }
+
+        $reponse = [
+            'coordinates' => ['galaxy' => $galaxy, 'system' => $system, 'position' => $envoyees[0]['position'] ?? 0],
+            'sentToCoordinates' => $envoyees,
+            'planetType' => 1,
+            'type' => 0,
+            'shipsSent' => count($envoyees),
+            'slots' => $compteurs['slotsUsed'],
+            'probes' => $compteurs['probes'],
+            'recyclers' => $compteurs['recyclers'],
+            'missiles' => $compteurs['missiles'],
+            'success' => $envoyees !== [],
+        ];
+        if ($envoyees !== []) {
+            $reponse['message'] = trans_choice('t_lifeforms_ui.discoveries.launched_many', count($envoyees), ['count' => count($envoyees), 'system' => $galaxy . ':' . $system]);
+        } elseif ($arret !== null) {
+            $reponse['message'] = __($arret->translationKey());
+        } elseif ($etat['general'] !== true) {
+            $reponse['message'] = $etat['general'];
+        } else {
+            $reponse['message'] = __('t_lifeforms_ui.discoveries.nothing_to_discover');
+        }
+
+        // L etat des positions APRES la salve, comme apres un vol seul : compteur de l en-tete, et raison generale s il y en a une.
+        $apres = $galaxie->forSystem($player, $galaxy, $system, $maintenant);
+        $reponse['discovery'] = [
+            'canSendDiscovery' => $apres['general'],
+            'discoveryCount' => $apres['count'],
+            'galaxyHeader' => ['LOCA_GALAXY_LIFEFORM_DISCOVERY_COUNT' => $apres['header']],
         ];
 
         return response()->json(['newAjaxToken' => csrf_token(), 'response' => $reponse]);

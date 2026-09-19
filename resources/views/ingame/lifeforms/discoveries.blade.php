@@ -64,7 +64,7 @@
                             </label>
                             <label style="display: flex; flex-direction: column; gap: 4px;">
                                 <span class="smallFont">{{ __('t_lifeforms_ui.discoveries.position') }}</span>
-                                <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" class="hideNumberSpin" name="position" value="{{ old('position', $current->position) }}" required style="width: 40px;">
+                                <input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" class="hideNumberSpin" name="position" value="{{ old('position', '') }}" placeholder="1-15" required style="width: 40px;">
                             </label>
                             <button type="submit" class="btn_blue" @if (!$centre_open || $available < 1 || $vacation) disabled @endif>{{ __('t_lifeforms_ui.discoveries.launch') }}</button>
                         </form>

@@ -67095,6 +67095,10 @@ function discoverPlanet(url, data, success = () => {}) {
 
       if (typeof res.response.success !== 'undefined' && res.response.success === true) {
         getAjaxEventbox();
+        // Le deroulant des evenements, de force comme sendShips : replie, il garderait l etat d avant le vol (journal §163).
+        if (typeof refreshFleetEvents === 'function') {
+          refreshFleetEvents(true);
+        }
         success();
         getAjaxResourcebox();
       }
@@ -67124,7 +67128,12 @@ function discoverPlanet(url, data, success = () => {}) {
                     title="${galaxyLoca.discoveryUnderway}">
                 </div>`);
       document.getElementById('galaxyHeaderDiscoveryCount').innerHTML = res.response.discovery.galaxyHeader.LOCA_GALAXY_LIFEFORM_DISCOVERY_COUNT;
-    }, "json");
+    }, "json").fail(function () {
+      // Une reponse en erreur (500, 419, 422) ne doit pas rester muette : « le clic ne fait rien » (journal §163).
+      if (typeof fadeBox === 'function' && typeof galaxyLoca !== 'undefined' && galaxyLoca && galaxyLoca.discoveryFailed) {
+        fadeBox(galaxyLoca.discoveryFailed, true);
+      }
+    });
   };
 
   if (showDiscoveryWarning) {
@@ -67168,11 +67177,17 @@ function sendSystemDiscoveryMission() {
 
       if (res.response.success) {
         getAjaxEventbox();
+        // Le deroulant des evenements, de force comme sendShips : replie, il garderait l etat d avant la salve (journal §163).
+        if (typeof refreshFleetEvents === 'function') {
+          refreshFleetEvents(true);
+        }
         getAjaxResourcebox();
+        // Azria : un seul message pour la salve (le serveur compte les vols), porte par les premieres coordonnees que la
+        // fonction exige ; l officiel repetait le meme message pour chaque position.
+        displayMiniFleetMessage({ ...res.response,
+          coordinates: res.response.sentToCoordinates[0]
+        }, false);
         res.response.sentToCoordinates.map(coords => {
-          displayMiniFleetMessage({ ...res.response,
-            coordinates: coords
-          }, false);
           const targetIcon = $('.planetDiscover.position' + coords.position);
           targetIcon.replaceWith(`
                         <div class="planetDiscoverIcons planetDiscoverUnavailable tooltip icon js_hideTipOnMobile"
@@ -67180,6 +67195,19 @@ function sendSystemDiscoveryMission() {
                         </div>
                     `);
         });
+        // Les autres icones et le compteur de l en-tete, comme apres un vol seul : un quota epuise grise tout.
+        if (res.response.discovery) {
+          if (res.response.discovery.canSendDiscovery !== true) {
+            Array.from(document.getElementsByClassName('planetDiscover')).forEach(icon => {
+              $(icon).replaceWith(`
+                        <div class="planetDiscoverIcons planetDiscoverUnavailable tooltip icon js_hideTipOnMobile"
+                            title="${res.response.discovery.canSendDiscovery}">
+                        </div>
+                    `);
+            });
+          }
+          document.getElementById('galaxyHeaderDiscoveryCount').innerHTML = res.response.discovery.galaxyHeader.LOCA_GALAXY_LIFEFORM_DISCOVERY_COUNT;
+        }
       } else {
         fadeBox(res.response.message, true);
       }
@@ -67187,6 +67215,10 @@ function sendSystemDiscoveryMission() {
       sendingSystemDiscoveryMission = false;
     },
     error: function () {
+      // Une reponse en erreur (500, 419, 422) ne doit pas rester muette (journal §163).
+      if (typeof fadeBox === 'function' && typeof galaxyLoca !== 'undefined' && galaxyLoca && galaxyLoca.discoveryFailed) {
+        fadeBox(galaxyLoca.discoveryFailed, true);
+      }
       sendingSystemDiscoveryMission = false;
     }
   });

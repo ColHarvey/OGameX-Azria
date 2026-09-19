@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Date;
 use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\Discovery\LifeformDiscoveryRules;
 use OGame\Lifeforms\Presentation\GalaxyDiscoveries;
+use OGame\Lifeforms\Services\LifeformDiscoveryService;
 use OGame\Lifeforms\Services\LifeformInstallationService;
 use OGame\Lifeforms\Services\LifeformLevels;
 use OGame\Lifeforms\Species;
@@ -16,8 +17,10 @@ use OGame\Models\Lifeforms\LifeformPlanet;
 use OGame\Models\Lifeforms\LifeformSpeciesProgress;
 use OGame\Models\Message;
 use OGame\Models\Planet;
+use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
 use OGame\Models\User;
+use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
 use Tests\Support\PinsSettings;
 
@@ -97,12 +100,20 @@ final class LifeformGalaxyDiscoveryTest extends AccountTestCase
                 continue;
             }
             $mission = $this->missionDeDecouverte($ligne);
+            if (in_array((int)$ligne['position'], $this->mesPositions(), true)) {
+                // « Chez soi » d abord, comme le service : quel que soit le centre ou le quota, cette position ne s explore pas (§163).
+                $this->assertSame(__('t_lifeforms_ui.refused.own_planet'), $mission['canSend'], 'position ' . $ligne['position']);
+                continue;
+            }
             $this->assertSame(__('t_ingame.galaxy.discovery_locked'), $mission['canSend'], 'position ' . $ligne['position']);
         }
 
         resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Building, self::RESEARCH_CENTRE, 1);
         // Une planete d un AUTRE joueur dans le systeme : elle reste explorable — seules les miennes ne le sont pas (§162).
         $etrangere = $this->aForeignPlanetInMySystem();
+        // Mes colonies d un AUTRE systeme et d une AUTRE galaxie, au numero d une case libre d ici : la case reste offerte (§163).
+        $homonyme = $this->positionVisee(1);
+        $this->assertContains($homonyme, $this->mesColoniesHomonymes($homonyme), 'Premisse : deux colonies du compte portent ce numero ailleurs.');
         $avecCentre = $this->systemeAjax();
         $lignes = 0;
         $etrangereVue = false;
@@ -113,6 +124,16 @@ final class LifeformGalaxyDiscoveryTest extends AccountTestCase
             $lignes++;
             $mission = $this->missionDeDecouverte($ligne);
             $this->assertSame(['missionType', 'canSend', 'discoveryCount', 'link', 'name'], array_keys($mission), 'position ' . $ligne['position']);
+            // La Galaxie et le service partagent la regle : la raison « chez soi » est exactement le verdict d isOwnBody().
+            $depart = $this->planetService->getPlanetCoordinates();
+            $this->assertSame(
+                LifeformDiscoveryService::isOwnBody($this->currentUserId, new Coordinate($depart->galaxy, $depart->system, (int)$ligne['position'])),
+                $mission['canSend'] === __('t_lifeforms_ui.refused.own_planet'),
+                'position ' . $ligne['position'] . ' : la Galaxie et le service ne disent pas la meme chose.'
+            );
+            if ((int)$ligne['position'] === $homonyme) {
+                $this->assertTrue($mission['canSend'], 'Une colonie du compte ailleurs, au meme numero, ne grise pas cette case.');
+            }
             if (in_array((int)$ligne['position'], $this->mesPositions(), true)) {
                 // On n explore pas chez soi (journal §162) : mes planetes portent l icone grise avec la raison, avant le clic.
                 $this->assertSame(__('t_lifeforms_ui.refused.own_planet'), $mission['canSend'], 'Ma propre planete ne s explore pas.');
@@ -221,6 +242,190 @@ final class LifeformGalaxyDiscoveryTest extends AccountTestCase
         $this->assertTrue($dernier->json('response.success'));
         $this->assertSame(0, $dernier->json('response.discovery.discoveryCount'));
         $this->assertSame(__('t_lifeforms_ui.refused.quota_exhausted'), $dernier->json('response.discovery.canSendDiscovery'));
+    }
+
+    /**
+     * **Le bouton « Decouvertes » de la barre de la Galaxie fait ce qu il annonce** (Keven, journal §163) : « Lancez une
+     * mission de decouverte dans tous les endroits possibles ». Le bundle officiel porte `sendSystemDiscoveryMission()`,
+     * qui lit `sendDiscoverSystemUrl` (vide jusqu ici : bouton grise, inerte) et une reponse `success`, `message`,
+     * `sentToCoordinates`. Le serveur envoie un vol vers chaque position du systeme affiche que la Galaxie offre — ni
+     * chez soi, ni en approche, ni exploree depuis moins de sept jours — dans l ordre des positions, et s arrete au quota
+     * ou aux ressources ; le service reste le seul juge de chaque vol.
+     */
+    public function testTheDiscoveriesButtonOfTheToolbarSendsToEveryOpenPositionOfTheSystem(): void
+    {
+        // Sans espece : le bouton existe, grise, avec la raison ; l adresse est publiee quand meme (le bundle la lit).
+        $page = $this->get('/galaxy');
+        $page->assertSee('id="discoverSystemBtn"', false);
+        $page->assertSee('var sendDiscoverSystemUrl = ' . json_encode(route('lifeforms.discoveries.galaxy_system')) . ';', false);
+        $this->assertMatchesRegularExpression('/id="discoverSystemBtn"[^>]*disabled="disabled"/', (string)$page->getContent(), 'Sans espece, le bouton est grise.');
+        $this->assertDoesNotMatchRegularExpression('/id="discoverSystemBtn"[^>]*onclick=/', (string)$page->getContent());
+
+        resolve(LifeformInstallationService::class)->chooseSpecies($this->currentUserId, Species::Humans, (int)Date::now()->timestamp);
+        $depart = $this->planetService->getPlanetCoordinates();
+        // Espece choisie, centre absent : la salve ne tente rien et repond la raison generale — celle que la Galaxie montre
+        // sur chaque icone et sur le bouton grise, pas le refus du service.
+        $sansCentre = $this->postJson(route('lifeforms.discoveries.galaxy_system'), ['galaxy' => $depart->galaxy, 'system' => $depart->system, '_token' => csrf_token()]);
+        $this->assertFalse($sansCentre->json('response.success'));
+        $this->assertSame(__('t_ingame.galaxy.discovery_locked'), $sansCentre->json('response.message'));
+        $this->assertSame([], $sansCentre->json('response.sentToCoordinates'));
+        $this->assertSame(0, LifeformDiscovery::query()->where('user_id', $this->currentUserId)->count());
+
+        resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Building, self::RESEARCH_CENTRE, 1);
+        $etrangere = $this->aForeignPlanetInMySystem();
+
+        // Avec espece et centre : le bouton est actif et branche sur la fonction du bundle.
+        $page = $this->get('/galaxy');
+        $this->assertMatchesRegularExpression('/id="discoverSystemBtn"[^>]*onclick="sendSystemDiscoveryMission\(\);"/', (string)$page->getContent(), 'Le bouton appelle la fonction officielle.');
+        $this->assertDoesNotMatchRegularExpression('/id="discoverSystemBtn"[^>]*disabled=/', (string)$page->getContent());
+        $page->assertSee('title="' . e(__('t_ingame.galaxy.discoveries_tooltip')) . '"', false);
+
+        // Ce que la Galaxie offre avant le clic : les positions ouvertes, dans l ordre — ni les miennes.
+        $ouvertes = [];
+        foreach ($this->systemeAjax()['system']['galaxyContent'] as $ligne) {
+            if ((int)$ligne['position'] <= 15 && $this->missionDeDecouverte($ligne)['canSend'] === true) {
+                $ouvertes[] = (int)$ligne['position'];
+            }
+        }
+        $this->assertNotContains($depart->position, $ouvertes);
+        $this->assertContains($etrangere, $ouvertes, 'Premisse : la planete d un autre est offerte.');
+        $this->assertGreaterThanOrEqual(10, count($ouvertes), 'Premisse : la plupart du systeme est ouverte.');
+        $metalAvant = $this->planetService->metal()->get();
+
+        $reponse = $this->postJson(route('lifeforms.discoveries.galaxy_system'), ['galaxy' => $depart->galaxy, 'system' => $depart->system, '_token' => csrf_token()]);
+        $reponse->assertStatus(200);
+        $this->assertIsString($reponse->json('newAjaxToken'));
+        $this->assertTrue($reponse->json('response.success'));
+        $envoyees = array_map(static fn (array $c): int => (int)$c['position'], $reponse->json('response.sentToCoordinates'));
+        $this->assertSame($ouvertes, $envoyees, 'Un vol vers chaque position offerte, dans l ordre, et vers rien d autre.');
+        foreach ($reponse->json('response.sentToCoordinates') as $c) {
+            $this->assertSame(['galaxy' => $depart->galaxy, 'system' => $depart->system], ['galaxy' => $c['galaxy'], 'system' => $c['system']]);
+        }
+        $this->assertSame(count($ouvertes), $reponse->json('response.shipsSent'));
+        $this->assertSame($depart->galaxy . ':' . $depart->system, $reponse->json('response.coordinates.galaxy') . ':' . $reponse->json('response.coordinates.system'));
+        $this->assertStringContainsString((string)count($ouvertes), (string)$reponse->json('response.message'));
+        $this->assertStringNotContainsString('t_lifeforms_ui', (string)$reponse->json('response.message'));
+        foreach (['slots', 'probes', 'recyclers', 'missiles', 'planetType'] as $clef) {
+            $this->assertArrayHasKey($clef, $reponse->json('response'), 'Ce que displayMiniFleetMessage() lit.');
+        }
+        $this->assertSame(LifeformDiscoveryRules::QUOTA_PER_DAY - count($ouvertes), $reponse->json('response.discovery.discoveryCount'));
+        $this->assertTrue($reponse->json('response.discovery.canSendDiscovery'), 'Le quota n est pas epuise : les autres systemes restent ouverts.');
+        $this->assertSame(__('t_ingame.galaxy.discoveries') . ': ' . (LifeformDiscoveryRules::QUOTA_PER_DAY - count($ouvertes)), $reponse->json('response.discovery.galaxyHeader.LOCA_GALAXY_LIFEFORM_DISCOVERY_COUNT'));
+
+        $vols = LifeformDiscovery::query()->where('user_id', $this->currentUserId)->where('status', 'running')->orderBy('position')->get();
+        $this->assertSame($ouvertes, $vols->map(static fn (LifeformDiscovery $v): int => (int)$v->position)->all(), 'Chaque vol est en base, par le meme service que l icone.');
+        $this->assertSame(count($ouvertes), $vols->filter(static fn (LifeformDiscovery $v): bool => $v->odds !== null)->count(), 'Chaque vol porte ses cotes scellees.');
+        $this->planetService->reloadPlanet();
+        $this->assertEqualsWithDelta($metalAvant - count($ouvertes) * LifeformDiscoveryRules::cost()->metal->get(), $this->planetService->metal()->get(), 1, 'Chaque vol est paye.');
+
+        // Le systeme est desormais entierement en approche : un second clic n envoie rien, et le dit.
+        $rien = $this->postJson(route('lifeforms.discoveries.galaxy_system'), ['galaxy' => $depart->galaxy, 'system' => $depart->system, '_token' => csrf_token()]);
+        $this->assertFalse($rien->json('response.success'));
+        $this->assertSame([], $rien->json('response.sentToCoordinates'));
+        $this->assertSame(__('t_lifeforms_ui.discoveries.nothing_to_discover'), $rien->json('response.message'));
+        $this->assertSame(count($ouvertes), LifeformDiscovery::query()->where('user_id', $this->currentUserId)->count());
+
+        // Le quota borne la salve : deux vols disponibles, deux vols partent vers le systeme voisin, et la reponse dit le quota epuise.
+        LifeformAccount::query()->where('user_id', $this->currentUserId)->update(['discoveries_available' => 2]);
+        $voisin = $depart->system < 499 ? $depart->system + 1 : $depart->system - 1;
+        $deux = $this->postJson(route('lifeforms.discoveries.galaxy_system'), ['galaxy' => $depart->galaxy, 'system' => $voisin, '_token' => csrf_token()]);
+        $this->assertTrue($deux->json('response.success'));
+        $this->assertCount(2, $deux->json('response.sentToCoordinates'));
+        $this->assertSame(2, $deux->json('response.shipsSent'));
+        $this->assertSame(0, $deux->json('response.discovery.discoveryCount'));
+        $this->assertSame(__('t_lifeforms_ui.refused.quota_exhausted'), $deux->json('response.discovery.canSendDiscovery'), 'Le bundle grise toutes les icones.');
+        $this->assertSame(count($ouvertes) + 2, LifeformDiscovery::query()->where('user_id', $this->currentUserId)->count());
+
+        // Quota a zero : refus avec la raison, rien d ecrit.
+        $epuise = $this->postJson(route('lifeforms.discoveries.galaxy_system'), ['galaxy' => $depart->galaxy, 'system' => $voisin, '_token' => csrf_token()]);
+        $this->assertFalse($epuise->json('response.success'));
+        $this->assertSame(__('t_lifeforms_ui.refused.quota_exhausted'), $epuise->json('response.message'));
+        $this->assertSame(count($ouvertes) + 2, LifeformDiscovery::query()->where('user_id', $this->currentUserId)->count());
+
+        // Coordonnees invalides : 422, comme le vol seul.
+        $this->postJson(route('lifeforms.discoveries.galaxy_system'), ['galaxy' => $depart->galaxy, 'system' => 500, '_token' => csrf_token()])->assertStatus(422);
+
+        // Module ferme : refus propre, rien d ecrit.
+        $this->pinSettings(['lifeforms_enabled' => 0]);
+        $ferme = $this->postJson(route('lifeforms.discoveries.galaxy_system'), ['galaxy' => $depart->galaxy, 'system' => $voisin, '_token' => csrf_token()]);
+        $this->assertFalse($ferme->json('response.success'));
+        $this->assertSame(__('t_ingame.galaxy.discovery_locked'), $ferme->json('response.message'));
+
+        // Le bundle : un seul message pour la salve, les icones des positions parties grisees, le compteur remis.
+        $source = str_replace("\r\n", "\n", (string)file_get_contents(resource_path('js/ingame/e7c74974620fa35b197315ebdbb8c2.js')));
+        $manifeste = json_decode((string)file_get_contents(public_path('build/manifest.json')), true);
+        $this->assertIsArray($manifeste);
+        $servi = str_replace("\r\n", "\n", (string)file_get_contents(public_path('build/' . $manifeste['resources/js/ingame.js']['file'])));
+        foreach (['source' => $source, 'servi' => $servi] as $nom => $js) {
+            $debut = strpos($js, 'function sendSystemDiscoveryMission() {');
+            $this->assertNotFalse($debut, "$nom : la fonction officielle existe.");
+            $fonction = substr($js, $debut, (int)strpos($js, 'function addToTable(', $debut) - $debut);
+            $this->assertSame(1, substr_count($fonction, 'displayMiniFleetMessage('), "$nom : un seul message pour la salve, pas un par position.");
+            $this->assertStringContainsString('displayMiniFleetMessage({ ...res.response,', $fonction, "$nom : le message porte les premieres coordonnees (la fonction les exige).");
+            $this->assertStringContainsString("          refreshFleetEvents(true);\n", $fonction, "$nom : le deroulant des evenements se redemande de force.");
+            $this->assertStringContainsString("document.getElementById('galaxyHeaderDiscoveryCount').innerHTML = res.response.discovery.galaxyHeader.LOCA_GALAXY_LIFEFORM_DISCOVERY_COUNT;", $fonction, "$nom : le compteur de l en-tete est remis.");
+            $this->assertStringContainsString('fadeBox(galaxyLoca.discoveryFailed, true);', $fonction, "$nom : une reponse en erreur se dit.");
+        }
+    }
+
+    /**
+     * **Le clic ne fait rien** (Keven, §162) : `discoverPlanet()` du bundle officiel envoie sans gestionnaire d erreur, et
+     * une reponse 500, 419 ou 422 restait muette. Le bundle dit l echec (`fadeBox`, phrase publiee par la page), et apres
+     * un vol reussi redemande le deroulant des evenements pour que le vol y apparaisse (§163). Temoin sur la source ET
+     * sur le bundle servi : un bundle non reconstruit n aurait aucun effet en jeu.
+     */
+    public function testTheBundleTellsAFailedLaunchAndRefreshesTheEventsAfterOne(): void
+    {
+        $source = str_replace("\r\n", "\n", (string)file_get_contents(resource_path('js/ingame/e7c74974620fa35b197315ebdbb8c2.js')));
+        $manifeste = json_decode((string)file_get_contents(public_path('build/manifest.json')), true);
+        $this->assertIsArray($manifeste);
+        $servi = str_replace("\r\n", "\n", (string)file_get_contents(public_path('build/' . $manifeste['resources/js/ingame.js']['file'])));
+
+        foreach (['source' => $source, 'servi' => $servi] as $nom => $js) {
+            $debut = strpos($js, 'function discoverPlanet(url, data, success = () => {}) {');
+            $this->assertNotFalse($debut, "$nom : discoverPlanet() existe.");
+            $fonction = substr($js, $debut, (int)strpos($js, 'if (showDiscoveryWarning) {', $debut) - $debut);
+            $this->assertStringContainsString("}, \"json\").fail(function () {", $fonction, "$nom : l envoi n a pas de gestionnaire d echec — un 500 reste muet.");
+            $this->assertStringContainsString('fadeBox(galaxyLoca.discoveryFailed, true);', $fonction, "$nom : l echec n est pas dit au joueur.");
+            $this->assertStringContainsString("        getAjaxEventbox();\n", $fonction);
+            // `true` : de force, comme `sendShips` — replie, le deroulant garderait l etat d avant le vol jusqu au rechargement.
+            $this->assertStringContainsString("          refreshFleetEvents(true);\n", $fonction, "$nom : le deroulant des evenements n est pas redemande de force apres le vol.");
+            $this->assertLessThan(strpos($fonction, 'success();'), strpos($fonction, 'refreshFleetEvents(true);'), "$nom : le deroulant se redemande dans la branche du succes.");
+        }
+
+        resolve(LifeformInstallationService::class)->chooseSpecies($this->currentUserId, Species::Humans, (int)Date::now()->timestamp);
+        $page = $this->get('/galaxy');
+        $page->assertSee('"discoveryFailed":' . json_encode(__('t_ingame.galaxy.discovery_failed')), false);
+        $this->assertNotSame('t_ingame.galaxy.discovery_failed', __('t_ingame.galaxy.discovery_failed'));
+    }
+
+    /**
+     * Deux colonies du compte qui portent le numero de position donne : l une dans un autre systeme de ma galaxie, l autre
+     * dans une autre galaxie, au meme systeme que moi. Rend les numeros crees (le meme, deux fois) pour la premisse.
+     *
+     * @return array<int, int>
+     */
+    private function mesColoniesHomonymes(int $position): array
+    {
+        $depart = $this->planetService->getPlanetCoordinates();
+        $galaxies = resolve(SettingsService::class)->numberOfGalaxies();
+        $this->assertGreaterThanOrEqual(2, $galaxies, 'Premisse : au moins deux galaxies.');
+        $autreGalaxie = $depart->galaxy < $galaxies ? $depart->galaxy + 1 : $depart->galaxy - 1;
+        $autreSysteme = $depart->system < 499 ? $depart->system + 1 : $depart->system - 1;
+        $faites = [];
+        foreach ([[$depart->galaxy, $autreSysteme], [$autreGalaxie, $depart->system]] as [$galaxie, $systeme]) {
+            $existante = Planet::query()->where('galaxy', $galaxie)->where('system', $systeme)->where('planet', $position)->first(['user_id']);
+            if ($existante !== null) {
+                // La base partagee d un processus a pu y poser un corps : le temoin exige le sien, il ne suppose pas.
+                $this->assertSame($this->currentUserId, (int)$existante->user_id, "Premisse : la position $galaxie:$systeme:$position est prise par un autre.");
+                $faites[] = $position;
+                continue;
+            }
+            Planet::factory()->create(['user_id' => $this->currentUserId, 'galaxy' => $galaxie, 'system' => $systeme, 'planet' => $position]);
+            $faites[] = $position;
+        }
+
+        return $faites;
     }
 
     /**

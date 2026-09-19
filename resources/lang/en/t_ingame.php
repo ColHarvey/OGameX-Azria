@@ -201,6 +201,7 @@ return [
 
     'fleet' => [
         'mission_patrol' => 'Patrol',
+        'mission_discovery' => 'Discovery',
         // Page / step headers
         'dispatch_1_title'         => 'Fleet Dispatch I',
         'dispatch_2_title'         => 'Fleet Dispatch II',
@@ -621,6 +622,7 @@ return [
         'discovery_unavailable'        => 'You can\'t dispatch an exploration ship to this location.',
         'discovery_underway'           => 'An Exploration Ship is already on approach to this planet.',
         'discovery_locked'             => 'You haven\'t unlocked the research to discover new lifeforms yet.',
+        'discovery_failed'             => 'The exploration ship could not depart: the server did not answer. Reload the page and try again.',
         'discovery_title'              => 'Exploration Ship',
         'discovery_question'           => 'Do you want to dispatch an exploration ship to this planet?<br/>Metal: 5000 Crystal: 1000 Deuterium: 500',
 

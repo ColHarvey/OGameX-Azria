@@ -69,6 +69,7 @@
                     'discoveryUnavailable' => __('t_ingame.galaxy.discovery_unavailable') . "\n",
                     'discoveryUnderway'    => __('t_ingame.galaxy.discovery_underway') . "\n",
                     'discoveryLocked'      => __('t_ingame.galaxy.discovery_locked') . "\n",
+                    'discoveryFailed'      => __('t_ingame.galaxy.discovery_failed'),
                     'discoverQuestionTitle'=> __('t_ingame.galaxy.discovery_title') . "\n",
                     'discoverQuestionText' => __('t_ingame.galaxy.discovery_question'),
                 ];
@@ -289,7 +290,7 @@
             var galaxyTacticalLoca = @json($tactiqueLoca);
             var shipsendingDone = 1;
             var premiumLink = "#?page=premium&openDetail=3";
-            var sendDiscoverSystemUrl = "";
+            var sendDiscoverSystemUrl = @json(route('lifeforms.discoveries.galaxy_system'));
             {{-- Pas de question avant chaque vol : le cout est dans l infobulle de l icone et la page des decouvertes. --}}
             var showDiscoveryWarning = false;
             var missleAttackLink = "{{ route('galaxy.missile-attack.overlay') }}?width=669&height=250";
@@ -432,9 +433,17 @@
                             </a>
                         @endif
 
-                        <div id="discoverSystemBtn" class="btn_blue tooltip discoverSystemLink btn_system_action" title="{{ __('t_ingame.galaxy.discoveries_tooltip') }}" disabled="disabled">
-                            <div class="disabled"></div>&nbsp;{{ __('t_ingame.galaxy.discoveries') }}
-                        </div>
+                        {{-- « Lancez une mission de decouverte dans tous les endroits possibles » : la fonction du bundle officiel,
+                             branchee sur la salve du serveur (journal §163). Grise avec la raison quand rien ne peut partir. --}}
+                        @if ($lifeform_discovery_general === true)
+                            <div id="discoverSystemBtn" class="btn_blue tooltip discoverSystemLink btn_system_action" title="{{ __('t_ingame.galaxy.discoveries_tooltip') }}" onclick="sendSystemDiscoveryMission();">
+                                &nbsp;{{ __('t_ingame.galaxy.discoveries') }}
+                            </div>
+                        @else
+                            <div id="discoverSystemBtn" class="btn_blue tooltip discoverSystemLink btn_system_action" title="{{ $lifeform_discovery_general }}" disabled="disabled">
+                                <div class="disabled"></div>&nbsp;{{ __('t_ingame.galaxy.discoveries') }}
+                            </div>
+                        @endif
                     </div>
                 </form>
             </div>

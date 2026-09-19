@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use OGame\Http\Controllers\Admin\AnnouncementController;
 use OGame\Http\Controllers\Admin\DeveloperShortcutsController;
 use OGame\Http\Controllers\Admin\EventController;
 use OGame\Http\Controllers\Admin\FleetTimingController;
@@ -45,6 +46,7 @@ use OGame\Http\Controllers\SearchController;
 use OGame\Http\Controllers\ServerSettingsController;
 use OGame\Http\Controllers\ShipyardController;
 use OGame\Http\Controllers\ShopController;
+use OGame\Http\Controllers\SupportController;
 use OGame\Http\Controllers\TechtreeController;
 
 /*
@@ -114,6 +116,7 @@ Route::middleware(['auth', 'banned', 'globalgame', 'locale', 'firstlogin'])->gro
     Route::get('/lifeforms/discoveries', [LifeformsController::class, 'discoveries'])->name('lifeforms.discoveries');
     Route::post('/lifeforms/discoveries/launch', [LifeformsController::class, 'launchDiscovery'])->name('lifeforms.discoveries.launch');
     Route::post('/ajax/lifeforms/discover', [LifeformsController::class, 'discoverFromGalaxy'])->name('lifeforms.discoveries.galaxy');
+    Route::post('/ajax/lifeforms/discover-system', [LifeformsController::class, 'discoverSystemFromGalaxy'])->name('lifeforms.discoveries.galaxy_system');
     Route::get('/lifeforms/bonuses', [LifeformsController::class, 'bonuses'])->name('lifeforms.bonuses');
 
     // Facilities
@@ -333,8 +336,8 @@ Route::middleware(['auth', 'banned', 'globalgame', 'locale', 'firstlogin'])->gro
 
 // Group: all logged in pages:
 Route::middleware(['auth', 'globalgame', 'locale'])->group(function () {
-    Route::get('/support', [\OGame\Http\Controllers\SupportController::class, 'index'])->name('support.index');
-    Route::post('/support', [\OGame\Http\Controllers\SupportController::class, 'send'])->name('support.send');
+    Route::get('/support', [SupportController::class, 'index'])->name('support.index');
+    Route::post('/support', [SupportController::class, 'send'])->name('support.send');
 });
 
 Route::middleware(['auth', 'globalgame', 'locale', 'admin'])->group(function () {
@@ -344,8 +347,8 @@ Route::middleware(['auth', 'globalgame', 'locale', 'admin'])->group(function () 
 
     // Rules
     // Annonces aux joueurs
-    Route::get('/admin/announcement', [\OGame\Http\Controllers\Admin\AnnouncementController::class, 'index'])->name('admin.announcement.index');
-    Route::post('/admin/announcement', [\OGame\Http\Controllers\Admin\AnnouncementController::class, 'send'])->name('admin.announcement.send');
+    Route::get('/admin/announcement', [AnnouncementController::class, 'index'])->name('admin.announcement.index');
+    Route::post('/admin/announcement', [AnnouncementController::class, 'send'])->name('admin.announcement.send');
 
     Route::get('/admin/event', [EventController::class, 'index'])->name('admin.event.index');
     Route::post('/admin/event', [EventController::class, 'update'])->name('admin.event.update');
