@@ -1298,10 +1298,13 @@ class FleetDispatchAcsAttackTest extends FleetDispatchTestCase
         $allyPlayerService->setResearchLevel('impulse_drive', 5);
         $allyPlayerService->setResearchLevel('combustion_drive', 5);
 
-        // Send initiator fleet (slower, no drive tech upgrades)
+        // **L initiatrice part a 10 % de vitesse** : l alliee sera donc ralentie pour la rejoindre, quelle que soit
+        // la distance entre les planetes du banc. Sans cela, la premisse « l alliee est naturellement plus rapide »
+        // dependait de l endroit ou les planetes etaient tombees : quand les deux durees coincidaient, l essai ne
+        // prouvait rien et rougissait (rouge de la CI sur 602697b4, 19 septembre 2026).
         $unitCollection = new UnitCollection();
         $unitCollection->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 20);
-        $this->dispatchFleet($this->targetPlanet()->getPlanetCoordinates(), $unitCollection, new Resources(0, 0, 0, 0), PlanetType::Planet);
+        $this->dispatchFleet($this->targetPlanet()->getPlanetCoordinates(), $unitCollection, new Resources(0, 0, 0, 0), PlanetType::Planet, speed: 1);
 
         $fleetMissionService = resolve(FleetMissionService::class);
         $initiatorMission = $fleetMissionService->getActiveFleetMissionsForCurrentPlayer()->first();

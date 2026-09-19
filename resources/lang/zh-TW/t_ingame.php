@@ -50,7 +50,7 @@ return [
         'wrong_class_discoverer' => '要建造此船隻，您需要選擇發現者職業。',
         'no_moon_building'       => '您不能在月球上建造該建築！',
         'not_enough_resources'   => '資源不足！',
-        'queue_full'             => '佇列已滿',
+        'queue_full'             => '佇列已滿：最多 :nombre 項工程可等待（不含進行中的那項）',
         'not_enough_fields'      => '土地不足！',
         'shipyard_busy'          => '造船廠正忙',
         'research_in_progress'   => '研究正在進行中！',

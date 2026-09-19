@@ -2,6 +2,8 @@
 
 namespace OGame\ViewModels\Queue\Abstracts;
 
+use OGame\Queues\QueueCapacity;
+
 class QueueListViewModel
 {
     /**
@@ -18,6 +20,12 @@ class QueueListViewModel
     }
 
     /**
+     * Les travaux qui peuvent **attendre** dans cette file, celui en cours non compris. L interface et le serveur
+     * lisent la meme regle (`QueueCapacity`) ; le service pose ici ce qu elle rend pour ce joueur.
+     */
+    public int $waitingAllowed = QueueCapacity::WAITING_BASE;
+
+    /**
      * Get amount of items in the queue.
      *
      * @return int
@@ -28,15 +36,18 @@ class QueueListViewModel
     }
 
     /**
-     * Get amount of items in the queue.
-     *
-     * @return bool
+     * Les travaux qui attendent. Les files qui distinguent le travail en cours le redefinissent.
+     */
+    public function waitingCount(): int
+    {
+        return count($this->queue);
+    }
+
+    /**
+     * La file est pleine quand elle porte deja tout ce qui peut **attendre** — le travail en cours ne compte pas.
      */
     public function isQueueFull(): bool
     {
-        // Max items is 1 currently building + 4 in queue = 5.
-        // TODO: refactor into global/constant setting configurable by admin.
-        $maxItemsInQueue = 5;
-        return count($this->queue) >= $maxItemsInQueue;
+        return $this->waitingCount() >= $this->waitingAllowed;
     }
 }

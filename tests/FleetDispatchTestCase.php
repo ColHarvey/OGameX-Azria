@@ -400,7 +400,11 @@ abstract class FleetDispatchTestCase extends MoonTestCase
      * @param bool $assertStatus
      * @return void
      */
-    protected function dispatchFleet(Coordinate $coordinates, UnitCollection $units, Resources $resources, PlanetType $planetType, int $holdingHours = 0, bool $assertStatus = true): void
+    /**
+     * Envoie une flotte. `$speed` est le cran du jeu, de 1 a 10 — 10 pour 100 %, 1 pour 10 % : un essai qui a
+     * besoin d une flotte **lente par construction** le demande ici, au lieu d esperer une geometrie favorable.
+     */
+    protected function dispatchFleet(Coordinate $coordinates, UnitCollection $units, Resources $resources, PlanetType $planetType, int $holdingHours = 0, bool $assertStatus = true, int $speed = 10): void
     {
         $unitsArray = $this->convertUnitsToArray($units);
 
@@ -415,7 +419,7 @@ abstract class FleetDispatchTestCase extends MoonTestCase
             'deuterium' => $resources->deuterium->get(),
             '_token' => csrf_token(),
             'holdingtime' => $holdingHours,
-            'speed' => 10,
+            'speed' => $speed,
             ...$unitsArray
         ]);
 

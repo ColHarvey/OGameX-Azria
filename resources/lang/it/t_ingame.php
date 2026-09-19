@@ -70,7 +70,7 @@ return [
         'wrong_class_discoverer' => 'Per poter costruire questa nave, devi aver selezionato la classe Scopritore.',
         'no_moon_building'       => "Non puoi costruire quell'edificio sulla luna!",
         'not_enough_resources'   => 'Risorse insufficienti!',
-        'queue_full'             => 'La coda è piena',
+        'queue_full'             => 'Coda piena: al massimo :nombre lavori in attesa, escluso quello in corso',
         'not_enough_fields'      => 'Campi insufficienti!',
         'shipyard_busy'          => 'Il cantiere spaziale è ancora occupato',
         'research_in_progress'   => 'È in corso una ricerca!',

@@ -16,6 +16,7 @@ use OGame\Models\Lifeforms\LifeformQueue;
 use OGame\Models\Lifeforms\LifeformSpeciesProgress;
 use OGame\Models\Planet;
 use OGame\Models\Resources;
+use OGame\Queues\QueueCapacity;
 use Tests\AccountTestCase;
 use Tests\Support\PinsSettings;
 
@@ -98,6 +99,45 @@ final class LifeformQueueTest extends AccountTestCase
         $this->assertSame((int)$premier->time_end + 14, $second->time_end, 'Niveau 2 a x8 : 2 × 40 × 1,21² ÷ 8 = 14 s.');
     }
 
+    /**
+     * **La file des formes de vie suit la regle du jeu, Commandant compris** (regle d Azria, 19 septembre 2026,
+     * journal §171). Elle autorisait cinq travaux en attente quand la file ordinaire en autorisait quatre.
+     */
+    public function testTheQueueFollowsTheGameRuleAndTheCommanderExtendsIt(): void
+    {
+        $maintenant = (int)Date::now()->timestamp;
+        $file = resolve(LifeformQueueService::class);
+
+        // Un travail demarre, quatre attendent : le cinquieme en attente — le sixieme de la file — est refuse.
+        for ($i = 0; $i < 1 + QueueCapacity::WAITING_BASE; $i++) {
+            $file->add($this->planetService, self::RESIDENTIAL, $maintenant);
+        }
+        $this->assertSame(QueueCapacity::WAITING_BASE, $file->queued($this->planetService->getPlanetId(), LifeformKind::Building)->where('status', 'waiting')->count());
+        $this->assertRefused($file, self::RESIDENTIAL, LifeformRefused::QUEUE_FULL, $maintenant);
+
+        // Avec un Commandant, la file de construction va jusqu a huit travaux en attente.
+        $joueur = $this->planetService->getPlayer();
+        $this->assertNotNull($joueur);
+        $utilisateur = $joueur->getUser();
+        $utilisateur->commander_until = Date::parse('+1 hour');
+        $utilisateur->save();
+        $joueur->load($this->currentUserId);
+
+        for ($i = QueueCapacity::WAITING_BASE; $i < QueueCapacity::WAITING_WITH_COMMANDER; $i++) {
+            $file->add($this->planetService, self::RESIDENTIAL, $maintenant);
+        }
+        $this->assertSame(QueueCapacity::WAITING_WITH_COMMANDER, $file->queued($this->planetService->getPlanetId(), LifeformKind::Building)->where('status', 'waiting')->count());
+        $this->assertRefused($file, self::RESIDENTIAL, LifeformRefused::QUEUE_FULL, $maintenant);
+
+        // Le Commandant expire : rien n est annule, seuls les ajouts nouveaux sont refuses.
+        $utilisateur->commander_until = Date::parse('-1 minute');
+        $utilisateur->save();
+        $joueur->load($this->currentUserId);
+
+        $this->assertSame(QueueCapacity::WAITING_WITH_COMMANDER, $file->queued($this->planetService->getPlanetId(), LifeformKind::Building)->where('status', 'waiting')->count(), 'Aucun travail n est annule.');
+        $this->assertRefused($file, self::RESIDENTIAL, LifeformRefused::QUEUE_FULL, $maintenant);
+    }
+
     public function testTheQueueRefusesWhatTheRulesForbidWithoutWritingAnything(): void
     {
         $maintenant = (int)Date::now()->timestamp;
@@ -119,13 +159,13 @@ final class LifeformQueueTest extends AccountTestCase
         $this->assertSame(0, LifeformQueue::query()->where('planet_id', $this->planetService->getPlanetId())->count(), 'Aucun refus n ecrit une ligne.');
         $this->assertSame($metalAvant, $this->metal(), 'Aucun refus ne debite.');
 
-        // Cinq en attente derriere celui qui court, pas un de plus.
-        for ($i = 0; $i < 6; $i++) {
+        // Quatre en attente derriere celui qui court, pas un de plus : la regle du jeu, sans Commandant (§171).
+        for ($i = 0; $i < 1 + QueueCapacity::WAITING_BASE; $i++) {
             $file->add($this->planetService, self::FARM, $maintenant);
         }
         $this->assertRefused($file, self::FARM, LifeformRefused::QUEUE_FULL, $maintenant);
         $this->assertSame(1, LifeformQueue::query()->where('planet_id', $this->planetService->getPlanetId())->where('status', 'running')->count());
-        $this->assertSame(5, LifeformQueue::query()->where('planet_id', $this->planetService->getPlanetId())->where('status', 'waiting')->count());
+        $this->assertSame(QueueCapacity::WAITING_BASE, LifeformQueue::query()->where('planet_id', $this->planetService->getPlanetId())->where('status', 'waiting')->count());
     }
 
     public function testAnItemWhoseResourcesAreMissingIsCanceledAtStartNotStartedHalfway(): void

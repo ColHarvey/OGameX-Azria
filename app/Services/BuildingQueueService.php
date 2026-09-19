@@ -5,9 +5,12 @@ namespace OGame\Services;
 use Exception;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Facades\DB;
 use OGame\GameObjects\Models\Enums\GameObjectType;
 use OGame\Models\BuildingQueue;
+use OGame\Models\Planet;
 use OGame\Models\Resources;
+use OGame\Queues\QueueCapacity;
 use OGame\ViewModels\Queue\BuildingQueueListViewModel;
 use OGame\ViewModels\Queue\BuildingQueueViewModel;
 use RuntimeException;
@@ -110,13 +113,26 @@ class BuildingQueueService
      */
     public function add(PlanetService $planet, int $building_id): void
     {
+        // **La file se juge sous le verrou de la planete, et le verrou tient jusqu a l insertion** (regle d Azria,
+        // 19 septembre 2026) : sans lui, deux clics simultanes lisaient tous deux une file non pleine et inseraient
+        // chacun leur travail.
+        DB::transaction(function () use ($planet, $building_id): void {
+            Planet::query()->whereKey($planet->getPlanetId())->lockForUpdate()->first();
+            $this->addUnderLock($planet, $building_id);
+        });
+    }
+
+    /**
+     * L ajout proprement dit, appele avec le verrou de la planete en main.
+     *
+     * @throws Exception
+     */
+    private function addUnderLock(PlanetService $planet, int $building_id): void
+    {
         $build_queue = $this->retrieveQueue($planet);
 
-        // Max amount of buildings that can be in the queue in a given time.
-        // TODO: refactor throw exception into a more user-friendly message.
         if ($build_queue->isQueueFull()) {
-            // Max amount of build queue items already exist, throw exception.
-            throw new Exception('Maximum number of items already in queue.');
+            throw new Exception(__('t_ingame.buildings.queue_full', ['nombre' => $build_queue->waitingAllowed]));
         }
 
         // Check if user satisfies requirements to build this object.
@@ -197,6 +213,19 @@ class BuildingQueueService
      */
     public function addDowngrade(PlanetService $planet, int $building_id): void
     {
+        DB::transaction(function () use ($planet, $building_id): void {
+            Planet::query()->whereKey($planet->getPlanetId())->lockForUpdate()->first();
+            $this->addDowngradeUnderLock($planet, $building_id);
+        });
+    }
+
+    /**
+     * Le retrogradage proprement dit, appele avec le verrou de la planete en main.
+     *
+     * @throws Exception
+     */
+    private function addDowngradeUnderLock(PlanetService $planet, int $building_id): void
+    {
         $player = $planet->getPlayer();
         if ($player === null) {
             throw new Exception('Planet has no owner.');
@@ -204,9 +233,8 @@ class BuildingQueueService
 
         $build_queue = $this->retrieveQueue($planet);
 
-        // Max amount of buildings that can be in the queue in a given time.
         if ($build_queue->isQueueFull()) {
-            throw new Exception('Maximum number of items already in queue.');
+            throw new Exception(__('t_ingame.buildings.queue_full', ['nombre' => $build_queue->waitingAllowed]));
         }
 
         // Get the building object
@@ -330,8 +358,12 @@ class BuildingQueueService
             $list[] = $viewModel;
         }
 
-        // Create BuildingQueueListViewModel
-        return new BuildingQueueListViewModel($list);
+        $vue = new BuildingQueueListViewModel($list);
+        // **La meme regle pour l interface et pour le refus** : ce qui peut attendre derriere le travail en cours,
+        // etendu tant qu un Commandant est embauche (`QueueCapacity`).
+        $vue->waitingAllowed = QueueCapacity::waitingAllowedForBuildings($planet->getPlayer()?->getUser());
+
+        return $vue;
     }
 
     /**

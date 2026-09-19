@@ -51,6 +51,10 @@ on:
       # le bac — et la mutation survivante du chantier (relecture du statut sous le verrou) ne se mesure
       # que la.
       - 'app/Lifeforms/**'
+      # La limite des files et son verrou (journal §171) : la regle partagee et les deux services qui l appliquent.
+      - 'app/Queues/**'
+      - 'app/Services/BuildingQueueService.php'
+      - 'app/Services/ResearchQueueService.php'
       - 'tests/Feature/HullRepairTest.php'
       - 'tests/Feature/Patrol*.php'
       - 'tests/MariaDb/**'
@@ -91,6 +95,10 @@ on:
       # le bac — et la mutation survivante du chantier (relecture du statut sous le verrou) ne se mesure
       # que la.
       - 'app/Lifeforms/**'
+      # La limite des files et son verrou (journal §171) : la regle partagee et les deux services qui l appliquent.
+      - 'app/Queues/**'
+      - 'app/Services/BuildingQueueService.php'
+      - 'app/Services/ResearchQueueService.php'
       - 'tests/Feature/HullRepairTest.php'
       - 'tests/Feature/Patrol*.php'
       - 'tests/MariaDb/**'
@@ -319,7 +327,7 @@ jobs:
         # 34695884708, plus ces cinq-la. Les trois courses des formes de vie (journal §155) le sont
         # aussi : un vert qui ne les nommerait pas ne prouverait pas qu elles ont tourne.
         run: >-
-          php scripts/verifier-junit.php storage/logs/junit-mariadb.xml --minimum=173 --sans-ignores
+          php scripts/verifier-junit.php storage/logs/junit-mariadb.xml --minimum=174 --sans-ignores
           --exige=testTwoFreeFirstChoicesAtOnceGrantOnlyOneFreeClass
           --exige=testDisbandingWaitsOnTheAllianceBeforeLockingAnyAccount
           --exige=testTwoConcurrentDisbandsBothFinishAndLeaveTheAllianceGone
@@ -328,6 +336,7 @@ jobs:
           --exige=testTwoSimultaneousSettlementsCreditOnceAndReportOnce
           --exige=testTheClassAtAnAdmissionIsNeverAMixOfTheColumnAndTheHistory
           --exige=testTwoSeparateReadsWouldMixWhereTheReaderDoesNot
+          --exige=testTwoSimultaneousRequestsNeverExceedTheQueueLimit
 
       - name: Publier les journaux
         if: always()

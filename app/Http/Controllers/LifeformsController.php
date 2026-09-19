@@ -149,7 +149,7 @@ final class LifeformsController extends OGameController
         $enFile = $this->queue->queued($planet->getPlanetId(), LifeformKind::Building);
         $enCours = $enFile->firstWhere('status', 'running');
         $enAttente = $enFile->where('status', 'waiting')->values();
-        $filePleine = $enAttente->count() >= LifeformQueueService::MAX_WAITING_PER_KIND;
+        $filePleine = $enAttente->count() >= LifeformQueueService::waitingAllowed($player, LifeformKind::Building);
         $vitesses = $this->revisions->live();
         $vacances = $player->isInVacationMode();
 
@@ -178,6 +178,8 @@ final class LifeformsController extends OGameController
         }
 
         return view('ingame.lifeforms.buildings', [
+            // Le gabarit dit combien de travaux peuvent attendre : la meme regle que le refus, jamais un nombre en dur.
+            'queue_waiting_allowed' => LifeformQueueService::waitingAllowed($player, LifeformKind::Building),
             'species' => $espece,
             'species_name' => __('t_lifeforms.species.' . $espece->machineName()),
             'planet_name' => $planet->getPlanetName(),
@@ -242,8 +244,8 @@ final class LifeformsController extends OGameController
             $raison = __('t_ingame.buildings.requirements_not_met');
         } elseif (!$this->queue->populationMet($objet, $cible, $etat)) {
             $raison = __('t_lifeforms_ui.buildings.population_not_met', ['required' => AppUtil::formatNumber((int)ceil($populationExigee))]);
-        } elseif ($enFile->where('status', 'waiting')->count() >= LifeformQueueService::MAX_WAITING_PER_KIND) {
-            $raison = __('t_ingame.buildings.queue_full');
+        } elseif ($enFile->where('status', 'waiting')->count() >= LifeformQueueService::waitingAllowed($player, LifeformKind::Building)) {
+            $raison = __('t_ingame.buildings.queue_full', ['nombre' => LifeformQueueService::waitingAllowed($player, LifeformKind::Building)]);
         } elseif (!$planet->hasResources($devis->price)) {
             $raison = __('t_ingame.buildings.not_enough_resources');
         }
@@ -346,7 +348,7 @@ final class LifeformsController extends OGameController
         $emplacements = $this->research->slotsOf($planet->getPlanetId());
         $enFile = $this->queue->queued($planet->getPlanetId(), LifeformKind::Technology);
         $enCours = $enFile->firstWhere('status', 'running');
-        $filePleine = $enFile->where('status', 'waiting')->count() >= LifeformQueueService::MAX_WAITING_PER_KIND;
+        $filePleine = $enFile->where('status', 'waiting')->count() >= LifeformQueueService::waitingAllowed($player, LifeformKind::Technology);
         $centreOuvert = $this->queue->requirementsMet(LifeformCatalogue::technologiesOf($espece)[0], $niveaux);
         $vacances = $player->isInVacationMode();
         $autresEspeces = array_values(array_filter($this->research->discoveredSpeciesOf($player->getId()), fn (Species $s) => $s !== $espece));
@@ -411,6 +413,7 @@ final class LifeformsController extends OGameController
         }
 
         return view('ingame.lifeforms.research', [
+            'queue_waiting_allowed' => LifeformQueueService::waitingAllowed($player, LifeformKind::Technology),
             'held' => $this->banner->heldOn($planet),
             'species' => $espece,
             'species_name' => __('t_lifeforms.species.' . $espece->machineName()),
@@ -547,8 +550,8 @@ final class LifeformsController extends OGameController
             $raison = __('t_lifeforms_ui.research.centre_needed');
         } elseif (!$ouvert) {
             $raison = __('t_lifeforms_ui.refused.slot_locked');
-        } elseif ($enFile->where('status', 'waiting')->count() >= LifeformQueueService::MAX_WAITING_PER_KIND) {
-            $raison = __('t_ingame.buildings.queue_full');
+        } elseif ($enFile->where('status', 'waiting')->count() >= LifeformQueueService::waitingAllowed($player, LifeformKind::Technology)) {
+            $raison = __('t_ingame.buildings.queue_full', ['nombre' => LifeformQueueService::waitingAllowed($player, LifeformKind::Technology)]);
         } elseif (!$planet->hasResources($devis->price)) {
             $raison = __('t_ingame.buildings.not_enough_resources');
         }

@@ -30,6 +30,14 @@ class BuildingQueueListViewModel extends QueueListViewModel
     }
 
     /**
+     * Ce qui attend derriere le travail en cours : la seule chose que la limite compte.
+     */
+    public function waitingCount(): int
+    {
+        return count($this->getQueuedFromQueue());
+    }
+
+    /**
      * Returns the items in the queue that are queued.
      *
      * @return array<BuildingQueueViewModel>

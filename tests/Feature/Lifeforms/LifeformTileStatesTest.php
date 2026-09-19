@@ -23,6 +23,7 @@ use OGame\Models\Lifeforms\LifeformSpeciesProgress;
 use OGame\Models\Lifeforms\LifeformTechnologyLevel;
 use OGame\Models\Planet;
 use OGame\Models\Resources;
+use OGame\Queues\QueueCapacity;
 use Tests\AccountTestCase;
 use Tests\Support\PinsSettings;
 
@@ -117,15 +118,15 @@ final class LifeformTileStatesTest extends AccountTestCase
         $niveaux = resolve(LifeformLevels::class);
 
         // Batiments : la Ferme court, cinq Enclaves attendent, et il ne reste rien a payer.
-        for ($i = 0; $i < 6; $i++) {
+        for ($i = 0; $i < 1 + QueueCapacity::WAITING_BASE; $i++) {
             $file->add($this->planetService, self::MEDITATION_ENCLAVE, $maintenant);
         }
         Planet::query()->whereKey($planetId)->update(['metal' => 0, 'crystal' => 0, 'deuterium' => 0]);
         $this->planetService->reloadPlanet();
         $page = (string)$this->get(route('lifeforms.buildings'))->getContent();
-        $this->assertSame(1, preg_match('#<li[^>]*data-technology="' . self::CRYSTAL_FARM . '"[^>]*data-status="disabled"[^>]*title="[^"]*' . preg_quote(e(__('t_ingame.buildings.queue_full')), '#') . '"#', $page), 'La vignette dit : file pleine.');
+        $this->assertSame(1, preg_match('#<li[^>]*data-technology="' . self::CRYSTAL_FARM . '"[^>]*data-status="disabled"[^>]*title="[^"]*' . preg_quote(e(__('t_ingame.buildings.queue_full', ['nombre' => QueueCapacity::WAITING_BASE])), '#') . '"#', $page), 'La vignette dit : file pleine.');
         $fiche = (string)$this->get(route('lifeforms.buildings.ajax', ['technology' => self::CRYSTAL_FARM]))->json('content.technologydetails');
-        $this->assertStringContainsString('title="' . e(__('t_ingame.buildings.queue_full')) . '"', $fiche, 'La fiche aussi.');
+        $this->assertStringContainsString('title="' . e(__('t_ingame.buildings.queue_full', ['nombre' => QueueCapacity::WAITING_BASE])) . '"', $fiche, 'La fiche aussi.');
         $this->assertStringNotContainsString('title="' . e(__('t_ingame.buildings.not_enough_resources')) . '"', $fiche);
         try {
             $file->add($this->planetService, self::CRYSTAL_FARM, $maintenant);
@@ -140,7 +141,7 @@ final class LifeformTileStatesTest extends AccountTestCase
         $niveaux->setLevel($planetId, LifeformKind::Building, self::RUNE_TECHNOLOGIUM, 1);
         LifeformPlanet::query()->where('planet_id', $planetId)->update(['population' => 250000.0]);
         resolve(LifeformResearchService::class)->choose($planetId, $this->currentUserId, 1, 'local', $maintenant);
-        for ($i = 0; $i < 6; $i++) {
+        for ($i = 0; $i < 1 + QueueCapacity::WAITING_BASE; $i++) {
             $file->add($this->planetService, self::VOLCANIC_BATTERIES, $maintenant);
         }
         $page = (string)$this->get(route('lifeforms.research'))->getContent();
@@ -148,7 +149,7 @@ final class LifeformTileStatesTest extends AccountTestCase
         // Un second emplacement ouvert et pris par une autre technologie dirait « file pleine » ; ici c est la fiche qui le dit.
         $fiche = (string)$this->get(route('lifeforms.research.ajax', ['technology' => self::VOLCANIC_BATTERIES]))->json('content.technologydetails');
         $this->assertStringContainsString(e(__('t_ingame.ajax_object.in_queue')), $fiche, 'Une recherche court : le bouton dit « Dans la file ».');
-        $this->assertStringContainsString('title="' . e(__('t_ingame.buildings.queue_full')) . '"', $fiche, 'La fiche dit : file pleine.');
+        $this->assertStringContainsString('title="' . e(__('t_ingame.buildings.queue_full', ['nombre' => QueueCapacity::WAITING_BASE])) . '"', $fiche, 'La fiche dit : file pleine.');
     }
 
     /**
@@ -164,11 +165,11 @@ final class LifeformTileStatesTest extends AccountTestCase
         $recherche = resolve(LifeformResearchService::class);
         $recherche->choose($planetId, $this->currentUserId, 1, 'local', $maintenant);
         $recherche->choose($planetId, $this->currentUserId, 2, 'local', $maintenant);
-        for ($i = 0; $i < 6; $i++) {
+        for ($i = 0; $i < 1 + QueueCapacity::WAITING_BASE; $i++) {
             $file->add($this->planetService, self::VOLCANIC_BATTERIES, $maintenant);
         }
         $page = (string)$this->get(route('lifeforms.research'))->getContent();
-        $this->assertSame(1, preg_match('#<li[^>]*data-slot="2"[^>]*data-technology="12202"[^>]*data-status="disabled" title="[^"]*' . preg_quote(e(__('t_ingame.buildings.queue_full')), '#') . '"#', $page), 'L emplacement 2 : file pleine, pas « ressources ».');
+        $this->assertSame(1, preg_match('#<li[^>]*data-slot="2"[^>]*data-technology="12202"[^>]*data-status="disabled" title="[^"]*' . preg_quote(e(__('t_ingame.buildings.queue_full', ['nombre' => QueueCapacity::WAITING_BASE])), '#') . '"#', $page), 'L emplacement 2 : file pleine, pas « ressources ».');
         $this->assertSame(0, preg_match('#data-slot="2"[^>]*' . preg_quote(e(__('t_ingame.buildings.not_enough_resources')), '#') . '#', $page));
     }
 

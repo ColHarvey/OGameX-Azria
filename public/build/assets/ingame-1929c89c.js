@@ -74674,12 +74674,27 @@ ogame.chat = {
      */
     restoreOpenChats: function () {
         var c = ogame.chat;
+        // La page appelle ce geste des qu elle est prete, et `initChat` le rappelle : il ne se fait qu une fois.
+        if (c.openChatsRestored) {
+            return
+        }
+        c.openChatsRestored = true;
         // **La page porte deja l historique des conversations ouvertes** : on les pose sans une requete, donc sans
         // le battement pendant lequel la fenetre manquait a l ecran (constat de Keven, 19 septembre 2026).
         if (typeof chatRestore !== 'undefined' && $.isArray(chatRestore) && chatRestore.length) {
+            // Ce que la page restaure EST ce qui est ouvert : le reste du script le lit dans `visibleChats`, et
+            // `setVisibilityState()` refermerait sinon ce qu on vient de poser.
+            visibleChats = {chatbar: false, players: [], associations: []};
             $.each(chatRestore, function (i, charge) {
                 c.absorbChatLog(charge);
-                c.showChat(charge)
+                c.showChat(charge);
+                if (charge.associationId !== undefined) {
+                    visibleChats.associations.push(charge.associationId)
+                } else {
+                    if (charge.playerId !== undefined) {
+                        visibleChats.players.push({partnerId: charge.playerId})
+                    }
+                }
             });
             return
         }

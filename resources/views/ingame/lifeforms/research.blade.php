@@ -56,7 +56,7 @@
                                         @elseif (!$s['centre_open'])
                                             data-status="off" title="{{ $s['title'] }}<br/>{{ __('t_lifeforms_ui.research.centre_needed') }}"
                                         @elseif ($s['queue_full'])
-                                            data-status="disabled" title="{{ $s['title'] }}<br/>{{ __('t_ingame.buildings.queue_full') }}"
+                                            data-status="disabled" title="{{ $s['title'] }}<br/>{{ __('t_ingame.buildings.queue_full', ['nombre' => $queue_waiting_allowed]) }}"
                                         @elseif (!$s['can_research'])
                                             data-status="disabled" title="{{ $s['title'] }}<br/>{{ __('t_ingame.buildings.not_enough_resources') }}"
                                         @else

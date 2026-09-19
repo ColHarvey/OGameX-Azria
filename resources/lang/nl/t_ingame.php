@@ -70,7 +70,7 @@ return [
         'wrong_class_discoverer' => 'Om dit schip te kunnen bouwen, moet je de klasse Ontdekker hebben geselecteerd.',
         'no_moon_building'       => 'Je kunt dat gebouw niet op een maan bouwen!',
         'not_enough_resources'   => 'Niet genoeg grondstoffen!',
-        'queue_full'             => 'Wachtrij is vol',
+        'queue_full'             => 'Wachtrij vol: maximaal :nombre wachtende taken, de lopende niet meegerekend',
         'not_enough_fields'      => 'Niet genoeg velden!',
         'shipyard_busy'          => 'De scheepswerf is nog bezig',
         'research_in_progress'   => 'Er wordt momenteel onderzoek gedaan!',

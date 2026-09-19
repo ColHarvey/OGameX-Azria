@@ -1803,6 +1803,12 @@ However, the Space Dock's engineers think that some of the remains can be salvag
                     initBuffBar();
                     tabletInitOverviewAdvice();
 
+                    /* **Les conversations ouvertes sont posees tout de suite** (releve de Codex, 19 septembre 2026) :
+                       la page porte deja leur historique, et rien ne justifie d attendre le chargement des contacts —
+                       une requete reseau — pour les afficher. Les contacts se chargent de leur cote, comme avant. */
+                    ogame.chat.initChatBar(playerId);
+                    ogame.chat.restoreOpenChats();
+
                     ogame.chat.showPlayerList('#chatBarPlayerList .cb_playerlist_box');
                     ogame.chat.showPlayerList('#sideBar');
                     var initChatAsyncInterval = window.setInterval(initChatAsync, 100);

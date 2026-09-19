@@ -300,7 +300,22 @@ final class LifeformBonusResolver
             ->where('user_id', $userId)
             ->where(static fn ($q) => $asOf === null ? $q->where('destroyed', 0) : $q->where('destroyed', 0)->orWhere('destroyed', '>', $asOf))
             ->pluck('id');
-        $etats = LifeformPlanet::query()->whereIn('planet_id', $planetes)->get();
+        $requete = LifeformPlanet::query()->whereIn('planet_id', $planetes);
+        if ($asOf !== null) {
+            // **Une colonie installee APRES l instant n armait rien alors** (releve de Codex, 19 septembre 2026) :
+            // elle ne contribue pas, et il n y a aucun passe a lui reconstituer. Sans ce filtre, une installation
+            // faite entre l arrivee d une flotte et son traitement faisait lever « population introuvable » et
+            // pouvait suspendre le combat. `installed_at` ne precede jamais la naissance du corps : le meme filtre
+            // ecarte donc aussi une colonie nee apres l instant.
+            //
+            // **Garde declaree.** Sur des donnees coherentes, aucun etat ne la separe du reste : une colonie installee
+            // apres l instant n a alors ni emplacement ni niveau, et le retour anticipe de `activeTechnologyLevelsAt()`
+            // suffit deja. Mesure faite par mutation le 19 septembre 2026 — retirer ce filtre ne fait tomber aucun
+            // temoin. Il reste parce qu il dit la regle a sa source (ce qui n existait pas n a pas de passe a reclamer)
+            // et protege toute lecture future du meme genre.
+            $requete->where('installed_at', '<=', $asOf);
+        }
+        $etats = $requete->get();
         if ($etats->isEmpty()) {
             return null;
         }

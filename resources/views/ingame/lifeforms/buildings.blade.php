@@ -51,7 +51,7 @@
                                 title="{{ $tile['title'] }}<br/>{{ __('t_lifeforms_ui.buildings.population_short') }}"
                             @elseif ($tile['queue_full'])
                                 data-status="disabled"
-                                title="{{ $tile['title'] }}<br/>{{ __('t_ingame.buildings.queue_full') }}"
+                                title="{{ $tile['title'] }}<br/>{{ __('t_ingame.buildings.queue_full', ['nombre' => $queue_waiting_allowed]) }}"
                             @elseif (!$tile['enough_resources'])
                                 data-status="disabled"
                                 title="{{ $tile['title'] }}<br/>{{ __('t_ingame.buildings.not_enough_resources') }}"

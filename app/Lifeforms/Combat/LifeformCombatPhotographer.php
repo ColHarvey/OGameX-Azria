@@ -8,6 +8,7 @@ use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
 use OGame\Lifeforms\Bonuses\LifeformBonusSet;
 use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Catalogue\LifeformKind;
+use OGame\Lifeforms\Demography\LifeformDemography;
 use OGame\Lifeforms\Demography\PlanetLifeformProfile;
 use OGame\Lifeforms\LifeformHistoryUnavailable;
 use OGame\Lifeforms\Rules\LifeformRuleRevisions;
@@ -47,6 +48,7 @@ final class LifeformCombatPhotographer
         private readonly LifeformBonusResolver $resolver,
         private readonly LifeformLevels $levels,
         private readonly LifeformRuleRevisions $revisions,
+        private readonly LifeformDemography $demography,
     ) {
     }
 
@@ -97,6 +99,17 @@ final class LifeformCombatPhotographer
         $etat = LifeformPlanet::query()->where('planet_id', $body->getPlanetId())->first();
         if ($etat === null) {
             return new FrozenLifeformCombatBonuses($unites, null, 0.0, 0.0, 0.0);
+        }
+        // **Un corps peuple dont la population de cet instant est inconnue n entre pas dans une bataille.** Ses pertes
+        // civiles se prennent sur cette population (`LifeformCombatLosses`) : un reglement qui ne la connait pas
+        // suspendrait de toute facon, et il vaut mieux le dire a l admission, quand rien n est encore gele. La
+        // lecture des bonus, elle, ne reclame plus cette population quand aucune technologie n est posee (§173) :
+        // la garantie vit donc ici, ou elle a toujours eu son sens.
+        if ($at !== null && $this->demography->stateAt($etat, $at) === null) {
+            throw new UnknownAdmissionHistory(
+                'La population du corps ' . $body->getPlanetId() . ' a l instant ' . $at . ' n est pas reconstituable : '
+                . 'les pertes civiles de cette bataille ne pourraient pas etre prises.'
+            );
         }
         $niveaux = $at === null
             ? $this->levels->buildingLevelsOf($body->getPlanetId())

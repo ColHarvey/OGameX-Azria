@@ -5,9 +5,12 @@ namespace OGame\Services;
 use Exception;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Facades\DB;
 use OGame\GameObjects\Models\Enums\GameObjectType;
 use OGame\Models\ResearchQueue;
 use OGame\Models\Resources;
+use OGame\Models\User;
+use OGame\Queues\QueueCapacity;
 use OGame\ViewModels\Queue\ResearchQueueListViewModel;
 use OGame\ViewModels\Queue\ResearchQueueViewModel;
 use RuntimeException;
@@ -109,13 +112,25 @@ class ResearchQueueService
      */
     public function add(PlayerService $player, PlanetService $planet, int $research_object_id): void
     {
+        // **La file se juge sous le verrou du compte** : la recherche est a l echelle du joueur, pas de la planete,
+        // et deux clics simultanes ne doivent pas la depasser (regle d Azria, 19 septembre 2026).
+        DB::transaction(function () use ($player, $planet, $research_object_id): void {
+            User::query()->whereKey($player->getId())->lockForUpdate()->first();
+            $this->addUnderLock($player, $planet, $research_object_id);
+        });
+    }
+
+    /**
+     * L ajout proprement dit, appele avec le verrou du compte en main.
+     *
+     * @throws Exception
+     */
+    private function addUnderLock(PlayerService $player, PlanetService $planet, int $research_object_id): void
+    {
         $research_queue = $this->retrieveQueue($planet);
 
-        // Max amount of research items that can be in the queue at a given time.
-        // TODO: refactor throw exception into a more user-friendly message.
         if ($research_queue->isQueueFull()) {
-            // Max amount of research queue items already exist, throw exception.
-            throw new Exception('Maximum number of items already in queue.');
+            throw new Exception(__('t_ingame.buildings.queue_full', ['nombre' => $research_queue->waitingAllowed]));
         }
 
         $object = ObjectService::getObjectById($research_object_id);
@@ -204,7 +219,11 @@ class ResearchQueueService
             $list[] = $viewModel;
         }
 
-        return new ResearchQueueListViewModel($list);
+        $vue = new ResearchQueueListViewModel($list);
+        // La recherche n est pas etendue par le Commandant (decision de Keven, 19 septembre 2026).
+        $vue->waitingAllowed = QueueCapacity::waitingAllowedForResearch();
+
+        return $vue;
     }
 
     /**

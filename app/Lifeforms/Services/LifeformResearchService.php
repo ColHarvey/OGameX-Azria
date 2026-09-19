@@ -417,6 +417,23 @@ final class LifeformResearchService
      */
     public function activeTechnologyLevelsAt(int $planetId, LifeformPlanet $state, PlanetLifeformProfile $profile, Species $species, array $buildingLevels, int $at): array
     {
+        $occupation = $this->occupancyOf($planetId, $at);
+        $niveaux = $this->levels->levelsAt($planetId, LifeformKind::Technology, $at);
+        // **Rien a arbitrer, rien a reconstituer** (releve de Codex, 19 septembre 2026) : si aucune technologie
+        // posee n avait de niveau a cet instant, la population ne change pas le resultat — et une colonie sans
+        // technologie n a aucune raison de suspendre un combat. La suspension reste entiere des qu une technologie
+        // pouvait contribuer : c est alors la population qui decide, et elle manque.
+        $possible = false;
+        foreach ($occupation as $objetPose) {
+            if (($niveaux[$objetPose] ?? 0) > 0) {
+                $possible = true;
+                break;
+            }
+        }
+        if (!$possible) {
+            return [];
+        }
+
         $population = $this->demography->populationAt($planetId, $at);
         if ($population === null) {
             throw new LifeformHistoryUnavailable(
@@ -427,8 +444,8 @@ final class LifeformResearchService
         }
 
         return $this->activeAmong(
-            $this->occupancyOf($planetId, $at),
-            $this->levels->levelsAt($planetId, LifeformKind::Technology, $at),
+            $occupation,
+            $niveaux,
             $population,
             $profile,
             $species,

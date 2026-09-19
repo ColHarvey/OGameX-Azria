@@ -14,6 +14,7 @@ use OGame\Lifeforms\Bonuses\LifeformPurgedBodies;
 use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\Combat\LifeformCombatPhotographer;
+use OGame\Lifeforms\Demography\LifeformDemography;
 use OGame\Lifeforms\LifeformHistoryUnavailable;
 use OGame\Lifeforms\Services\LifeformInstallationService;
 use OGame\Lifeforms\Services\LifeformLevels;
@@ -360,6 +361,76 @@ final class LifeformColonyAbandonmentTest extends AccountTestCase
         $this->purgeTheColony();
 
         $this->assertSame(0, DB::table('lifeform_purged_bodies')->where('planet_id', $this->colonie)->count());
+    }
+
+    /**
+     * **Une colonie installee APRES l instant ne compte pas et ne suspend rien** (releve de Codex, 19 septembre 2026,
+     * journal §173).
+     *
+     * Le scenario exact : une flotte arrive, une minute plus tard une colonie recoit ses formes de vie, et le serveur
+     * traite l arrivee deux minutes apres. La population de cette colonie a l instant de l arrivee est evidemment
+     * introuvable — elle n avait pas de formes de vie — et le calcul levait « population introuvable », ce qui suspend
+     * un combat. Or cette colonie n armait rien a cet instant : elle doit simplement etre ignoree.
+     */
+    public function testAColonyInstalledAfterTheInstantNeitherCountsNorSuspends(): void
+    {
+        $this->theSameTechnologyOnBothPlanets();
+        // La colonie n a pas encore de formes de vie au moment de l arrivee.
+        LifeformSlot::query()->where('planet_id', $this->colonie)->delete();
+        LifeformSlotChange::query()->where('planet_id', $this->colonie)->delete();
+        LifeformTechnologyLevel::query()->where('planet_id', $this->colonie)->delete();
+        LifeformBuildingLevel::query()->where('planet_id', $this->colonie)->delete();
+        LifeformPlanet::query()->where('planet_id', $this->colonie)->delete();
+        LifeformBonusCache::invalidate();
+
+        $arrivee = $this->aLittleLater(600);
+        $mereSeule = $this->energyAt($arrivee);
+        $this->assertGreaterThan(0.0, $mereSeule, 'Premisse : la planete mere arme la flotte, la colonie non.');
+
+        // Une minute plus tard, la colonie recoit ses formes de vie — par le vrai chemin.
+        $installation = $this->aLittleLater(60);
+        resolve(LifeformInstallationService::class)->installOnExistingPlanet($this->colonie, $installation);
+        $this->sustainLifeformPopulation($this->colonie, Species::Rocktal, 2000000.0, $installation);
+        $this->placeLifeformSlot($this->colonie, self::SLOT, self::VOLCANIC_BATTERIES, $installation);
+        resolve(LifeformLevels::class)->setLevel($this->colonie, LifeformKind::Technology, self::VOLCANIC_BATTERIES, 10);
+        LifeformBonusCache::invalidate();
+
+        // Deux minutes apres l arrivee, le serveur la traite enfin.
+        $this->aLittleLater(60);
+        LifeformBonusCache::invalidate();
+
+        $this->assertEqualsWithDelta($mereSeule, $this->energyAt($arrivee), self::DELTA, 'La colonie installee apres l arrivee ne compte pas, et rien ne leve.');
+        $this->assertGreaterThan($mereSeule, $this->energyAt($installation + 30), 'Apres son installation, en revanche, elle compte.');
+    }
+
+    /**
+     * **Une colonie sans technologie ne reclame pas un passe** (releve de Codex, 19 septembre 2026) : la population
+     * n est exigee que si une technologie posee pouvait contribuer. La suspension, elle, reste entiere quand une
+     * technologie existait : c est alors la population qui decide, et son absence est un vrai trou.
+     */
+    public function testAColonyWithoutTechnologyDoesNotDemandAPastItCannotHave(): void
+    {
+        $this->theSameTechnologyOnBothPlanets();
+        $instant = (int)Date::now()->timestamp;
+
+        // La colonie garde ses formes de vie, mais plus aucune technologie posee.
+        LifeformSlot::query()->where('planet_id', $this->colonie)->delete();
+        LifeformSlotChange::query()->where('planet_id', $this->colonie)->delete();
+        LifeformTechnologyLevel::query()->where('planet_id', $this->colonie)->delete();
+        // Et sa population de cet instant n est pas reconstituable : son horloge est passee devant.
+        LifeformPlanet::query()->where('planet_id', $this->colonie)->update([
+            'calculated_at' => $instant + 86400,
+            'previous_calculated_at' => $instant + 86400,
+        ]);
+        LifeformBonusCache::invalidate();
+
+        $this->assertNull(resolve(LifeformDemography::class)->populationAt($this->colonie, $instant), 'Premisse : la population de cet instant est introuvable.');
+
+        $this->aLittleLater(120);
+        LifeformBonusCache::invalidate();
+        $valeur = $this->energyAt($instant);
+
+        $this->assertGreaterThan(0.0, $valeur, 'La planete mere compte toujours, et rien n a leve pour la colonie sans technologie.');
     }
 
     private function theSameTechnologyOnBothPlanets(): void

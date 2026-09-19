@@ -19,7 +19,9 @@ use OGame\Models\Lifeforms\LifeformPlanet;
 use OGame\Models\Lifeforms\LifeformQueue;
 use OGame\Models\Planet;
 use OGame\Models\Resources;
+use OGame\Queues\QueueCapacity;
 use OGame\Services\PlanetService;
+use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
 use RuntimeException;
 
@@ -44,7 +46,18 @@ use RuntimeException;
  */
 final class LifeformQueueService
 {
-    public const int MAX_WAITING_PER_KIND = 5;
+    /**
+     * Les travaux qui peuvent attendre, par genre et par planete : la regle du jeu (`QueueCapacity`), pas une regle
+     * propre aux formes de vie. Elle autorisait cinq travaux en attente quand la file ordinaire en autorisait
+     * quatre — un bâtiment de forme de vie n a aucune raison d etre plus genereux (constat de Keven, 19 septembre
+     * 2026).
+     */
+    public static function waitingAllowed(PlayerService|null $player, LifeformKind $kind): int
+    {
+        return $kind === LifeformKind::Building
+            ? QueueCapacity::waitingAllowedForBuildings($player?->getUser())
+            : QueueCapacity::waitingAllowedForResearch();
+    }
 
     public function __construct(
         private readonly SettingsService $settings,
@@ -86,7 +99,7 @@ final class LifeformQueueService
             }
 
             $enFile = $this->queued($planet->getPlanetId(), $objet->kind);
-            if ($enFile->where('status', 'waiting')->count() >= self::MAX_WAITING_PER_KIND) {
+            if ($enFile->where('status', 'waiting')->count() >= self::waitingAllowed($planet->getPlayer(), $objet->kind)) {
                 throw new LifeformRefused(LifeformRefused::QUEUE_FULL);
             }
 
