@@ -196,6 +196,7 @@ return [
         'quota_exhausted' => 'No discovery flight available: the quota refills by 50 flights per day.',
         'recently_explored' => 'This position was explored less than seven days ago.',
         'bad_coordinates' => 'Invalid coordinates.',
+        'own_planet' => 'An exploration ship cannot be sent to your own planets.',
     ],
     'effects' => [
         'living_space' => 'Living space',

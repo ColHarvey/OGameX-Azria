@@ -5,6 +5,7 @@ namespace Tests\Feature\Lifeforms;
 use Illuminate\Support\Facades\Date;
 use InvalidArgumentException;
 use OGame\Factories\GameMessageFactory;
+use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\Discovery\LifeformDiscoveryOdds;
@@ -81,6 +82,17 @@ final class LifeformDiscoveryTest extends AccountTestCase
 
         $this->assertRefused(fn () => $service->launch($this->planetService, new Coordinate(1, 500, 1), $maintenant), LifeformRefused::BAD_COORDINATES);
         $this->assertRefused(fn () => $service->launch($this->planetService, new Coordinate(1, 1, 16), $maintenant), LifeformRefused::BAD_COORDINATES);
+
+        // On n explore pas chez soi (journal §162) : ni la planete de depart, ni une autre planete du compte, ni sa lune ; le
+        // refus vient avant tout debit — ni vol, ni metal, ni quota.
+        $this->assertRefused(fn () => $service->launch($this->planetService, $depart, $maintenant), LifeformRefused::OWN_PLANET, 'Ma planete de depart.');
+        $autrePlanete = $this->createPlanetAtSafeCoordinate($this->currentUserId);
+        $this->assertRefused(fn () => $service->launch($this->planetService, $autrePlanete->getPlanetCoordinates(), $maintenant), LifeformRefused::OWN_PLANET, 'Une autre planete du compte.');
+        $lune = resolve(PlanetServiceFactory::class)->createMoonForPlanet($autrePlanete, 2000000, 20);
+        $this->assertSame($autrePlanete->getPlanetCoordinates()->asString(), $lune->getPlanetCoordinates()->asString(), 'Premisse : la lune partage la position.');
+        $this->assertRefused(fn () => $service->launch($this->planetService, $lune->getPlanetCoordinates(), $maintenant), LifeformRefused::OWN_PLANET, 'La position d une lune du compte.');
+        $this->assertSame(0, LifeformDiscovery::query()->where('user_id', $this->currentUserId)->count(), 'Aucun vol ecrit.');
+        $this->assertSame(LifeformDiscoveryRules::QUOTA_PER_DAY, (int)$service->accrueQuota($this->currentUserId, $maintenant)?->discoveries_available, 'Le quota est intact.');
 
         $metalAvant = (int)Planet::query()->whereKey($this->currentPlanetId)->value('metal');
         $vol = $service->launch($this->planetService, $cible, $maintenant);

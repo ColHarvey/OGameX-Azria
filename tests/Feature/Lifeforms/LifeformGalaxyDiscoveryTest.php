@@ -17,6 +17,7 @@ use OGame\Models\Lifeforms\LifeformSpeciesProgress;
 use OGame\Models\Message;
 use OGame\Models\Planet;
 use OGame\Models\Resources;
+use OGame\Models\User;
 use Tests\AccountTestCase;
 use Tests\Support\PinsSettings;
 
@@ -31,6 +32,8 @@ use Tests\Support\PinsSettings;
 final class LifeformGalaxyDiscoveryTest extends AccountTestCase
 {
     use PinsSettings;
+
+    private int|null $etrangere = null;
 
     private const int RESEARCH_CENTRE = 11103;
 
@@ -98,8 +101,11 @@ final class LifeformGalaxyDiscoveryTest extends AccountTestCase
         }
 
         resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Building, self::RESEARCH_CENTRE, 1);
+        // Une planete d un AUTRE joueur dans le systeme : elle reste explorable — seules les miennes ne le sont pas (§162).
+        $etrangere = $this->aForeignPlanetInMySystem();
         $avecCentre = $this->systemeAjax();
         $lignes = 0;
+        $etrangereVue = false;
         foreach ($avecCentre['system']['galaxyContent'] as $ligne) {
             if ((int)$ligne['position'] > 15) {
                 continue;
@@ -107,11 +113,18 @@ final class LifeformGalaxyDiscoveryTest extends AccountTestCase
             $lignes++;
             $mission = $this->missionDeDecouverte($ligne);
             $this->assertSame(['missionType', 'canSend', 'discoveryCount', 'link', 'name'], array_keys($mission), 'position ' . $ligne['position']);
-            $this->assertTrue($mission['canSend'], 'position ' . $ligne['position'] . ' : centre ouvert, quota plein, position vierge.');
+            if (in_array((int)$ligne['position'], $this->mesPositions(), true)) {
+                // On n explore pas chez soi (journal §162) : mes planetes portent l icone grise avec la raison, avant le clic.
+                $this->assertSame(__('t_lifeforms_ui.refused.own_planet'), $mission['canSend'], 'Ma propre planete ne s explore pas.');
+                continue;
+            }
+            $this->assertTrue($mission['canSend'], 'position ' . $ligne['position'] . ' : centre ouvert, quota plein, position vierge ou planete d un autre.');
+            $etrangereVue = $etrangereVue || (int)$ligne['position'] === $etrangere;
             $this->assertSame(LifeformDiscoveryRules::QUOTA_PER_DAY, $mission['discoveryCount']);
             $this->assertSame(route('lifeforms.discoveries.galaxy'), $mission['link']);
         }
         $this->assertSame(15, $lignes, 'Les quinze positions, planetes et cases vides comprises.');
+        $this->assertTrue($etrangereVue, 'Premisse : la planete etrangere est dans le systeme et son vol est offert.');
 
         $page = $this->get('/galaxy');
         $page->assertSee('"lifeformEnabled": true', false);
@@ -132,6 +145,7 @@ final class LifeformGalaxyDiscoveryTest extends AccountTestCase
         resolve(LifeformInstallationService::class)->chooseSpecies($this->currentUserId, Species::Humans, (int)Date::now()->timestamp);
         resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Building, self::RESEARCH_CENTRE, 1);
         $metalAvant = $this->planetService->metal()->get();
+        $etrangere = $this->aForeignPlanetInMySystem();
 
         // Un premier vol vers la position 1 : elle devient « en approche ». La reponse d un vol suivant doit dire que les
         // AUTRES positions restent ouvertes (`canSendDiscovery` = vrai) — le bundle grise toutes les icones sinon. Elle
@@ -170,18 +184,36 @@ final class LifeformGalaxyDiscoveryTest extends AccountTestCase
             $mission = $this->missionDeDecouverte($ligne);
             if (in_array((int)$ligne['position'], [$this->positionVisee(1), $this->positionVisee(2)], true)) {
                 $this->assertSame(__('t_ingame.galaxy.discovery_underway'), $mission['canSend']);
+            } elseif (in_array((int)$ligne['position'], $this->mesPositions(), true)) {
+                $this->assertSame(__('t_lifeforms_ui.refused.own_planet'), $mission['canSend']);
             } else {
                 $this->assertTrue($mission['canSend'], 'position ' . $ligne['position']);
             }
         }
 
+        // Un vol vers la planete d un autre joueur : accepte — la regle ne vise que les miennes.
+        $depart = $this->planetService->getPlanetCoordinates();
+        $versUnAutre = $this->postJson(route('lifeforms.discoveries.galaxy'), ['galaxy' => $depart->galaxy, 'system' => $depart->system, 'position' => $etrangere, '_token' => csrf_token()]);
+        $this->assertTrue($versUnAutre->json('response.success'), 'La planete d un autre joueur s explore.');
+        $this->assertSame(3, LifeformDiscovery::query()->where('user_id', $this->currentUserId)->count());
+
+        // Un vol vers ma propre planete, par l adresse du bundle : refuse par le service, avec sa raison, rien d ecrit, et
+        // l etat general des autres positions reste ouvert.
+        $depart = $this->planetService->getPlanetCoordinates();
+        $chezMoi = $this->postJson(route('lifeforms.discoveries.galaxy'), ['galaxy' => $depart->galaxy, 'system' => $depart->system, 'position' => $depart->position, '_token' => csrf_token()]);
+        $this->assertFalse($chezMoi->json('response.success'));
+        $this->assertSame(__('t_lifeforms_ui.refused.own_planet'), $chezMoi->json('response.message'));
+        $this->assertTrue($chezMoi->json('response.discovery.canSendDiscovery'));
+        $this->assertSame(LifeformDiscoveryRules::QUOTA_PER_DAY - 3, $chezMoi->json('response.discovery.discoveryCount'));
+        $this->assertSame(3, LifeformDiscovery::query()->where('user_id', $this->currentUserId)->count());
+
         // Un second vol vers la meme position est refuse — par le service, avec sa raison, sans consommer le quota.
         $refus = $this->postJson(route('lifeforms.discoveries.galaxy'), $this->coordonnees(2) + ['_token' => csrf_token()]);
         $this->assertFalse($refus->json('response.success'));
         $this->assertSame(__('t_lifeforms_ui.refused.recently_explored', ['coordinates' => $this->coordonneesTexte(2)]), $refus->json('response.message'));
-        $this->assertSame(LifeformDiscoveryRules::QUOTA_PER_DAY - 2, $refus->json('response.discovery.discoveryCount'));
+        $this->assertSame(LifeformDiscoveryRules::QUOTA_PER_DAY - 3, $refus->json('response.discovery.discoveryCount'));
         $this->assertTrue($refus->json('response.discovery.canSendDiscovery'), 'Un refus propre a une position ne grise pas les autres.');
-        $this->assertSame(2, LifeformDiscovery::query()->where('user_id', $this->currentUserId)->count());
+        $this->assertSame(3, LifeformDiscovery::query()->where('user_id', $this->currentUserId)->count());
 
         // Un quota epuise grise toutes les icones, et la reponse le dit pour que le script les grise sans recharger.
         LifeformAccount::query()->where('user_id', $this->currentUserId)->update(['discoveries_available' => 1]);
@@ -189,6 +221,44 @@ final class LifeformGalaxyDiscoveryTest extends AccountTestCase
         $this->assertTrue($dernier->json('response.success'));
         $this->assertSame(0, $dernier->json('response.discovery.discoveryCount'));
         $this->assertSame(__('t_lifeforms_ui.refused.quota_exhausted'), $dernier->json('response.discovery.canSendDiscovery'));
+    }
+
+    /**
+     * Une planete d un autre joueur dans mon systeme de depart, a une position libre ; rend sa position. Idempotent : la
+     * premiere creee est reprise.
+     */
+    private function aForeignPlanetInMySystem(): int
+    {
+        if ($this->etrangere !== null) {
+            return $this->etrangere;
+        }
+        $depart = $this->planetService->getPlanetCoordinates();
+        $existante = Planet::query()->where('galaxy', $depart->galaxy)->where('system', $depart->system)->where('user_id', '!=', $this->currentUserId)->where('planet_type', 1)->orderBy('planet')->first();
+        if ($existante !== null) {
+            return $this->etrangere = (int)$existante->planet;
+        }
+        $occupees = Planet::query()->where('galaxy', $depart->galaxy)->where('system', $depart->system)->pluck('planet')->map(static fn ($p): int => (int)$p)->all();
+        $libre = collect(range(1, 15))->first(static fn (int $p): bool => !in_array($p, $occupees, true));
+        $this->assertNotNull($libre, 'Premisse : une position libre dans mon systeme.');
+        $autre = User::factory()->create();
+        Planet::factory()->create(['user_id' => $autre->id, 'galaxy' => $depart->galaxy, 'system' => $depart->system, 'planet' => $libre]);
+
+        return $this->etrangere = (int)$libre;
+    }
+
+    /**
+     * Les positions du systeme de depart qui portent une planete ou une lune du compte (la base d un processus en garde
+     * d autres essais) : la planete de depart en fait toujours partie.
+     *
+     * @return array<int, int>
+     */
+    private function mesPositions(): array
+    {
+        $depart = $this->planetService->getPlanetCoordinates();
+        $positions = Planet::query()->where('user_id', $this->currentUserId)->where('galaxy', $depart->galaxy)->where('system', $depart->system)->pluck('planet')->map(static fn ($p): int => (int)$p)->all();
+        $this->assertContains($depart->position, $positions, 'Premisse : ma planete de depart est dans le systeme.');
+
+        return $positions;
     }
 
     /**
@@ -220,8 +290,9 @@ final class LifeformGalaxyDiscoveryTest extends AccountTestCase
     /** Une position du systeme de depart autre que celle de la planete : la n-ieme position libre de ce choix. */
     private function positionVisee(int $rang): int
     {
-        $depart = $this->planetService->getPlanetCoordinates()->position;
-        $candidates = array_values(array_filter(range(1, 15), static fn (int $p): bool => $p !== $depart));
+        // Jamais une position du compte (on n explore pas chez soi, §162), ni celle de la planete etrangere que l essai vise a part.
+        $exclues = array_merge($this->mesPositions(), $this->etrangere === null ? [] : [$this->etrangere]);
+        $candidates = array_values(array_filter(range(1, 15), static fn (int $p): bool => !in_array($p, $exclues, true)));
 
         return $candidates[$rang - 1];
     }

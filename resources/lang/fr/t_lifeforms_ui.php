@@ -196,6 +196,7 @@ return [
         'quota_exhausted' => 'Aucun vol de découverte disponible : le quota se recharge de 50 vols par jour.',
         'recently_explored' => 'Cette position a été explorée il y a moins de sept jours.',
         'bad_coordinates' => 'Coordonnées invalides.',
+        'own_planet' => 'Un vaisseau d’exploration ne se lance pas vers vos propres planètes.',
     ],
     'effects' => [
         'living_space' => 'Espace de vie',

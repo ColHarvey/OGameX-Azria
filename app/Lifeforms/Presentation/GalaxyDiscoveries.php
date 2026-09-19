@@ -9,6 +9,7 @@ use OGame\Lifeforms\Services\LifeformDiscoveryService;
 use OGame\Lifeforms\Services\LifeformInstallationService;
 use OGame\Lifeforms\Services\LifeformLevels;
 use OGame\Models\Lifeforms\LifeformDiscovery;
+use OGame\Models\Planet;
 use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
 
@@ -84,9 +85,22 @@ final class GalaxyDiscoveries
             }
         }
 
+        // Les positions du systeme qui portent une planete ou une lune du compte : on n explore pas chez soi (§162), la
+        // meme regle que `LifeformDiscoveryService::launch()`, montree avant le clic.
+        $miennes = Planet::query()
+            ->where('user_id', $player->getId())
+            ->where('galaxy', $galaxy)
+            ->where('system', $system)
+            ->pluck('planet')
+            ->map(static fn ($p): int => (int)$p)
+            ->all();
+
         $missions = [];
         for ($position = 1; $position <= 15; $position++) {
             $raison = $generale;
+            if ($raison === null && in_array($position, $miennes, true)) {
+                $raison = (string)__('t_lifeforms_ui.refused.own_planet');
+            }
             if ($raison === null && isset($parPosition[$position])) {
                 $raison = (string)__($parPosition[$position] === 'running' ? 't_ingame.galaxy.discovery_underway' : 't_ingame.galaxy.discovery_unavailable');
             }

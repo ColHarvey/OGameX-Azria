@@ -20,6 +20,7 @@ use OGame\Models\Lifeforms\LifeformAccount;
 use OGame\Models\Lifeforms\LifeformDiscovery;
 use OGame\Models\Lifeforms\LifeformPlanet;
 use OGame\Models\Lifeforms\LifeformSpeciesProgress;
+use OGame\Models\Planet;
 use OGame\Models\Planet\Coordinate;
 use OGame\Services\MessageService;
 use OGame\Services\PlanetService;
@@ -42,6 +43,12 @@ use OGame\Services\SettingsService;
  * atomique ; l issue est tiree et ecrite dans la meme transaction. Regler verrouille la ligne du vol,
  * la relit `running`, credite, envoie le rapport et pose `settled_at` : un second passage ne trouve
  * plus rien a faire.
+ *
+ * ## On n explore pas chez soi
+ *
+ * Une position qui porte une planete ou une lune du compte est refusee (`OWN_PLANET`, decision de Keven,
+ * journal §162) — avant tout debit, comme les coordonnees. La Galaxie grise l icone de ces positions
+ * avec la meme raison ; le service reste le seul juge.
  *
  * ## Les cotes d artefacts sont lues au lancement, et scellees avec le vol
  *
@@ -108,6 +115,9 @@ final class LifeformDiscoveryService
             throw new LifeformRefused(LifeformRefused::NOT_A_PLANET);
         }
         $this->requireCoordinates($target);
+        if (self::isOwnBody($joueur->getId(), $target)) {
+            throw new LifeformRefused(LifeformRefused::OWN_PLANET, $target->asString());
+        }
         // Les cotes du vol se lisent avant tout debit : un reglage illisible refuse le lancement sans rien ecrire.
         $cotes = $this->settings->lifeformDiscoveryOdds();
 
@@ -306,6 +316,19 @@ final class LifeformDiscoveryService
             default:
                 return $issue;
         }
+    }
+
+    /**
+     * La position porte-t-elle une planete ou une lune de ce compte ? (les deux vivent dans `planets`).
+     */
+    public static function isOwnBody(int $userId, Coordinate $target): bool
+    {
+        return Planet::query()
+            ->where('user_id', $userId)
+            ->where('galaxy', $target->galaxy)
+            ->where('system', $target->system)
+            ->where('planet', $target->position)
+            ->exists();
     }
 
     private function requireCoordinates(Coordinate $target): void
