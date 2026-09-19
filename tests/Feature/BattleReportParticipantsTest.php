@@ -195,14 +195,19 @@ final class BattleReportParticipantsTest extends FleetDispatchTestCase
         foreach ($roundsDuRapport as $i => $round) {
             $pertesDuRound = $bloc['rounds'][$i]['losses'];
             $this->assertSame([$moi['key'], $garnison['key'], $acs['key']], array_keys($pertesDuRound), "Round $i : les trois participants, sous leur clef, et personne d autre.");
-            $this->assertSame($round['attacker_losses_in_this_round'], $pertesDuRound[$moi['key']], "Round $i : les pertes de l attaquant sont les miennes.");
+            // **Une egalite de pertes, pas d ordre.** Sous le moteur Rust, les types d unite d une carte suivent l ordre de
+            // sa table de hachage : la CI l a montre sur `8ad71216` (« rocket_launcher » avant « light_fighter », memes
+            // nombres). L affichage lit les pertes par nom et ordonne les lignes par les unites de DEPART, qui ne dependent
+            // pas du moteur : le joueur voit la meme chose. Ce qui est affirme ici est une egalite de valeurs, et c est elle
+            // qu on compare (journal §166.3).
+            $this->assertSame(self::parNom($round['attacker_losses_in_this_round']), self::parNom($pertesDuRound[$moi['key']]), "Round $i : les pertes de l attaquant sont les miennes.");
             $sommeDefense = [];
             foreach ([$garnison['key'], $acs['key']] as $clef) {
                 foreach ($pertesDuRound[$clef] as $machine => $n) {
                     $sommeDefense[$machine] = ($sommeDefense[$machine] ?? 0) + $n;
                 }
             }
-            $this->assertSame(array_filter($round['defender_losses_in_this_round']), array_filter($sommeDefense), "Round $i : garnison + renfort = pertes de la defense.");
+            $this->assertSame(self::parNom(array_filter($round['defender_losses_in_this_round'])), self::parNom(array_filter($sommeDefense)), "Round $i : garnison + renfort = pertes de la defense.");
             $pertesAcsCumulees += (int)($pertesDuRound[$acs['key']]['light_fighter'] ?? 0);
         }
         // Les survivants et les pertes de chaque flotte sont les siens : le renfort ne prend pas ceux de la garnison.
@@ -282,6 +287,20 @@ final class BattleReportParticipantsTest extends FleetDispatchTestCase
         foreach (['115473', '4492924', '2:488:1', 'PTL', '8196210', '"armor": 1160'] as $invente) {
             $this->assertStringNotContainsString($invente, $ancien);
         }
+    }
+
+    /**
+     * Une carte de pertes rangee par nom d unite : ce que deux cartes egales ont de commun, quel que soit le moteur qui les
+     * a remplies. Les valeurs restent comparees strictement ; seul l ordre des clefs, qui n est pas une donnee, disparait.
+     *
+     * @param array<string, int> $pertes
+     * @return array<string, int>
+     */
+    private static function parNom(array $pertes): array
+    {
+        ksort($pertes);
+
+        return $pertes;
     }
 
     /**
