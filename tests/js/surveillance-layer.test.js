@@ -1312,23 +1312,29 @@ test('un contact en hyperespace est masque, et reparait dans le dernier quart d 
  * **Les contacts seuls animent la carte.** Le cas de l observateur : un reseau sur sa planete,
  * aucune flotte ni patrouille a lui dans le systeme. Sans la troisieme condition de `animer()`, le
  * contact ne bougerait qu a chaque veille. Mesure sur deux images.
+ *
+ * **Un trajet de trois secondes, pas de soixante** (rouge intermittent du 19 septembre 2026, journal §167). La
+ * position s ecrit au dixieme de pixel ; sur soixante secondes, le contact avancait d environ 0,05 px par seconde a
+ * l horizontale (mesure), donc d un centieme de pixel entre les deux releves : le temoin ne passait que quand
+ * l arrondi basculait, trois fois sur cinq en echec rejoue seul. Sur trois secondes, l avance entre les releves
+ * depasse le dixieme de pixel — le juste et le faux ne coincident plus.
  */
 test('un contact seul, sans flotte ni patrouille du joueur, avance a chaque image', async () => {
     const monde = unMonde();
 
     try {
         const maintenant = Math.floor(Date.now() / 1000);
-        const route = { from: PLANETE_4, to: POINT, time_departure: maintenant - 30, time_arrival: maintenant + 30 };
+        const route = { from: PLANETE_4, to: POINT, time_departure: maintenant - 1, time_arrival: maintenant + 2 };
 
         monde.amorcer(1, 5, [uneLigne(4)]);
         monde.demandes[0].repondre(reponse(1, 5, [unContact(11, null, null, { segment: route })], maintenant));
 
         const contact = monde.contacts()[0];
-        const avant = contact.style.left;
+        const avant = contact.style.left + '/' + contact.style.top;
 
         await new Promise((suite) => setTimeout(suite, 250));
 
-        assert.notEqual(contact.style.left, avant, 'le contact seul ne bouge pas entre deux images : la boucle ne s arme pas pour lui');
+        assert.notEqual(contact.style.left + '/' + contact.style.top, avant, 'le contact seul ne bouge pas entre deux images : la boucle ne s arme pas pour lui');
     } finally {
         monde.fermer();
     }

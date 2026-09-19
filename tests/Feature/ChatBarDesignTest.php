@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use Illuminate\Support\Facades\Lang;
 use Tests\AccountTestCase;
 
 /**
@@ -20,7 +21,7 @@ class ChatBarDesignTest extends AccountTestCase
         'PLAYER_LIST', 'FILTER_BY', 'FILTER_ONLINE', 'FILTER_ALL', 'FILTER_ACTIVE', 'BUDDIES', 'NO_BUDDIES', 'ALLIANCE',
         'ALLIANCE_CHAT', 'ALLIANCE_CHANNEL', 'STRANGERS', 'STATUS_ONLINE', 'STATUS_OFFLINE', 'STATUS_HIDDEN', 'COMMUNICATIONS',
         'CONTACTS_ONLINE_SHORT', 'CONTACTS_NETWORK', 'ONLINE_RATIO', 'COLLAPSE_CONTACTS', 'PRIVATE_CONVERSATION',
-        'MINIMIZE_CONVERSATION', 'CLOSE_CONVERSATION', 'OPEN_MESSAGING', 'SEND', 'LOAD_ERROR',
+        'MINIMIZE_CONVERSATION', 'CLOSE_CONVERSATION', 'OPEN_MESSAGING', 'SEND', 'LOAD_ERROR', 'NETWORK_FAILED', 'NOT_AUTHORIZED',
     ];
 
     private const array ICONES = ['radio-tower', 'message-square', 'shield', 'orbit', 'crosshair', 'sparkles', 'moon', 'send', 'minus', 'x', 'chevron-up', 'chevron-down'];
@@ -59,6 +60,20 @@ class ChatBarDesignTest extends AccountTestCase
         return $m[1] ?? '';
     }
 
+    /**
+     * La clef de traduction que le gabarit donne a chaque entree de `chatLoca`, lue sur sa forme de code.
+     *
+     * @return array<string, string>
+     */
+    private function clefsDeTraduction(): array
+    {
+        $gabarit = str_replace("\r\n", "\n", (string)file_get_contents(resource_path('views/ingame/layouts/main.blade.php')));
+        $bloc = $this->capture('#var chatLoca = \{!! json_encode\(\[(.*?)\]\) !!\};#s', $gabarit, 'Le bloc chatLoca du gabarit.');
+        preg_match_all("#'([A-Z_]+)'\s*=>\s*__\('([a-z_.]+)'\)#", $bloc, $m);
+
+        return array_combine($m[1], $m[2]);
+    }
+
     private function chatJs(): string
     {
         return str_replace("\r\n", "\n", (string)file_get_contents(resource_path('js/ingame/chat.js')));
@@ -76,6 +91,7 @@ class ChatBarDesignTest extends AccountTestCase
     {
         // Les cinq langues du jeu (le kit les exige) : chaque clef resout dans sa langue, jamais en clef brute ni en repli.
         $temoins = ['fr' => 'Statut non visible', 'en' => 'Status not visible', 'it' => 'Stato non visibile', 'nl' => 'Status niet zichtbaar', 'zh-TW' => '狀態不可見'];
+        $traductions = $this->clefsDeTraduction();
         foreach (['fr', 'en', 'it', 'nl', 'zh-TW'] as $locale) {
             // La page suit le choix de langue de la session (middleware Locale, priorite 1), pas la langue du banc.
             $page = (string)$this->withSession(['locale' => $locale])->get('/overview')->assertStatus(200)->getContent();
@@ -86,6 +102,10 @@ class ChatBarDesignTest extends AccountTestCase
                 $this->assertIsString($loca[$clef]);
                 $this->assertNotSame('', $loca[$clef]);
                 $this->assertStringNotContainsString('t_ingame.', $loca[$clef], "chatLoca.$clef est une clef brute ($locale).");
+                // **Dans sa propre langue, sans repli** (mutation survivante du §167) : une phrase absente d un fichier de
+                // langue ne rend pas la clef brute, Laravel retombe EN SILENCE sur l anglais. Seul le fichier le dit.
+                $this->assertArrayHasKey($clef, $traductions, "Le gabarit ne donne pas de clef de traduction a chatLoca.$clef.");
+                $this->assertTrue(Lang::has($traductions[$clef], $locale, false), "chatLoca.$clef ({$traductions[$clef]}) manque en $locale : le joueur lirait la langue de repli.");
             }
             $this->assertSame($temoins[$locale], $loca['STATUS_HIDDEN'], "La clef est traduite en $locale, pas reprise de l anglais.");
             $this->assertStringContainsString('#+#', $loca['CONTACTS_ONLINE_SHORT'], 'Le nombre de contacts en ligne se remplace cote client.');

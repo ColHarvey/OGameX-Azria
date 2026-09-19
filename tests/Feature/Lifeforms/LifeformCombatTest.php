@@ -28,6 +28,7 @@ use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\Combat\LifeformCombatPhotographer;
 use OGame\Lifeforms\Demography\DemographicRules;
+use OGame\Lifeforms\LifeformHistoryUnavailable;
 use OGame\Lifeforms\Services\LifeformInstallationService;
 use OGame\Lifeforms\Services\LifeformLevels;
 use OGame\Lifeforms\Services\LifeformPlanetUpdater;
@@ -44,6 +45,7 @@ use OGame\Models\Lifeforms\LifeformSlot;
 use OGame\Models\Lifeforms\LifeformSlotChange;
 use OGame\Models\Lifeforms\LifeformTechnologyLevel;
 use OGame\Models\Message;
+use OGame\Models\Planet;
 use OGame\Models\Resources;
 use OGame\Models\User;
 use OGame\Services\FleetMissionService;
@@ -72,6 +74,9 @@ final class LifeformCombatTest extends FleetDispatchTestCase
     protected string $missionName = 'Attaquer';
 
     private const int GENERAL_OVERHAUL_LIGHT_FIGHTER = 13205;
+
+    /** Batteries volcaniques (Rock tal), palier 1 position 1 : un apport au compte, gele a l admission. */
+    private const int VOLCANIC_BATTERIES = 12201;
 
     /**
      * Les planetes etrangeres que cet essai a peuplees, a rendre au demontage.
@@ -123,6 +128,7 @@ final class LifeformCombatTest extends FleetDispatchTestCase
             LifeformTechnologyLevel::query()->whereIn('planet_id', $this->planetesPeuplees)->delete();
             LifeformBuildingLevel::query()->whereIn('planet_id', $this->planetesPeuplees)->delete();
             LifeformPlanet::query()->whereIn('planet_id', $this->planetesPeuplees)->delete();
+            DB::table('lifeform_purged_bodies')->whereIn('planet_id', $this->planetesPeuplees)->delete();
             $this->planetesPeuplees = [];
         }
         LifeformBonusCache::invalidate();
@@ -602,6 +608,86 @@ final class LifeformCombatTest extends FleetDispatchTestCase
 
         $this->assertEqualsWithDelta((float)DemographicRules::SHELTERED, (float)LifeformPlanet::query()->where('planet_id', $cible->getPlanetId())->value('population'), 0.001, 'A l echeance, seule la part protegee gelee — ici l abri — survit.');
         $this->assertNotNull(Message::query()->where('user_id', $proprietaire)->where('key', 'lifeform_population_loss')->orderByDesc('id')->first());
+    }
+
+    /**
+     * **Un combat deja fige se regle depuis ses donnees enregistrees, meme apres la purge d une colonie de l attaquant**
+     * (garantie de Keven, journal §167).
+     *
+     * La trace de purge rend impossible toute **reconstruction** des bonus a un instant ou la colonie existait : c est sa
+     * raison d etre. Mais un combat dont l admission a deja gele les faits n a rien a reconstruire, et la suspension ne
+     * doit pas toucher tous les combats d un compte parce qu une de ses colonies a disparu. Ce temoin etablit d abord
+     * que la reconstruction echouerait bien — sans quoi « le reglement passe » ne prouverait rien —, puis que le
+     * reglement passe, depuis ce qui est enregistre.
+     */
+    public function testAFrozenCombatSettlesFromItsRecordsEvenAfterAColonyOfTheAttackerIsPurged(): void
+    {
+        resolve(SettingsService::class)->set('lifeforms_enabled', '1');
+        resolve(SettingsService::class)->set('lifeform_population_loss_rate', '25');
+        for ($i = 0; $i < 6; $i++) {
+            $this->createAndLoginUser();
+        }
+        $this->basicSetup();
+
+        // L attaquant a une espece et une technologie sur sa COLONIE : son admission gelera l apport du compte.
+        $attaquant = $this->currentUserId;
+        $colonie = (int)$this->secondPlanetService?->getPlanetId();
+        $this->assertGreaterThan(0, $colonie, 'Premisse : l attaquant a une colonie.');
+        resolve(LifeformInstallationService::class)->chooseSpecies($attaquant, Species::Rocktal, (int)Date::now()->timestamp);
+        $this->populate($colonie, 2_000_000.0);
+        $this->placeLifeformSlot($colonie, 1, self::VOLCANIC_BATTERIES, (int)Date::now()->timestamp);
+        resolve(LifeformLevels::class)->setLevel($colonie, LifeformKind::Technology, self::VOLCANIC_BATTERIES, 10);
+        LifeformBonusCache::invalidate();
+
+        $unites = new UnitCollection();
+        $unites->addUnit(ObjectService::getUnitObjectByMachineName('small_cargo'), 50);
+        $unites->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 350);
+        $cible = $this->sendMissionToOtherPlayerCleanPlanet($unites, new Resources(0, 0, 0, 0));
+        $cible->removeUnits($cible->getShipUnits(), false);
+        $cible->removeUnits($cible->getDefenseUnits(), false);
+        $cible->save();
+        $cible->reloadPlanet();
+
+        $mission = DB::table('fleet_missions')->where('user_id', $attaquant)->where('processed', 0)->orderByDesc('id')->first();
+        $this->assertNotNull($mission, 'No fleet was dispatched.');
+        $arrivee = (int)$mission->time_arrival;
+        $proprietaire = (int)DB::table('planets')->where('id', $cible->getPlanetId())->value('user_id');
+        DB::table('users')->where('id', $proprietaire)->update(['tactical_retreat_ratio' => 0]);
+        DB::table('planets')->where('id', $cible->getPlanetId())->update(['rocket_launcher' => 20, 'metal' => 100_000]);
+        $this->requireAnAdmissibleHistoryFor($proprietaire, $arrivee, 'le proprietaire de la cible');
+        $this->requireAnAdmissibleHistoryFor($attaquant, $arrivee, 'l attaquant');
+        $this->assertGreaterThan(0.0, resolve(LifeformBonusResolver::class)->forPlayer($attaquant, $arrivee)->fraction(LifeformEffect::ENERGY_PRODUCTION), 'Premisse : la colonie arme le compte a l arrivee.');
+
+        $this->app->bind(BattleDraws::class, static fn (): SeededDraws => new SeededDraws(4242));
+        resolve(SettingsService::class)->set('persistent_combat_enabled', '1');
+        $this->travelTo(Date::createFromTimestamp($arrivee));
+        $this->get('/overview')->assertStatus(200);
+
+        $combat = $this->theCombatOf((int)$mission->id, $cible->getPlanetId());
+        $this->assertNotNull($combat, 'The arrival did not open a combat.');
+        $this->assertSame(CombatState::Active, $combat->status, 'Le combat est clos et fige.');
+        $this->assertNotNull($combat->battle_result);
+
+        // Apres le gel : la colonie de l attaquant est abandonnee, puis purgee au moins vingt-quatre heures plus tard.
+        $this->travelTo(Date::createFromTimestamp($arrivee + 60));
+        resolve(PlanetServiceFactory::class)->make($colonie, true)?->abandonPlanet();
+        $this->travelTo(Date::createFromTimestamp($arrivee + 86_400 + 120));
+        resolve(PlanetServiceFactory::class)->make($colonie, true)?->permanentlyDeletePlanet();
+        $this->assertNull(Planet::query()->find($colonie), 'Premisse : la colonie est purgee.');
+
+        // Premisse : une RECONSTRUCTION a l arrivee est desormais impossible, et elle le dit.
+        LifeformBonusCache::invalidate();
+        try {
+            resolve(LifeformBonusResolver::class)->forPlayer($attaquant, $arrivee);
+            $this->fail('Une reconstruction a l arrivee aurait du dire que les faits de la colonie manquent.');
+        } catch (LifeformHistoryUnavailable) {
+            $this->addToAssertionCount(1);
+        }
+
+        // Le reglement, lui, ne reconstruit rien : il lit ce qui est gele.
+        $this->settle($combat);
+        $combat->refresh();
+        $this->assertSame(CombatState::Resolved, $combat->status, 'Le combat fige se regle depuis ses donnees enregistrees.');
     }
 
     /**

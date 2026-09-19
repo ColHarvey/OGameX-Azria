@@ -1079,6 +1079,9 @@
                     'OPEN_MESSAGING'           => __('t_ingame.chat.open_messaging'),
                     'SEND'                     => __('t_ingame.chat.submit'),
                     'LOAD_ERROR'               => __('t_ingame.chat.load_error'),
+                    // Ce que le joueur lit quand son message n est pas parti, ou que la conversation lui est refusee (§167).
+                    'NETWORK_FAILED'           => __('t_ingame.chat.network_failed'),
+                    'NOT_AUTHORIZED'           => __('t_ingame.chat.not_authorized'),
                 ]) !!};
                 var eventboxLoca = {!! json_encode([
                     'mission'      => __('t_ingame.layout.eventbox_mission'),

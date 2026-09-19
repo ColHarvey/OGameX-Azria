@@ -19,8 +19,10 @@ use OGame\Enums\AccountDeletionState;
 use OGame\GameObjects\Models\Abstracts\GameObject;
 use OGame\GameObjects\Models\Calculations\CalculationType;
 use OGame\GameObjects\Models\Enums\GameObjectType;
+use OGame\Lifeforms\Bonuses\LifeformBonusCache;
 use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
 use OGame\Lifeforms\Bonuses\LifeformBonusSet;
+use OGame\Lifeforms\Bonuses\LifeformPurgedBodies;
 use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Services\LifeformDiscoveryService;
 use OGame\Models\BuildingQueue;
@@ -1342,7 +1344,11 @@ class PlayerService
         $this->user->save();
 
         // Delete all planets.
+        // **Une suppression en masse ne passe par aucun observateur** : les colonies de formes de vie laissent leur trace
+        // ici, dans la transaction du retrait, et la memoire des bonus les oublie (journal §167).
+        LifeformPurgedBodies::recordBeforeAccountDeletion($this->getId(), (int)Date::now()->timestamp);
         Planet::where('user_id', $this->getId())->delete();
+        LifeformBonusCache::invalidate();
 
         // Delete the actual user.
         $this->user->delete();

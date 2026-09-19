@@ -2,8 +2,11 @@
 
 namespace OGame\Observers;
 
+use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use OGame\Events\GalaxySystemChanged;
+use OGame\Lifeforms\Bonuses\LifeformBonusCache;
+use OGame\Lifeforms\Bonuses\LifeformPurgedBodies;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\Planet;
 
@@ -40,11 +43,27 @@ class PlanetObserver
             return;
         }
 
+        // Une colonie abandonnee ne porte plus ses bonus de formes de vie au present : la memoire les relache tout de
+        // suite, au lieu de les servir jusqu a son expiration (constat de Keven, journal §167).
+        LifeformBonusCache::invalidate();
         $this->announce($planet, 'destroyed');
+    }
+
+    /**
+     * Releve, avant la suppression, la trace qu une colonie de formes de vie laissera : la cascade efface la ligne qui
+     * dit si elle en portait (`LifeformPurgedBodies`).
+     */
+    public function deleting(Planet $planet): void
+    {
+        LifeformPurgedBodies::noteBeforeDeletion($planet, (int)Date::now()->timestamp);
     }
 
     public function deleted(Planet $planet): void
     {
+        // La trace s ecrit ici, et seulement ici : ce crochet ne se declenche que si la suppression a reussi, dans sa
+        // transaction. Ni fausse trace, ni disparition sans trace.
+        LifeformPurgedBodies::recordAfterDeletion($planet, (int)Date::now()->timestamp);
+        LifeformBonusCache::invalidate();
         $this->announce($planet, 'deleted');
     }
 

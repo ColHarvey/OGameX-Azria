@@ -206,10 +206,26 @@ ogame.chat = {
             b.initConnection()
         }, 5000)
     },
-    sendMessage: function (u, r, n, m) {
+    /*
+     * **Un message n'est jamais perdu en silence, et un refus ne se rejoue pas** (constats de Keven, 19 septembre 2026,
+     * journal §167).
+     *
+     * `issue`, facultatif, recoit l'issue de l'envoi : `envoye()` quand le serveur l'a accepte, `echoue(raison)` quand il
+     * n'est pas parti — le texte doit alors etre rendu au joueur —, `refuse()` quand la conversation ne lui est plus
+     * accessible. Un appelant qui ne le passe pas garde le comportement d'avant, sans la boucle.
+     *
+     * `NOT_AUTHORIZED` est un **vrai refus** du serveur (`ChatController` : le joueur n'est plus dans cette alliance).
+     * Le rejouer, comme le faisait ce script, envoyait la meme requete sans fin : rien ne peut le lever avant que ses
+     * droits changent.
+     */
+    sendMessage: function (u, r, n, m, issue) {
         var o = ogame.chat;
+        var fin = issue || {};
         if ($.trim(n).length == 0) {
             s("TEXT_EMPTY");
+            if (fin.echoue) {
+                fin.echoue("TEXT_EMPTY")
+            }
             return
         }
         if (u > 0) {
@@ -230,7 +246,12 @@ ogame.chat = {
                 success: function (a) {
                     p(a)
                 },
-                error: function (a, b, c) {
+                error: function () {
+                    // Aucune reponse : le message n'est pas parti. On le dit, et l'appelant rend le texte.
+                    s('NETWORK_FAILED');
+                    if (fin.echoue) {
+                        fin.echoue('NETWORK_FAILED')
+                    }
                 }
             })
         }
@@ -259,14 +280,24 @@ ogame.chat = {
         function p(a) {
             switch (a.status) {
                 case"NOT_AUTHORIZED":
-                    v();
+                    // Un vrai refus : on le dit une fois, et la conversation se ferme. Plus jamais `v()` ici.
+                    s('NOT_AUTHORIZED');
+                    if (fin.refuse) {
+                        fin.refuse()
+                    }
                     break;
                 case"OK":
                     q(a);
                     ogame.chat.cleanupUrl();
+                    if (fin.envoye) {
+                        fin.envoye()
+                    }
                     break;
                 default:
-                    s(a.status)
+                    s(a.status);
+                    if (fin.echoue) {
+                        fin.echoue(a.status)
+                    }
             }
         }
 
@@ -1105,14 +1136,41 @@ ogame.chat = {
             return
         }
         if (l === 13) {
-            if (p.parent(".chat_box").data("playerid") !== undefined) {
-                o.sendMessage(p.parent(".chat_box").data("playerid"), 0, p.val())
-            } else {
-                if (p.parent(".chat_box").data("associationid") !== undefined) {
-                    o.sendMessage(0, p.parent(".chat_box").data("associationid"), p.val())
-                }
+            // **Le texte reste dans le champ jusqu'a la confirmation du serveur** (constat de Keven, journal §167). Il etait
+            // vide des l'envoi : une connexion coupee faisait disparaitre le message, sans avertissement ni brouillon.
+            // Pendant l'envoi, le champ est en lecture seule et une seconde Entree ne part pas : jamais de double envoi.
+            if (p.data("azriaEnvoi") === true) {
+                return
             }
-            p.val("")
+            var boite = p.parent(".chat_box");
+            var joueur = boite.data("playerid");
+            var alliance = boite.data("associationid");
+            if (joueur === undefined && alliance === undefined) {
+                return
+            }
+            var texte = p.val();
+            p.data("azriaEnvoi", true).prop("readonly", true).addClass("azria-chat-sending");
+            var liberer = function () {
+                p.data("azriaEnvoi", false).prop("readonly", false).removeClass("azria-chat-sending")
+            };
+            o.sendMessage(joueur !== undefined ? joueur : 0, joueur !== undefined ? 0 : alliance, texte, undefined, {
+                envoye: function () {
+                    liberer();
+                    p.val("")
+                },
+                echoue: function () {
+                    // Le brouillon est rendu tel que le joueur l'a tape : sans le saut de ligne que la touche Entree
+                    // vient d'ajouter, sinon chaque nouvel essai en accumulerait un.
+                    liberer();
+                    p.val(texte.replace(/\r?\n$/, ""))
+                },
+                refuse: function () {
+                    // Desactivee jusqu'a l'actualisation des droits (un rechargement de la page) : le refus est dit dans
+                    // le champ lui-meme, et plus rien ne part d'ici.
+                    liberer();
+                    p.val(texte.replace(/\r?\n$/, "")).prop("disabled", true).addClass("azria-chat-refused").attr("placeholder", o.loca('NOT_AUTHORIZED'))
+                }
+            })
         }
     },
     swapChatBarItem: function (d) {

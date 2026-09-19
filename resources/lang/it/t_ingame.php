@@ -1481,5 +1481,7 @@ return [
         'close_conversation'    => 'Chiudi la conversazione',
         'open_messaging'        => 'Apri la messaggistica',
         'load_error'            => 'Impossibile caricare i contatti.',
+        'network_failed'        => 'Impossibile inviare il messaggio. Il testo è stato conservato: riprova.',
+        'not_authorized'        => 'Non puoi più scrivere in questa conversazione. Ricarica la pagina se i tuoi permessi sono cambiati.',
     ],
 ];

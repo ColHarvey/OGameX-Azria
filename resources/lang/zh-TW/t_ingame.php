@@ -1315,5 +1315,7 @@ return [
         'close_conversation'    => '關閉對話',
         'open_messaging'        => '開啟訊息頁面',
         'load_error'            => '無法載入聯絡人。',
+        'network_failed'        => '訊息無法送出。你的文字已保留，請再試一次。',
+        'not_authorized'        => '你已無法在此對話中發言。若權限已變更，請重新整理頁面。',
     ],
 ];

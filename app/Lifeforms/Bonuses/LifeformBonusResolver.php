@@ -8,6 +8,7 @@ use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Catalogue\LifeformFormulas;
 use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\Demography\PlanetLifeformProfile;
+use OGame\Lifeforms\LifeformHistoryUnavailable;
 use OGame\Lifeforms\Research\LifeformExperienceLedger;
 use OGame\Lifeforms\Rules\LifeformRuleRevisions;
 use OGame\Lifeforms\Services\LifeformLevels;
@@ -279,7 +280,26 @@ final class LifeformBonusResolver
      */
     private function technologyContributions(int $userId, int|null $asOf = null): array|null
     {
-        $planetes = Planet::query()->where('user_id', $userId)->where('destroyed', 0)->pluck('id');
+        // **Les colonies du compte A L INSTANT demande, pas celles d aujourd hui** (constat de Keven, journal §167). Une
+        // colonie abandonnee apres l arrivee d une flotte armait encore cette flotte : la retirer changerait son passe.
+        // Un abandon date exactement de l instant compte comme deja survenu, comme toute ecriture de ce module
+        // (`LifeformLevels::levelsAt()` : `time_end <= at`).
+        //
+        // Et une colonie deja PURGEE ne se voit plus du tout : ses faits sont partis en cascade. Si elle existait a cet
+        // instant, le passe ne peut plus etre reconstruit — on le dit, on ne rend pas un bonus reduit.
+        if ($asOf !== null) {
+            $purgee = LifeformPurgedBodies::purgedAt($userId, $asOf);
+            if ($purgee !== null) {
+                throw new LifeformHistoryUnavailable(
+                    'La colonie ' . $purgee->planet_id . ' du compte ' . $userId . ' existait a l instant ' . $asOf
+                    . ' et ses faits ont ete purges (' . $purgee->purged_at . ') : l apport des formes de vie a cet instant ne peut plus etre etabli.'
+                );
+            }
+        }
+        $planetes = Planet::query()
+            ->where('user_id', $userId)
+            ->where(static fn ($q) => $asOf === null ? $q->where('destroyed', 0) : $q->where('destroyed', 0)->orWhere('destroyed', '>', $asOf))
+            ->pluck('id');
         $etats = LifeformPlanet::query()->whereIn('planet_id', $planetes)->get();
         if ($etats->isEmpty()) {
             return null;
