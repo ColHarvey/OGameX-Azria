@@ -86,6 +86,15 @@
     position: relative;
     cursor: pointer;
 }
+/* **Une conversation fermee disparait.** `closeChatBox()` marque son onglet `outOfChatbar`, et la feuille historique
+   le cache par `.outOfChatbar { display: none }` — une regle de classe seule (0,1,0), que le `display: flex` des
+   onglets du theme ci-dessus (1,2,0) battait. Le X de l en-tete ne fermait donc plus rien, et la fenetre restait a
+   l ecran puisqu elle vit DANS l onglet (constat de Keven, 19 septembre 2026). La regle qui suit reprend la main
+   par sa specificite (1,3,0), sans `!important`. */
+#chatBar.azria-chat .chat_bar_list_item.outOfChatbar,
+#chatBar.azria-chat .chat_bar_pl_list_item.outOfChatbar {
+    display: none;
+}
 #chatBar.azria-chat .chat_bar_list_item.open,
 #chatBar.azria-chat .chat_bar_pl_list_item.open {
     border-color: #6a8798;
@@ -219,8 +228,8 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 10px 12px;
-    min-height: 56px;
+    padding: 7px 12px;
+    min-height: 44px;
     height: auto;
     width: auto;
     line-height: normal;
@@ -517,10 +526,12 @@
 }
 
 /* ---------------------------------------------------------------- une conversation */
+/* La hauteur de la liste des messages : avec l en-tete (44) et le pied (61), la fenetre fait 285 px au lieu des 347
+   d origine — « tout etire », disait Keven en la voyant en jeu le 19 septembre 2026. */
 #chatBar.azria-chat .chat_box_ctn {
     background: linear-gradient(#091520, #101f2d);
-    padding: 12px 12px 4px;
-    height: 230px;
+    padding: 10px 12px 4px;
+    height: 180px;
 }
 #chatBar.azria-chat .chat_box .chat_msg {
     max-width: 91%;
@@ -682,7 +693,7 @@
         max-width: 110px;
     }
     #chatBar.azria-chat .chat_box_ctn {
-        height: 190px;
+        height: 150px;
     }
     #chatBar.azria-chat .scrollContainer {
         max-height: 240px;

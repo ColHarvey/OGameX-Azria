@@ -102,7 +102,6 @@ Route::middleware(['auth', 'banned', 'globalgame', 'locale', 'firstlogin'])->gro
     // Toute page repond 404 quand l interrupteur est ferme.
     Route::get('/lifeforms', [LifeformsController::class, 'index'])->name('lifeforms.index');
     Route::post('/lifeforms/select', [LifeformsController::class, 'select'])->name('lifeforms.select');
-    Route::post('/lifeforms/welcome/later', [LifeformsController::class, 'dismissWelcome'])->name('lifeforms.welcome.later');
     Route::get('/lifeforms/buildings', [LifeformsController::class, 'buildings'])->name('lifeforms.buildings');
     Route::get('/ajax/lifeforms/buildings', [LifeformsController::class, 'buildingsAjax'])->name('lifeforms.buildings.ajax');
     Route::post('/lifeforms/buildings/add-buildrequest', [LifeformsController::class, 'addBuildRequest'])->name('lifeforms.buildings.addbuildrequest.post');

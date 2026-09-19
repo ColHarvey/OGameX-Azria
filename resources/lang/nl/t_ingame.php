@@ -1479,7 +1479,6 @@ return [
         'private_conversation'  => 'Privégesprek',
         'minimize_conversation' => 'Gesprek minimaliseren',
         'close_conversation'    => 'Gesprek sluiten',
-        'open_messaging'        => 'Berichtenpagina openen',
         'load_error'            => 'De contacten konden niet worden geladen.',
         'network_failed'        => 'Het bericht kon niet worden verzonden. Je tekst is bewaard: probeer het opnieuw.',
         'not_authorized'        => 'Je kunt niet meer schrijven in dit gesprek. Laad de pagina opnieuw als je rechten zijn gewijzigd.',

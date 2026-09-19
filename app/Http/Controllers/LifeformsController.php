@@ -36,7 +36,6 @@ use OGame\Lifeforms\Species;
 use OGame\Models\Lifeforms\LifeformPlanet;
 use OGame\Models\Lifeforms\LifeformQueue;
 use OGame\Models\Lifeforms\LifeformSpeciesProgress;
-use OGame\Models\Lifeforms\LifeformWelcome;
 use OGame\Models\Planet\Coordinate;
 use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
@@ -124,19 +123,6 @@ final class LifeformsController extends OGameController
         }
 
         return redirect()->route('lifeforms.index')->with('status', __('t_lifeforms_ui.selection.done', ['species' => __('t_lifeforms.species.' . $espece->machineName())]));
-    }
-
-    /**
-     * « Plus tard » sur l invitation : memorise par compte et par version d accueil.
-     */
-    public function dismissWelcome(PlayerService $player): RedirectResponse
-    {
-        LifeformWelcome::query()->updateOrCreate(
-            ['user_id' => $player->getId()],
-            ['dismissed_version' => LifeformWelcome::VERSION, 'dismissed_at' => (int)Date::now()->timestamp]
-        );
-
-        return redirect()->route('overview.index');
     }
 
     /**

@@ -78,7 +78,6 @@ final class LifeformInstallationService
                     'chosen_at' => $now,
                     'artifacts' => 0,
                     'discoveries_available' => 0,
-                    'welcome_dismissed_version' => 0,
                 ]);
                 LifeformSpeciesProgress::query()->firstOrCreate(
                     ['user_id' => $userId, 'species' => $species->value],

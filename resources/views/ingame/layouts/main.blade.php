@@ -1076,7 +1076,6 @@
                     'PRIVATE_CONVERSATION'     => __('t_ingame.chat.private_conversation'),
                     'MINIMIZE_CONVERSATION'    => __('t_ingame.chat.minimize_conversation'),
                     'CLOSE_CONVERSATION'       => __('t_ingame.chat.close_conversation'),
-                    'OPEN_MESSAGING'           => __('t_ingame.chat.open_messaging'),
                     'SEND'                     => __('t_ingame.chat.submit'),
                     'LOAD_ERROR'               => __('t_ingame.chat.load_error'),
                     // Ce que le joueur lit quand son message n est pas parti, ou que la conversation lui est refusee (§167).

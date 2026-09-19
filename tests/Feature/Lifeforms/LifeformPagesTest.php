@@ -23,7 +23,6 @@ use OGame\Models\Lifeforms\LifeformSlot;
 use OGame\Models\Lifeforms\LifeformSlotChange;
 use OGame\Models\Lifeforms\LifeformSpeciesProgress;
 use OGame\Models\Lifeforms\LifeformTechnologyLevel;
-use OGame\Models\Lifeforms\LifeformWelcome;
 use OGame\Models\Planet;
 use OGame\Models\Resources;
 use Tests\AccountTestCase;
@@ -48,7 +47,6 @@ final class LifeformPagesTest extends AccountTestCase
         LifeformPlanet::query()->whereIn('planet_id', $planetes)->delete();
         LifeformAccount::query()->where('user_id', $this->currentUserId)->delete();
         LifeformSpeciesProgress::query()->where('user_id', $this->currentUserId)->delete();
-        LifeformWelcome::query()->where('user_id', $this->currentUserId)->delete();
         $this->restorePinnedSettings();
         parent::tearDown();
     }
@@ -60,7 +58,7 @@ final class LifeformPagesTest extends AccountTestCase
         $vueGenerale = $this->get(route('overview.index'));
         $vueGenerale->assertStatus(200);
         $vueGenerale->assertDontSee('id="menu-lifeforms"', false);
-        $vueGenerale->assertDontSee('id="lifeform-welcome"', false);
+        $vueGenerale->assertDontSee('lifeform-welcome', false);
         $vueGenerale->assertDontSee('id="population_box"', false);
 
         $this->get(route('lifeforms.index'))->assertStatus(404);
@@ -71,15 +69,17 @@ final class LifeformPagesTest extends AccountTestCase
         $reponse->assertJsonPath('success', false);
     }
 
-    public function testTheMenuTheInvitationAndTheFourSpeciesAppearWhenTheSwitchIsOpen(): void
+    public function testTheMenuAndTheFourSpeciesAppearWhenTheSwitchIsOpenAndNothingInvitesOnTheOverview(): void
     {
         $this->pinSettings(['lifeforms_enabled' => 1]);
 
         $vueGenerale = $this->get(route('overview.index'));
         $vueGenerale->assertStatus(200);
         $vueGenerale->assertSee('id="menu-lifeforms"', false);
-        $vueGenerale->assertSee('id="lifeform-welcome"', false);
-        $vueGenerale->assertSee(route('lifeforms.welcome.later'), false);
+        // **Aucune invitation dans la page** (decision de Keven, 19 septembre 2026, pendant la mise en service) :
+        // l ouverture s annonce par une note de mise a jour. L entree de menu suffit a dire que c est la, et la
+        // vue generale d un compte sans espece reste celle d hier.
+        $vueGenerale->assertDontSee('lifeform-welcome', false);
         $vueGenerale->assertDontSee('id="population_box"', false);
         // Sans espece, le bouton principal du menu mene au choix : il n y a rien a batir.
         $this->assertSame(route('lifeforms.index'), self::menuButtonTargetOf((string)$vueGenerale->getContent()));
@@ -92,17 +92,6 @@ final class LifeformPagesTest extends AccountTestCase
         $page->assertSee('lifeform-species-mechas', false);
         $page->assertSee('lifeformTech11101', false);
         $page->assertSee('lifeformTech14218', false);
-    }
-
-    public function testLaterHidesTheInvitationWithoutChoosingAnything(): void
-    {
-        $this->pinSettings(['lifeforms_enabled' => 1]);
-
-        $this->post(route('lifeforms.welcome.later'))->assertRedirect(route('overview.index'));
-
-        $this->get(route('overview.index'))->assertDontSee('id="lifeform-welcome"', false);
-        $this->assertNull(resolve(LifeformInstallationService::class)->accountOf($this->currentUserId));
-        $this->assertSame(1, LifeformWelcome::query()->where('user_id', $this->currentUserId)->count());
     }
 
     public function testChoosingASpeciesFromThePageIsFinalAndShowsTheBanner(): void
@@ -129,7 +118,7 @@ final class LifeformPagesTest extends AccountTestCase
         $vueGenerale->assertSee('id="food_box"', false);
         $vueGenerale->assertSee('id="resources_population" data-raw="500"', false);
         $vueGenerale->assertSee('lifeform-item-icon lifeform3', false);
-        $vueGenerale->assertDontSee('id="lifeform-welcome"', false);
+        $vueGenerale->assertDontSee('lifeform-welcome', false);
         $vueGenerale->assertSee('id="productionboxlfbuildingcomponent"', false);
         $vueGenerale->assertSee('id="productionboxlfresearchcomponent"', false);
 

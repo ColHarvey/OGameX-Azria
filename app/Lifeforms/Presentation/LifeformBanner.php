@@ -11,7 +11,6 @@ use OGame\Lifeforms\Services\LifeformInstallationService;
 use OGame\Lifeforms\Services\LifeformLevels;
 use OGame\Lifeforms\Species;
 use OGame\Models\Lifeforms\LifeformPlanet;
-use OGame\Models\Lifeforms\LifeformWelcome;
 use OGame\Services\PlanetService;
 use OGame\Services\PlayerService;
 use OGame\Services\SettingsService;
@@ -38,7 +37,7 @@ final class LifeformBanner
     }
 
     /**
-     * @return array{enabled: bool, species: Species|null, species_name: string|null, planet: Chiffres|null, welcome: bool, held: Suspension|null}
+     * @return array{enabled: bool, species: Species|null, species_name: string|null, planet: Chiffres|null, held: Suspension|null}
      */
     public function for(PlayerService $player, PlanetService|null $planet): array
     {
@@ -56,7 +55,6 @@ final class LifeformBanner
             'species' => $espece,
             'species_name' => is_string($nom) ? $nom : null,
             'planet' => $chiffres,
-            'welcome' => $ouvert && $espece === null && !$this->welcomeDismissed($player->getId()),
             'held' => $espece !== null && $planet !== null && $planet->isPlanet() ? $this->heldOn($planet) : null,
         ];
     }
@@ -65,8 +63,7 @@ final class LifeformBanner
      * Les chiffres de la planete pour ce compte, sans le reste du bandeau.
      *
      * Le bandeau des ressources se resynchronise toutes les trente secondes (`/ajax/resourcebox`) : il lui
-     * faut la population et la nourriture, pas l invitation d accueil ni la suspension de la planete, qui
-     * coutent chacune une lecture de plus.
+     * faut la population et la nourriture, pas la suspension de la planete, qui coute une lecture de plus.
      *
      * @return Chiffres|null
      */
@@ -102,11 +99,6 @@ final class LifeformBanner
         }
 
         return ['since' => $depuis, 'since_formatted' => date('d.m.Y H:i', $depuis)];
-    }
-
-    public function welcomeDismissed(int $userId): bool
-    {
-        return LifeformWelcome::query()->where('user_id', $userId)->where('dismissed_version', '>=', LifeformWelcome::VERSION)->exists();
     }
 
     /**

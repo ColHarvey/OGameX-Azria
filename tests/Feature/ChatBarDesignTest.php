@@ -21,7 +21,7 @@ class ChatBarDesignTest extends AccountTestCase
         'PLAYER_LIST', 'FILTER_BY', 'FILTER_ONLINE', 'FILTER_ALL', 'FILTER_ACTIVE', 'BUDDIES', 'NO_BUDDIES', 'ALLIANCE',
         'ALLIANCE_CHAT', 'ALLIANCE_CHANNEL', 'STRANGERS', 'STATUS_ONLINE', 'STATUS_OFFLINE', 'STATUS_HIDDEN', 'COMMUNICATIONS',
         'CONTACTS_ONLINE_SHORT', 'CONTACTS_NETWORK', 'ONLINE_RATIO', 'COLLAPSE_CONTACTS', 'PRIVATE_CONVERSATION',
-        'MINIMIZE_CONVERSATION', 'CLOSE_CONVERSATION', 'OPEN_MESSAGING', 'SEND', 'LOAD_ERROR', 'NETWORK_FAILED', 'NOT_AUTHORIZED',
+        'MINIMIZE_CONVERSATION', 'CLOSE_CONVERSATION', 'SEND', 'LOAD_ERROR', 'NETWORK_FAILED', 'NOT_AUTHORIZED',
     ];
 
     private const array ICONES = ['radio-tower', 'message-square', 'shield', 'orbit', 'crosshair', 'sparkles', 'moon', 'send', 'minus', 'x', 'chevron-up', 'chevron-down'];
@@ -204,6 +204,75 @@ class ChatBarDesignTest extends AccountTestCase
         $this->assertStringNotContainsString('jsdelivr', $js);
         $this->assertStringContainsString('stroke="currentColor"', $js, 'Les icones en ligne heritent de la couleur CSS.');
         $this->assertStringContainsString('aria-hidden="true"', $js);
+    }
+
+    /**
+     * La regle qui contient ce selecteur, dans la feuille servie : ses selecteurs, et ses declarations.
+     *
+     * @return array{0: string, 1: string}
+     */
+    private function regleContenant(string $feuille, string $selecteur): array
+    {
+        $position = strpos($feuille, $selecteur);
+        $this->assertNotFalse($position, "Le selecteur « $selecteur » n est pas dans la feuille servie.");
+        $avant = strrpos(substr($feuille, 0, $position), '}');
+        $debut = $avant === false ? 0 : $avant + 1;
+        $accolade = (int)strpos($feuille, '{', $position);
+        $fin = (int)strpos($feuille, '}', $accolade);
+
+        return [substr($feuille, $debut, $accolade - $debut), substr($feuille, $accolade + 1, $fin - $accolade - 1)];
+    }
+
+    /**
+     * La specificite d un selecteur simple, en un seul nombre : identifiants d abord, classes ensuite.
+     */
+    private static function specificite(string $selecteur): int
+    {
+        return substr_count($selecteur, '#') * 100 + substr_count($selecteur, '.') * 10;
+    }
+
+    /**
+     * **Une conversation fermee disparait, et la regle qui la cache bat celle qui l affiche** (constat de Keven,
+     * 19 septembre 2026, journal §168).
+     *
+     * `closeChatBox()` ne fait que poser `outOfChatbar` sur l onglet — et la fenetre de conversation vit **dans**
+     * l onglet. La feuille historique la cache par `.outOfChatbar{display:none}`, une regle de classe seule, que le
+     * `display:flex` des onglets du theme battait : le X de l en-tete ne fermait plus rien, et les fenetres
+     * s accumulaient a l ecran. Le temoin lit la feuille **servie**, exige que la regle concurrente existe toujours, et
+     * compare les deux specificites — reconnaitre un motif ne prouverait pas qu il gagne.
+     */
+    public function testAClosedConversationIsHiddenByARuleStrongerThanTheThemeTabs(): void
+    {
+        $feuille = $this->feuilleServie();
+        $this->assertStringContainsString('.outOfChatbar{display:none}', $feuille, 'La regle historique qui cache un onglet ferme doit exister : c est elle que le theme battait.');
+
+        [$onglets, $declarationsOnglets] = $this->regleContenant($feuille, '#chatBar.azria-chat .chat_bar_list_item{');
+        $this->assertStringContainsString('display:flex', $declarationsOnglets, 'La regle concurrente — les onglets du theme — existe encore, et c est bien elle qui pose un display.');
+
+        [$fermees, $declarationsFermees] = $this->regleContenant($feuille, '#chatBar.azria-chat .chat_bar_list_item.outOfChatbar');
+        $this->assertStringContainsString('display:none', $declarationsFermees, 'Le theme cache l onglet ferme.');
+        $this->assertStringContainsString('.chat_bar_pl_list_item.outOfChatbar', $fermees, 'L onglet des contacts ferme se cache aussi.');
+
+        $this->assertGreaterThan(
+            self::specificite('#chatBar.azria-chat .chat_bar_list_item'),
+            self::specificite('#chatBar.azria-chat .chat_bar_list_item.outOfChatbar'),
+            'La regle qui cache doit etre PLUS specifique que celle qui affiche, sinon le X ne ferme rien.'
+        );
+    }
+
+    /**
+     * **L en-tete d une conversation n offre plus « Ouvrir la messagerie »** : ce bouton envoyait le navigateur vers
+     * `bigChatLink + "&playerId=…"`, et `bigChatLink` vaut la vue generale sur ce serveur — une adresse sans page
+     * (constat de Keven, 19 septembre 2026). Le comportement au clic vit dans `tests/js/chat-window.test.js` ; ici on
+     * epingle la forme de code, sur la source et sur le bundle servi.
+     */
+    public function testAConversationHeaderOffersNoLinkThatLeadsNowhere(): void
+    {
+        foreach ([$this->chatJs(), $this->bundleServi()] as $ou => $js) {
+            $this->assertStringNotContainsString('icon_maximize fright az-icon', $js, 'Le bouton « Ouvrir la messagerie » du theme est retire (' . ($ou === 0 ? 'source' : 'bundle servi') . ').');
+            $this->assertStringContainsString('icon_minimize fright az-icon', $js, 'Reduire reste.');
+            $this->assertStringContainsString('icon_close fright az-icon', $js, 'Fermer reste.');
+        }
     }
 
     public function testTheAzriaRosterWritesNamesAsTextAndInventsNoStatus(): void

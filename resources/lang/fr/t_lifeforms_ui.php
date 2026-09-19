@@ -165,13 +165,6 @@ return [
         'body' => 'Un combat visant cette planète attend sa résolution. La population, la nourriture et les travaux de formes de vie reprendront à l’issue de la bataille, sans perte de temps.',
         'since' => 'Figé depuis :',
     ],
-    'welcome' => [
-        'title' => 'Les formes de vie arrivent sur Azria',
-        'text' => 'Installez une civilisation sur vos planètes, développez sa population et débloquez ses technologies à votre rythme.',
-        'fairness' => 'Même départ pour tous : aucun niveau, artefact ou ressource offert selon l’ancienneté. Vos possessions actuelles restent intactes. Vous choisissez votre espèce une seule fois, pour toutes vos planètes.',
-        'discover' => 'Découvrir',
-        'later' => 'Plus tard',
-    ],
     'refused' => [
         'closed' => 'Les formes de vie sont fermées pour le moment.',
         'already_chosen' => 'Votre espèce est déjà choisie, et elle ne change plus.',

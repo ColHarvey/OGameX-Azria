@@ -496,6 +496,69 @@ ogame.chat = {
             }
         })
     },
+    /**
+     * **Les conversations ouvertes survivent au changement de page** (constat de Keven, 19 septembre 2026).
+     *
+     * Le jeu ecrit deja la liste des fenetres ouvertes dans le cookie `visibleChats` (`updateVisibleState`), mais
+     * personne ne la relisait : le gabarit repose `visibleChats` vide a chaque page, et la barre ne porte au depart
+     * que l onglet des contacts — chaque page refermait donc tout. On relit ce cookie et on redemande l historique
+     * de chaque conversation memorisee, par le chemin ordinaire (`loadChatLogWith…`), cinq au plus.
+     *
+     * Rien n est invente : un identifiant qui n est pas un entier positif est ignore, un cookie illisible est ignore,
+     * et une conversation deja dans la barre n est pas redemandee. La relecture ne marque **pas** les messages comme
+     * lus (`updateUnread` a faux) : rouvrir une fenetre en changeant de page n est pas la lire.
+     */
+    restoreOpenChats: function () {
+        var c = ogame.chat;
+        if (typeof $.cookie !== 'function') {
+            return
+        }
+        var brut = $.cookie('visibleChats');
+        if (!brut) {
+            return
+        }
+        var memoire = null;
+        try {
+            memoire = JSON.parse(brut)
+        } catch (e) {
+            return
+        }
+        if (!memoire || typeof memoire !== 'object') {
+            return
+        }
+        var entiers = function (liste) {
+            var vus = [];
+            if (!$.isArray(liste)) {
+                return vus
+            }
+            for (var i = 0; i < liste.length; i++) {
+                var v = liste[i];
+                if (v !== null && typeof v === 'object') {
+                    v = v.partnerId
+                }
+                v = parseInt(v, 10);
+                if (!isNaN(v) && v > 0 && $.inArray(v, vus) === -1) {
+                    vus.push(v)
+                }
+            }
+            return vus
+        };
+        var reste = 5;
+        $.each(entiers(memoire.players), function (i, id) {
+            if (reste <= 0 || $(".chat_bar_list .chat_bar_list_item[data-playerid='" + id + "']").length) {
+                return
+            }
+            reste--;
+            c.loadChatLogWithPlayer(id, undefined, undefined, false)
+        });
+        $.each(entiers(memoire.associations), function (i, id) {
+            if (reste <= 0 || $(".chat_bar_list .chat_bar_list_item[data-associationid='" + id + "']").length) {
+                return
+            }
+            reste--;
+            c.loadChatLogWithAssociation(id, undefined, undefined, false)
+        })
+    },
     initChat: function (c, d, associationId) {
         ogame.chat.playerId = c;
         ogame.chat.isMobile = d;
@@ -504,6 +567,7 @@ ogame.chat = {
         ogame.chat.initialize();
         ogame.chat.toggleVisibility();
         ogame.chat.setVisibilityState();
+        ogame.chat.restoreOpenChats();
         ogame.chat.initMaximize();
         ogame.chat.getInMaxChat()
     },
@@ -842,8 +906,12 @@ ogame.chat = {
         return o
     },
     /**
-     * Les boutons de l en-tete d une fenetre : fermer et ouvrir la messagerie (les accroches historiques `.icon_close` et
-     * `.icon_maximize`, avec leur icone Lucide et un nom accessible sous le theme Azria), plus « reduire » sous le theme.
+     * Les boutons de l en-tete d une fenetre.
+     *
+     * Sans le theme, les deux accroches historiques : fermer et ouvrir la messagerie. **Sous le theme, « Ouvrir la
+     * messagerie » n existe plus** (constat de Keven, 19 septembre 2026) : ce bouton envoie le navigateur vers
+     * `bigChatLink + "&playerId=" + id`, et `bigChatLink` n est pose nulle part sur ce serveur — le clic menait donc
+     * a une adresse sans page. Restent « fermer » et « reduire ».
      */
     azriaTitleButtons: function () {
         var n = ogame.chat;
@@ -852,8 +920,7 @@ ogame.chat = {
         }
         var close = $('<span class="icon icon_close fright az-icon" role="button" tabindex="0"></span>').attr('title', n.loca('CLOSE_CONVERSATION')).attr('aria-label', n.loca('CLOSE_CONVERSATION')).html(n.azriaIcon('x'));
         var minimize = $('<span class="icon icon_minimize fright az-icon" role="button" tabindex="0"></span>').attr('title', n.loca('MINIMIZE_CONVERSATION')).attr('aria-label', n.loca('MINIMIZE_CONVERSATION')).html(n.azriaIcon('minus'));
-        var maximize = $('<span class="icon icon_maximize fright az-icon" role="button" tabindex="0"></span>').attr('title', n.loca('OPEN_MESSAGING')).attr('aria-label', n.loca('OPEN_MESSAGING')).html(n.azriaIcon('message-square'));
-        return [close, minimize, maximize];
+        return [close, minimize];
     },
     /**
      * L identite de l en-tete sous le theme Azria : un avatar (initiale sure, ou le bouclier pour l alliance), le nom en

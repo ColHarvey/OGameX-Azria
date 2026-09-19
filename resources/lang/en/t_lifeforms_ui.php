@@ -165,13 +165,6 @@ return [
         'body' => 'A combat targeting this planet is awaiting resolution. Population, food and lifeform works will resume once the battle is settled, with no time lost.',
         'since' => 'Frozen since:',
     ],
-    'welcome' => [
-        'title' => 'Lifeforms are coming to Azria',
-        'text' => 'Settle a civilisation on your planets, grow its population and unlock its technologies at your own pace.',
-        'fairness' => 'Same start for everyone: no level, artefact or resource granted for seniority. Your current possessions stay intact. You choose your species once, for all your planets.',
-        'discover' => 'Discover',
-        'later' => 'Later',
-    ],
     'refused' => [
         'closed' => 'Lifeforms are closed for now.',
         'already_chosen' => 'Your species is already chosen, and it never changes.',

@@ -9,10 +9,6 @@
         </div>
     @endif
 
-    @if (!empty($lifeforms['welcome']))
-        @include('ingame.lifeforms.partials.welcome')
-    @endif
-
     <!-- JAVASCRIPT -->
     <script type="text/javascript">
         var textContent = [];
