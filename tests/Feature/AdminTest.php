@@ -3,12 +3,31 @@
 namespace Tests\Feature;
 
 use Tests\AccountTestCase;
+use Tests\Support\ReturnsLifeformRuleRevisions;
 
 /**
  * Verify that the admin panel works as expected.
  */
 class AdminTest extends AccountTestCase
 {
+    use ReturnsLifeformRuleRevisions;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // Cet essai enregistre la page des reglages du serveur, ce qui ecrit une **revision datee** des vitesses de
+        // formes de vie. Elle survivrait a la classe et ecraserait la vitesse epinglee de toute classe de formes de vie
+        // du meme processus (journal §166).
+        $this->rememberLifeformRuleRevisions();
+    }
+
+    protected function tearDown(): void
+    {
+        $this->returnLifeformRuleRevisions();
+        parent::tearDown();
+    }
+
     /**
      * The paths that are only accessible by admins which will be tested.
      */

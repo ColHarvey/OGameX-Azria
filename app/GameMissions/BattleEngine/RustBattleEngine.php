@@ -370,10 +370,16 @@ class RustBattleEngine extends BattleEngine
             // le schema 2 ; le moteur partage refuse un round dont l'attribution ne recouvre pas
             // les pertes du camp, donc une bibliotheque qui ne les rendrait pas ne produirait
             // aucun resultat plutot qu'un resultat muet.
-            $round->attackerLossesInRoundPerFleet = $this->convertUnitsByFleet($roundData['attacker_losses_in_round_per_fleet'] ?? []);
-            $round->defenderLossesInRoundPerFleet = $this->convertUnitsByFleet($roundData['defender_losses_in_round_per_fleet'] ?? []);
-            $round->hitsPerAttackerFleet = $this->convertIntByFleet($roundData['hits_per_attacker_fleet'] ?? []);
-            $round->damagePerAttackerFleet = $this->convertIntByFleet($roundData['damage_per_attacker_fleet'] ?? []);
+            // **Et elles portent toutes les flottes, dans l ordre des flottes** : la bibliotheque n ecrit une entree
+            // qu a la premiere perte, et ses tables de hachage ne se serialisent pas dans un ordre stable, la ou le moteur
+            // PHP pose une entree vide pour chaque flotte a chaque round. Sans cette remise en forme, un renfort qui
+            // traversait un round sans perte disparaissait du round (CI du 19 septembre 2026, journal §166).
+            $missionsAttaquantes = array_map(static fn (AttackerFleet $f): int => $f->fleetMissionId, $this->attackers);
+            $missionsDefensives = array_map(static fn (DefenderFleet $f): int => $f->fleetMissionId, $this->defenders);
+            $round->attackerLossesInRoundPerFleet = RustRoundShape::unitsOfEveryFleet($this->convertUnitsByFleet($roundData['attacker_losses_in_round_per_fleet'] ?? []), $missionsAttaquantes, 'attaquant');
+            $round->defenderLossesInRoundPerFleet = RustRoundShape::unitsOfEveryFleet($this->convertUnitsByFleet($roundData['defender_losses_in_round_per_fleet'] ?? []), $missionsDefensives, 'defenseur');
+            $round->hitsPerAttackerFleet = RustRoundShape::numbersOfEveryFleet($this->convertIntByFleet($roundData['hits_per_attacker_fleet'] ?? []), $missionsAttaquantes, 'attaquant');
+            $round->damagePerAttackerFleet = RustRoundShape::numbersOfEveryFleet($this->convertIntByFleet($roundData['damage_per_attacker_fleet'] ?? []), $missionsAttaquantes, 'attaquant');
 
             // Pertes cumulees et effectif par flotte attaquante : le round Rust les porte deja dans
             // ses resultats par flotte, calcules a la fin de chaque round.

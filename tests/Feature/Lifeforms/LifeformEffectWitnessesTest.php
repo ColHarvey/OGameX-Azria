@@ -16,6 +16,7 @@ use OGame\Lifeforms\Catalogue\LifeformFormulas;
 use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\Combat\LifeformCombatPhotographer;
 use OGame\Lifeforms\Demography\PlanetLifeformProfile;
+use OGame\Lifeforms\Rules\LifeformRuleRevisions;
 use OGame\Lifeforms\Services\LifeformInstallationService;
 use OGame\Lifeforms\Services\LifeformLevels;
 use OGame\Lifeforms\Services\LifeformQueueService;
@@ -118,6 +119,15 @@ final class LifeformEffectWitnessesTest extends AccountTestCase
         parent::setUp();
         $this->pinSettings(['lifeforms_enabled' => 1, 'economy_speed' => 1, 'research_speed' => 1, 'fleet_speed' => 1]);
         LifeformBonusCache::invalidate();
+
+        // **Ce que cette classe epingle doit etre ce que la file emploiera.** Les durees se calculent sur les vitesses
+        // DATEES (`LifeformRuleRevisions::at()`), qui preferent toute revision au reglage vivant — et retombent meme sur
+        // la plus ancienne quand aucune ne precede l instant. Une classe voisine qui enregistre la page des reglages en
+        // fait naitre une, a la vitesse du banc (8) : les attendus d ici valaient alors huit fois trop (journal §166).
+        // La prochaine fois, le rouge dira cela, au lieu d un ecart de facteur huit sans explication.
+        $vitesses = resolve(LifeformRuleRevisions::class)->at((int)Date::now()->timestamp);
+        $this->assertSame(1.0, $vitesses->economy, 'Premisse : une revision datee contredit la vitesse economique epinglee par cette classe.');
+        $this->assertSame(1.0, $vitesses->buildMultiplier, 'Premisse : une revision datee contredit le multiplicateur de construction.');
     }
 
     protected function tearDown(): void

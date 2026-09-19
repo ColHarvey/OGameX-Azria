@@ -5,14 +5,67 @@ namespace Tests\Unit\Combat;
 use InvalidArgumentException;
 use OGame\Combat\Presentation\BattleReportParticipants;
 use OGame\Combat\Support\CombatParticipantKey;
-use PHPUnit\Framework\TestCase;
+use OGame\GameMissions\BattleEngine\Models\BattleResult;
+use OGame\GameMissions\BattleEngine\Models\BattleResultRound;
+use OGame\GameObjects\Models\Units\UnitCollection;
+use OGame\Services\ObjectService;
+use Tests\UnitTestCase;
 
 /**
  * La relecture du bloc des participants d un rapport de combat (journal §161) : une porte de confiance — un schema
  * inconnu, un camp absent, un niveau ou un effectif qui n est pas un entier sont refuses, jamais ramenes.
  */
-final class BattleReportParticipantsTest extends TestCase
+final class BattleReportParticipantsTest extends UnitTestCase
 {
+    /**
+     * **Le bloc porte chaque participant a chaque round, dans son ordre, meme si le moteur rend une carte creuse.**
+     *
+     * Le moteur PHP pose une entree vide pour chaque flotte a chaque round ; la bibliotheque Rust ne cree l entree qu a
+     * la premiere perte, et ses tables de hachage ne se serialisent pas dans un ordre stable. Sous Rust, un renfort qui
+     * traversait le round 0 sans perte **disparaissait du round** du bloc gele : la CI l a fait rougir sur `c0161281`
+     * (journal §166). Le bloc ne lit donc plus les cartes dans leur ordre : il demande a chaque participant ce qu il a
+     * perdu. Ici, la carte du moteur est volontairement creuse **et desordonnee**.
+     */
+    public function testEveryParticipantIsInEveryRoundEvenWhenTheEngineMapIsSparse(): void
+    {
+        $chasseur = ObjectService::getUnitObjectByMachineName('light_fighter');
+        $lanceur = ObjectService::getUnitObjectByMachineName('rocket_launcher');
+
+        $premier = new BattleResultRound();
+        $pertesAttaquantes = new UnitCollection();
+        $pertesAttaquantes->addUnit($chasseur, 3);
+        $premier->attackerLossesInRoundPerFleet = [19 => $pertesAttaquantes];
+        $pertesGarnison = new UnitCollection();
+        $pertesGarnison->addUnit($lanceur, 2);
+        // Le renfort (18) a traverse ce round sans perte : la bibliotheque ne le nomme pas.
+        $premier->defenderLossesInRoundPerFleet = [0 => $pertesGarnison];
+
+        $second = new BattleResultRound();
+        $second->attackerLossesInRoundPerFleet = [19 => new UnitCollection()];
+        $pertesRenfort = new UnitCollection();
+        $pertesRenfort->addUnit($chasseur, 1);
+        // Et ici, dans l ordre inverse de celui des flottes.
+        $second->defenderLossesInRoundPerFleet = [18 => $pertesRenfort, 0 => new UnitCollection()];
+
+        $resultat = new BattleResult();
+        $resultat->rounds = [$premier, $second];
+
+        $rounds = BattleReportParticipants::roundsOf(
+            [19 => CombatParticipantKey::forFleet(19)],
+            [0 => BattleReportParticipants::GARRISON_KEY, 18 => CombatParticipantKey::forFleet(18)],
+            $resultat
+        );
+
+        $attendu = [CombatParticipantKey::forFleet(19), BattleReportParticipants::GARRISON_KEY, CombatParticipantKey::forFleet(18)];
+        $this->assertCount(2, $rounds);
+        $this->assertSame($attendu, array_keys($rounds[0]['losses']), 'Round 1 : les trois participants, dans l ordre du bloc.');
+        $this->assertSame($attendu, array_keys($rounds[1]['losses']), 'Round 2 : l ordre du bloc, pas celui de la carte du moteur.');
+        $this->assertSame(['light_fighter' => 3], $rounds[0]['losses'][CombatParticipantKey::forFleet(19)]);
+        $this->assertSame(['rocket_launcher' => 2], $rounds[0]['losses'][BattleReportParticipants::GARRISON_KEY]);
+        $this->assertSame([], $rounds[0]['losses'][CombatParticipantKey::forFleet(18)], 'Un participant sans perte figure au round, les mains vides.');
+        $this->assertSame(['light_fighter' => 1], $rounds[1]['losses'][CombatParticipantKey::forFleet(18)]);
+    }
+
     public function testANullBlockIsAnOldReport(): void
     {
         $this->assertNull(BattleReportParticipants::fromStorage(null));

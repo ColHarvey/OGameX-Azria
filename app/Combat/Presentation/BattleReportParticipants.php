@@ -95,19 +95,49 @@ final class BattleReportParticipants
             );
         }
 
+        $clefsAttaquantes = [];
+        foreach ($attackerFleets as $flotte) {
+            $clefsAttaquantes[$flotte->fleetMissionId] = self::keyOfFleet($flotte->fleetMissionId);
+        }
+        $clefsDefensives = [];
+        foreach ($defenderFleets as $flotte) {
+            $clefsDefensives[$flotte->fleetMissionId] = $flotte->fleetMissionId === 0 ? self::GARRISON_KEY : self::keyOfFleet($flotte->fleetMissionId);
+        }
+
+        return ['schema' => self::SCHEMA, 'attackers' => $attaquants, 'defenders' => $defenseurs, 'rounds' => self::roundsOf($clefsAttaquantes, $clefsDefensives, $result)];
+    }
+
+    /**
+     * Les pertes de chaque round, **par participant du bloc**, dans l ordre du bloc.
+     *
+     * Elle ne lit plus les cartes du moteur dans leur propre ordre : elle demande a chaque participant ce qu il a perdu
+     * dans ce round, et rend `[]` quand il n a rien perdu. Deux raisons, mesurees par la CI du 19 septembre 2026
+     * (journal §166) : le moteur PHP pose une entree vide pour chaque flotte a chaque round, la bibliotheque Rust ne cree
+     * l entree qu a la premiere perte — un renfort qui traversait un round sans perte **disparaissait du round** sous
+     * Rust ; et une carte Rust est une table de hachage, dont l ordre de serialisation n est pas celui des flottes, si
+     * bien que l ordre des clefs du bloc dependait du moteur. Le bloc est gele : sa forme ne peut pas dependre de cela.
+     *
+     * Publique pour etre eprouvee seule, sur un resultat forge, sans monter une bataille entiere.
+     *
+     * @param array<int, string> $attackerKeys clef de chaque flotte attaquante, par identifiant de mission, dans l ordre du bloc
+     * @param array<int, string> $defenderKeys idem pour la defense, la garnison sous `0`
+     * @return list<array{losses: array<string, array<string, int>>}>
+     */
+    public static function roundsOf(array $attackerKeys, array $defenderKeys, BattleResult $result): array
+    {
         $rounds = [];
         foreach ($result->rounds as $round) {
             $pertes = [];
-            foreach ($round->attackerLossesInRoundPerFleet as $missionId => $unites) {
-                $pertes[self::keyOfFleet((int)$missionId)] = $unites->toArray();
+            foreach ($attackerKeys as $missionId => $clef) {
+                $pertes[$clef] = isset($round->attackerLossesInRoundPerFleet[$missionId]) ? $round->attackerLossesInRoundPerFleet[$missionId]->toArray() : [];
             }
-            foreach ($round->defenderLossesInRoundPerFleet as $missionId => $unites) {
-                $pertes[(int)$missionId === 0 ? self::GARRISON_KEY : self::keyOfFleet((int)$missionId)] = $unites->toArray();
+            foreach ($defenderKeys as $missionId => $clef) {
+                $pertes[$clef] = isset($round->defenderLossesInRoundPerFleet[$missionId]) ? $round->defenderLossesInRoundPerFleet[$missionId]->toArray() : [];
             }
             $rounds[] = ['losses' => $pertes];
         }
 
-        return ['schema' => self::SCHEMA, 'attackers' => $attaquants, 'defenders' => $defenseurs, 'rounds' => $rounds];
+        return $rounds;
     }
 
     /**

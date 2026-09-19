@@ -7,6 +7,7 @@ use OGame\Combat\Exceptions\IncoherentRoundAttribution;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Combat\Support\LiveLootContextFactory;
 use OGame\GameMissions\BattleEngine\BattleEngine;
+use OGame\GameMissions\BattleEngine\Draws\SeededDraws;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameMissions\BattleEngine\Models\BattleResultRound;
@@ -40,6 +41,9 @@ abstract class RoundLossesByParticipantTestAbstract extends UnitTestCase
     private const int RENFORT = 777;
 
     private const int ATTAQUANTE = 4242;
+
+    /** La graine du temoin de forme : les deux moteurs jouent la meme bataille. */
+    private const int GRAINE = 20260919;
 
     /**
      * @return class-string<BattleEngine>
@@ -122,6 +126,38 @@ abstract class RoundLossesByParticipantTestAbstract extends UnitTestCase
     }
 
     /**
+     * **Chaque flotte a son entree dans chaque round, dans l ordre des flottes** — vide quand elle n a rien perdu.
+     *
+     * Le moteur PHP pose ces entrees a l ouverture du round ; la bibliotheque Rust ne les cree qu a la premiere perte, et
+     * ses cartes sont des tables de hachage sans ordre stable. Le bloc gele du rapport de combat en derive sa forme : sous
+     * Rust, un renfort qui traversait le round 0 sans perte **disparaissait du round** (CI du 19 septembre 2026, deux
+     * echecs sur `c0161281`, journal §166). Ce temoin tient le contrat des deux cotes ; l adaptateur Rust le respecte en
+     * remettant les cartes en forme (`RustRoundShape`).
+     */
+    public function testEveryFleetHasItsEntryInEveryRoundEvenWithoutALoss(): void
+    {
+        $resultat = $this->aBattleWhereTheReinforcementCrossesARoundUntouched();
+        $vides = 0;
+
+        foreach ($resultat->rounds as $rang => $round) {
+            $this->assertSame([self::ATTAQUANTE], array_keys($round->attackerLossesInRoundPerFleet), 'Round ' . ($rang + 1) . ' : la carte attaquante ne porte pas exactement les flottes attaquantes, dans leur ordre.');
+            $this->assertSame([0, self::RENFORT], array_keys($round->defenderLossesInRoundPerFleet), 'Round ' . ($rang + 1) . ' : la carte defensive ne porte pas la garnison puis le renfort.');
+            $this->assertSame([self::ATTAQUANTE], array_keys($round->hitsPerAttackerFleet), 'Round ' . ($rang + 1) . ' : les coups par flotte attaquante.');
+            $this->assertSame([self::ATTAQUANTE], array_keys($round->damagePerAttackerFleet), 'Round ' . ($rang + 1) . ' : les degats par flotte attaquante.');
+
+            foreach ($round->defenderLossesInRoundPerFleet as $flotte => $unites) {
+                if ($this->withoutZeros($unites->toArray()) === []) {
+                    $vides++;
+                }
+            }
+        }
+
+        // **Le faux doit etre observable** : si chaque flotte perdait quelque chose a chaque round, une carte creuse et
+        // une carte complete auraient les memes clefs, et ce temoin ne prouverait rien.
+        $this->assertGreaterThan(0, $vides, 'Aucun round ne laisse une flotte defensive sans perte : une carte creuse porterait les memes clefs qu une carte complete.');
+    }
+
+    /**
      * Un round dont l'attribution ne recouvre pas les pertes du camp arrete le moteur partage.
      *
      * Le moteur est celui du banc ; seule la carte par flotte d'un round est amputee apres coup,
@@ -164,6 +200,51 @@ abstract class RoundLossesByParticipantTestAbstract extends UnitTestCase
             $this->assertStringContainsString('camp defenseur', $refus->getMessage());
             $this->assertStringContainsString('rocket_launcher', $refus->getMessage(), 'The refusal does not name the losses that went unattributed.');
         }
+    }
+
+    /**
+     * Une garnison de lanceurs et un renfort de **deux cuirasses**, contre une attaque modeste : les cuirasses
+     * traversent des rounds entiers sans perdre un vaisseau, ce que la garnison ne fait pas. C est ce round-la qui
+     * separe une carte creuse d une carte complete. La graine est fixe : les deux moteurs jouent la meme bataille.
+     */
+    private function aBattleWhereTheReinforcementCrossesARoundUntouched(): BattleResult
+    {
+        $this->createAndSetPlanetModel([
+            'metal' => 100_000,
+            'crystal' => 100_000,
+            'deuterium' => 10_000,
+            'rocket_launcher' => 120,
+        ]);
+
+        $renfort = new DefenderFleet();
+        $renfort->units = new UnitCollection();
+        $renfort->units->addUnit(ObjectService::getUnitObjectByMachineName('battle_ship'), 2);
+        $renfort->player = $this->playerService;
+        $renfort->fleetMissionId = self::RENFORT;
+        $renfort->ownerId = 5;
+        $renfort->fleetMission = null;
+
+        $attaquante = new AttackerFleet();
+        $attaquante->units = new UnitCollection();
+        $attaquante->units->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 120);
+        $attaquante->units->addUnit(ObjectService::getUnitObjectByMachineName('cruiser'), 15);
+        $attaquante->player = $this->playerService;
+        $attaquante->fleetMissionId = self::ATTAQUANTE;
+        $attaquante->ownerId = $this->playerService->getId();
+        $attaquante->cargoResources = new Resources(0, 0, 0, 0);
+        $attaquante->isInitiator = true;
+        $attaquante->fleetMission = null;
+
+        $classe = $this->battleEngineClass();
+        $moteur = new $classe(
+            [$attaquante],
+            $this->planetService,
+            [DefenderFleet::fromPlanet($this->planetService), $renfort],
+            $this->settingsService,
+            LiveLootContextFactory::forBattle([$attaquante], $this->planetService, FrozenLootAllocation::atOperationStart())
+        );
+
+        return $moteur->withDraws(new SeededDraws(self::GRAINE))->simulateBattle();
     }
 
     /**

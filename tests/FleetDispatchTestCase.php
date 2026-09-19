@@ -3,12 +3,14 @@
 namespace Tests;
 
 use Illuminate\Contracts\Container\BindingResolutionException;
+use Illuminate\Support\Facades\DB;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\History\ClassHistoryReader;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
 use OGame\Services\PlanetService;
+use Tests\Support\BackdatesTheBirthOfBenchAccounts;
 
 /**
  * Base class to test that fleet missions work as expected.
@@ -16,6 +18,8 @@ use OGame\Services\PlanetService;
  */
 abstract class FleetDispatchTestCase extends MoonTestCase
 {
+    use BackdatesTheBirthOfBenchAccounts;
+
     /**
      * @var int The mission type for the test.
      */
@@ -289,10 +293,13 @@ abstract class FleetDispatchTestCase extends MoonTestCase
 
         foreach ($lectures as $quoi => $valeur) {
             if (!$valeur->isKnown()) {
+                $naissance = DB::table('character_class_history')->where('user_id', $playerId)->orderBy('changed_at')->orderBy('id')->first();
                 $this->fail(
                     'Premisse du montage : ' . $role . ' (compte ' . $playerId . ') n a pas d historique admissible a l instant '
                     . $instant . ' ; la fermeture se suspendrait pour cela, pas pour ce que l essai mesure. '
                     . ucfirst($quoi) . ' : ' . $valeur->reason
+                    . ' Naissance du compte : ' . ($naissance === null ? 'aucune ligne' : $naissance->changed_at . ' (cause ' . $naissance->cause . ')')
+                    . ' — un compte de banc ne apres cet instant est un artefact d horloge, pas un fait de jeu.'
                 );
             }
         }

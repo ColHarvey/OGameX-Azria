@@ -176,9 +176,12 @@ final class LifeformDiscoveryTest extends AccountTestCase
         // La Galaxie le dit avant le clic, sur chaque position, et la salve du systeme ne lance rien.
         $etat = resolve(GalaxyDiscoveries::class)->forSystem($joueur, $depart->galaxy, $depart->system, (int)Date::now()->timestamp);
         $this->assertSame(__('t_lifeforms_ui.refused.vacation_mode'), $etat['general'], 'L etat general de la Galaxie porte la raison.');
+        // **« Chez soi » prime pour TOUT corps du compte** (§163), pas seulement la planete de depart : selon la
+        // repartition des essais, une autre planete du compte peut occuper une position du systeme. Le banc lit donc
+        // les positions occupees au lieu d en supposer une seule (journal §166).
+        $chezSoi = Planet::query()->where('user_id', $this->currentUserId)->where('galaxy', $depart->galaxy)->where('system', $depart->system)->pluck('planet')->map(static fn ($p): int => (int)$p)->all();
         foreach ($etat['missions'] as $position => $mission) {
-            // « Chez soi » garde sa preseance (§163) ; partout ailleurs, la raison est le mode vacances, et aucune position n est offerte.
-            $this->assertSame($position === $depart->position ? __('t_lifeforms_ui.refused.own_planet') : __('t_lifeforms_ui.refused.vacation_mode'), $mission['canSend'], 'position ' . $position);
+            $this->assertSame(in_array((int)$position, $chezSoi, true) ? __('t_lifeforms_ui.refused.own_planet') : __('t_lifeforms_ui.refused.vacation_mode'), $mission['canSend'], 'position ' . $position);
         }
         $reponse = $this->postJson(route('lifeforms.discoveries.galaxy_system'), ['galaxy' => $depart->galaxy, 'system' => $depart->system, '_token' => csrf_token()]);
         $this->assertFalse($reponse->json('response.success'));

@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use Illuminate\Support\Facades\DB;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
+use Tests\Support\ReturnsLifeformRuleRevisions;
 
 /**
  * Les deux interrupteurs des chantiers s arment et se desarment depuis l administration.
@@ -31,6 +32,8 @@ use Tests\AccountTestCase;
  */
 class AdminChantierSwitchesTest extends AccountTestCase
 {
+    use ReturnsLifeformRuleRevisions;
+
     /**
      * Tous les reglages, tels qu ils etaient avant cet essai.
      *
@@ -52,6 +55,9 @@ class AdminChantierSwitchesTest extends AccountTestCase
         // remet ce qu elle a leve, y compris ce qu elle n avait pas l intention de toucher.
         $this->reglagesAvant = DB::table('settings')->pluck('value', 'key')->map(static fn ($v): string => (string)$v)->all();
 
+        // Enregistrer la page ecrit aussi une revision datee des vitesses de formes de vie : elle se rend comme le reste.
+        $this->rememberLifeformRuleRevisions();
+
         $user = auth()->user();
 
         if ($user === null) {
@@ -65,6 +71,7 @@ class AdminChantierSwitchesTest extends AccountTestCase
     {
         // **Une epreuve remet ce qu elle a leve.** La base d un processus est partagee entre classes,
         // et laisser un chantier arme ferait mentir les essais suivants.
+        $this->returnLifeformRuleRevisions();
         foreach ($this->reglagesAvant as $clef => $valeur) {
             DB::table('settings')->where('key', $clef)->update(['value' => $valeur]);
         }
