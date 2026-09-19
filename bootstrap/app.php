@@ -29,6 +29,10 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
 
         $middleware->prepend(ServerTiming::class);
+        // `visibleChats` est ecrit par `chat.js` (les fenetres de conversation ouvertes) et relu par la page pour les
+        // rendre tout de suite : un cookie pose par le navigateur ne peut pas etre dechiffre par Laravel, qui le
+        // supprimerait de la requete. Il ne porte que des identifiants de conversation, jamais un secret.
+        $middleware->encryptCookies(except: ['visibleChats']);
         // Locale must be APPENDED (not prepended) to the web group so that it executes
         // after StartSession. Prepending would place it before StartSession, making
         // $request->hasSession() return false and breaking session-based locale reading.

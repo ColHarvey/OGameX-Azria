@@ -435,13 +435,7 @@ ogame.chat = {
         }
         $.ajax({
             url: chatHistoryUrl, type: "POST", dataType: "json", data: k, success: function (a) {
-                m.data[a.playerId] = {
-                    playerstatus: a.playerstatus,
-                    playerName: a.playerName,
-                    playerId: a.playerId,
-                    chatItems: a.chatItems,
-                    chatItemsByDateAsc: a.chatItemsByDateAsc
-                };
+                m.absorbChatLog(a);
                 if (typeof l == "function") {
                     l()
                 } else {
@@ -474,13 +468,7 @@ ogame.chat = {
         }
         $.ajax({
             url: chatHistoryUrl, type: "POST", dataType: "json", data: k, success: function (a) {
-                m.data.association[a.associationId] = {
-                    playerstatus: a.playerstatus,
-                    associationName: a.associationName,
-                    associationId: a.associationId,
-                    chatItems: a.chatItems,
-                    chatItemsByDateAsc: a.chatItemsByDateAsc
-                };
+                m.absorbChatLog(a);
                 if (typeof l == "function") {
                     l()
                 } else {
@@ -497,19 +485,55 @@ ogame.chat = {
         })
     },
     /**
+     * Ranger l historique d une conversation dans la memoire du script : le meme geste pour la reponse de la route
+     * et pour la charge que la page pose (`chatRestore`).
+     */
+    absorbChatLog: function (a) {
+        var m = ogame.chat;
+        if (a && a.associationId !== undefined) {
+            m.data.association[a.associationId] = {
+                playerstatus: a.playerstatus,
+                associationName: a.associationName,
+                associationId: a.associationId,
+                chatItems: a.chatItems,
+                chatItemsByDateAsc: a.chatItemsByDateAsc
+            };
+            return
+        }
+        if (a && a.playerId !== undefined) {
+            m.data[a.playerId] = {
+                playerstatus: a.playerstatus,
+                playerName: a.playerName,
+                playerId: a.playerId,
+                chatItems: a.chatItems,
+                chatItemsByDateAsc: a.chatItemsByDateAsc
+            }
+        }
+    },
+    /**
      * **Les conversations ouvertes survivent au changement de page** (constat de Keven, 19 septembre 2026).
      *
-     * Le jeu ecrit deja la liste des fenetres ouvertes dans le cookie `visibleChats` (`updateVisibleState`), mais
-     * personne ne la relisait : le gabarit repose `visibleChats` vide a chaque page, et la barre ne porte au depart
-     * que l onglet des contacts — chaque page refermait donc tout. On relit ce cookie et on redemande l historique
-     * de chaque conversation memorisee, par le chemin ordinaire (`loadChatLogWith…`), cinq au plus.
+     * Le navigateur memorise les fenetres ouvertes dans le cookie `visibleChats` (`updateVisibleState`) ; personne
+     * ne le relisait, et le gabarit reposait une liste vide a chaque page — tout se refermait. Desormais la PAGE
+     * porte leur historique (`chatRestore`, construit par `OpenConversations`) : les fenetres sont la d emblee,
+     * sans requete et sans battement. A defaut — page ancienne, cookie seul — on redemande l historique par le
+     * chemin ordinaire, cinq conversations au plus.
      *
-     * Rien n est invente : un identifiant qui n est pas un entier positif est ignore, un cookie illisible est ignore,
-     * et une conversation deja dans la barre n est pas redemandee. La relecture ne marque **pas** les messages comme
-     * lus (`updateUnread` a faux) : rouvrir une fenetre en changeant de page n est pas la lire.
+     * Rien n est invente : un identifiant qui n est pas un entier positif est ignore, un cookie illisible est
+     * ignore, et une conversation deja dans la barre n est pas redemandee. Rouvrir une fenetre ne marque pas les
+     * messages comme lus (`updateUnread` a faux) : ce n est pas la lire.
      */
     restoreOpenChats: function () {
         var c = ogame.chat;
+        // **La page porte deja l historique des conversations ouvertes** : on les pose sans une requete, donc sans
+        // le battement pendant lequel la fenetre manquait a l ecran (constat de Keven, 19 septembre 2026).
+        if (typeof chatRestore !== 'undefined' && $.isArray(chatRestore) && chatRestore.length) {
+            $.each(chatRestore, function (i, charge) {
+                c.absorbChatLog(charge);
+                c.showChat(charge)
+            });
+            return
+        }
         if (typeof $.cookie !== 'function') {
             return
         }
@@ -769,7 +793,7 @@ ogame.chat = {
         var panel = $('#chatBarPlayerList > .cb_playerlist_box');
         var shift = 0;
         if (panel.length && panel.is(':visible') && $('body').innerWidth() >= 620) {
-            shift = panel.outerWidth() + 7;
+            shift = panel.outerWidth() + 14;
         }
         var droite = 8 + shift;
         $('.chat_bar_list > .chat_bar_list_item.open').each(function () {

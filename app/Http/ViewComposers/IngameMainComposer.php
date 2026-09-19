@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Date;
+use OGame\Chat\OpenConversations;
 use OGame\Lifeforms\Presentation\LifeformBanner;
 use OGame\Models\Alliance;
 use OGame\Models\AllianceMember;
@@ -44,7 +45,7 @@ class IngameMainComposer
      * @param HighscoreService $highscoreService
      * @param BuddyService $buddyService
      */
-    public function __construct(private Request $request, private PlayerService $player, private MessageService $messageService, private SettingsService $settingsService, private FleetMissionService $fleetMissionService, private HighscoreService $highscoreService, private BuddyService $buddyService, private ChatService $chatService, private EventMissionService $eventMissionService, private LifeformBanner $lifeformBanner)
+    public function __construct(private Request $request, private PlayerService $player, private MessageService $messageService, private SettingsService $settingsService, private FleetMissionService $fleetMissionService, private HighscoreService $highscoreService, private BuddyService $buddyService, private ChatService $chatService, private EventMissionService $eventMissionService, private LifeformBanner $lifeformBanner, private OpenConversations $openConversations)
     {
     }
 
@@ -86,6 +87,8 @@ class IngameMainComposer
         $isImpersonating = $impersonateManager->isImpersonating();
         $attackBlockUntil = $this->settingsService->attackBlockUntil();
         $attackBlockActive = $this->settingsService->attackBlockActive();
+        // Un cookie peut arriver en tableau (plusieurs valeurs du meme nom) : ce n est pas une memoire lisible.
+        $memoireDesConversations = $this->request->cookie('visibleChats');
 
         $view->with([
             'underAttack' => $this->fleetMissionService->currentPlayerUnderAttack(),
@@ -97,6 +100,10 @@ class IngameMainComposer
             'buddyRequestCount' => $this->buddyService->getUnreadRequestsCount((int) auth()->id()),
             'onlineBuddiesCount' => $this->getOnlineContactsCount(),
             'unreadChatCount' => $this->chatService->getTotalUnreadMessageCount((int) auth()->id()),
+            // **Les conversations ouvertes arrivent avec la page** (constat de Keven, 19 septembre 2026 : « c est
+            // comme si elle se reloadait »). Le navigateur memorise les fenetres ouvertes dans le cookie
+            // `visibleChats` ; la page rend leur historique tout de suite, au lieu de le redemander apres coup.
+            'chatRestore' => $this->openConversations->fromCookie((int) auth()->id(), is_string($memoireDesConversations) ? $memoireDesConversations : null),
             'resources' => $resources,
             'resourceBarTicker' => $resourceBar->ticker,
             'currentPlayer' => $this->player,

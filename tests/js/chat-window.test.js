@@ -21,7 +21,7 @@ const SOURCE = new URL('../../resources/js/ingame/chat.js', import.meta.url);
 /**
  * Une barre de chat au theme Azria, avec le seul onglet que le gabarit pose : les contacts.
  */
-function unMonde(cookie) {
+function unMonde(cookie, charge) {
     const dom = new JSDOM(
         '<!doctype html><html><body><div id="chatBar" class="azria-chat">'
         + '<ul class="chat_bar_list"><li id="chatBarPlayerList" class="chat_bar_pl_list_item"></li></ul>'
@@ -53,6 +53,10 @@ function unMonde(cookie) {
     window.$.ajax = function (options) {
         requetes.push({ url: options.url, donnees: options.data });
     };
+    // Le greffon de barre de defilement vient du paquet du jeu, pas de chat.js : ici il ne fait rien, et ce n est pas
+    // lui qu on eprouve.
+    window.$.fn.mCustomScrollbar = function () { return this; };
+
     const memoire = { visibleChats: cookie };
     window.$.cookie = function (nom, valeur) {
         if (valeur === undefined) {
@@ -67,6 +71,8 @@ function unMonde(cookie) {
     window.chatHistoryUrl = '/ajax/chat/history';
     window.playerId = 1;
     window.visibleChats = { players: [], associations: [] };
+    // Ce que la page pose desormais elle-meme : l historique des conversations ouvertes, sans requete.
+    window.chatRestore = charge || [];
     window.chatLoca = {
         CLOSE_CONVERSATION: 'Fermer la conversation',
         MINIMIZE_CONVERSATION: 'Reduire la conversation',
@@ -177,6 +183,21 @@ test('les fenetres se rangent cote a cote, et non sur leur onglet', () => {
     assert.notEqual(places[0], places[1], 'Deux fenetres ouvertes ne se superposent pas.');
     assert.equal(places[0], '8px', 'La premiere se colle au bord droit de la barre.');
     assert.equal(places[1], '365px', 'La seconde se range a sa gauche, d une largeur de fenetre plus l ecart.');
+});
+
+test('la page porte l historique : les conversations reviennent sans aucune requete', () => {
+    const monde = unMonde(
+        JSON.stringify({ players: [7], associations: [] }),
+        [{ playerId: 7, playerName: 'Cap James Kirk', playerstatus: 'offline', chatItems: {}, chatItemsByDateAsc: [] }]
+    );
+
+    monde.chat.restoreOpenChats();
+
+    assert.equal(monde.requetes.length, 0, 'Aucune demande d historique : la page l a deja apportee.');
+    const onglet = monde.window.$('.chat_bar_list .chat_bar_list_item[data-playerid="7"]');
+    assert.equal(onglet.length, 1, 'La conversation est la des le chargement.');
+    assert.equal(onglet.find('.chat_box_title .icon_close').length, 1, 'Avec sa fenetre et son bouton de fermeture.');
+    assert.equal(monde.chat.data[7].playerName, 'Cap James Kirk', 'Et son historique est en memoire.');
 });
 
 test('ce que le jeu memorise est bien ce qu il relit', () => {

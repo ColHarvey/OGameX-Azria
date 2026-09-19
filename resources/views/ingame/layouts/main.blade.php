@@ -2100,6 +2100,8 @@ However, the Space Dock's engineers think that some of the remains can be salvag
     </div>
 </div>
 <script type="text/javascript">var visibleChats = {"players": [], "associations": []};
+    /* Les conversations que ce joueur avait ouvertes, avec leur historique : `chat.js` les pose sans une requete. */
+    var chatRestore = @json($chatRestore ?? []);
     var bigChatLink = "{{ route('overview.index') }}";
     var locaKeys = {!! json_encode([
         'bold'               => __('t_ingame.messages.bbcode_bold'),

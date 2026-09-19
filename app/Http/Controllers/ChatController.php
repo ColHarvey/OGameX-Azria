@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\View\View;
 use OGame\Chat\ChatTranslator;
+use OGame\Chat\OpenConversations;
 use OGame\Chat\PresentedAuthor;
 use OGame\Models\Alliance;
 use OGame\Models\ChatMessage;
@@ -322,7 +323,7 @@ class ChatController extends OGameController
      *
      * Handles mode 2 (player chat history), mode 4 (alliance chat history) and mode 6 (general).
      */
-    public function getHistory(Request $request, ChatService $chatService, BuddyService $buddyService): JsonResponse
+    public function getHistory(Request $request, ChatService $chatService, BuddyService $buddyService, OpenConversations $conversations): JsonResponse
     {
         $userId = (int) auth()->id();
         $mode = (int) $request->input('mode', 2);
@@ -337,27 +338,13 @@ class ChatController extends OGameController
                 return response()->json(['status' => 'INVALID_PARAMETERS']);
             }
 
-            $messages = $chatService->getConversation($userId, $partnerId);
-
             if ($updateUnread) {
                 $chatService->markAsRead($userId, $partnerId);
             }
 
-            $formatted = $chatService->formatMessagesForFrontend($messages, $userId);
-
-            // Only reveal online status if partner is a buddy or in the same alliance
-            $user = User::find($userId);
-            $canSeeOnline = $buddyService->areBuddies($userId, $partnerId)
-                || ($user && $user->alliance_id && $user->alliance_id === $partner->alliance_id);
-            $playerStatus = $canSeeOnline ? ($partner->isOnline() ? 'online' : 'offline') : 'offline';
-
-            return response()->json([
-                'playerId' => $partnerId,
-                'playerName' => $partner->username,
-                'playerstatus' => $playerStatus,
-                'chatItems' => $formatted['chatItems'],
-                'chatItemsByDateAsc' => $formatted['chatItemsByDateAsc'],
-            ]);
+            // La charge utile est construite par `OpenConversations`, que la PAGE emploie aussi pour rendre les
+            // conversations ouvertes sans requete : une seule source, memes droits, memes donnees.
+            return response()->json($conversations->withPlayer($userId, $partnerId));
         }
 
         if ($mode === 4) {
@@ -369,16 +356,7 @@ class ChatController extends OGameController
                 return response()->json(['status' => 'NOT_AUTHORIZED']);
             }
 
-            $messages = $chatService->getAllianceMessages($allianceId);
-            $formatted = $chatService->formatMessagesForFrontend($messages, $userId);
-
-            return response()->json([
-                'associationId' => $allianceId,
-                'associationName' => $user->alliance->alliance_name ?? 'Alliance',
-                'playerstatus' => 'online',
-                'chatItems' => $formatted['chatItems'],
-                'chatItemsByDateAsc' => $formatted['chatItemsByDateAsc'],
-            ]);
+            return response()->json($conversations->withAlliance($userId, $allianceId));
         }
 
         if ($mode === 6) {
