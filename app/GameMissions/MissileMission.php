@@ -12,6 +12,7 @@ use OGame\GameMessages\MissileAttackReport;
 use OGame\GameMessages\MissileDefenseReport;
 use OGame\GameMissions\Abstracts\GameMission;
 use OGame\GameMissions\Models\MissionPossibleStatus;
+use OGame\GameObjects\Models\DefenseObject;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Military\MilitaryMissileTally;
 use OGame\Models\Enums\PlanetType;
@@ -378,7 +379,9 @@ class MissileMission extends GameMission
             $missileCount,
             $attackerPlayer->getResearchLevel('weapon_technology'),
             $defenderPlayer->getResearchLevel('armor_technology'),
-            (int)($mission->target_priority ?? 0)
+            (int)($mission->target_priority ?? 0),
+            // Le Renforcement des boucliers d'obsidienne du defenseur, comme en bataille (journal §164).
+            static fn (DefenseObject $defense): float => $defenderPlayer->getLifeformUnitStatsPercent($defense)
         );
         foreach ($detruites as $nom => $nombre) {
             $destroyedDefenses->addUnit(ObjectService::getUnitObjectByMachineName($nom), $nombre);

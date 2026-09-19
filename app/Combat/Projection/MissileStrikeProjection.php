@@ -2,6 +2,7 @@
 
 namespace OGame\Combat\Projection;
 
+use Closure;
 use OGame\GameObjects\Models\DefenseObject;
 use OGame\Services\ObjectService;
 
@@ -20,7 +21,10 @@ use OGame\Services\ObjectService;
  * ## La formule
  *
  * - puissance = missiles effectifs × 12 000 × (1 + 0,1 × technologie d'armes de l'attaquant) ;
- * - armure d'une defense = integrite structurelle × (1 + 0,1 × technologie de blindage) / 10 ;
+ * - armure d'une defense = (integrite structurelle × (1 + 0,1 × technologie de blindage)
+ *   + floor(integrite structurelle × bonus de formes de vie / 100)) / 10 — le Renforcement des boucliers
+ *   d'obsidienne s'ajoute a la base comme en bataille et sur la page (journal §164) ; sans forme de vie, la
+ *   formule d'avant, au bit pres ;
  * - dans l'ordre de priorite, chaque type perd `min(floor(puissance / armure), presentes)`, et la
  *   puissance decroit d'autant ; les missiles eux-memes ne sont jamais vises.
  *
@@ -43,9 +47,11 @@ final class MissileStrikeProjection
      * Les defenses detruites par une salve, type par type, dans l'ordre de priorite.
      *
      * @param array<string, int> $defences Ce que le corps (ou la photographie) porte : nom de machine => nombre.
+     * @param Closure(DefenseObject): float $lifeformPercentOf Le bonus de formes de vie d'une defense, en pour cent :
+     *        le defenseur vivant pour une frappe, la photographie d'ouverture pour la projection d'un combat durable.
      * @return array<string, int> Nom de machine => nombre detruit ; seules les entrees non nulles.
      */
-    public static function destroyedOn(array $defences, int $effectiveMissiles, int $weaponTech, int $armorTech, int $priorityCode): array
+    public static function destroyedOn(array $defences, int $effectiveMissiles, int $weaponTech, int $armorTech, int $priorityCode, Closure $lifeformPercentOf): array
     {
         if ($effectiveMissiles <= 0) {
             return [];
@@ -67,7 +73,8 @@ final class MissileStrikeProjection
                 continue;
             }
 
-            $armor = $defence->properties->structural_integrity->rawValue * (1 + 0.1 * $armorTech) / 10;
+            $integrite = $defence->properties->structural_integrity->rawValue;
+            $armor = ($integrite * (1 + 0.1 * $armorTech) + floor($integrite * $lifeformPercentOf($defence) / 100)) / 10;
             $lost = min((int)floor($power / $armor), $present);
             if ($lost > 0) {
                 $destroyed[$defence->machine_name] = $lost;

@@ -26,6 +26,7 @@ use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
 use OGame\Lifeforms\Catalogue\LifeformCatalogue;
 use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Catalogue\LifeformKind;
+use OGame\Lifeforms\Combat\LifeformCombatPhotographer;
 use OGame\Lifeforms\Demography\DemographicRules;
 use OGame\Lifeforms\Services\LifeformInstallationService;
 use OGame\Lifeforms\Services\LifeformLevels;
@@ -384,6 +385,54 @@ final class LifeformCombatTest extends FleetDispatchTestCase
         $this->assertSame($messagesAvant + 1, Message::query()->where('user_id', $proprietaire)->where('key', 'lifeform_population_loss')->count());
         $this->assertSame($morts, (int)$message->params['lost']);
         $this->assertSame(25, (int)$message->params['loss_percent']);
+    }
+
+    /**
+     * **La part protegee est celle de l ouverture**, pas celle de la cloture (audit des bonus, journal §164) : la
+     * preuve existante comparait 0,0 a 0,0 — la cible n avait de Bouclier ni a l ouverture ni apres, et une lecture
+     * vivante a la cloture passait. Ici la cible (Humains) n a pas de Bouclier planetaire a l ouverture ; il est pose
+     * au niveau 10 (30 %) pendant le ralliement. La bataille tue le quart de TOUTE la population, pas le quart des 70 %.
+     */
+    public function testTheProtectedShareIsTheOneOfTheOpeningEvenWhenAShieldIsBuiltDuringTheRally(): void
+    {
+        resolve(SettingsService::class)->set('lifeforms_enabled', '1');
+        resolve(SettingsService::class)->set('lifeform_population_loss_rate', '25');
+        [$ouvreuse, $cibleId, $ouverture] = $this->aRallyAboutToOpen(0);
+        [$proprietaire, $espece, $habitants] = $this->populate($cibleId, 400000.0);
+        $this->assertSame(Species::Humans, $espece, 'Premisse : la cible porte les Humains, seuls a avoir le Bouclier planetaire.');
+        $messagesAvant = Message::query()->where('user_id', $proprietaire)->where('key', 'lifeform_population_loss')->count();
+
+        $combat = $this->theOpeningProcessedAt($ouvreuse, $ouverture);
+        $this->assertSame(0.0, OpeningStateRecorder::openingDefenderOf($combat)->lifeformBonuses->protectedShare, 'Premisse : aucun Bouclier a l ouverture.');
+        $barriere = CelestialBodyCombatBarrier::query()->where('combat_instance_id', $combat->id)->firstOrFail();
+        $echeanceDuRalliement = (int)$barriere->owned_through_effect_at;
+
+        // Le Bouclier planetaire est pose pendant le ralliement : cette bataille n en sait rien.
+        resolve(LifeformLevels::class)->setLevel($cibleId, LifeformKind::Building, 11112, 10);
+        LifeformBonusCache::invalidate();
+        $cible = resolve(PlanetServiceFactory::class)->make($cibleId, true);
+        $this->assertNotNull($cible);
+        $this->assertEqualsWithDelta(0.3, (float)resolve(LifeformCombatPhotographer::class)->ofBody($cible)->protectedShare, 1e-9, 'Premisse : le corps vivant protege desormais 30 %.');
+
+        $this->travelTo(Date::createFromTimestamp($echeanceDuRalliement + 120));
+        $avance = (new PersistentCombatAdvancer())->advance($echeanceDuRalliement + 120);
+        $this->assertArrayNotHasKey($combat->id, $avance->failures, 'La cloture a echoue : ' . json_encode($avance->failures[$combat->id] ?? null));
+        $combat->refresh();
+        $this->assertNotNull($combat->ends_at);
+        $this->travelTo(Date::createFromTimestamp(max($echeanceDuRalliement + 120, (int)$combat->ends_at + 1)));
+        $avance = (new PersistentCombatAdvancer())->advance((int)Date::now()->timestamp);
+        $this->assertArrayNotHasKey($combat->id, $avance->failures, 'Le reglement a echoue : ' . json_encode($avance->failures[$combat->id] ?? null));
+        $combat->refresh();
+        $this->assertSame(CombatState::Resolved, $combat->status, 'Premisse : la bataille est reglee.');
+
+        $photographie = $combat->frozen_settings;
+        $this->assertIsArray($photographie);
+        $this->assertSame(0.0, FrozenCombatApplicationContext::fromStorage($photographie)->lifeformProtectedShareOf($cible), 'La cloture gele la part de l ouverture, pas celle du corps a la cloture.');
+        $message = Message::query()->where('user_id', $proprietaire)->where('key', 'lifeform_population_loss')->orderByDesc('id')->first();
+        $this->assertNotNull($message);
+        $this->assertSame($messagesAvant + 1, Message::query()->where('user_id', $proprietaire)->where('key', 'lifeform_population_loss')->count());
+        $this->assertSame(0, (int)$message->params['protected_percent'], 'Aucune part protegee : le Bouclier est venu apres l ouverture.');
+        $this->assertSame((int)floor($habitants * 0.25), (int)$message->params['lost'], 'Le quart de toute la population, pas le quart des 70 %.');
     }
 
     public function testAFailedAttackSparesThePopulation(): void

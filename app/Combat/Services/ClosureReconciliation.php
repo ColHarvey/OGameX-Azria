@@ -22,6 +22,7 @@ use OGame\Combat\Support\EffectOrderKey;
 use OGame\Combat\Support\ResourceBoundary;
 use OGame\Combat\Support\SnapshotContributionSet;
 use OGame\Factories\PlanetServiceFactory;
+use OGame\GameObjects\Models\DefenseObject;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\CombatInstance;
 use OGame\Models\Resources;
@@ -338,7 +339,10 @@ final class ClosureReconciliation
     {
         $effectif = OpeningStateRecorder::openingUnitsOf($combat)->toArray();
         $antimissiles = OpeningStateRecorder::openingInterceptorsOf($combat);
-        $blindage = OpeningStateRecorder::openingDefenderOf($combat)->armorLevel;
+        $defenseurOuvert = OpeningStateRecorder::openingDefenderOf($combat);
+        $blindage = $defenseurOuvert->armorLevel;
+        // Le bonus de formes de vie des defenses, gele a l ouverture avec le blindage (journal §164).
+        $bonusDesDefenses = static fn (DefenseObject $defense): float => $defenseurOuvert->lifeformBonuses->unitStatsPercent($defense);
 
         // **Les lots admissibles, et ce qu'ils ont deja donne a la photographie.** Un lot ne s'ajoute
         // pas en bloc : ses unites naissent une par une, et une salve qui frappe au milieu ne trouve
@@ -425,7 +429,7 @@ final class ClosureReconciliation
                 $crediterJusqua((int)$mission->time_arrival);
 
                 $interceptes = MissileStrikeProjection::intercepted($faits->missiles, $antimissiles + $faits->parentInterceptorsBefore);
-                foreach (MissileStrikeProjection::destroyedOn($effectif, $faits->missiles - $interceptes, $faits->weaponTech, $blindage, $faits->priority) as $nom => $nombre) {
+                foreach (MissileStrikeProjection::destroyedOn($effectif, $faits->missiles - $interceptes, $faits->weaponTech, $blindage, $faits->priority, $bonusDesDefenses) as $nom => $nombre) {
                     $effectif[$nom] = max(0, ($effectif[$nom] ?? 0) - $nombre);
                 }
                 // La planete mere prete les siens en premier, comme le gestionnaire le fait.

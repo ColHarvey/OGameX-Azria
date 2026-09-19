@@ -5,10 +5,13 @@ namespace Tests\Feature\Combat;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use OGame\Combat\Replay\BattleResultCodec;
+use OGame\Combat\Services\OpeningStateRecorder;
 use OGame\Combat\Services\RallyClosureService;
+use OGame\Combat\Support\FrozenLifeformCombatBonuses;
 use OGame\Models\CombatInstance;
 use OGame\Services\ObjectService;
 use OGame\Services\SettingsService;
+use ReflectionMethod;
 use Tests\FleetDispatchTestCase;
 
 /**
@@ -107,6 +110,31 @@ final class MissileProjectionOnThePhotographTest extends FleetDispatchTestCase
             $this->defenderStartOf($combat, 'rocket_launcher'),
             'The projection and the world delta agree here: this test would pass without the projection.'
         );
+    }
+
+    /**
+     * **La projection lit le bonus de formes de vie des defenses gele a l ouverture** (journal §164) : le
+     * Renforcement des boucliers d obsidienne compte contre les missiles comme en bataille. Le document d ouverture
+     * porte ici 10 % sur les defenses (valeur que le photographe ecrit pour un Rock tal, posee a la main sur le
+     * document : c est le LECTEUR que ce temoin eprouve) : chaque defense de 2 000 d integrite vaut 220 au lieu de 200.
+     * Trois missiles (36 000) : les 50 lasers (11 000), puis floor(25 000 / 220) = 113 lance-missiles sur 240 — reste
+     * 127, et non 110.
+     */
+    public function testTheProjectionReadsTheDefenceBonusFrozenAtTheOpening(): void
+    {
+        [$combat, , $ouverture] = $this->aRallyUnderAMixedSalvo();
+        $etat = $combat->opening_state;
+        $this->assertIsArray($etat);
+        $this->assertSame([], $etat['defender']['lifeform_bonuses']['unit_stats'] ?? null, 'Premisse : la cible n a aucun bonus de formes de vie a l ouverture.');
+        $etat['defender']['lifeform_bonuses']['unit_stats'] = [FrozenLifeformCombatBonuses::DEFENCE => 10.0];
+        // Le document est scelle par son empreinte : le banc le rescelle comme le recorder le ferait (OpeningLifeformLossRateTest).
+        $combat->opening_state = $etat;
+        $combat->opening_state_fingerprint = (new ReflectionMethod(OpeningStateRecorder::class, 'fingerprintOf'))->invoke(null, $etat);
+        $combat->save();
+
+        $this->closeAt($combat, $ouverture);
+        $this->assertSame(127, $this->defenderStartOf($combat, 'rocket_launcher'), 'La projection ignore le bonus des defenses gele a l ouverture.');
+        $this->assertSame(0, $this->defenderStartOf($combat, 'light_laser'));
     }
 
     /**

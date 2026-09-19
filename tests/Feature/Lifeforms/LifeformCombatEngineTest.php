@@ -8,6 +8,7 @@ use OGame\Combat\Allocation\FrozenLootAllocation;
 use OGame\Combat\Services\PhotographedDefender;
 use OGame\Combat\Support\FrozenLifeformCombatBonuses;
 use OGame\Combat\Support\LiveLootContextFactory;
+use OGame\Factories\PlanetServiceFactory;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleet;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleet;
@@ -33,7 +34,9 @@ use OGame\Models\Message;
 use OGame\Models\Planet;
 use OGame\Models\Resources;
 use OGame\Services\ObjectService;
+use OGame\Services\PlanetService;
 use OGame\Services\SettingsService;
+use OGame\Services\WreckFieldService;
 use Tests\AccountTestCase;
 use Tests\Support\PinsSettings;
 use Tests\Support\PlacesLifeformSlots;
@@ -52,6 +55,8 @@ final class LifeformCombatEngineTest extends AccountTestCase
     private const int SUPRA_REFRACTOR = 14112;
 
     private const int PLANETARY_SHIELD = 11112;
+
+    private const int NANO_REPAIR_BOTS = 13112;
 
     protected function setUp(): void
     {
@@ -105,6 +110,54 @@ final class LifeformCombatEngineTest extends AccountTestCase
         $geleeMoteur = $this->engine();
         $geleeMoteur->withPhotographedDefender($gelee);
         $this->assertEquals(floor($chasseur->price->resources->metal->get() * 100 * 0.45), $geleeMoteur->debrisOf($perdusAttaquant, $perdusDefenseur)->metal->get(), 'Photographie a +50 % : 45 %.');
+    }
+
+    /**
+     * **Le champ d epaves du DEFENSEUR suit les Nano-robots de reparation** — au moteur, pas au seul service (audit
+     * des bonus, journal §164) — et sur sa LUNE aussi : ses epaves s y reparent au chantier spatial de la planete, que
+     * le moteur emprunte deja, et l attaquant qui part d une lune emprunte deja les Nano-robots de la planete. Le
+     * defenseur sur sa lune rendait la part de base.
+     */
+    public function testTheDefendersWreckFieldFollowsItsNanoRobotsOnItsPlanetAndOnItsMoon(): void
+    {
+        $this->pinSettings(['wreck_field_min_resources_loss' => 0, 'wreck_field_min_fleet_percentage' => 0]);
+        $croiseur = ObjectService::getShipObjectByMachineName('cruiser');
+        $perdus = new UnitCollection();
+        $perdus->addUnit($croiseur, 100);
+        $depart = new UnitCollection();
+        $depart->addUnit($croiseur, 100);
+        $lune = resolve(PlanetServiceFactory::class)->createMoonForPlanet($this->planetService, 2000000, 20);
+        $joueur = $this->planetService->getPlayer();
+        $this->assertNotNull($joueur);
+        $service = new WreckFieldService($joueur, resolve(SettingsService::class));
+        $croiseursA = static function (array $epaves): int {
+            foreach ($epaves['ships'] as $ligne) {
+                if ($ligne['machine_name'] === 'cruiser') {
+                    return (int)$ligne['quantity'];
+                }
+            }
+
+            return 0;
+        };
+
+        $sans = $croiseursA($this->engine()->wreckFieldOf($perdus, $depart));
+        $this->assertSame((int)floor(100 * $service->getRecoverableWreckFieldPercentage(1, null, 0.0) / 100), $sans, 'Sans forme de vie : la part du chantier spatial.');
+
+        $this->choose(Species::Mechas);
+        resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Building, self::NANO_REPAIR_BOTS, 10);
+        LifeformBonusCache::invalidate();
+        $avecBonus = (int)floor(100 * $service->getRecoverableWreckFieldPercentage(1, null, 0.13) / 100);
+        $this->assertGreaterThan($sans, $avecBonus, 'Premisse : +13 % change le nombre d epaves.');
+
+        $this->assertSame($avecBonus, $croiseursA($this->engine()->wreckFieldOf($perdus, $depart)), 'Sur sa planete : Nano-robots niveau 10, +13 %.');
+        $this->assertEqualsWithDelta(0.13, resolve(LifeformCombatPhotographer::class)->ofBody($lune)->wreckRecovery, 1e-12, 'La lune emprunte les Nano-robots de sa planete.');
+        $this->assertNull(resolve(LifeformCombatPhotographer::class)->ofBody($lune)->protectedShare, 'Une lune n a pas de population.');
+        $this->assertSame($avecBonus, $croiseursA($this->engine($lune)->wreckFieldOf($perdus, $depart)), 'Sur sa lune : les memes epaves que sur sa planete.');
+
+        // Un combat durable lit la photographie, jamais le corps : une part photographiee a zero rend la part de base.
+        $photographie = $this->engine($lune);
+        $photographie->withPhotographedDefender(new PhotographedDefender(0, 0, 0, 0, 1, new FrozenLifeformCombatBonuses([], null, 0.0, 0.0, 0.0)));
+        $this->assertSame($sans, $croiseursA($photographie->wreckFieldOf($perdus, $depart)));
     }
 
     public function testTheSupraRefractorRaisesTheMoonChanceUnderTheUniverseCap(): void
@@ -361,10 +414,11 @@ final class LifeformCombatEngineTest extends AccountTestCase
     }
 
     /**
-     * Le moteur PHP sur ma propre planete, avec ses deux calculs d apres-bataille exposes.
+     * Le moteur PHP sur ma propre planete (ou le corps donne), avec ses calculs d apres-bataille exposes.
      */
-    private function engine(): EngineExposingItsAfterBattleMaths
+    private function engine(PlanetService|null $corps = null): EngineExposingItsAfterBattleMaths
     {
+        $corps ??= $this->planetService;
         $flotte = new AttackerFleet();
         $flotte->units = new UnitCollection();
         $flotte->units->addUnit(ObjectService::getShipObjectByMachineName('light_fighter'), 10);
@@ -377,7 +431,7 @@ final class LifeformCombatEngineTest extends AccountTestCase
         $flotte->isInitiator = true;
         $flotte->fleetMission = null;
 
-        return new EngineExposingItsAfterBattleMaths([$flotte], $this->planetService, [DefenderFleet::fromPlanet($this->planetService)], resolve(SettingsService::class), LiveLootContextFactory::forBattle([$flotte], $this->planetService, FrozenLootAllocation::atOperationStart()));
+        return new EngineExposingItsAfterBattleMaths([$flotte], $corps, [DefenderFleet::fromPlanet($corps)], resolve(SettingsService::class), LiveLootContextFactory::forBattle([$flotte], $corps, FrozenLootAllocation::atOperationStart()));
     }
 }
 
@@ -394,5 +448,13 @@ final class EngineExposingItsAfterBattleMaths extends PhpBattleEngine
     public function moonChanceOf(Resources $debris): int
     {
         return $this->calculateMoonChance($debris);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function wreckFieldOf(UnitCollection $defenderLost, UnitCollection $defenderStart): array
+    {
+        return $this->calculateWreckField($defenderLost, $defenderStart);
     }
 }

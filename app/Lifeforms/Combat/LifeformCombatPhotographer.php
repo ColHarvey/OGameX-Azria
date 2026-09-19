@@ -83,7 +83,16 @@ final class LifeformCombatPhotographer
             ? []
             : $this->unitStatsOf($this->orSuspend(fn (): LifeformBonusSet => $this->resolver->forPlayer($proprietaire->getId(), $at), $quoi));
         if (!$body->isPlanet()) {
-            return new FrozenLifeformCombatBonuses($unites, null, 0.0, 0.0, 0.0);
+            // Une lune ne porte aucune forme de vie : ni population, ni lune, ni debris. Mais ses epaves se reparent au
+            // chantier spatial de SA planete, que le moteur emprunte deja (`BattleEngine::calculateWreckField()`), et
+            // l attaquant qui part d une lune emprunte deja les Nano-robots de la planete
+            // (`LiveCombatApplicationContext::wreckRecoveryBonusFor()`) : le defenseur sur sa lune fait de meme (§164).
+            $planete = $body->isMoon() ? $body->planet() : null;
+            $epaves = $planete === null || !$planete->isPlanet()
+                ? 0.0
+                : $this->orSuspend(fn (): LifeformBonusSet => $this->resolver->forPlanet($planete->getPlanetId(), $at), $quoi)->fraction(LifeformEffect::WRECK_RECOVERY);
+
+            return new FrozenLifeformCombatBonuses($unites, null, 0.0, 0.0, $epaves);
         }
         $etat = LifeformPlanet::query()->where('planet_id', $body->getPlanetId())->first();
         if ($etat === null) {
@@ -133,13 +142,16 @@ final class LifeformCombatPhotographer
     private function unitStatsOf(LifeformBonusSet $bonus): array
     {
         $unites = [];
+        // Le pour cent se pose en millioniemes exacts, comme la lecture vivante (`PlayerService::getLifeformUnitStatsPercent()`,
+        // journal §157) : 0,3 x 3 / 100 x 100 vaut 0,8999999999999999, et le combat durable tirait un point sous l attaque
+        // instantanee et sous l infobulle (audit des bonus, journal §164).
         foreach (ObjectService::getShipObjects() as $vaisseau) {
-            $pourcent = $bonus->fraction(LifeformEffect::SHIP_STATS, $vaisseau->machine_name) * 100;
+            $pourcent = round($bonus->fraction(LifeformEffect::SHIP_STATS, $vaisseau->machine_name) * 100, 6);
             if ($pourcent > 0) {
                 $unites[$vaisseau->machine_name] = $pourcent;
             }
         }
-        $defenses = $bonus->fraction(LifeformEffect::DEFENCE_STATS) * 100;
+        $defenses = round($bonus->fraction(LifeformEffect::DEFENCE_STATS) * 100, 6);
         if ($defenses > 0) {
             $unites[FrozenLifeformCombatBonuses::DEFENCE] = $defenses;
         }

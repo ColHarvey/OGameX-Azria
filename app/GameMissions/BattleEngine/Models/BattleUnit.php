@@ -40,8 +40,9 @@ class BattleUnit
      */
     public function __construct(public UnitObject $unitObject, int $structuralIntegrity, public int $originalShieldPoints, public int $attackPower, public int $fleetMissionId, public int $ownerId)
     {
-        // Hull plating is the structural integrity divided by 10.
-        $hullPlating = $structuralIntegrity / 10;
+        // Hull plating is the structural integrity divided by 10 — truncated explicitly, as the Rust engine does
+        // (floor), since a lifeform bonus makes integrities that are no longer multiples of 10 (journal §164).
+        $hullPlating = intdiv($structuralIntegrity, 10);
         $this->originalHullPlating = $hullPlating;
         $this->currentHullPlating = $hullPlating;
         $this->currentShieldPoints = $this->originalShieldPoints;

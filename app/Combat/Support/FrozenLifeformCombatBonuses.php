@@ -51,11 +51,13 @@ final readonly class FrozenLifeformCombatBonuses
      */
     public function unitStatsPercent(GameObject $object): float
     {
-        return match ($object->type) {
+        // Arrondi au millionieme comme la lecture vivante : une ligne ecrite avant l arrondi du photographe (§164) tire
+        // comme la page, et un arrondi de plus ne change pas une valeur deja exacte.
+        return round(match ($object->type) {
             GameObjectType::Ship => $this->unitStats[$object->machine_name] ?? 0.0,
             GameObjectType::Defense => $this->unitStats[self::DEFENCE] ?? 0.0,
             default => 0.0,
-        };
+        }, 6);
     }
 
     /**
