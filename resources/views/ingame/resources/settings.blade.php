@@ -525,7 +525,9 @@
                             </td>
                         </tr>
                         {{-- L energie que consomment les batiments de formes de vie de la planete : le bilan la retire, la ligne la
-                             montre, et le total d energie est celui du bandeau (audit des bonus, journal §164). --}}
+                             montre, et le total d energie est celui du bandeau (audit des bonus, journal §164). Sans espece, il n y a
+                             pas de batiment : pas de ligne (journal §165). --}}
+                        @if ($lifeform_species !== null)
                         <tr class="alt">
                             <td colspan="2" class="label">
                                 {{ __('t_ingame.resource_settings.lifeform_buildings_energy') }}
@@ -547,6 +549,7 @@
                             <td>
                             </td>
                         </tr>
+                        @endif
                         <tr class="alt">
                             <td colspan="2" class="label">{{ __('t_ingame.resource_settings.storage_capacity') }}</td>
                             <td class="{{ $metal >= $metal_storage ? 'overmark' : 'normalmark' }} left2">

@@ -1392,6 +1392,25 @@ class GalaxyTacticalMapTest extends UnitTestCase
     }
 
     /**
+     * **Une fonction fermee ne se montre pas grisee** (relecture avant production, journal §165) : l action « Vaisseau
+     * d exploration » de la fiche tactique invitait un joueur sans espece a en choisir une, alors que toutes les pages
+     * des formes de vie repondent 404. Elle n entre dans la grille que si le module est ouvert ET le compte a une espece
+     * (`constants.lifeformEnabled`, la meme condition que l icone ADN du tableau).
+     */
+    public function testTheExplorationShipActionOnlyExistsWhenTheLifeformsAreOpen(): void
+    {
+        $module = $this->module();
+        $this->assertStringContainsString("return clef !== 'decouvrir' || estOuvertAuxFormesDeVie();", $module, 'La grille ne filtre pas l action sur l interrupteur.');
+        $this->assertStringContainsString("function estOuvertAuxFormesDeVie() {", $module);
+        $this->assertStringContainsString("return typeof constants !== 'undefined' && constants && constants.lifeformEnabled === true;", $module, 'La condition est celle que la page publie pour l icone ADN.');
+
+        $manifeste = json_decode((string)file_get_contents(public_path('build/manifest.json')), true);
+        $this->assertIsArray($manifeste);
+        $bundle = (string)file_get_contents(public_path('build/' . $manifeste['resources/js/ingame.js']['file']));
+        $this->assertStringContainsString("return clef !== 'decouvrir' || estOuvertAuxFormesDeVie();", $bundle, 'Le bundle servi ne porte pas le filtre : la carte offrirait encore l action.');
+    }
+
+    /**
      * **Les compteurs du bandeau suivent les flottes.** « Esp.Sonde : 2 » ne bougeait qu'au chargement
      * du systeme (Keven). Ils viennent d'une seule source (`GalaxyHeaderCounters`), rendue par la
      * photographie, par l'envoi rapide — qui ecrivait onze sondes de demonstration dans le bandeau —

@@ -61,7 +61,9 @@ final class GalaxyDiscoveries
         $generale = null;
         $planete = $player->planets->current();
         $centre = LifeformCatalogue::buildingWithEffect($espece, LifeformEffect::LF_RESEARCH_TIME_REDUCTION);
-        if (!$planete->isPlanet()) {
+        if ($player->isInVacationMode()) {
+            $generale = (string)__('t_lifeforms_ui.refused.vacation_mode');
+        } elseif (!$planete->isPlanet()) {
             $generale = (string)__('t_lifeforms_ui.buildings.not_on_a_moon');
         } elseif ($centre === null || ($this->levels->buildingLevelsOf($planete->getPlanetId())[$centre->id] ?? 0) < 1) {
             $generale = (string)__('t_ingame.galaxy.discovery_locked');

@@ -50,6 +50,8 @@ final class LifeformEffectPresenter
                 LifeformEffect::TIER2_CAPACITY => [self::entier((int)floor($profilCourant->tier2Capacity)), self::entier((int)floor($profilSuivant->tier2Capacity))],
                 LifeformEffect::TIER3_CAPACITY => [self::entier((int)floor($profilCourant->tier3Capacity)), self::entier((int)floor($profilSuivant->tier3Capacity))],
                 LifeformEffect::POPULATION_PROTECTION => [self::pourcent($profilCourant->protectedShare * 100), self::pourcent($profilSuivant->protectedShare * 100)],
+                // Les cases de planete sont un nombre : « 20 », « 22 », jamais « +200 % ».
+                LifeformEffect::PLANET_FIELDS => [(string)LifeformFormulas::planetFields($bonus, $courant), (string)LifeformFormulas::planetFields($bonus, $courant + 1)],
                 default => LifeformEffect::isReduction($bonus->code)
                     ? [self::reduction(LifeformFormulas::buildingBonusPercent($bonus, $courant)), self::reduction(LifeformFormulas::buildingBonusPercent($bonus, $courant + 1))]
                     : [self::pourcent(LifeformFormulas::buildingBonusPercent($bonus, $courant)), self::pourcent(LifeformFormulas::buildingBonusPercent($bonus, $courant + 1))],

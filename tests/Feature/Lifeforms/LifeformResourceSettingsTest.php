@@ -135,6 +135,8 @@ final class LifeformResourceSettingsTest extends AccountTestCase
         $this->assertStringContainsString('grayscale', $ligne);
         $this->assertStringContainsString(e(__('t_lifeforms_ui.banner.no_species')), $ligne);
         $this->assertSame([0, 0, 0, 0], $this->valeurs($ligne));
+        // La ligne d energie des batiments, elle, n existe pas sans espece : rien a montrer (journal §165).
+        $this->assertSame('', $this->ligne($page, __('t_ingame.resource_settings.lifeform_buildings_energy')), 'Sans espece, aucune ligne d energie des batiments de formes de vie.');
     }
 
     /**

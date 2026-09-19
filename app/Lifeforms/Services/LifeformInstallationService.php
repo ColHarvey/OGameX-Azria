@@ -4,6 +4,7 @@ namespace OGame\Lifeforms\Services;
 
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use OGame\Lifeforms\Bonuses\LifeformBonusCache;
 use OGame\Lifeforms\Demography\DemographicRules;
 use OGame\Lifeforms\Demography\PlanetLifeformProfile;
 use OGame\Lifeforms\LifeformRefused;
@@ -134,6 +135,9 @@ final class LifeformInstallationService
 
     private function populate(Planet $planet, Species $species, int $now): void
     {
+        // La memoire des bonus retient « ce corps n a pas de forme de vie » (journal §165) : l installation la vide, pour
+        // qu un travailleur de longue duree ne serve pas ce neutre apres le choix d une espece.
+        LifeformBonusCache::invalidate();
         $base = PlanetLifeformProfile::fromLevels($species, [], 1.0)->basePopulation;
         LifeformPlanet::query()->firstOrCreate(
             ['planet_id' => (int)$planet->id],

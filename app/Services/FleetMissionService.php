@@ -1211,6 +1211,6 @@ class FleetMissionService
             'fleetMissionService' => $this,
             'messageService' => $this->messageService,
         ]);
-        $missionObject->cancel($mission);
+        $missionObject->cancel($mission, rappelDuJoueur: true);
     }
 }

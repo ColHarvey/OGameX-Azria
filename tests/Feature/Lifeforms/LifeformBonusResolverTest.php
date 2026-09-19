@@ -3,6 +3,7 @@
 namespace Tests\Feature\Lifeforms;
 
 use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Facades\DB;
 use OGame\Lifeforms\Bonuses\LifeformBonusCache;
 use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
 use OGame\Lifeforms\Bonuses\LifeformBonusSet;
@@ -153,6 +154,37 @@ final class LifeformBonusResolverTest extends AccountTestCase
         } catch (LifeformRefused $refus) {
             $this->assertSame(LifeformRefused::CLOSED, $refus->reason, $refus->getMessage());
         }
+    }
+
+    /**
+     * **Un compte sans forme de vie ne refait pas ses requetes a chaque lecture** (relecture avant production, journal §165).
+     * La memoire ne retenait pas un resultat neutre : chaque lecture de bonus — et il y en a des dizaines par page, une par
+     * vaisseau, par batiment producteur et par bonus de classe — reinterrogeait `planets` et `lifeform_planets` pour rendre
+     * « rien ». Le neutre se memorise comme le reste ; une ecriture de forme de vie l invalide toujours.
+     */
+    public function testTheNeutralAnswerIsRememberedSoAPlayerWithoutLifeformsDoesNotQueryAgain(): void
+    {
+        $resolveur = resolve(LifeformBonusResolver::class);
+        LifeformBonusCache::invalidate();
+        $this->assertTrue($resolveur->forPlayer($this->currentUserId)->isEmpty(), 'Premisse : ce compte n a pas de forme de vie.');
+        $this->assertTrue($resolveur->forPlanet($this->currentPlanetId)->isEmpty());
+        $this->assertSame(0, $resolveur->buildingEnergyOf($this->currentPlanetId));
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        for ($i = 0; $i < 5; $i++) {
+            $resolveur->forPlayer($this->currentUserId);
+            $resolveur->forPlanet($this->currentPlanetId);
+            $resolveur->buildingEnergyOf($this->currentPlanetId);
+        }
+        $requetes = count(DB::getQueryLog());
+        DB::disableQueryLog();
+        $this->assertSame(0, $requetes, 'Cinq lectures de plus : aucune requete — le neutre est memorise.');
+
+        // Et le choix d une espece se voit aussitot : l installation invalide la memoire.
+        resolve(LifeformInstallationService::class)->chooseSpecies($this->currentUserId, Species::Rocktal, (int)Date::now()->timestamp);
+        $this->building($this->currentPlanetId, self::MAGMA_FORGE, 5);
+        $this->assertEqualsWithDelta(0.10, $resolveur->forPlanet($this->currentPlanetId)->fraction(LifeformEffect::METAL_PRODUCTION), 1e-9, 'Le neutre memorise ne survit pas a l installation d une espece.');
     }
 
     public function testBuildingBonusesAreLinearCappedAndLocalToThePlanet(): void

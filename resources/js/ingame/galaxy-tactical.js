@@ -436,6 +436,9 @@
     /*
      * Les actions que chaque genre de corps peut porter — l'inventaire de la revue 112, section 5.
      * Une action absente de la ligne n'est pas cachee : elle est grisee avec sa raison.
+     *
+     * Sauf les decouvertes : fermees, elles n'existent pas. La fiche invitait sinon un joueur sans espece a en choisir
+     * une alors que toutes leurs pages repondent 404 (relecture avant production, journal §165).
      */
     var ACTIONS_PAR_GENRE = {
         planete: ['espionner', 'attaquer', 'transporter', 'deployer', 'acs', 'missiles', 'phalange', 'decouvrir', 'message', 'ami', 'ignorer', 'classement', 'alliance', 'patrouiller'],
@@ -905,7 +908,9 @@
         }
 
         var decisions = decisionsDe(contexte);
-        var noms = ACTIONS_PAR_GENRE[contexte.genre] || [];
+        var noms = (ACTIONS_PAR_GENRE[contexte.genre] || []).filter(function (clef) {
+            return clef !== 'decouvrir' || estOuvertAuxFormesDeVie();
+        });
 
         if (contexte.genre === 'profond' && contexte.objet) {
             noms = noms.concat(['recycler']);
@@ -921,6 +926,14 @@
         noms.forEach(function (clef) {
             grille.appendChild(boutonDAction(clef, decisions[clef]()));
         });
+    }
+
+    /*
+     * Les formes de vie sont-elles ouvertes pour ce joueur : l'interrupteur ET une espece choisie, exactement ce que la
+     * page publie pour l'icone ADN du tableau (`constants.lifeformEnabled`, main.blade.php).
+     */
+    function estOuvertAuxFormesDeVie() {
+        return typeof constants !== 'undefined' && constants && constants.lifeformEnabled === true;
     }
 
     /*

@@ -38,6 +38,9 @@ final class LifeformRefused extends RuntimeException
     public const string RECENTLY_EXPLORED = 'recently_explored';
     public const string BAD_COORDINATES = 'bad_coordinates';
 
+    /** Le compte est en mode vacances : il ne lance rien, pas plus un vol de decouverte qu un travail (journal §165). */
+    public const string VACATION_MODE = 'vacation_mode';
+
     /** La position porte une planete ou une lune du compte : on n explore pas chez soi (decision de Keven, journal §162). */
     public const string OWN_PLANET = 'own_planet';
 

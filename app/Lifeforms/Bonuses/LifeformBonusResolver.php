@@ -50,11 +50,11 @@ use OGame\Models\Planet;
  *
  * `APPLIED` nomme les effets qu il resout (lune et debris compris : le moteur les lit par la photographie de
  * combat, journal §155.6) ; `HANDLED_ELSEWHERE` ceux que la demographie, la file et les decouvertes appliquent
- * deja ; `NOT_YET_APPLIED` ceux qui attendent une decision
+ * deja ; `NOT_YET_APPLIED` ceux qui attendent une decision — **elle est vide** depuis le 19 septembre 2026
  * (`LifeformBonusResolverTest` exige que chaque code du catalogue soit dans une des trois listes : rien
- * ne se perd en silence). Champs de planete du Bio-modificateur : le fichier maitre dit « 200 par
- * niveau », ni un pourcentage ni un nombre de champs credible — non applique tant que ce n est pas
- * compris (absent plutot que devine).
+ * ne se perd en silence). Champs de planete du Bio-modificateur : le fichier maitre disait « 200 par
+ * niveau » sans unite ; Keven a tranche que ce sont **deux cases par niveau**, regle officielle, servie a
+ * part par `planetFieldsOf()` puisqu un nombre de cases n est pas un pour cent (journal §165).
  */
 final class LifeformBonusResolver
 {
@@ -97,6 +97,7 @@ final class LifeformBonusResolver
         LifeformEffect::CLASS_BONUS,
         LifeformEffect::MOON_CHANCE,
         LifeformEffect::DEBRIS_RECOVERY,
+        LifeformEffect::RECALL_FUEL_REFUND,
     ];
 
     public const array HANDLED_ELSEWHERE = [
@@ -119,16 +120,19 @@ final class LifeformBonusResolver
         LifeformEffect::LF_TECH_BONUS,
         LifeformEffect::SLOT_REQUIREMENT_REDUCTION,
         LifeformEffect::DISCOVERY_DURATION_REDUCTION,
+        LifeformEffect::PLANET_FIELDS,
         LifeformEffect::UNASSIGNED,
     ];
 
     /**
-     * Attendent une decision (champs de planete, remboursement au rappel) — journal §155.5.
+     * Plus aucun effet du catalogue n attend de decision : Keven a tranche les deux derniers le 19 septembre 2026 —
+     * le Bio-modificateur agrandit la planete de deux cases par niveau (regle officielle), et le Pilote automatique a
+     * fronde rend une part du carburant au rappel (journal §165). La liste reste : un effet neuf que personne n aurait
+     * raccorde s y poserait, et `LifeformAvailability` fermerait l objet au lieu de promettre un bonus absent.
+     *
+     * @var array<int, string>
      */
-    public const array NOT_YET_APPLIED = [
-        LifeformEffect::PLANET_FIELDS,
-        LifeformEffect::RECALL_FUEL_REFUND,
-    ];
+    public const array NOT_YET_APPLIED = [];
 
     public function __construct(
         private readonly LifeformLevels $levels,
@@ -201,6 +205,35 @@ final class LifeformBonusResolver
         });
 
         return is_int($energie) ? $energie : 0;
+    }
+
+    /**
+     * Les cases que les batiments de formes de vie ajoutent a cette planete (Bio-modificateur des Kaelesh : deux par
+     * niveau, regle officielle tranchee par Keven, journal §165).
+     *
+     * Un nombre de cases, et non un pour cent : cet effet ne passe pas par `buildingBonuses()`, qui divise par cent et
+     * ferait annoncer « +200 % » sur la fiche. Memorise comme l energie, invalide par les memes ecritures.
+     */
+    public function planetFieldsOf(int $planetId): int
+    {
+        $cases = LifeformBonusCache::remember('lf-cases:' . $planetId, time(), function () use ($planetId): int|null {
+            $etat = LifeformPlanet::query()->where('planet_id', $planetId)->first();
+            if ($etat === null) {
+                return null;
+            }
+            $niveaux = $this->levels->buildingLevelsOf($planetId);
+            $total = 0;
+            foreach (LifeformCatalogue::buildingsOf(Species::from((int)$etat->species)) as $batiment) {
+                $bonus = $batiment->bonus(LifeformEffect::PLANET_FIELDS);
+                if ($bonus !== null) {
+                    $total += LifeformFormulas::planetFields($bonus, $niveaux[$batiment->id] ?? 0);
+                }
+            }
+
+            return $total;
+        });
+
+        return is_int($cases) ? $cases : 0;
     }
 
     public static function isCivilShip(string $machineName): bool

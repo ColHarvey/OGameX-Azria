@@ -10,8 +10,8 @@ use OGame\Lifeforms\Catalogue\LifeformCatalogue;
 use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\Catalogue\LifeformObject;
-use OGame\Lifeforms\LifeformRefused;
 use OGame\Lifeforms\Research\LifeformSlotHistory;
+use OGame\Lifeforms\Research\LifeformSlotRules;
 use OGame\Lifeforms\Services\LifeformInstallationService;
 use OGame\Lifeforms\Services\LifeformLevels;
 use OGame\Lifeforms\Services\LifeformQueueService;
@@ -34,11 +34,16 @@ use Tests\Support\PlacesLifeformSlots;
 /**
  * **Un objet dont l effet n est pas applique ne se vend pas et ne promet rien** (releve de Codex, journal §155.26).
  *
- * Deux effets du catalogue attendent une decision de jeu (`LifeformBonusResolver::NOT_YET_APPLIED`) : les cases de
- * planete du Bio-modificateur kaelesh et le carburant rendu au rappel du Pilote automatique a fronde mecha. Le
- * joueur pouvait construire l un et payer l autre en artefacts, pour un bonus que le jeu ne rendait pas. La regle
- * `LifeformAvailability` ferme les deux objets partout : la file, le choix d un emplacement (direct, tirage), les
- * vignettes, les panneaux et la fenetre du choix disent « indisponible » sans afficher d effet.
+ * Deux objets du catalogue etaient fermes par cette regle : le Bio-modificateur kaelesh, dont les cases de planete
+ * n etaient pas appliquees, et le Pilote automatique a fronde mecha, dont le carburant rendu au rappel ne l etait pas
+ * davantage. **Keven a tranche les deux le 19 septembre 2026** (journal §165) : deux cases par niveau, et une part du
+ * carburant que le retour ne rend pas deja. Les deux effets sont appliques, les deux objets sont ouverts, et
+ * `LifeformBonusResolver::NOT_YET_APPLIED` est vide.
+ *
+ * Cette classe tient donc les deux moities de la regle : **plus aucun objet du catalogue n est ferme** — le joueur
+ * construit le Bio-modificateur, choisit et tire le Pilote automatique a fronde —, et **la regle ferme toujours** un
+ * effet neuf que personne n aurait raccorde, eprouvee contre une liste d attente posee par le temoin (la liste du jeu
+ * etant vide, passer par elle ne distinguerait plus le juste du faux).
  */
 final class LifeformAvailabilityTest extends AccountTestCase
 {
@@ -55,10 +60,11 @@ final class LifeformAvailabilityTest extends AccountTestCase
 
     private const int SLINGSHOT_AUTOPILOT = 13210;
 
-    private const int ROCKTAL_TIER2_POSITION4 = 12210;
-
     /** L emplacement du palier 2, position 4 : celui du Pilote automatique a fronde. */
     private const int SLOT = 10;
+
+    /** Un effet imaginaire : celui que personne n aurait raccorde. */
+    private const string EFFET_NEUF = 'effet_jamais_raccorde';
 
     protected function setUp(): void
     {
@@ -84,86 +90,71 @@ final class LifeformAvailabilityTest extends AccountTestCase
     }
 
     /**
-     * La regle derive de la liste du resolveur : exactement les objets qui ne portent que des effets non appliques.
+     * La regle derive de la liste du resolveur : elle est vide, donc plus rien n est ferme — et un code pose dans une
+     * liste d attente ferme exactement l objet qui ne porte que lui.
      */
-    public function testTheRuleClosesExactlyTheObjectsWhoseOnlyEffectsAreNotApplied(): void
+    public function testNothingIsClosedAnyMoreAndTheRuleStillClosesAnEffectNobodyWiredUp(): void
     {
+        $this->assertSame([], LifeformBonusResolver::NOT_YET_APPLIED, 'Plus aucun effet du catalogue n attend de decision (journal §165).');
+
         $fermes = [];
         foreach (LifeformCatalogue::all() as $objet) {
             if (!LifeformAvailability::isAvailable($objet)) {
                 $fermes[] = $objet->id;
             }
         }
-        sort($fermes);
-        $this->assertSame([self::SLINGSHOT_AUTOPILOT, self::BIO_MODIFIER], $fermes, 'Le Pilote automatique a fronde et le Bio-modificateur, rien d autre.');
-        foreach ($fermes as $id) {
-            foreach (LifeformCatalogue::byId($id)->bonuses as $bonus) {
-                $this->assertContains($bonus->code, LifeformBonusResolver::NOT_YET_APPLIED);
-            }
-        }
-        // Un objet qui porte un effet applique a cote d un effet en attente reste disponible : on ne ferme que ce qui
-        // ne rend rien. Aucun objet du catalogue n est dans ce cas ; un objet de banc le montre.
-        $this->assertTrue(LifeformAvailability::isAvailable(LifeformCatalogue::byId(self::SANCTUARY)));
-        $this->assertTrue(LifeformAvailability::isAvailable($this->anObjectWith([LifeformEffect::PLANET_FIELDS, LifeformEffect::LIVING_SPACE])), 'Un effet applique suffit.');
-        $this->assertFalse(LifeformAvailability::isAvailable($this->anObjectWith([LifeformEffect::PLANET_FIELDS, LifeformEffect::RECALL_FUEL_REFUND])), 'Deux effets en attente : rien n est rendu.');
-        $this->assertTrue(LifeformAvailability::isAvailable($this->anObjectWith([])), 'Sans effet, rien n est promis : disponible.');
+        $this->assertSame([], $fermes, 'Aucun objet du catalogue n est ferme : les deux derniers effets sont appliques.');
+
+        // La regle elle-meme, contre une liste d attente posee ici. Sans cela, juste et faux coincideraient : tout
+        // objet serait disponible, que la regle compare ou non.
+        $this->assertFalse(LifeformAvailability::isAvailableGiven($this->anObjectWith([self::EFFET_NEUF]), [self::EFFET_NEUF]), 'Un objet qui ne porte qu un effet en attente est ferme.');
+        $this->assertTrue(LifeformAvailability::isAvailableGiven($this->anObjectWith([self::EFFET_NEUF, LifeformEffect::LIVING_SPACE]), [self::EFFET_NEUF]), 'Un effet applique a cote suffit a ouvrir l objet.');
+        $this->assertTrue(LifeformAvailability::isAvailableGiven($this->anObjectWith([]), [self::EFFET_NEUF]), 'Sans effet, rien n est promis : disponible.');
+        $this->assertTrue(LifeformAvailability::isAvailableGiven($this->anObjectWith([LifeformEffect::LIVING_SPACE]), [self::EFFET_NEUF]), 'Un effet hors de la liste ouvre l objet.');
+
+        // Et ce sont bien ces deux effets-la qui fermaient les deux objets : les remettre en attente les referme, ce
+        // qui etablit qu ils ne portent rien d autre et que leur ouverture vient de la decision, pas d un contournement.
+        $this->assertFalse(LifeformAvailability::isAvailableGiven(LifeformCatalogue::byId(self::BIO_MODIFIER), [LifeformEffect::PLANET_FIELDS]), 'Le Bio-modificateur ne porte que ses cases de planete.');
+        $this->assertFalse(LifeformAvailability::isAvailableGiven(LifeformCatalogue::byId(self::SLINGSHOT_AUTOPILOT), [LifeformEffect::RECALL_FUEL_REFUND]), 'Le Pilote automatique a fronde ne porte que son carburant rendu.');
+        $this->assertTrue(LifeformAvailability::isAvailableGiven(LifeformCatalogue::byId(self::SANCTUARY), [LifeformEffect::PLANET_FIELDS]), 'Premisse : un objet voisin ne depend pas de cet effet.');
     }
 
-    public function testTheBioModifierIsNeitherBuiltNorPromisedOnTheBuildingsPage(): void
+    /**
+     * Le Bio-modificateur se construit et annonce ses cases — deux par niveau, un nombre et non un pour cent.
+     */
+    public function testTheBioModifierIsBuiltAndAnnouncesItsFields(): void
     {
         $maintenant = (int)Date::now()->timestamp;
-        $file = resolve(LifeformQueueService::class);
         $planetId = $this->currentPlanetId;
-        $metalAvant = $this->metal();
-
-        // La file refuse avant toute ecriture, et le refus est celui de la regle — pas un prerequis manquant.
-        try {
-            $file->add($this->planetService, self::BIO_MODIFIER, $maintenant);
-            $this->fail('Le Bio-modificateur ne se construit pas tant que ses cases ne sont pas appliquees.');
-        } catch (LifeformRefused $refus) {
-            $this->assertSame(LifeformRefused::NOT_AVAILABLE, $refus->reason);
-        }
-        $this->assertSame(0, LifeformQueue::query()->where('planet_id', $planetId)->count());
-        $this->assertSame($metalAvant, $this->metal(), 'Aucun refus ne debite.');
-
-        // La requete du navigateur recoit le refus en clair, dans la forme que le script du jeu lit.
-        $refus = $this->post(route('lifeforms.buildings.addbuildrequest.post'), ['technologyId' => self::BIO_MODIFIER, 'mode' => 1, '_token' => csrf_token()]);
-        $refus->assertJsonPath('success', false);
-        $this->assertSame(__('t_lifeforms_ui.refused.not_available'), $refus->json('errors.0.message'));
-
-        // La vignette : eteinte, marquee indisponible, sans fleche verte — et elle seule. Ses prerequis sont satisfaits
-        // et les ressources y sont : seule la regle retient la fleche, sinon l essai ne distinguerait rien.
         $niveaux = resolve(LifeformLevels::class);
         foreach (LifeformCatalogue::byId(self::BIO_MODIFIER)->requirements as $exige => $niveauExige) {
             $niveaux->setLevel($planetId, LifeformKind::Building, $exige, $niveauExige);
         }
-        $this->assertTrue($file->requirementsMet(LifeformCatalogue::byId(self::BIO_MODIFIER), $niveaux->buildingLevelsOf($planetId)), 'Premisse.');
+        $metalAvant = $this->metal();
+
+        // La vignette porte la fleche verte et aucune mention d indisponibilite — nulle part sur la page.
         $page = (string)$this->get(route('lifeforms.buildings'))->getContent();
-        $this->assertSame(1, preg_match('#<li[^>]*data-technology="' . self::BIO_MODIFIER . '"[^>]*data-status="off" data-unavailable="1"#', $page), 'La vignette du Bio-modificateur est marquee indisponible.');
-        $this->assertSame(1, substr_count($page, 'data-unavailable="1"'), 'Aucune autre vignette ne l est.');
-        $this->assertStringContainsString(e(__('t_lifeforms_ui.refused.not_available')), $page);
-        $this->assertSame(0, preg_match('#<button class="upgrade[^"]*"[^>]*data-technology="' . self::BIO_MODIFIER . '"#', $page), 'Pas de fleche verte sur la vignette.');
-        $this->assertSame(1, preg_match('#<button class="upgrade[^"]*"[^>]*data-technology="' . self::SANCTUARY . '"#', $page), 'Premisse : la fleche verte existe sur une vignette disponible.');
+        $this->assertSame(0, substr_count($page, 'data-unavailable="1"'), 'Plus aucune vignette n est marquee indisponible.');
+        $this->assertStringNotContainsString(e(__('t_lifeforms_ui.refused.not_available')), $page);
+        $this->assertSame(1, preg_match('#<button class="upgrade[^"]*"[^>]*data-technology="' . self::BIO_MODIFIER . '"#', $page), 'La fleche verte existe sur la vignette du Bio-modificateur.');
 
-        // Le panneau : l indisponibilite en clair, aucun effet promis, aucun bouton.
+        // Le panneau promet l effet, chiffre en cases : deux par niveau, du niveau courant au suivant.
         $panneau = (string)$this->get(route('lifeforms.buildings.ajax', ['technology' => self::BIO_MODIFIER]))->json('content.technologydetails');
-        $this->assertStringContainsString('class="overmark lifeform_unavailable"', $panneau);
-        $this->assertStringContainsString(e(__('t_lifeforms_ui.refused.not_available')), $panneau);
-        $this->assertStringNotContainsString('lifeform_effects_table', $panneau, 'Aucun effet promis.');
-        $this->assertStringNotContainsString('data-effect="planet_fields"', $panneau);
-        $this->assertStringNotContainsString('<button class="upgrade"', $panneau, 'Aucun bouton d amelioration.');
-        $this->assertStringContainsString('var showLifeformBonusCapReached = false;', $panneau);
+        $this->assertStringNotContainsString('lifeform_unavailable', $panneau, 'Le Bio-modificateur ne se dit plus indisponible.');
+        $this->assertStringContainsString('lifeform_effects_table', $panneau);
+        $this->assertSame(1, preg_match('#<tr data-effect="' . LifeformEffect::PLANET_FIELDS . '">.*?<td style="text-align: right;">\s*0\s*</td>\s*<td style="text-align: right;" class="undermark">\s*2\s*</td>#s', $panneau), 'La ligne des cases annonce 0 puis 2 : un nombre de cases, jamais un pour cent.');
+        $this->assertStringNotContainsString('200 %', $panneau, 'Les cases ne se lisent pas en pour cent.');
 
-        $sanctuaire = (string)$this->get(route('lifeforms.buildings.ajax', ['technology' => self::SANCTUARY]))->json('content.technologydetails');
-        $this->assertStringNotContainsString('lifeform_unavailable', $sanctuaire, 'Premisse : un batiment disponible ne porte pas la mention.');
-        $this->assertStringContainsString('lifeform_effects_table', $sanctuaire);
-        $this->assertStringContainsString('<button class="upgrade" data-technology="' . self::SANCTUARY . '" >', $sanctuaire);
+        // Et il se construit : la file l accepte et la planete paie.
+        resolve(LifeformQueueService::class)->add($this->planetService, self::BIO_MODIFIER, $maintenant);
+        $this->assertSame(1, LifeformQueue::query()->where('planet_id', $planetId)->where('object_id', self::BIO_MODIFIER)->count(), 'Le Bio-modificateur entre dans la file.');
+        $this->assertLessThan($metalAvant, $this->metal(), 'La construction est payee.');
     }
 
     /**
-     * Le choix d un emplacement : la technologie indisponible n est ni proposee, ni placee, ni payee, ni tiree.
+     * Le Pilote automatique a fronde se choisit, se paie et se tire — les trois chemins que la regle fermait.
      */
-    public function testTheSlingshotAutopilotIsNeitherOfferedNorPlacedNorPaidNorDrawn(): void
+    public function testTheSlingshotAutopilotIsOfferedPlacedAndDrawn(): void
     {
         $maintenant = (int)Date::now()->timestamp;
         $planetId = $this->currentPlanetId;
@@ -172,57 +163,36 @@ final class LifeformAvailabilityTest extends AccountTestCase
         $this->discover(Species::Mechas, $maintenant);
         $this->assertSame(1, LifeformAccount::query()->where('user_id', $this->currentUserId)->update(['artifacts' => 400]));
 
-        $this->assertFalse(LifeformAvailability::isAvailable(LifeformCatalogue::byId(self::SLINGSHOT_AUTOPILOT)), 'Premisse.');
+        $this->assertTrue(LifeformAvailability::isAvailable(LifeformCatalogue::byId(self::SLINGSHOT_AUTOPILOT)), 'Premisse : l objet est ouvert.');
 
-        // La fenetre : la fiche mecha dit « indisponible » sans formulaire ; le tirage aussi, puisque rien ne se tire.
-        $fenetre = $this->get(route('lifeforms.research.slot.overlay', ['slot' => self::SLOT]));
-        $fenetre->assertStatus(200);
-        $html = (string)$fenetre->getContent();
-        $this->assertStringContainsString('id="lifeform-slot-choice" data-slot="' . self::SLOT . '"', $html);
-        $this->assertStringNotContainsString('name="choice" value="' . self::SLINGSHOT_AUTOPILOT . '"', $html, 'Aucun formulaire pour la technologie indisponible.');
-        $this->assertStringNotContainsString('name="choice" value="random"', $html, 'Aucun tirage : rien a tirer.');
-        $this->assertStringContainsString('name="choice" value="local"', $html, 'La technologie locale, elle, se choisit.');
-        $this->assertSame(2, substr_count($html, 'class="overmark lifeform_unavailable"'), 'La fiche mecha et le tirage portent la mention.');
-        $this->assertStringNotContainsString('select-button-artifacts', $html, 'Ni bouton d achat, ni bouton grise : la fiche ne se vend pas.');
-        $this->assertSame(1, substr_count($html, 'lifeformnotclaim'), 'La fiche mecha est eteinte ; le tirage n est pas une fiche mais un bouton de l en-tete.');
-        $this->assertStringNotContainsString('id="selectChance"', $html, 'Aucun bouton de tirage.');
-
-        // Le service : refus direct, refus du tirage, et pas un artefact debite.
-        $this->assertRefused(fn () => $recherche->choose($planetId, $this->currentUserId, self::SLOT, (string)self::SLINGSHOT_AUTOPILOT, $maintenant), LifeformRefused::NOT_AVAILABLE);
-        $this->assertRefused(fn () => $recherche->choose($planetId, $this->currentUserId, self::SLOT, 'random', $maintenant), LifeformRefused::NOT_AVAILABLE);
-        $this->assertSame(400, (int)LifeformAccount::query()->where('user_id', $this->currentUserId)->value('artifacts'), 'Aucun artefact paye pour un refus.');
-        $this->assertNull(LifeformSlot::query()->where('planet_id', $planetId)->where('slot', self::SLOT)->whereNotNull('object_id')->first());
-
-        // Le refus arrive au joueur par la page, en clair.
-        $reponse = $this->post(route('lifeforms.research.choose'), ['slot' => self::SLOT, 'choice' => (string)self::SLINGSHOT_AUTOPILOT]);
-        $reponse->assertRedirect(route('lifeforms.research'));
-        $reponse->assertSessionHas('lifeforms_error', __('t_lifeforms_ui.refused.not_available'));
-
-        // Une seconde espece decouverte dont la technologie est disponible : le tirage revient, et il ne tire qu elle.
-        $this->discover(Species::Rocktal, $maintenant);
+        // La fenetre : la fiche mecha s offre, avec son bouton d achat, et le tirage existe puisqu il a de quoi tirer.
         $html = (string)$this->get(route('lifeforms.research.slot.overlay', ['slot' => self::SLOT]))->getContent();
-        $this->assertStringContainsString('name="choice" value="random"', $html);
-        $this->assertStringContainsString('<a class="select-button" id="selectChance"', $html, 'Le tirage est le bouton de l en-tete, comme le bundle officiel le lie.');
-        $this->assertSame(3, substr_count($html, 'class="lifeform-item lifeform-choice'), 'Trois fiches — la locale, la mecha fermee, la rock tal —, et pas une pour le tirage.');
-        $this->assertStringContainsString('name="choice" value="' . self::ROCKTAL_TIER2_POSITION4 . '"', $html);
-        $this->assertStringNotContainsString('name="choice" value="' . self::SLINGSHOT_AUTOPILOT . '"', $html);
-        $this->assertSame(1, substr_count($html, 'class="overmark lifeform_unavailable"'), 'Seule la fiche mecha reste fermee.');
+        $this->assertStringContainsString('id="lifeform-slot-choice" data-slot="' . self::SLOT . '"', $html);
+        $this->assertStringContainsString('name="choice" value="' . self::SLINGSHOT_AUTOPILOT . '"', $html, 'La fiche mecha se choisit.');
+        $this->assertStringContainsString('name="choice" value="random"', $html, 'Le tirage a de quoi tirer.');
+        $this->assertStringContainsString('select-button-artifacts', $html, 'Le bouton d achat en artefacts est la.');
+        $this->assertStringNotContainsString('lifeform_unavailable', $html);
+        $this->assertSame(0, substr_count($html, 'lifeformnotclaim'), 'Aucune fiche eteinte.');
 
-        // Douze tirages, l emplacement vide entre deux (avec sa ligne d historique) : un tirage qui ne filtrerait pas
-        // tomberait sur la technologie mecha une fois sur deux, et survivrait a douze tirages une fois sur 4096.
-        for ($i = 0; $i < 12; $i++) {
-            $tirage = $recherche->choose($planetId, $this->currentUserId, self::SLOT, 'random', $maintenant + $i);
-            $this->assertSame(self::ROCKTAL_TIER2_POSITION4, $tirage->object_id, "Tirage $i : le tirage ne tire pas la technologie indisponible.");
-            $tirage->delete();
-            resolve(LifeformSlotHistory::class)->record($planetId, self::SLOT, null, $maintenant + $i + 1);
-        }
+        // Le tirage, seule espece etrangere decouverte : il rend exactement la technologie qu il refusait.
+        $tirage = $recherche->choose($planetId, $this->currentUserId, self::SLOT, 'random', $maintenant);
+        $this->assertSame(self::SLINGSHOT_AUTOPILOT, $tirage->object_id, 'Le tirage rend la technologie mecha.');
+        $this->assertSame('random', $tirage->chosen_via);
         $this->assertSame(400, (int)LifeformAccount::query()->where('user_id', $this->currentUserId)->value('artifacts'), 'Le tirage est gratuit.');
+
+        // Le choix direct, paye en artefacts, sur l emplacement libere.
+        $tirage->delete();
+        resolve(LifeformSlotHistory::class)->record($planetId, self::SLOT, null, $maintenant + 1);
+        $ligne = $recherche->choose($planetId, $this->currentUserId, self::SLOT, (string)self::SLINGSHOT_AUTOPILOT, $maintenant + 2);
+        $this->assertSame(self::SLINGSHOT_AUTOPILOT, $ligne->object_id);
+        $this->assertSame('artifacts', $ligne->chosen_via);
+        $this->assertSame(400 - LifeformSlotRules::ARTIFACT_COST[2], (int)LifeformAccount::query()->where('user_id', $this->currentUserId)->value('artifacts'), 'Le choix direct coute ses artefacts.');
     }
 
     /**
-     * Une technologie placee avant la regle (une donnee de production) se montre indisponible et ne se recherche pas.
+     * Une technologie placee dans un emplacement se montre et se recherche : ni vignette eteinte, ni refus de la file.
      */
-    public function testATechnologyPlacedBeforeTheRuleIsShownUnavailableAndNotResearched(): void
+    public function testAPlacedTechnologyIsShownAndResearched(): void
     {
         $maintenant = (int)Date::now()->timestamp;
         $planetId = $this->currentPlanetId;
@@ -232,19 +202,16 @@ final class LifeformAvailabilityTest extends AccountTestCase
         $this->placeLifeformSlot($planetId, self::SLOT, self::SLINGSHOT_AUTOPILOT, $maintenant - 10);
 
         $page = (string)$this->get(route('lifeforms.research'))->getContent();
-        $this->assertSame(1, preg_match('#<li[^>]*data-slot="' . self::SLOT . '"[^>]*data-technology="' . self::SLINGSHOT_AUTOPILOT . '"[^>]*data-status="off" data-unavailable="1"#', $page), 'La vignette est eteinte et marquee.');
-        $this->assertSame(1, substr_count($page, 'data-unavailable="1"'));
+        $this->assertSame(1, preg_match('#<li[^>]*data-slot="' . self::SLOT . '"[^>]*data-technology="' . self::SLINGSHOT_AUTOPILOT . '"#', $page), 'Premisse : la vignette est celle de la technologie placee.');
+        $this->assertSame(0, substr_count($page, 'data-unavailable="1"'), 'Aucune vignette eteinte par la regle.');
 
         $panneau = (string)$this->get(route('lifeforms.research.ajax', ['technology' => self::SLINGSHOT_AUTOPILOT]))->json('content.technologydetails');
-        $this->assertStringContainsString('class="overmark lifeform_unavailable"', $panneau);
-        $this->assertStringNotContainsString('lifeform_effects_table', $panneau);
-        $this->assertStringNotContainsString('<button class="upgrade"', $panneau);
+        $this->assertStringNotContainsString('lifeform_unavailable', $panneau);
+        $this->assertStringContainsString('lifeform_effects_table', $panneau, 'L effet est promis, puisqu il est rendu.');
+        $this->assertSame(1, preg_match('#<tr data-effect="' . LifeformEffect::RECALL_FUEL_REFUND . '">#', $panneau), 'La ligne du carburant rendu existe.');
 
-        $this->assertRefused(fn () => resolve(LifeformQueueService::class)->add($this->planetService, self::SLINGSHOT_AUTOPILOT, $maintenant), LifeformRefused::NOT_AVAILABLE);
-        $refus = $this->post(route('lifeforms.buildings.addbuildrequest.post'), ['technologyId' => self::SLINGSHOT_AUTOPILOT, 'mode' => 1, '_token' => csrf_token()]);
-        $refus->assertJsonPath('success', false);
-        $this->assertSame(__('t_lifeforms_ui.refused.not_available'), $refus->json('errors.0.message'));
-        $this->assertSame(0, LifeformQueue::query()->where('planet_id', $planetId)->count());
+        resolve(LifeformQueueService::class)->add($this->planetService, self::SLINGSHOT_AUTOPILOT, $maintenant);
+        $this->assertSame(1, LifeformQueue::query()->where('planet_id', $planetId)->where('object_id', self::SLINGSHOT_AUTOPILOT)->count(), 'La recherche entre dans la file.');
     }
 
     /**
@@ -278,15 +245,5 @@ final class LifeformAvailabilityTest extends AccountTestCase
     private function metal(): int
     {
         return (int)Planet::query()->whereKey($this->currentPlanetId)->value('metal');
-    }
-
-    private function assertRefused(callable $action, string $raison): void
-    {
-        try {
-            $action();
-            $this->fail("Un refus « $raison » etait attendu.");
-        } catch (LifeformRefused $refus) {
-            $this->assertSame($raison, $refus->reason, $refus->getMessage());
-        }
     }
 }

@@ -3,6 +3,7 @@
 namespace Tests\Feature\Lifeforms;
 
 use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use OGame\Factories\GameMessageFactory;
 use OGame\Factories\PlanetServiceFactory;
@@ -12,6 +13,7 @@ use OGame\Lifeforms\Discovery\LifeformDiscoveryOdds;
 use OGame\Lifeforms\Discovery\LifeformDiscoveryOutcome;
 use OGame\Lifeforms\Discovery\LifeformDiscoveryRules;
 use OGame\Lifeforms\LifeformRefused;
+use OGame\Lifeforms\Presentation\GalaxyDiscoveries;
 use OGame\Lifeforms\Services\LifeformDiscoveryService;
 use OGame\Lifeforms\Services\LifeformInstallationService;
 use OGame\Lifeforms\Services\LifeformLevels;
@@ -146,6 +148,47 @@ final class LifeformDiscoveryTest extends AccountTestCase
      * l espece de la technologie et la Metropole de la planete — ce que la fiche affichait deja — et seulement tant que
      * leur emplacement est ouvert (audit des effets, journal §157).
      */
+    /**
+     * **Le mode vacances gele aussi les vols de decouverte** (relecture avant production, journal §165) : le service ne le
+     * regardait pas, et seul le bouton du gabarit etait grise — l icone ADN de la Galaxie, la salve du systeme et l adresse
+     * du formulaire laissaient partir un vol, debitaient les ressources et creditaient artefacts et experience.
+     */
+    public function testVacationModeRefusesEveryDiscoveryEntry(): void
+    {
+        $service = resolve(LifeformDiscoveryService::class);
+        resolve(LifeformLevels::class)->setLevel($this->currentPlanetId, LifeformKind::Building, self::RESEARCH_CENTRE, 1);
+        $cible = $this->unePositionLibre(0);
+        $depart = $this->planetService->getPlanetCoordinates();
+        $metalAvant = (int)Planet::query()->whereKey($this->currentPlanetId)->value('metal');
+
+        DB::table('users')->where('id', $this->currentUserId)->update(['vacation_mode' => 1]);
+        $this->reloadApplication();
+        $joueur = resolve(PlayerServiceFactory::class)->make($this->currentUserId, true);
+        $this->assertTrue($joueur->isInVacationMode(), 'Premisse : le compte est en vacances.');
+
+        // La planete du banc porte le joueur charge avant la mise a jour : le service en prend une fraiche, comme le jeu.
+        $planete = resolve(PlanetServiceFactory::class)->make($this->currentPlanetId, true);
+        $this->assertNotNull($planete);
+        $this->assertRefused(fn () => $service->launch($planete, $cible, (int)Date::now()->timestamp), LifeformRefused::VACATION_MODE, 'Le service refuse.');
+        $this->assertSame(0, LifeformDiscovery::query()->where('user_id', $this->currentUserId)->count(), 'Aucun vol ecrit.');
+        $this->assertSame($metalAvant, (int)Planet::query()->whereKey($this->currentPlanetId)->value('metal'), 'Rien de debite.');
+
+        // La Galaxie le dit avant le clic, sur chaque position, et la salve du systeme ne lance rien.
+        $etat = resolve(GalaxyDiscoveries::class)->forSystem($joueur, $depart->galaxy, $depart->system, (int)Date::now()->timestamp);
+        $this->assertSame(__('t_lifeforms_ui.refused.vacation_mode'), $etat['general'], 'L etat general de la Galaxie porte la raison.');
+        foreach ($etat['missions'] as $position => $mission) {
+            // « Chez soi » garde sa preseance (§163) ; partout ailleurs, la raison est le mode vacances, et aucune position n est offerte.
+            $this->assertSame($position === $depart->position ? __('t_lifeforms_ui.refused.own_planet') : __('t_lifeforms_ui.refused.vacation_mode'), $mission['canSend'], 'position ' . $position);
+        }
+        $reponse = $this->postJson(route('lifeforms.discoveries.galaxy_system'), ['galaxy' => $depart->galaxy, 'system' => $depart->system, '_token' => csrf_token()]);
+        $this->assertFalse($reponse->json('response.success'));
+        $this->assertSame(__('t_lifeforms_ui.refused.vacation_mode'), $reponse->json('response.message'));
+        $this->assertSame(0, LifeformDiscovery::query()->where('user_id', $this->currentUserId)->count());
+
+        DB::table('users')->where('id', $this->currentUserId)->update(['vacation_mode' => 0]);
+        $this->reloadApplication();
+    }
+
     public function testTheEnvoysShortenTheFlightWithExperienceAndMetropolisWhileTheirSlotIsOpen(): void
     {
         $service = resolve(LifeformDiscoveryService::class);

@@ -227,21 +227,42 @@ final class BattleReportParticipantsTest extends FleetDispatchTestCase
         $this->assertStringContainsString('var combatData = {', $page);
         $this->assertMatchesRegularExpression('/setCombatLoca\(\s*"Armes:",\s*"Boucliers:",\s*"Armure:",\s*"Classe:"/', $page, 'Les libelles que le script reecrit sont traduits.');
         $this->assertStringNotContainsString("'Weapons:'", $page);
-        $this->assertStringContainsString('"' . CombatParticipantKey::forFleet((int)$missionRenfort->id) . '":{"ownerName":"' . e($joueurRenfort->getUsername(false)), $page);
+        $clefScript = static fn (string $clef): string => str_replace(':', '_', $clef);
+        $this->assertStringContainsString('"' . $clefScript(CombatParticipantKey::forFleet((int)$missionRenfort->id)) . '":{"ownerName":"' . e($joueurRenfort->getUsername(false)), $page);
         $this->assertStringContainsString('"weaponPercentage":100', $page);
         $this->assertStringContainsString('"shipDetails":{"204":{"armor":800,"weapon":100,"shield":20,"count":15}}', $page);
         $this->assertStringContainsString('"shipDetails":{"204":{"armor":603,"weapon":75,"shield":15,"count":30}}', $page);
         // Le choix du renfort porte l origine de SA flotte, pas la planete attaquee ; et les vaisseaux du dernier round du
         // script sont les survivants geles de chaque participant.
-        $this->assertStringContainsString('<option value="' . e($joueurRenfort->getUsername(false)) . '" data-coords="' . $renfort->getPlanetCoordinates()->asString() . '" data-planettype="1">', $page);
+        // **Le script officiel decoupe la valeur d une option** : `nom|id1:id2` (`loadDataBySelectedRound`). Une valeur
+        // sans « | » levait une TypeError au premier clic sur un round, et le rapport se figeait (journal §165).
+        $this->assertStringContainsString('<option value="' . e($joueurRenfort->getUsername(false)) . '|' . $clefScript(CombatParticipantKey::forFleet((int)$missionRenfort->id)) . '" data-coords="' . $renfort->getPlanetCoordinates()->asString() . '" data-planettype="1">', $page);
         $this->assertSame(1, preg_match('/var combatData = (\{.*?\});\s*
 /s', $page, $json), 'Le script du rapport porte combatData.');
         $donnees = json_decode($json[1] ?? '', true);
         $this->assertIsArray($donnees);
         $dernier = $donnees['combatRounds'][count($donnees['combatRounds']) - 1];
-        $this->assertSame((int)($moi['units_result']['light_fighter'] ?? 0), $dernier['attackerShips'][$moi['key']]['204'], 'Les vaisseaux du dernier round sont mes survivants.');
-        $this->assertSame(15 - $pertesAcsCumulees, $dernier['defenderShips'][$acs['key']]['204'], 'Les vaisseaux du dernier round du renfort sont ses survivants.');
-        $this->assertSame($acs['units_start']['light_fighter'], $donnees['combatRounds'][0]['defenderShips'][$acs['key']]['204'], 'Le round de depart porte l effectif de depart.');
+        $this->assertSame((int)($moi['units_result']['light_fighter'] ?? 0), $dernier['attackerShips'][$clefScript($moi['key'])]['204'], 'Les vaisseaux du dernier round sont mes survivants.');
+        $this->assertSame(15 - $pertesAcsCumulees, $dernier['defenderShips'][$clefScript($acs['key'])]['204'], 'Les vaisseaux du dernier round du renfort sont ses survivants.');
+        $this->assertSame($acs['units_start']['light_fighter'], $donnees['combatRounds'][0]['defenderShips'][$clefScript($acs['key'])]['204'], 'Le round de depart porte l effectif de depart.');
+
+        // Chaque option nomme un membre que le script sait retrouver : « nom|clef », et la clef existe dans le JSON de son camp.
+        preg_match_all('/<option value="([^"]+)"/', $page, $options);
+        foreach ($options[1] as $valeur) {
+            $valeur = html_entity_decode($valeur, ENT_QUOTES);
+            if ($valeur === 'all') {
+                continue;
+            }
+            $this->assertStringContainsString('|', $valeur, 'Une option sans « | » fait lever une TypeError au script officiel.');
+            [$nom, $clefs] = explode('|', $valeur, 2);
+            $this->assertNotSame('', $nom);
+            foreach (explode(':', $clefs) as $clef) {
+                $this->assertTrue(
+                    isset($donnees['defenderJSON']['member'][$clef]) || isset($donnees['attackerJSON']['member'][$clef]),
+                    'La clef « ' . $clef . ' » de l option n existe dans aucun camp du JSON.'
+                );
+            }
+        }
         $this->assertStringContainsString('data-combatreportid="' . $rapport->id . '"', $page);
         $this->assertStringContainsString('data-message-id="' . $message->id . '"', $page);
         $this->assertStringContainsString('sendShipsWithPopup(6,' . $cible->getPlanetCoordinates()->galaxy . ',' . $cible->getPlanetCoordinates()->system . ',' . $cible->getPlanetCoordinates()->position . ',1,0)', $page);

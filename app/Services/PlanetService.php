@@ -738,6 +738,12 @@ class PlanetService
             $extra_fields += $this->planet->lunar_base * 3;
         }
 
+        // Formes de vie : le Bio-modificateur agrandit SA planete (deux cases par niveau, journal §165). Une lune n en
+        // porte aucune : elle n a pas de forme de vie.
+        if ($this->isPlanet()) {
+            $extra_fields += app(LifeformBonusResolver::class)->planetFieldsOf($this->getPlanetId());
+        }
+
         return $extra_fields + $this->planet->field_max;
     }
 

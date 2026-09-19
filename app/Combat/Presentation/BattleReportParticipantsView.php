@@ -79,6 +79,7 @@ final class BattleReportParticipantsView
 
         return [
             'key' => (string)$p['key'],
+            'script_id' => self::scriptId((string)$p['key']),
             'kind' => (string)($p['kind'] ?? 'fleet'),
             'player_id' => (int)$p['player_id'],
             'name' => (string)($p['player_name'] ?? ''),
@@ -95,6 +96,18 @@ final class BattleReportParticipantsView
             'unit_characteristics' => (array)($p['unit_characteristics'] ?? []),
             'lifeform_lines' => $lignes,
         ];
+    }
+
+    /**
+     * L identifiant qu un participant porte dans le JSON du script et dans la valeur de son option.
+     *
+     * Le script officiel lit une option `nom|id1:id2` et decoupe les identifiants sur le deux-points
+     * (`loadDataBySelectedRound`) : une clef de participant (`fleet:12`) en porte un, et le decoupage rendait
+     * une clef vide puis une TypeError au premier clic sur un round (journal §165).
+     */
+    private static function scriptId(string $key): string
+    {
+        return str_replace(':', '_', $key);
     }
 
     /**
@@ -170,13 +183,13 @@ final class BattleReportParticipantsView
                     'count' => $unite->amount,
                 ];
             }
-            $member[$m['key']] = [
+            $member[$m['script_id']] = [
                 'ownerName' => $m['name'],
                 'ownerCharacterClassName' => (string)($m['character_class'] ?? ''),
                 'ownerID' => $m['player_id'],
                 'ownerCoordinates' => $m['coords'],
                 'ownerPlanetType' => $m['planet_type'],
-                'fleetID' => $m['key'],
+                'fleetID' => $m['script_id'],
                 'armorPercentage' => $m['armor'],
                 'weaponPercentage' => $m['weapons'],
                 'shieldPercentage' => $m['shields'],
@@ -226,7 +239,7 @@ final class BattleReportParticipantsView
                 }
                 $restants[(string)$unite->unitObject->id] = max(0, $unite->amount - $perdus);
             }
-            $resultat[$m['key']] = (object)$restants;
+            $resultat[$m['script_id']] = (object)$restants;
         }
 
         return (object)$resultat;
@@ -253,7 +266,7 @@ final class BattleReportParticipantsView
                     $pertes[(string)$unite->unitObject->id] = $total;
                 }
             }
-            $resultat[$m['key']] = (object)$pertes;
+            $resultat[$m['script_id']] = (object)$pertes;
         }
 
         return (object)$resultat;
@@ -272,6 +285,7 @@ final class BattleReportParticipantsView
     {
         $membre = static fn (array $camp, string $clef, string $genre): array => [
             'key' => $clef,
+            'script_id' => self::scriptId($clef),
             'kind' => $genre,
             'player_id' => $camp['player_id'],
             'name' => $camp['name'],

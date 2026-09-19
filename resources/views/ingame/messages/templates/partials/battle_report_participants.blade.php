@@ -8,7 +8,8 @@
     <select id="{{ $side }}_select_combatreport" class="participant_select" data-member-name="all">
         <option value="all">{{ __('t_ingame.messages.battle_all_participants') }}</option>
         @foreach ($members as $member)
-            <option value="{{ $member['name'] }}" data-coords="{{ $member['coords'] }}" data-planettype="{{ $member['planet_type'] }}">{{ $member['label'] }}@if ($member['kind'] === 'garrison') ({{ __('t_ingame.messages.battle_garrison') }})@endif</option>
+            {{-- La valeur que le script officiel decoupe : « nom|clef », la clef sans deux-points (journal §165). --}}
+            <option value="{{ $member['name'] }}|{{ $member['script_id'] }}" data-coords="{{ $member['coords'] }}" data-planettype="{{ $member['planet_type'] }}">{{ $member['label'] }}@if ($member['kind'] === 'garrison') ({{ __('t_ingame.messages.battle_garrison') }})@endif</option>
         @endforeach
     </select>
 @else

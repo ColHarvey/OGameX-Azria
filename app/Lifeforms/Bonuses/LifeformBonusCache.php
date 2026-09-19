@@ -46,7 +46,13 @@ final class LifeformBonusCache
     }
 
     /**
-     * Rend la valeur memorisee, ou la calcule. Un calcul qui rend `null` n est pas memorise.
+     * Rend la valeur memorisee, ou la calcule — **`null` compris**.
+     *
+     * Un resultat neutre (« ce corps n a pas de forme de vie », « ce compte n en a pas ») n etait pas memorise : chaque
+     * lecture le recalculait, et une page en demande des dizaines — une par vaisseau, par batiment producteur, par bonus
+     * de classe. Pour les comptes sans forme de vie, c est-a-dire tout le monde a l ouverture, cela faisait une centaine
+     * de requetes de plus par envoi de flotte (relecture avant production, journal §165). Une ecriture de forme de vie
+     * invalide toujours la memoire : le neutre ne survit pas au choix d une espece.
      *
      * @param Closure(): mixed $compute
      */
@@ -57,9 +63,7 @@ final class LifeformBonusCache
             return $entree['value'];
         }
         $valeur = $compute();
-        if ($valeur !== null) {
-            self::$entries[$key] = ['generation' => self::$generation, 'at' => $now, 'value' => $valeur];
-        }
+        self::$entries[$key] = ['generation' => self::$generation, 'at' => $now, 'value' => $valeur];
 
         return $valeur;
     }

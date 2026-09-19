@@ -99,6 +99,19 @@ final class LifeformFormulas
     }
 
     /**
+     * Les cases de planete qu un batiment ajoute a un niveau : la base du fichier maitre se lit en centiemes de case
+     * (200 = deux cases par niveau — regle officielle, journal §165), lineaire, sans plafond.
+     */
+    public static function planetFields(LifeformBonus $bonus, int $level): int
+    {
+        if ($level < 1) {
+            return 0;
+        }
+
+        return (int)floor($bonus->base * $level / 100);
+    }
+
+    /**
      * La part qu un pour cent de formes de vie ajoute a une valeur de base entiere, tronquee a l unite.
      */
     public static function partOf(int $base, float $percent): int

@@ -199,6 +199,7 @@ return [
         'recently_explored' => 'This position was explored less than seven days ago.',
         'bad_coordinates' => 'Invalid coordinates.',
         'own_planet' => 'An exploration ship cannot be sent to your own planets.',
+        'vacation_mode' => 'Your account is in vacation mode: it starts nothing.',
     ],
     'effects' => [
         'living_space' => 'Living space',

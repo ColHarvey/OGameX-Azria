@@ -199,6 +199,7 @@ return [
         'recently_explored' => 'Cette position a été explorée il y a moins de sept jours.',
         'bad_coordinates' => 'Coordonnées invalides.',
         'own_planet' => 'Un vaisseau d’exploration ne se lance pas vers vos propres planètes.',
+        'vacation_mode' => 'Votre compte est en mode vacances : il ne lance rien.',
     ],
     'effects' => [
         'living_space' => 'Espace de vie',

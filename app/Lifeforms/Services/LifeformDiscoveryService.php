@@ -114,6 +114,10 @@ final class LifeformDiscoveryService
         if ($joueur === null || !$planet->isPlanet()) {
             throw new LifeformRefused(LifeformRefused::NOT_A_PLANET);
         }
+        // Un compte en vacances ne lance rien — la file des formes de vie le refuse deja, le vol le refuse aussi (§165).
+        if ($joueur->isInVacationMode()) {
+            throw new LifeformRefused(LifeformRefused::VACATION_MODE);
+        }
         $this->requireCoordinates($target);
         if (self::isOwnBody($joueur->getId(), $target)) {
             throw new LifeformRefused(LifeformRefused::OWN_PLANET, $target->asString());

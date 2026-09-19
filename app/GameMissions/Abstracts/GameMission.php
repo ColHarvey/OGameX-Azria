@@ -23,10 +23,13 @@ use OGame\GameMissions\Models\MissionPossibleStatus;
 use OGame\GameMissions\Models\ResolvedReturnDestination;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Hull\DamagedHulls;
+use OGame\Lifeforms\Bonuses\LifeformBonusResolver;
+use OGame\Lifeforms\Catalogue\LifeformEffect;
 use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\FleetUnion;
 use OGame\Models\Planet\Coordinate;
+use OGame\Models\Resource;
 use OGame\Models\Resources;
 use OGame\Models\User;
 use OGame\Protection\PlayerStrengthGuard;
@@ -169,7 +172,7 @@ abstract class GameMission
      */
     public const int TRAVEL_FULLY_DONE = 10000;
 
-    public function cancel(FleetMission $mission): void
+    public function cancel(FleetMission $mission, bool $rappelDuJoueur = false): void
     {
         // Handle fleet recall from union (remove from union, delete empty union)
         if ($mission->isInUnion()) {
@@ -226,13 +229,49 @@ abstract class GameMission
          * `time_arrival` brut ferait repartir un renfort rappele en vol d un point qu il n a jamais
          * atteint — le defaut qu on corrige, a l envers.
          */
+        $partDuTrajet = self::travelledPortionOf((int)$mission->time_departure, (int)$originalArrivalTimeForAdjustment, $currentTime);
+
+        /*
+         * **Le Pilote automatique a fronde** (Mechas), decision de Keven du 19 septembre 2026 (journal §165). Azria rend
+         * deja la moitie du carburant a TOUT retour : la fronde ne porte que sur la moitie que le retour ne rend pas, et
+         * d autant moins que l aller est deja fait — plus tot la flotte rebrousse chemin, plus elle recupere. Le
+         * deuterium arrive avec le retour, comme le reste de sa cargaison.
+         *
+         * Le supplement n appartient qu au RAPPEL DU JOUEUR : une colonisation refusee passe par le meme `cancel()` et ne
+         * rend rien de plus.
+         */
+        $ressources = $this->fleetMissionService->getResources($mission);
+        if ($rappelDuJoueur) {
+            $supplement = self::slingshotRefundOf($mission, $partDuTrajet);
+            if ($supplement > 0) {
+                $ressources->deuterium->add(new Resource($supplement));
+            }
+        }
+
         $this->startReturn(
             $mission,
-            $this->fleetMissionService->getResources($mission),
+            $ressources,
             $this->fleetMissionService->getFleetUnits($mission),
             $returnTripAdjustment,
-            recallProgress: self::travelledPortionOf((int)$mission->time_departure, (int)$originalArrivalTimeForAdjustment, $currentTime)
+            recallProgress: $partDuTrajet
         );
+    }
+
+    /**
+     * Le carburant que le Pilote automatique a fronde rend en plus au rappel : la part du taux sur la moitie que le
+     * retour ne rend pas deja, au prorata du trajet restant (journal §165).
+     */
+    private static function slingshotRefundOf(FleetMission $mission, int $partDuTrajet): int
+    {
+        $taux = resolve(LifeformBonusResolver::class)->forPlayer((int)$mission->user_id)->fraction(LifeformEffect::RECALL_FUEL_REFUND);
+        if ($taux <= 0.0) {
+            return 0;
+        }
+        $consommation = (int)$mission->deuterium_consumption;
+        $nonRendu = $consommation - intdiv($consommation, 2);
+        $restant = max(0, self::TRAVEL_FULLY_DONE - $partDuTrajet) / self::TRAVEL_FULLY_DONE;
+
+        return (int)floor($nonRendu * $taux * $restant);
     }
 
     /**
