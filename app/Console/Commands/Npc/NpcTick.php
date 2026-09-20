@@ -55,12 +55,12 @@ class NpcTick extends Command
         $this->line($simulation ? "[NPC SIM] {$stamp}" : "[NPC] {$stamp}");
         $this->line('');
         $this->line(sprintf(
-            '  serveur    actifs %d | mediane %d | seuil %d | bases %d | plafond de base %d',
+            '  serveur    actifs %d | mediane %d | seuil %d | bases %d | plafond de base %s',
             $this->population->activePlayerCount(),
             $this->population->medianScore(),
             $this->population->threshold(),
             $this->bases->baseCount(),
-            $this->growth->powerCeiling()
+            $this->growth->ceilingLabel()
         ));
 
         $this->growBases();
@@ -99,14 +99,16 @@ class NpcTick extends Command
                 continue;
             }
 
+            // Le releve garde la maturite NUMERIQUE : c est elle que les raids lisent, et le mode sans
+            // plafond ne doit toucher a aucune de leurs decisions. Seule la ligne affichee la distingue.
             $maturity = $this->growth->maturityOf($planet);
 
             $this->recordSnapshot($planet, $maturity, $result);
 
             $lines[] = sprintf(
-                '    %-24s %3d%%  %-14s %s',
+                '    %-24s %-12s  %-14s %s',
                 $planet->getPlanetName(),
-                $maturity,
+                $this->growth->maturityLabel($planet),
                 $result['action'],
                 $result['detail']
             );

@@ -286,11 +286,59 @@ class NpcGrowthService
     }
 
     /**
+     * Get whether hostile bases grow without any ceiling.
+     *
+     * **Decision de Keven, 20 septembre 2026.** Le plafond et tout ce qui le calcule restent en place : ce
+     * reglage ne fait que les court-circuiter, et le desarmer rend exactement le comportement d avant.
+     */
+    public function isGrowthUnlimited(): bool
+    {
+        return $this->settings->npcGrowthUnlimited();
+    }
+
+    /**
      * Get whether this base has grown as far as the server currently allows.
      */
     public function isAtCeiling(PlanetService $planet): bool
     {
+        // **Sans plafond, aucune base n y est.** Le refus est explicite, et il doit l etre : rendre un plafond
+        // a zero aurait transforme « aucune limite » en « tout est plafonne », puisque tout score est >= 0.
+        if ($this->isGrowthUnlimited()) {
+            return false;
+        }
+
         return $planet->getPlanetScore() >= $this->powerCeiling();
+    }
+
+    /**
+     * Le plafond tel qu il s affiche : un nombre de points, ou « sans plafond ».
+     *
+     * Jamais un zero, qui se lirait comme un vrai plafond atteint par tout le monde.
+     */
+    public function ceilingLabel(): string
+    {
+        if ($this->isGrowthUnlimited()) {
+            return 'sans plafond';
+        }
+
+        return number_format($this->powerCeiling(), 0, ',', ' ') . ' points';
+    }
+
+    /**
+     * La maturite telle qu elle s affiche : un pourcentage, ou « sans plafond ».
+     *
+     * `maturityOf()` garde son contrat numerique parce que deux decisions de raid s en servent — la force
+     * d un raid et une porte a 20 %. La rendre nulle changerait le comportement des pirates, ce que ce
+     * reglage ne doit pas faire. C est donc l AFFICHAGE qui refuse d annoncer un pourcentage de maturite
+     * quand il n existe aucun plafond par rapport auquel murir.
+     */
+    public function maturityLabel(PlanetService $planet): string
+    {
+        if ($this->isGrowthUnlimited()) {
+            return 'sans plafond';
+        }
+
+        return $this->maturityOf($planet) . '%';
     }
 
     /**

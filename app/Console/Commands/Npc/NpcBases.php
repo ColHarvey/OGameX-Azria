@@ -65,11 +65,9 @@ class NpcBases extends Command
             return Command::SUCCESS;
         }
 
-        $plafond = $this->growth->powerCeiling();
-
         $this->line(sprintf(
-            '  plafond de maturite  %d points   (mediane serveur %d, seuil %d)',
-            $plafond,
+            '  plafond de maturite  %s   (mediane serveur %d, seuil %d)',
+            $this->growth->ceilingLabel(),
             $this->population->medianScore(),
             $this->population->threshold()
         ));
@@ -110,12 +108,12 @@ class NpcBases extends Command
             $creation = $proprietaire?->getUser()->created_at;
 
             $this->line(sprintf(
-                '    %-24s %-12s %3dj  %6d   %4d%%  %4d  %6d  %5d',
+                '    %-24s %-12s %3dj  %6d   %-12s  %4d  %6d  %5d',
                 $planete->getPlanetName(),
                 $planete->getPlanetCoordinates()->asString(),
                 $creation !== null ? (int)$creation->diffInDays(Date::now()) : 0,
                 (int)$planete->getPlanetScore(),
-                $this->growth->maturityOf($planete),
+                $this->growth->maturityLabel($planete),
                 $planete->getBuildingCount(),
                 (int)$planete->getShipUnits()->getAmount(),
                 (int)$planete->getDefenseUnits()->getAmount()
@@ -154,12 +152,12 @@ class NpcBases extends Command
             $mesure = true;
 
             $this->line(sprintf(
-                '    %-24s score %d -> %d   maturite %d%% -> %d%%   batiments %d -> %d',
+                '    %-24s score %d -> %d   maturite %d%% -> %s   batiments %d -> %d',
                 $planete->getPlanetName(),
                 $premier->score,
                 (int)$planete->getPlanetScore(),
                 $premier->maturity,
-                $this->growth->maturityOf($planete),
+                $this->growth->maturityLabel($planete),
                 $premier->buildings,
                 $planete->getBuildingCount()
             ));

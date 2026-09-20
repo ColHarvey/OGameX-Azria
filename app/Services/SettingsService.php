@@ -1267,6 +1267,18 @@ class SettingsService
     }
 
     /**
+     * Returns whether hostile bases may grow past the server-derived ceiling.
+     *
+     * **Decision de Keven, 20 septembre 2026** : les bases pirates evoluent sans limite. Le plafond calcule
+     * depuis la mediane des joueurs (`npcMaturityRatio`) reste entierement en place et reprend la main des que
+     * ce reglage est desarme — le retour en arriere ne demande aucune livraison.
+     */
+    public function npcGrowthUnlimited(): bool
+    {
+        return $this->get('npc_growth_unlimited', '1') === '1';
+    }
+
+    /**
      * Returns whether a long-matured base may found a second one.
      */
     public function npcSwarmEnabled(): bool
