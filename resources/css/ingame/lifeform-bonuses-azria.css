@@ -1,0 +1,189 @@
+/*
+ * La page des bonus des formes de vie : corrections de presentation.
+ *
+ * **Tout est prefixe `#lfbonusescomponent`** : cette page seule. Les batiments, les recherches et les autres
+ * panneaux du jeu emploient les memes classes (`.headerRS`, `.mainRS`, `bonus-item-heading`) et ne doivent rien
+ * ressentir d ici.
+ *
+ * Aucune regle de jeu, aucune formule : de la mise en page.
+ *
+ * Les quatre causes, mesurees au navigateur le 20 septembre 2026 (journal §171) :
+ *
+ * 1. **Une bande vide le long du cadre.** Les trois images du cadre (`32469184…`, `db530b4d…`, `04a7b39d…`) font
+ *    **667 px** de large ; la boite en fait **670**. `no-repeat` laissait donc 3 px nus a droite du chapeau et du
+ *    pied, et `repeat-y` une raie nue sur toute la hauteur du corps.
+ * 2. **La barre de titre depassait du panneau.** `bonus-item-heading` fait `width: 100%` et porte ses deux embouts
+ *    en `::before` / `::after` a `left: -5px` et `right: -5px` : pleine largeur, ils sortaient de 5 px de chaque
+ *    cote. Le composant officiel pose son contenu a 645 px dans 667, soit **11 px** de marge.
+ * 3. **Les textes touchaient le bord** : `bonus-item-content-holder` n avait que 4 px de retrait.
+ * 4. **Les quatre especes se tassaient au centre** : une rangee flex centree donnait **77 px** par espece dans un
+ *    panneau de 662, moitie droite vide. Quatre colonnes egales valent 160 px chacune.
+ */
+
+/* 1. Le cadre epouse la boite, a n importe quelle largeur. */
+#lfbonusescomponent .headerRS,
+#lfbonusescomponent .footerRS {
+    background-size: 100% 29px;
+}
+
+#lfbonusescomponent .mainRS {
+    background-size: 100% auto;
+    /* Le chapeau et la barre de titre se lisaient comme deux barres separees par un vide. */
+    padding-top: 3px;
+}
+
+/* 2. La barre de titre rentre dans le cadre, embouts compris. */
+#lfbonusescomponent bonus-item-heading {
+    box-sizing: border-box;
+    width: auto;
+    margin-left: 11px;
+    margin-right: 11px;
+}
+
+/* 3. Le contenu respire, avec la marge du composant officiel. */
+#lfbonusescomponent bonus-item-content-holder {
+    padding: 10px 11px 12px;
+}
+
+#lfbonusescomponent .lifeform-bonus-intro {
+    margin: 0 0 12px;
+}
+
+/* Les petits textes de cette page passent de 9 a 11 px : a 9 px la ligne d experience se devine plus qu elle ne
+   se lit. Les pastilles de plafond gardent leur taille reduite pour rester un commentaire. */
+#lfbonusescomponent .smallFont {
+    font-size: 11px;
+    line-height: 16px;
+}
+
+#lfbonusescomponent .subCategoryBonus .smallFont {
+    font-size: 10px;
+}
+
+/* 4. Les quatre especes, en quatre colonnes regulieres. */
+#lfbonusescomponent .lifeform-species-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    align-items: start;
+}
+
+#lfbonusescomponent lifeform-avatar {
+    width: 100%;
+    gap: 2px;
+    text-align: center;
+}
+
+/* L anneau d experience fait 88 px et se pose a -4 : l icone doit donc faire 80, sans quoi il deborde. Elle
+   heritait de la largeur de sa colonne (77 px mesures) et l anneau sortait de 7 px. */
+#lfbonusescomponent lifeform-avatar .lifeform-item-icon {
+    width: 80px;
+    height: 80px;
+}
+
+#lfbonusescomponent lifeform-avatar-xp-holder {
+    width: 80px;
+    height: 80px;
+    margin: 0 auto 6px;
+}
+
+#lfbonusescomponent lifeform-avatar .xpbar .progress-ring {
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+#lfbonusescomponent lifeform-avatar .currentlevel {
+    font: bold 12px/16px Verdana, Arial, Helvetica, sans-serif;
+    color: #9fd5f5;
+}
+
+#lfbonusescomponent lifeform-avatar .bonusValue {
+    margin-top: 6px;
+    font-weight: bold;
+}
+
+/* 5. La boite commence par sa barre de titre : le chapeau `.headerRS` est vide sur cette page et se lisait
+      comme une bande de cadre nue. L espacement entre les deux sections est tenu par la feuille. */
+#lfbonusescomponent .lifeform-bonus-box {
+    padding-top: 8px;
+}
+
+#lfbonusescomponent .footerRS + .lifeform-bonus-box {
+    margin-top: 16px;
+}
+
+/* 6. Les lignes de detail : le retrait de la technologie sous sa planete, et de l air entre les effets. */
+#lfbonusescomponent .lifeform-bonus-item {
+    margin-bottom: 14px;
+}
+
+#lfbonusescomponent .lifeform-bonus-item:last-child {
+    margin-bottom: 0;
+}
+
+#lfbonusescomponent .lifeform-bonus-planet {
+    margin-bottom: 6px;
+}
+
+#lfbonusescomponent .lifeform-bonus-row {
+    padding-left: 18px;
+}
+
+/* Le titre d un effet et sa valeur ne doivent jamais se toucher, meme avec un nom long — et le titre revient a
+   la ligne plutot que d etre coupe : une ligne de 22 px fixes obligeait a tronquer. */
+#lfbonusescomponent inner-bonus-item-heading {
+    height: auto;
+    min-height: 22px;
+    align-items: center;
+}
+
+#lfbonusescomponent inner-bonus-item-heading > span:first-of-type {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+#lfbonusescomponent inner-bonus-item-heading .subCategoryBonus {
+    flex: none;
+    padding-left: 12px;
+    white-space: nowrap;
+}
+
+/* Une ligne de detail porte plus de champs : on laisse le titre prendre la place restante et on garde le
+   reste lisible sans le couper. */
+#lfbonusescomponent .lifeform-bonus-row > span:nth-of-type(2) {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* L etat vide : le message ne colle plus au bord, et il ne porte pas de marge basse inutile. */
+#lfbonusescomponent .lifeform-bonus-empty {
+    margin: 0;
+}
+
+/* 7. Le repli des sections. La fleche et le curseur « main » l annoncent depuis toujours — le composant vient de
+      la page officielle — mais aucun script n ecoutait cette barre sur cette page : le clic ne faisait rien
+      (releve de Codex, 20 septembre 2026). La fleche montre desormais l etat : vers le bas quand la section est
+      ouverte, vers le haut quand elle est repliee. */
+#lfbonusescomponent bonus-item-heading arrow-icon {
+    border-width: 7px;
+    border-style: solid;
+    border-color: transparent transparent #2dad40;
+    margin-top: 0;
+    margin-bottom: 6px;
+}
+
+#lfbonusescomponent bonus-item-heading:not(.active) arrow-icon {
+    border-color: #2dad40 transparent transparent;
+    margin-top: 6px;
+    margin-bottom: 0;
+}
+
+#lfbonusescomponent bonus-item-heading:not(.active) + bonus-item-content-holder {
+    display: none;
+}
+
+#lfbonusescomponent bonus-item-heading:focus-visible {
+    outline: 1px solid #6f9fc8;
+    outline-offset: -2px;
+}

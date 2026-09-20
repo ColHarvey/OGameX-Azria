@@ -15,8 +15,10 @@
             </header>
 
             <div id="technologies">
-                <div class="headerRS"></div>
-                <div class="mainRS" id="lifeform-experience-bonuses">
+                {{-- **Pas de `.headerRS` ici** : sur la page officielle ce chapeau porte le bouton de fermeture ;
+                     vide, il se lisait comme une bande de cadre nue au-dessus de chaque section (releve de Codex,
+                     20 septembre 2026). La barre de titre est le haut de la boite, et `.footerRS` la ferme. --}}
+                <div class="mainRS lifeform-bonus-box" id="lifeform-experience-bonuses">
                     {{-- La barre de titre du composant officiel : `bonus-item-heading` porte le fond et ses deux
                          embouts, le triangle vert vient de `arrow-icon`. Un `<h3>` nu n etait habille par rien ici —
                          la regle `.lfsettingsContent > h3` appartient a la page des especes (journal §155.23). --}}
@@ -26,8 +28,10 @@
                         <span class="info"></span>
                     </bonus-item-heading>
                     <bonus-item-content-holder>
-                        <p class="smallFont" style="margin: 0 0 10px 0;">{{ __('t_lifeforms_ui.bonuses.experience_intro') }}</p>
-                        <div style="display: flex; gap: 18px; flex-wrap: wrap; justify-content: center;">
+                        <p class="smallFont lifeform-bonus-intro">{{ __('t_lifeforms_ui.bonuses.experience_intro') }}</p>
+                        {{-- Quatre colonnes regulieres : une rangee centree donnait 77 px par espece dans un
+                             panneau de 662, moitie droite vide (journal §171). --}}
+                        <div class="lifeform-species-grid">
                             @foreach ($experience as $espece)
                                 @php
                                     $n = $espece['species']->value;
@@ -43,7 +47,7 @@
                                              attribut SVG — l anneau etait pointille et ne montrait aucune progression. --}}
                                         <div class="xpHolder">
                                             <div class="xpbar" aria-label="{{ $espece['progress'] }}/{{ $espece['needed'] }} XP">
-                                                <svg class="progress-ring" width="88" height="88" aria-hidden="true" style="position: absolute; top: 0; left: 0;">
+                                                <svg class="progress-ring" width="88" height="88" aria-hidden="true">
                                                     <circle cx="44" cy="44" r="40" fill="none" stroke="#1d2f3d" stroke-width="4"></circle>
                                                     <circle class="progress-ring__circle" cx="44" cy="44" r="40" fill="none" stroke="#7fcf93" stroke-width="4"
                                                             style="stroke-dasharray: {{ round($part * $tour, 2) }} {{ round((1 - $part) * $tour, 2) }};"></circle>
@@ -62,8 +66,7 @@
                 </div>
                 <div class="footerRS"></div>
 
-                <div class="headerRS" style="margin-top: 12px;"></div>
-                <div class="mainRS" id="lifeform-effect-bonuses">
+                <div class="mainRS lifeform-bonus-box" id="lifeform-effect-bonuses">
                     <bonus-item-heading class="active">
                         <arrow-icon></arrow-icon>
                         <span>{{ __('t_lifeforms_ui.bonuses.effects_title') }}</span>
@@ -71,14 +74,14 @@
                     </bonus-item-heading>
                     <bonus-item-content-holder>
                         @if (count($effets) === 0)
-                            <p class="smallFont" style="margin: 0;">{{ __('t_lifeforms_ui.bonuses.none') }}</p>
+                            <p class="smallFont lifeform-bonus-empty">{{ __('t_lifeforms_ui.bonuses.none') }}</p>
                         @else
-                            <p class="smallFont" style="margin: 0 0 10px 0;">{{ __('t_lifeforms_ui.bonuses.effects_intro') }}</p>
+                            <p class="smallFont lifeform-bonus-intro">{{ __('t_lifeforms_ui.bonuses.effects_intro') }}</p>
                             {{-- **Les lignes sont celles du jeu** : `inner-bonus-item-heading` (22 px, une ligne sur
                                  deux teintee, valeur poussee a droite par `.subCategoryBonus`). Le tableau a quatre
                                  colonnes du premier gabarit n etait habille par aucune classe et se lisait tasse. --}}
                             @foreach ($effets as $effet)
-                                <div class="lifeform-bonus-item" data-effect="{{ $effet['key'] }}" style="margin-bottom: 10px;">
+                                <div class="lifeform-bonus-item" data-effect="{{ $effet['key'] }}">
                                     <inner-bonus-item-heading class="textBeefy">
                                         <span>{{ $effet['label'] }}</span>
                                         <span class="subCategoryBonus">{{ rtrim(rtrim(number_format($effet['total'], 2, '.', ''), '0'), '.') }} %@if ($effet['capped']) <span class="smallFont overmark" title="{{ __('t_lifeforms_ui.bonuses.capped_hint') }}">({{ __('t_lifeforms_ui.bonuses.capped') }})</span>@endif</span>
@@ -90,7 +93,7 @@
                                                 <span class="subCategoryBonus">{{ rtrim(rtrim(number_format($planete['total'], 2, '.', ''), '0'), '.') }} %</span>
                                             </inner-bonus-item-heading>
                                             @foreach ($planete['rows'] as $ligne)
-                                                <inner-bonus-item-heading class="smallFont" style="padding-left: 16px;">
+                                                <inner-bonus-item-heading class="smallFont lifeform-bonus-row">
                                                     <span class="queuePic lifeformqueuetiny lifeformTech{{ $ligne['object'] }}"></span>
                                                     <span>{{ $ligne['title'] }}</span>
                                                     <span class="smallFont">{{ __('t_lifeforms_ui.bonuses.slot') }} {{ $ligne['slot'] }} · {{ __('t_lifeforms_ui.bonuses.level_column') }} {{ $ligne['level'] }}</span>
@@ -108,5 +111,37 @@
             </div>
         </div>
     </div>
+
+    <script>
+        // **Les sections se replient vraiment.** La fleche et le curseur « main » l annoncent depuis toujours,
+        // mais aucun script n ecoutait cette barre : le clic ne faisait rien (releve de Codex, 20 septembre 2026).
+        // Rien ne change au calcul des bonus — c est de l affichage.
+        (function () {
+            var panneau = document.getElementById("lfbonusescomponent");
+            if (!panneau) {
+                return;
+            }
+            var barres = panneau.querySelectorAll("bonus-item-heading");
+            Array.prototype.forEach.call(barres, function (barre) {
+                barre.setAttribute("role", "button");
+                barre.setAttribute("tabindex", "0");
+                barre.setAttribute("aria-expanded", barre.classList.contains("active") ? "true" : "false");
+                barre.addEventListener("keydown", function (evenement) {
+                    if (evenement.key === "Enter" || evenement.key === " ") {
+                        evenement.preventDefault();
+                        barre.click();
+                    }
+                });
+            });
+            panneau.addEventListener("click", function (evenement) {
+                var barre = evenement.target.closest ? evenement.target.closest("bonus-item-heading") : null;
+                if (!barre || !panneau.contains(barre)) {
+                    return;
+                }
+                var ouvert = barre.classList.toggle("active");
+                barre.setAttribute("aria-expanded", ouvert ? "true" : "false");
+            });
+        })();
+    </script>
 
 @endsection

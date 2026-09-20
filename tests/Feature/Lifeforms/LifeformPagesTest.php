@@ -303,8 +303,10 @@ final class LifeformPagesTest extends AccountTestCase
         $bonus = $this->get(route('lifeforms.bonuses'));
         $bonus->assertStatus(200);
         $bonus->assertSee('id="lfbonusescomponent"', false);
-        $bonus->assertSee('class="mainRS" id="lifeform-experience-bonuses"', false);
-        $bonus->assertSee('class="mainRS" id="lifeform-effect-bonuses"', false);
+        // La boite large reste `.mainRS` ; `lifeform-bonus-box` la commence par sa barre de titre, le chapeau
+        // `.headerRS` etant vide sur cette page (journal §171).
+        $bonus->assertSee('class="mainRS lifeform-bonus-box" id="lifeform-experience-bonuses"', false);
+        $bonus->assertSee('class="mainRS lifeform-bonus-box" id="lifeform-effect-bonuses"', false);
         $bonus->assertDontSee('class="content-box-s"', false);
     }
 
