@@ -540,10 +540,14 @@ test('sur une sous-page, une memoire masquante n empeche plus la restauration', 
  * conversations — un joueur qui n ouvre une discussion que depuis `/lifeforms/buildings` n ecrit qu elle. Les
  * quatre cas de divergence sont eprouves ici, avec la regle qui les tranche :
  *
- *   racine non vide  -> la racine gagne (on ne ressuscite pas ce qui a ete ferme ailleurs) ;
- *   racine vide ou absente, sous-chemin non vide -> le sous-chemin est adopte (on ne perd rien) ;
- *   les deux vides   -> rien a garder ;
- *   pas de sous-chemin -> rien a faire.
+ *   racine porteuse -> la racine gagne, **et ce que portait le sous-chemin est perdu** ;
+ *   racine absente, illisible ou vide, sous-chemin porteur -> le sous-chemin est adopte ;
+ *   sous-chemin non porteur -> rien a migrer ;
+ *   pas de sous-chemin du tout -> rien a faire.
+ *
+ * **C est une priorite deterministe, pas une garantie de retrouver le dernier etat.** J avais ecrit « on ne
+ * perd jamais, on ne ressuscite jamais » : c est faux dans les deux sens, et Keven l a releve. Les trois cas
+ * ou cela se voit sont epingles plus bas, chacun nomme pour ce qu il coute.
  */
 function memoireDe(joueurs, alliances) {
     return JSON.stringify({
@@ -606,7 +610,7 @@ test('quand la racine porte des conversations, c est elle qui gagne', () => {
     monde.chat.oublierLesMemoiresDUnSousChemin();
 
     assert.deepEqual(cookiesNommes(document, 'visibleChats'), [racine],
-        'La racine est ecrite par toutes les pages : elle prime, et on ne ressuscite pas ce qui a ete ferme ailleurs.');
+        'La racine est ecrite par toutes les pages : elle prime. Ce que portait le sous-chemin est perdu — c est le compromis.');
 });
 
 test('une racine vide cede la place au sous-chemin, une racine vide face a un sous-chemin vide ne change rien', () => {
@@ -653,4 +657,81 @@ test('une memoire illisible au sous-chemin ne devient jamais la memoire de la ra
 
     assert.deepEqual(cookiesNommes(document, 'visibleChats'), [],
         'Une memoire illisible ne porte aucune conversation : elle part, et rien ne la remplace.');
+});
+
+/*
+ * **Le compromis de la migration, cas par cas.**
+ *
+ * Keven, 20 septembre 2026 : « retire "on ne perd jamais, on ne ressuscite jamais" ». Il a raison — la regle est
+ * une **priorite deterministe**, pas une garantie. Les trois temoins ci-dessous epinglent exactement ce qu elle
+ * coute, pour que personne ne redecouvre le compromis en production et pour qu un changement de politique fasse
+ * tomber un essai qui le nomme.
+ */
+test('COMPROMIS, cas 1 : deux conversations differentes — celle du sous-chemin est PERDUE', () => {
+    const monde = unMonde(undefined, [], 1280, 'https://exemple.test/lifeforms/buildings');
+    const document = monde.window.document;
+
+    const racine = memoireDe([7]);
+    const ailleurs = memoireDe([9]);
+    document.cookie = 'visibleChats=' + encodeURIComponent(racine) + '; path=/; max-age=604800';
+    document.cookie = 'visibleChats=' + encodeURIComponent(ailleurs) + '; path=/lifeforms; max-age=604800';
+
+    monde.chat.oublierLesMemoiresDUnSousChemin();
+
+    // Ce n est PAS une fusion : la conversation 9 disparait, et c est assume.
+    assert.deepEqual(cookiesNommes(document, 'visibleChats'), [racine],
+        'La racine prime ; la conversation qui n existait que dans le sous-chemin est perdue.');
+    assert.equal(monde.chat.etatDeLaMemoire(racine), 'porteuse');
+});
+
+test('COMPROMIS, cas 2 : fermeture sur le sous-chemin, racine encore porteuse — la fermeture est OUBLIEE', () => {
+    const monde = unMonde(undefined, [], 1280, 'https://exemple.test/lifeforms/buildings');
+    const document = monde.window.document;
+
+    // Le joueur avait j7 et j9 ouvertes, puis a ferme j9 depuis une sous-page : le sous-chemin ne porte plus que j7.
+    const racine = memoireDe([7, 9]);
+    const apresFermeture = memoireDe([7]);
+    document.cookie = 'visibleChats=' + encodeURIComponent(racine) + '; path=/; max-age=604800';
+    document.cookie = 'visibleChats=' + encodeURIComponent(apresFermeture) + '; path=/lifeforms; max-age=604800';
+
+    monde.chat.oublierLesMemoiresDUnSousChemin();
+
+    assert.deepEqual(cookiesNommes(document, 'visibleChats'), [racine],
+        'La racine prime : la fermeture faite sur la sous-page est oubliee, et j9 reapparaitra une fois.');
+});
+
+test('COMPROMIS, cas 3 : racine VOLONTAIREMENT vide — les conversations du sous-chemin REAPPARAISSENT', () => {
+    const monde = unMonde(undefined, [], 1280, 'https://exemple.test/lifeforms/buildings');
+    const document = monde.window.document;
+
+    // Une racine vide n est pas une memoire manquante : c est une declaration, « rien n est ouvert ». Aujourd hui
+    // elle est traitee comme une absence, donc le sous-chemin gagne. C est le point le plus discutable de la
+    // politique, et le changer est une decision de jeu — ce temoin est la pour qu elle ne change pas en silence.
+    const videVolontaire = memoireDe([]);
+    const sousChemin = memoireDe([7]);
+    document.cookie = 'visibleChats=' + encodeURIComponent(videVolontaire) + '; path=/; max-age=604800';
+    document.cookie = 'visibleChats=' + encodeURIComponent(sousChemin) + '; path=/lifeforms; max-age=604800';
+
+    assert.equal(monde.chat.etatDeLaMemoire(videVolontaire), 'vide',
+        'Une liste vide se distingue d une absence : elle est lisible et dit explicitement « rien d ouvert ».');
+
+    monde.chat.oublierLesMemoiresDUnSousChemin();
+
+    assert.deepEqual(cookiesNommes(document, 'visibleChats'), [sousChemin],
+        'Politique actuelle : une racine vide cede la place. Les conversations du sous-chemin reapparaissent.');
+});
+
+test('les trois etats d une memoire sont distingues, meme s ils menent au meme geste', () => {
+    const monde = unMonde(undefined, [], 1280, 'https://exemple.test/lifeforms/buildings');
+    const etat = (brut) => monde.chat.etatDeLaMemoire(brut);
+
+    assert.equal(etat(undefined), 'absente', 'Cookie absent.');
+    assert.equal(etat(null), 'absente', 'Cookie nul.');
+    assert.equal(etat(''), 'absente', 'Cookie vide de contenu.');
+    assert.equal(etat('{ceci n est pas du JSON'), 'illisible', 'Cookie abime.');
+    assert.equal(etat('"une chaine"'), 'illisible', 'JSON valide mais pas un objet.');
+    assert.equal(etat(memoireDe([])), 'vide', 'Listes vides : une declaration, pas une absence.');
+    assert.equal(etat(JSON.stringify({chatbar: false})), 'vide', 'Listes manquantes : rien d ouvert.');
+    assert.equal(etat(memoireDe([7])), 'porteuse', 'Une conversation privee.');
+    assert.equal(etat(memoireDe([], [42])), 'porteuse', 'Un canal d alliance compte autant.');
 });

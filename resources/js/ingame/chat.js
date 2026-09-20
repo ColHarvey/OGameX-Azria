@@ -1593,36 +1593,66 @@ ogame.chat = {
             // Il n y avait pas de memoire de sous-chemin : rien n a ete efface qui comptait.
             return
         }
-        if (c.porteUneConversation(racine) || !c.porteUneConversation(masquante)) {
-            // La racine a quelque chose a dire, ou le sous-chemin n avait rien : la racine gagne.
+
+        // **LA POLITIQUE DE CONFLIT, et ce qu elle coute.** Deux memoires, aucun horodatage : rien ne dit
+        // laquelle est la plus recente. On tranche par la provenance — la racine est ecrite par TOUTES les
+        // pages, le sous-chemin seulement par les sous-pages d une famille. C est une **priorite
+        // deterministe**, pas une garantie de retrouver le dernier etat :
+        //
+        //   racine porteuse -> la racine gagne, le sous-chemin est perdu ;
+        //   racine absente, illisible ou vide, sous-chemin porteur -> le sous-chemin est adopte.
+        //
+        // **Ce que ce choix coute**, et il faut le dire :
+        //   - racine {j1} et sous-chemin {j9} : j9 est ABANDONNE, ce n est pas une fusion ;
+        //   - une conversation fermee sur une sous-page pendant que la racine en porte encore une autre :
+        //     la fermeture est oubliee, la conversation REAPPARAIT une fois ;
+        //   - une racine **volontairement vide** — le joueur a tout ferme sur une page ordinaire — est
+        //     traitee comme une memoire absente : le sous-chemin est adopte, donc des conversations
+        //     REAPPARAISSENT. C est le cas le plus discutable ; il est isole ci-dessous pour qu un changement
+        //     de politique tienne en une ligne, et il est epingle par un temoin qui le nomme.
+        //
+        // Tout cela ne dure qu une transition : ensuite il n y a plus qu une memoire, a la racine.
+        var etatRacine = c.etatDeLaMemoire(racine);
+        var etatMasquante = c.etatDeLaMemoire(masquante);
+        if (etatMasquante !== "porteuse") {
+            // Rien a migrer : le sous-chemin etait absent, illisible, ou disait explicitement « rien d ouvert ».
             return
         }
-        // **Migration** : le sous-chemin etait la seule memoire a porter des conversations. On la recopie a
-        // la racine plutot que de la perdre. L effacement a deja eu lieu : elle ne masquera plus rien.
+        if (etatRacine === "porteuse") {
+            // La racine a quelque chose a dire : elle gagne, et ce que portait le sous-chemin est perdu.
+            return
+        }
+        // `absente`, `illisible` et `vide` menent ici au meme geste. **Les separer est une decision de jeu** :
+        // traiter `vide` comme une fermeture volontaire ferait perdre les conversations d un joueur qui
+        // n ouvre ses discussions que depuis une sous-page. Le jour ou Keven tranche, c est cette ligne.
         $.cookie("visibleChats", masquante, c.MEMOIRE)
     },
     /**
-     * Une memoire porte-t-elle au moins une conversation ? Une memoire absente, illisible, ou dont les deux
-     * listes sont vides ne dit rien : elle ne doit ni gagner ni etre migree.
+     * L etat d une memoire, **nomme** : `absente`, `illisible`, `vide` ou `porteuse`.
+     *
+     * Les trois premiers menent aujourd hui au meme geste, mais ils ne disent pas la meme chose : un cookie
+     * absent est une memoire qui n existe pas, un cookie illisible une memoire abimee, et une liste vide une
+     * **declaration** — « rien n est ouvert ». Les distinguer ici permet de les eprouver separement et de
+     * changer la politique sans la redecouvrir.
      */
-    porteUneConversation: function (brut) {
-        if (!brut) {
-            return false
+    etatDeLaMemoire: function (brut) {
+        if (brut === null || brut === undefined || brut === "") {
+            return "absente"
         }
         var lu = null;
         try {
             lu = JSON.parse(brut)
         } catch (e) {
-            return false
+            return "illisible"
         }
         if (!lu || typeof lu !== "object") {
-            return false
+            return "illisible"
         }
         var compte = function (liste) {
             return $.isArray(liste) ? liste.length : 0
         };
 
-        return (compte(lu.players) + compte(lu.associations)) > 0
+        return (compte(lu.players) + compte(lu.associations)) > 0 ? "porteuse" : "vide"
     },
     updateVisibleState: function () {
         if (ogame.chat.restoringOpenChats) {
