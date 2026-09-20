@@ -32,7 +32,11 @@ return new class () extends Migration {
     {
         Schema::create('daily_rewards', function (Blueprint $table) {
             $table->id();
-            $table->unsignedBigInteger('user_id');
+            // **`users.id` est un `increments`**, donc `int unsigned` — pas `bigint`. Une colonne de reference
+            // d un autre type fait echouer la creation de la table sous MariaDB (erreur 1005, errno 150,
+            // « Foreign key constraint is incorrectly formed »), la ou SQLite l accepte en silence. Mesure faite
+            // au bac le 20 septembre 2026 ; dix tables voisines declarent deja `unsignedInteger`.
+            $table->unsignedInteger('user_id');
             // La journee du serveur, pas un instant : c est elle qui porte l unicite.
             $table->date('reward_date');
             $table->unsignedBigInteger('amount');
