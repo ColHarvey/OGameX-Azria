@@ -278,6 +278,47 @@ class ChatBarDesignTest extends AccountTestCase
         }
     }
 
+    /**
+     * **Initialiser la barre deux fois ne doit pas dedoubler ses gestionnaires** (constat de Keven, 19 septembre 2026,
+     * journal §170). Le gabarit appelle `initChatBar` une premiere fois pour poser les conversations des le chargement,
+     * puis une seconde quand la liste des contacts arrive. Les gestionnaires etant delegues sur `.chat_bar_list`, le
+     * retrait vise sur `html` n en enlevait aucun : chaque clic partait deux fois, CONTACTS basculait le panneau deux
+     * fois de suite — il paraissait mort.
+     *
+     * Le comportement vit dans `tests/js/chat-window.test.js`. Ici on epingle la forme, **sur la source et sur le
+     * bundle servi** : une source corrigee dont le bundle n est pas reconstruit ne change rien en jeu.
+     */
+    public function testTheChatBarCanBeInitialisedTwiceWithoutDoublingItsHandlers(): void
+    {
+        foreach (['source' => $this->chatJs(), 'bundle servi' => $this->bundleServi()] as $ou => $js) {
+            $this->assertStringContainsString(
+                '$(".chat_bar_list").off(".chatBarTabs");',
+                $js,
+                "Les gestionnaires sont retires la ou ils sont poses ($ou)."
+            );
+            $this->assertStringContainsString(
+                '$(window).off("resize.chatBar").on("resize.chatBar"',
+                $js,
+                "Le redimensionnement ne s empile pas d un appel a l autre ($ou)."
+            );
+            $this->assertSame(
+                8,
+                substr_count($js, 'on("click.chatBar.chatBarTabs", "'),
+                "Les huit gestionnaires de clic de la barre portent le sous-espace de nom ($ou)."
+            );
+            $this->assertSame(
+                1,
+                substr_count($js, 'on("keyup.chatBar.chatBarTabs", "'),
+                "Et celui de frappe aussi ($ou)."
+            );
+            $this->assertStringContainsString(
+                'on("click.chatBar", ".chat_box .chat_box_title .icon_maximize"',
+                $js,
+                "Le gestionnaire d un autre module reste hors du sous-espace : le retrait ne doit pas l emporter ($ou)."
+            );
+        }
+    }
+
     public function testTheAzriaRosterWritesNamesAsTextAndInventsNoStatus(): void
     {
         $js = $this->chatJs();
@@ -294,7 +335,7 @@ class ChatBarDesignTest extends AccountTestCase
         $this->assertStringContainsString("openAssociationChat", $panneau);
 
         // Le bouton Envoyer prend le chemin de la touche Entree, et rien d autre.
-        $envoi = $this->capture('/\.on\("click\.chatBar", "\.chat_box \.az-send", function \(a\) \{(.*?)\n        \}\)/s', $js, 'Le bouton Envoyer a son ecouteur.');
+        $envoi = $this->capture('/\.on\("click\.chatBar\.chatBarTabs", "\.chat_box \.az-send", function \(a\) \{(.*?)\n        \}\)/s', $js, 'Le bouton Envoyer a son ecouteur.');
         $this->assertStringContainsString('c.submitChatBarMsg(t, 13, false, t[0].scrollHeight)', $envoi);
         $this->assertStringNotContainsString('$.ajax', $envoi, 'Aucune requete parallele.');
         $this->assertStringContainsString("if ($.trim(t.val()).length > 0) {", $envoi, 'Un texte vide ne part pas.');

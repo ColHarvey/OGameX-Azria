@@ -1090,11 +1090,21 @@ ogame.chat = {
     initChatBar: function (d) {
         var c = ogame.chat;
         ogame.chat.playerId = d;
+        // **Poser deux fois les gestionnaires les dedouble** (constat de Keven, 19 septembre 2026) : ils sont
+        // delegues sur `.chat_bar_list`, que `$("html").off(".chatBar")` ne touche pas — cette ligne ne retirait rien du
+        // tout. Le gabarit appelant desormais `initChatBar` avant la liste des contacts puis apres, chaque clic partait
+        // deux fois : CONTACTS basculait le panneau deux fois de suite, donc il s ouvrait et se refermait aussitot, et
+        // un nom de contact n ouvrait aucune fenetre.
+        //
+        // Le retrait porte sur `.chatBarTabs`, le sous-espace de nom que ces seuls gestionnaires portent : retirer tout
+        // `.chatBar` emporterait aussi celui que `initMaximize()` pose sur la meme liste. Le redimensionnement, lui,
+        // recoit son propre espace de noms au lieu de s empiler a chaque appel.
         $("html").off(".chatBar");
-        $(window).resize(function () {
+        $(".chat_bar_list").off(".chatBarTabs");
+        $(window).off("resize.chatBar").on("resize.chatBar", function () {
             c.updateChatBar()
         });
-        $(".chat_bar_list").on("click.chatBar", "#chatBarPlayerList", function (a) {
+        $(".chat_bar_list").on("click.chatBar.chatBarTabs", "#chatBarPlayerList", function (a) {
             // L onglet porte une icone et un compteur sous le theme Azria : le clic sur l un d eux est un clic sur l onglet.
             if ($(a.target).attr("id") !== "chatBarPlayerList" && !$(a.target).closest(".onlineCount").length) {
                 return
@@ -1103,13 +1113,13 @@ ogame.chat = {
             c.updateCustomScrollbar($(".scrollContainer"), true);
             c.azriaDeck();
             c.updateVisibleState()
-        }).on("click.chatBar", ".cb_playerlist_box .az-collapse", function (a) {
+        }).on("click.chatBar.chatBarTabs", ".cb_playerlist_box .az-collapse", function (a) {
             // Replier le panneau des contacts : la meme chose que fermer l onglet.
             a.stopPropagation();
             $(".cb_playerlist_box").hide();
             c.azriaDeck();
             c.updateVisibleState()
-        }).on("click.chatBar", ".cb_playerlist_box .az-filter button", function (a) {
+        }).on("click.chatBar.chatBarTabs", ".cb_playerlist_box .az-filter button", function (a) {
             // Les trois filtres du panneau posent les deux cases que `filterPlayerlist` lit deja : en ligne, tous, discussions.
             a.stopPropagation();
             var mode = $(this).data("filter");
@@ -1119,7 +1129,7 @@ ogame.chat = {
             $(this).attr("aria-pressed", "true");
             c.filterPlayerlist();
             c.updateCustomScrollbar($(".scrollContainer"), true)
-        }).on("click.chatBar", ".chat_box .chat_box_title .icon_minimize", function (a) {
+        }).on("click.chatBar.chatBarTabs", ".chat_box .chat_box_title .icon_minimize", function (a) {
             // Reduire : la fenetre se cache, l onglet reste, le brouillon aussi (le DOM n est pas detruit).
             a.stopPropagation();
             var item = $(this).closest(".chat_bar_list_item");
@@ -1127,7 +1137,7 @@ ogame.chat = {
             item.removeClass("open");
             c.updateChatBar();
             c.updateVisibleState()
-        }).on("click.chatBar", ".chat_box .az-send", function (a) {
+        }).on("click.chatBar.chatBarTabs", ".chat_box .az-send", function (a) {
             // Envoyer : le chemin de la touche Entree, et rien d autre. Un texte vide ne part pas ; un texte deja parti a
             // vide la zone, donc un second clic n envoie rien.
             a.stopPropagation();
@@ -1136,7 +1146,7 @@ ogame.chat = {
                 c.submitChatBarMsg(t, 13, false, t[0].scrollHeight)
             }
             t.focus()
-        }).on("click.chatBar", ".chat_bar_list_item", function (a) {
+        }).on("click.chatBar.chatBarTabs", ".chat_bar_list_item", function (a) {
             a.stopPropagation();
             if (!isNaN($(this).data("playerid"))) {
                 ogame.messagemarker.toggle(ogame.messagemarker.action_remove, ogame.messagemarker.type_chattab, $(this).data("playerid"));
@@ -1168,13 +1178,13 @@ ogame.chat = {
                 c.toggleChatBox($(a.target), $(this))
             }
             c.updateVisibleState()
-        }).on("click.chatBar", ".chat_bar_list_item > .icon_close", function (a) {
+        }).on("click.chatBar.chatBarTabs", ".chat_bar_list_item > .icon_close", function (a) {
             a.stopPropagation();
             var b = $(this).closest(".chat_bar_list_item");
             ogame.chat.closeChatBox(b.attr("data-playerid"), b.attr("data-associationid"));
             b.remove("open");
             c.updateChatBar()
-        }).on("keyup.chatBar", ".chat_box_textarea", function (a) {
+        }).on("keyup.chatBar.chatBarTabs", ".chat_box_textarea", function (a) {
             if ((a.ctrlKey || a.keyCode == 10) && a.keyCode == 13) {
                 a.preventDefault();
                 var b = $(this).val();
@@ -1185,7 +1195,7 @@ ogame.chat = {
                     c.submitChatBarMsg($(a.currentTarget), a.which, a.shiftKey, a.delegateTarget.scrollHeight)
                 }
             }
-        }).on("click.chatBar", ".chat_box_textarea", function (a) {
+        }).on("click.chatBar.chatBarTabs", ".chat_box_textarea", function (a) {
             ogame.messagemarker.toggle(ogame.messagemarker.action_remove, ogame.messagemarker.type_chattab, $(this).parent().parent().parent().data("playerid"));
             ogame.messagemarker.toggle(ogame.messagemarker.action_remove, ogame.messagemarker.type_chatbar, $(this).parent().parent().parent().data("playerid"));
             if ($(this).data("playerid") > 0) {

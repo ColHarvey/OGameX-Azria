@@ -24,7 +24,8 @@ const SOURCE = new URL('../../resources/js/ingame/chat.js', import.meta.url);
 function unMonde(cookie, charge) {
     const dom = new JSDOM(
         '<!doctype html><html><body><div id="chatBar" class="azria-chat">'
-        + '<ul class="chat_bar_list"><li id="chatBarPlayerList" class="chat_bar_pl_list_item"></li></ul>'
+        + '<ul class="chat_bar_list"><li id="chatBarPlayerList" class="chat_bar_pl_list_item">'
+        + '<div class="cb_playerlist_box" style="display: none;"></div></li></ul>'
         + '</div></body></html>',
         { runScripts: 'dangerously', url: 'https://exemple.test/overview' }
     );
@@ -216,4 +217,41 @@ test('ce que le jeu memorise est bien ce qu il relit', () => {
     const page = unMonde(monde.memoire.visibleChats);
     page.chat.restoreOpenChats();
     assert.equal(page.requetes.length, 2, 'La page suivante rouvre ce que la precedente avait ouvert.');
+});
+
+test('la barre initialisee deux fois ne dedouble pas ses gestionnaires', () => {
+    // Le gabarit appelle `initChatBar` une premiere fois pour poser les conversations des le chargement, puis une
+    // seconde quand la liste des contacts est arrivee. Les gestionnaires etant delegues sur `.chat_bar_list`, un
+    // `off` vise sur `html` n en retirait aucun : chaque clic partait deux fois, le panneau des contacts s ouvrait
+    // puis se refermait, et le bouton paraissait mort.
+    const monde = unMonde(undefined);
+    const $ = monde.window.$;
+
+    monde.chat.initChatBar(1);
+    const apresUn = $._data($('.chat_bar_list')[0], 'events').click.length;
+    monde.chat.initChatBar(1);
+    const apresDeux = $._data($('.chat_bar_list')[0], 'events').click.length;
+
+    assert.equal(apresDeux, apresUn, 'Le second appel remplace les gestionnaires, il ne les ajoute pas.');
+    assert.equal(
+        $._data(monde.window, 'events').resize.length,
+        1,
+        'Le redimensionnement aussi : un seul gestionnaire, quel que soit le nombre d appels.'
+    );
+
+    // Le retrait reste chez lui : `initMaximize()` pose son propre gestionnaire sur la meme liste, dans l espace
+    // `.chatBar`. Une reinitialisation de la barre ne doit pas l emporter.
+    let ailleurs = 0;
+    $('.chat_bar_list').on('click.chatBar', '.temoin-ailleurs', function () { ailleurs += 1; });
+    monde.chat.initChatBar(1);
+    $('.chat_bar_list').append('<li class="temoin-ailleurs"></li>');
+    $('.temoin-ailleurs').trigger('click');
+    assert.equal(ailleurs, 1, 'Le gestionnaire d un autre module survit a une reinitialisation de la barre.');
+
+    const panneau = $('.cb_playerlist_box');
+    assert.equal(panneau.is(':visible'), false, 'Le panneau part masque, comme le gabarit le pose.');
+    $('#chatBarPlayerList').trigger('click');
+    assert.equal(panneau.is(':visible'), true, 'Un clic ouvre les contacts.');
+    $('#chatBarPlayerList').trigger('click');
+    assert.equal(panneau.is(':visible'), false, 'Le clic suivant les referme.');
 });
