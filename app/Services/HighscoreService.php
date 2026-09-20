@@ -11,6 +11,7 @@ use OGame\Facades\AppUtil;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameObjects\CivilShipObjects;
 use OGame\GameObjects\MilitaryShipObjects;
+use OGame\Lifeforms\Score\LifeformScoreCalculator;
 use OGame\Models\Alliance;
 use OGame\Models\AllianceHighscore;
 use OGame\Models\FleetMission;
@@ -208,6 +209,13 @@ class HighscoreService
         // Get score for research levels of player
         $score += $player->getResearchScore();
 
+        // **Les formes de vie entrent dans le General, jamais dans l Economie ni dans la Recherche.**
+        // C est la structure du jeu officiel, etablie le 20 septembre 2026 par deux preuves independantes
+        // conservees au journal (§173) : la correction d un membre du conseil enterinee par un administrateur
+        // de jeu, et l arithmetique de l API publique du serveur `en1`, ou le Total moins l Economie, la
+        // Recherche et le Militaire laisse exactement le total Formes de vie.
+        $score += $this->getPlayerScoreLifeform($player);
+
         // Get score for fleets that are on missions (in transit)
         $score += $this->getPlayerFleetMissionScore($player);
 
@@ -228,6 +236,52 @@ class HighscoreService
     public function getPlayerScoreResearch(PlayerService $player): int
     {
         return $player->getResearchScore();
+    }
+
+    /**
+     * Les points des batiments de formes de vie — categorie `Lifeform Economy` du jeu officiel.
+     *
+     * La somme des ressources se fait sur toutes les planetes **avant** la division par mille : arrondir
+     * planete par planete perdrait un reste par corps, donc jusqu a neuf cent quatre-vingt-dix-neuf
+     * ressources a chaque fois.
+     */
+    public function getPlayerScoreLifeformEconomy(PlayerService $player): int
+    {
+        $calculateur = resolve(LifeformScoreCalculator::class);
+        $ressources = new Resources(0, 0, 0, 0);
+
+        foreach ($player->planets->all() as $planet) {
+            $ressources->add($calculateur->buildingResourcesOf($planet->getPlanetId()));
+        }
+
+        return (int)floor($ressources->sum() / 1000);
+    }
+
+    /**
+     * Les points des technologies de formes de vie — categorie `Lifeform Technology` du jeu officiel.
+     */
+    public function getPlayerScoreLifeformTechnology(PlayerService $player): int
+    {
+        $calculateur = resolve(LifeformScoreCalculator::class);
+        $ressources = new Resources(0, 0, 0, 0);
+
+        foreach ($player->planets->all() as $planet) {
+            $ressources->add($calculateur->technologyResourcesOf($planet->getPlanetId()));
+        }
+
+        return (int)floor($ressources->sum() / 1000);
+    }
+
+    /**
+     * Le total des formes de vie : la somme des deux, **en points**.
+     *
+     * C est bien la somme des points et non celle des ressources : l API officielle donne, sur un meme
+     * joueur, 37 413 544 349 et 35 989 655 471 pour un total de 73 403 207 171 — soit la somme des deux a
+     * 7 351 pres, l ecart venant de releves non simultanes.
+     */
+    public function getPlayerScoreLifeform(PlayerService $player): int
+    {
+        return $this->getPlayerScoreLifeformEconomy($player) + $this->getPlayerScoreLifeformTechnology($player);
     }
 
     /**
@@ -276,6 +330,9 @@ class HighscoreService
             'research' => $this->getPlayerScoreResearch($player),
             'military' => $this->getPlayerScoreMilitary($player),
             'honor' => resolve(HonorService::class)->pointsOf($player->getUser()),
+            'lifeform_economy' => $this->getPlayerScoreLifeformEconomy($player),
+            'lifeform_technology' => $this->getPlayerScoreLifeformTechnology($player),
+            'lifeform' => $this->getPlayerScoreLifeform($player),
         ];
     }
 

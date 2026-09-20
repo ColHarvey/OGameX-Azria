@@ -24,6 +24,12 @@ use Illuminate\Support\Carbon;
  * @property int $research_rank
  * @property int $military_rank
  * @property int|null $honor_rank
+ * @property int $lifeform_economy
+ * @property int $lifeform_technology
+ * @property int $lifeform
+ * @property int|null $lifeform_economy_rank
+ * @property int|null $lifeform_technology_rank
+ * @property int|null $lifeform_rank
  * @property int $military_built
  * @property int $military_destroyed
  * @property int $military_lost
@@ -66,6 +72,12 @@ use Illuminate\Support\Carbon;
     'research_rank',
     'military_rank',
     'honor_rank',
+    'lifeform_economy',
+    'lifeform_technology',
+    'lifeform',
+    'lifeform_economy_rank',
+    'lifeform_technology_rank',
+    'lifeform_rank',
     'military_built_rank',
     'military_destroyed_rank',
     'military_lost_rank',

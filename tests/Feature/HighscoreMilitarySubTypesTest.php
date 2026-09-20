@@ -61,14 +61,18 @@ class HighscoreMilitarySubTypesTest extends AccountTestCase
      * **Un sous-classement pas encore compte ne rend aucun classement**, ni pour les joueurs ni pour les alliances :
      * le message, et pas une ligne.
      *
-     * Les trois valeurs sont celles que les boutons envoyaient : construits, detruits, perdus.
+     * Les trois valeurs sont celles que les boutons envoyaient : construits (5), detruits (6), perdus (7).
+     *
+     * **Cette liste portait un 8 au lieu du 7**, et passait au vert parce que le type 8 n existait pas : le
+     * controleur rendait le meme message pour un type inconnu. Le sous-classement « perdus » n etait donc
+     * jamais couvert. L ajout des classements des formes de vie (type 8) l a revele le 20 septembre 2026.
      */
     public function testTheUncountedMilitaryStatisticsShowNoRankingAtAll(): void
     {
         $this->uneLigneDeClassement();
 
         foreach ([1, 2] as $categorie) {
-            foreach ([5, 6, 8] as $type) {
+            foreach ([5, 6, 7] as $type) {
                 $this->assertIndisponible($this->post('/ajax/highscore', ['category' => $categorie, 'type' => $type]), "Categorie $categorie, type $type.");
             }
         }

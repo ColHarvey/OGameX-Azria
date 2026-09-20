@@ -51,7 +51,11 @@ class HighscoreHonourRankingTest extends AccountTestCase
         $scores = resolve(HighscoreService::class)->getPlayerScores($joueur);
 
         // Les trois cumuls militaires n y sont pas : `MilitaryTallyPublisher` les publie avec leurs rangs.
-        $this->assertSame(['general', 'economy', 'research', 'military', 'honor'], array_keys($scores));
+        // Les trois classements des formes de vie, si : ils se calculent avec les autres (journal §173).
+        $this->assertSame(
+            ['general', 'economy', 'research', 'military', 'honor', 'lifeform_economy', 'lifeform_technology', 'lifeform'],
+            array_keys($scores)
+        );
         $this->assertSame(-37, $scores['honor']);
     }
 

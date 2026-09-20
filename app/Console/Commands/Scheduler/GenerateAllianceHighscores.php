@@ -38,7 +38,10 @@ class GenerateAllianceHighscores extends Command
                         COALESCE(SUM(highscores.economy), 0) as total_economy,
                         COALESCE(SUM(highscores.research), 0) as total_research,
                         COALESCE(SUM(highscores.military), 0) as total_military,
-                        COALESCE(SUM(highscores.honor), 0) as total_honor
+                        COALESCE(SUM(highscores.honor), 0) as total_honor,
+                        COALESCE(SUM(highscores.lifeform_economy), 0) as total_lifeform_economy,
+                        COALESCE(SUM(highscores.lifeform_technology), 0) as total_lifeform_technology,
+                        COALESCE(SUM(highscores.lifeform), 0) as total_lifeform
                     ')
                     ->first();
 
@@ -51,6 +54,11 @@ class GenerateAllianceHighscores extends Command
                         'research' => $memberScores->total_research ?? 0,
                         'military' => $memberScores->total_military ?? 0,
                         'honor' => $memberScores->total_honor ?? 0,
+                        // Les trois classements des formes de vie s additionnent comme les autres : la somme
+                        // des membres actuels. `lifeform` est deja la somme des deux autres chez chaque joueur.
+                        'lifeform_economy' => $memberScores->total_lifeform_economy ?? 0,
+                        'lifeform_technology' => $memberScores->total_lifeform_technology ?? 0,
+                        'lifeform' => $memberScores->total_lifeform ?? 0,
                     ]
                 );
 
