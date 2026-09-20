@@ -327,3 +327,110 @@ test('sur petit ecran, la barre n affiche qu une conversation mais n en oublie a
     assert.deepEqual(Array.from(apres.players), [7], 'La conversation privee reste memorisee, meme masquee.');
     assert.deepEqual(Array.from(apres.associations), [42], 'Et le canal d alliance aussi : l ecran ne decide pas de la memoire.');
 });
+test('sous le theme, montrer un onglet n ecrase pas son display', () => {
+    // Mesure du 20 septembre 2026, contacts retenus au niveau du reseau : tant que la liste des contacts n etait
+    // pas arrivee, l onglet etait une boite flex et ses icones etaient centrees sur le nom (ecart 0). Des qu elle
+    // arrivait, `setVisibilityState()` posait `style="display: inline"`, l onglet passait en bloc, et les icones
+    // se decalaient de 12,5 px. Un style en ligne bat n importe quelle feuille.
+    const monde = unMonde(undefined);
+    const $ = monde.window.$;
+    $('.chat_bar_list').append('<li class="chat_bar_list_item open" data-playerid="7"><div class="chat_box"></div></li>');
+    monde.window.visibleChats = { chatbar: false, players: [{ partnerId: 7 }], associations: [] };
+
+    monde.chat.setVisibilityState();
+
+    const onglet = $('.chat_bar_list_item[data-playerid="7"]')[0];
+    assert.equal(onglet.style.display, '', 'Sous le theme, le style en ligne est efface : la feuille decide.');
+    assert.equal(onglet.getAttribute('style') || '', '', 'Et il ne reste aucun reliquat.');
+});
+
+test('hors du theme, le comportement historique est garde', () => {
+    const monde = unMonde(undefined);
+    const $ = monde.window.$;
+    // Sans la classe d activation, la barre n est plus la barre Azria.
+    $('#chatBar').removeClass('azria-chat');
+    $('.chat_bar_list').append('<li class="chat_bar_list_item open" data-playerid="7"><div class="chat_box"></div></li>');
+    monde.window.visibleChats = { chatbar: false, players: [{ partnerId: 7 }], associations: [] };
+
+    monde.chat.setVisibilityState();
+
+    assert.equal(
+        $('.chat_bar_list_item[data-playerid="7"]')[0].style.display,
+        'inline',
+        'Hors theme, l onglet reprend le display en ligne historique : on ne change pas le jeu d origine.'
+    );
+});
+
+test('la memoire retient la presence, l ordre et l etat replie', () => {
+    const monde = unMonde(undefined);
+    const $ = monde.window.$;
+    // Trois conversations : deux ouvertes, une reduite (dans la barre, fenetre repliee).
+    $('.chat_bar_list').append('<li class="chat_bar_list_item open" data-playerid="7"><div class="chat_box" style="display: block;"></div></li>');
+    $('.chat_bar_list').append('<li class="chat_bar_list_item open" data-associationid="42"><div class="chat_box" style="display: block;"></div></li>');
+    $('.chat_bar_list').append('<li class="chat_bar_list_item" data-playerid="9"><div class="chat_box" style="display: none;"></div></li>');
+    // Et une fermee, qui ne doit rien laisser derriere elle.
+    $('.chat_bar_list').append('<li class="chat_bar_list_item outOfChatbar" data-playerid="11"><div class="chat_box" style="display: none;"></div></li>');
+
+    monde.chat.updateVisibleState();
+
+    const memoire = JSON.parse(monde.memoire.visibleChats);
+    assert.deepEqual(Array.from(memoire.players), [7, 9], 'La conversation reduite compte comme presente ; la fermee, non.');
+    assert.deepEqual(Array.from(memoire.associations), [42]);
+    assert.deepEqual(Array.from(memoire.ordre), ['j7', 'a42', 'j9'], 'L ordre de la barre est retenu tel quel.');
+    assert.deepEqual(Array.from(memoire.reduits), ['j9'], 'Et seule la reduite est marquee repliee.');
+});
+
+test('la memoire vive dit la meme chose que le cookie', () => {
+    // `setVisibilityState()` lit la variable `visibleChats`, que personne ne remettait a jour : une conversation
+    // ouverte avant l arrivee des contacts n y figurait pas et se faisait fermer des que la liste arrivait.
+    const monde = unMonde(undefined);
+    const $ = monde.window.$;
+    $('.chat_bar_list').append('<li class="chat_bar_list_item open" data-playerid="7"><div class="chat_box" style="display: block;"></div></li>');
+    $('.chat_bar_list').append('<li class="chat_bar_list_item open" data-associationid="42"><div class="chat_box" style="display: block;"></div></li>');
+
+    monde.chat.updateVisibleState();
+
+    const vive = monde.window.visibleChats;
+    assert.deepEqual(Array.from(vive.players).map((p) => p.partnerId), [7], 'Les joueurs, sous la forme que le lecteur attend.');
+    assert.deepEqual(Array.from(vive.associations), [42], 'Les alliances, sous la leur.');
+
+    // Et la consequence : une seconde passe ne ferme plus rien.
+    monde.chat.setVisibilityState();
+    assert.equal($('.chat_bar_list_item.outOfChatbar').length, 0, 'Rien n est ferme : la memoire vive connait ces conversations.');
+});
+
+test('les conversations restaurees reprennent leur ordre et leur etat', () => {
+    // `updateChatBar()` insere chaque onglet juste apres CONTACTS : restaurees dans l ordre, trois conversations
+    // ressortaient a l envers. Et une conversation reduite doit revenir reduite, pas ouverte.
+    const memoireDAvant = JSON.stringify({
+        chatbar: false,
+        players: [7, 9],
+        associations: [42],
+        ordre: ['j7', 'a42', 'j9'],
+        reduits: ['j9']
+    });
+    const monde = unMonde(memoireDAvant, [
+        { playerId: 7, playerName: 'Cap James Kirk', playerstatus: 'offline', chatItems: {}, chatItemsByDateAsc: [] },
+        { playerId: 9, playerName: 'Legor', playerstatus: 'offline', chatItems: {}, chatItemsByDateAsc: [] },
+        { associationId: 42, associationName: 'Les Pirates', playerstatus: 'online', chatItems: {}, chatItemsByDateAsc: [] }
+    ]);
+    const $ = monde.window.$;
+
+    monde.chat.restoreOpenChats();
+
+    const ordre = Array.from($('.chat_bar_list > li')).map((li) => (
+        li.id === 'chatBarPlayerList' ? 'CONTACTS'
+            : (li.getAttribute('data-playerid') ? 'j' + li.getAttribute('data-playerid')
+                : 'a' + li.getAttribute('data-associationid'))
+    ));
+    assert.deepEqual(ordre, ['CONTACTS', 'j7', 'a42', 'j9'], 'L ordre memorise est rendu, pas son inverse.');
+
+    const reduite = $('.chat_bar_list_item[data-playerid="9"]');
+    assert.equal(reduite.length, 1, 'La conversation reduite est bien dans la barre.');
+    assert.equal(reduite.hasClass('open'), false, 'Et elle y est repliee.');
+    assert.equal(reduite.hasClass('outOfChatbar'), false, 'Repliee n est pas fermee.');
+    assert.equal(reduite.children('.chat_box').is(':visible'), false, 'Sa fenetre reste fermee.');
+
+    const ouverte = $('.chat_bar_list_item[data-playerid="7"]');
+    assert.equal(ouverte.hasClass('open'), true, 'Les autres reviennent ouvertes.');
+});

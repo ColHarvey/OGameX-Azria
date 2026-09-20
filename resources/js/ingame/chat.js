@@ -46,6 +46,27 @@ ogame.chat = {
         return $('#chatBar').hasClass('azria-chat');
     },
     /**
+     * Rendre un onglet visible **sans ecraser le theme**.
+     *
+     * `display: inline` pose en style en ligne bat n importe quelle feuille. Sous le theme Azria l onglet est
+     * une boite flex qui centre ses icones sur le nom : l imposer en ligne les decalait de **12,5 px** et
+     * retrecissait l onglet de 121 a 100 px — mesure du 20 septembre 2026, faite en retenant la liste des
+     * contacts au niveau du reseau. Le decalage n apparaissait donc qu au moment ou les contacts arrivaient,
+     * c est-a-dire apres coup, ce qui le rendait difficile a attribuer.
+     *
+     * Effacer le style en ligne rend la main a la feuille. Hors theme, le comportement historique est garde.
+     */
+    montrerSansEcraserLeTheme: function (element) {
+        if (!element) {
+            return
+        }
+        if (ogame.chat.azriaActive()) {
+            element.style.display = "";
+            return
+        }
+        element.style.display = "inline"
+    },
+    /**
      * Un libelle du chat : la clef de `chatLoca` posee par le gabarit, sinon la clef elle-meme — visible, donc reperable.
      */
     loca: function (key) {
@@ -548,6 +569,7 @@ ogame.chat = {
                     }
                 }
             });
+            c.appliquerOrdreEtReduction();
             c.restoringOpenChats = false;
             return
         }
@@ -839,10 +861,10 @@ ogame.chat = {
                 if (r !== undefined && !n.isInJson(r, m)) {
                     n.closeChatBox(0, r)
                 } else {
-                    l.style.display = "inline";
+                    n.montrerSansEcraserLeTheme(l);
                     if ($(l).hasClass("open")) {
                         var p = $(l).find("div.chat_box")[0];
-                        p.style.display = "inline";
+                        n.montrerSansEcraserLeTheme(p);
                         n.updateCustomScrollbar($(l).find(".chat_box_ctn"), 1)
                     }
                 }
@@ -1240,7 +1262,7 @@ ogame.chat = {
                 // la fermait. On ne clique que si la fenetre n est pas visible.
                 if (!a.hasClass("open") || !a.children(".chat_box").is(":visible")) {
                     a.click();
-                    a[0].style.display = "inline"
+                    g.montrerSansEcraserLeTheme(a[0])
                 } else {
                     a.fadeTo("400", 0.3).fadeTo("400", 1)
                 }
@@ -1475,22 +1497,115 @@ ogame.chat = {
         if (ogame.chat.restoringOpenChats) {
             return
         }
-        var b = {chatbar: false, players: [], associations: []};
+        // **Presence, ordre et etat, separement** (releve de Codex, 20 septembre 2026). La memoire ne retenait que
+        // les conversations dont la FENETRE etait visible : une conversation reduite en sortait, et ne revenait pas
+        // a la page suivante. Elle ne retenait pas non plus l ordre, et la restauration les rendait a l envers.
+        //
+        // `players` et `associations` gardent leur forme : la page les lit (`OpenConversations::fromCookie`), et un
+        // cookie ecrit par une version precedente reste lisible. `ordre` et `reduits` s y ajoutent.
+        //
+        // `chatbar` reste faux : l onglet des contacts porte `chat_bar_pl_list_item`, que cette boucle n a jamais
+        // rencontre. On garde le champ pour ne pas changer la forme du cookie.
+        var b = {chatbar: false, players: [], associations: [], ordre: [], reduits: []};
         $(".chat_bar_list>.chat_bar_list_item").each(function () {
             var a = $(this);
-            if (a.attr("id") === "chatBarPlayerList" && a.children(".cb_playerlist_box").is(":visible")) {
-                b.chatbar = true
+            // Ferme : l onglet a quitte la barre. Reduit : il y reste, fenetre repliee.
+            if (a.hasClass("outOfChatbar")) {
+                return
+            }
+            var jeton = null;
+            if (a.data("playerid")) {
+                b.players.push(a.data("playerid"));
+                jeton = "j" + a.data("playerid")
             } else {
-                if (a.data("playerid") && a.children(".chat_box").is(":visible")) {
-                    b.players.push(a.data("playerid"))
-                } else {
-                    if (a.data("associationid") && a.children(".chat_box").is(":visible")) {
-                        b.associations.push(a.data("associationid"))
-                    }
+                if (a.data("associationid")) {
+                    b.associations.push(a.data("associationid"));
+                    jeton = "a" + a.data("associationid")
                 }
             }
+            if (jeton === null) {
+                return
+            }
+            b.ordre.push(jeton);
+            if (!a.children(".chat_box").is(":visible")) {
+                b.reduits.push(jeton)
+            }
         });
-        $.cookie("visibleChats", JSON.stringify(b), {expires: 7})
+        $.cookie("visibleChats", JSON.stringify(b), {expires: 7});
+        // **La memoire vive dit la meme chose que le cookie.** `setVisibilityState()` lit la variable
+        // `visibleChats`, que personne ne remettait a jour : une conversation ouverte avant l arrivee de la
+        // liste des contacts n y figurait pas, et se faisait FERMER des que cette liste arrivait — quelques
+        // secondes apres le chargement de la page (mesure du 20 septembre 2026, contacts retenus au reseau).
+        // Les deux lecteurs attendent des formes differentes : un objet par joueur, un nombre par alliance.
+        visibleChats = {
+            chatbar: b.chatbar,
+            players: $.map(b.players, function (identifiant) {
+                return {partnerId: identifiant}
+            }),
+            associations: b.associations.slice()
+        }
+    },
+    /**
+     * Remettre les onglets restaures dans l ordre memorise, et rendre a chacun son etat.
+     *
+     * `updateChatBar()` insere chaque onglet **juste apres CONTACTS** : restaurer trois conversations les rendait
+     * donc dans l ordre inverse de celui que le joueur avait (mesure : ouvertes j1, a1, j3, la barre rendait
+     * `CONTACTS > j3 > a1 > j1`).
+     *
+     * Un cookie ecrit par une version precedente ne porte ni `ordre` ni `reduits` : on ne touche alors a rien.
+     */
+    appliquerOrdreEtReduction: function () {
+        var c = ogame.chat;
+        if (typeof $.cookie !== "function") {
+            return
+        }
+        var brut = $.cookie("visibleChats");
+        if (!brut) {
+            return
+        }
+        var memoire = null;
+        try {
+            memoire = JSON.parse(brut)
+        } catch (e) {
+            return
+        }
+        if (!memoire || typeof memoire !== "object") {
+            return
+        }
+        var ongletDe = function (jeton) {
+            if (typeof jeton !== "string" || jeton.length < 2) {
+                return $()
+            }
+            var identifiant = parseInt(jeton.slice(1), 10);
+            if (isNaN(identifiant) || identifiant <= 0) {
+                return $()
+            }
+            var attribut = jeton.charAt(0) === "a" ? "associationid" : "playerid";
+            return $(".chat_bar_list > .chat_bar_list_item[data-" + attribut + "='" + identifiant + "']")
+        };
+        if ($.isArray(memoire.ordre)) {
+            var precedent = $("#chatBarPlayerList");
+            $.each(memoire.ordre, function (i, jeton) {
+                var onglet = ongletDe(jeton);
+                if (!onglet.length || !precedent.length) {
+                    return
+                }
+                onglet.insertAfter(precedent);
+                precedent = onglet
+            })
+        }
+        if ($.isArray(memoire.reduits)) {
+            $.each(memoire.reduits, function (i, jeton) {
+                var onglet = ongletDe(jeton);
+                if (!onglet.length) {
+                    return
+                }
+                onglet.children(".chat_box").hide();
+                onglet.removeClass("open")
+            })
+        }
+        c.updateChatBar();
+        c.azriaDeck()
     },
     showPlayerList: function (d) {
         var c = ogame.chat;
