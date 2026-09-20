@@ -74716,10 +74716,12 @@ ogame.chat = {
         }
         c.openChatsRestored = true;
         // L heritage d abord : sinon la lecture ci-dessous tomberait encore sur la memoire masquante.
-        c.oublierLesMemoiresDUnSousChemin();
+        // **Et le nettoyage dit si la page est encore a jour** : le serveur a lu le cookie AVANT lui, donc
+        // il a pu construire `chatRestore` depuis une memoire qui vient d etre ecartee.
+        var pageAJour = c.oublierLesMemoiresDUnSousChemin();
         // **La page porte deja l historique des conversations ouvertes** : on les pose sans une requete, donc sans
         // le battement pendant lequel la fenetre manquait a l ecran (constat de Keven, 19 septembre 2026).
-        if (typeof chatRestore !== 'undefined' && $.isArray(chatRestore) && chatRestore.length) {
+        if (pageAJour && typeof chatRestore !== 'undefined' && $.isArray(chatRestore) && chatRestore.length) {
             // Ce que la page restaure EST ce qui est ouvert : le reste du script le lit dans `visibleChats`, et
             // `setVisibilityState()` refermerait sinon ce qu on vient de poser.
             visibleChats = {chatbar: false, players: [], associations: []};
@@ -75720,6 +75722,11 @@ ogame.chat = {
      * chemin courant, **sauf la racine**, qui porte la memoire a garder. Sur `/resources` il n y a aucun
      * ancetre : le geste ne fait rien. Sur `/lifeforms/buildings` il en efface un.
      */
+    /**
+     * @return {boolean} vrai si la charge utile posee par la page (`chatRestore`) decrit encore la memoire qui
+     *                   fait autorite ; faux si le serveur a lu une memoire de sous-chemin qu on vient
+     *                   d ecarter, auquel cas l appelant doit reprendre par le cookie.
+     */
     oublierLesMemoiresDUnSousChemin: function () {
         var c = ogame.chat;
         var segments = window.location.pathname.split("/");
@@ -75735,7 +75742,7 @@ ogame.chat = {
             ancetres.push(chemin)
         }
         if (!ancetres.length) {
-            return
+            return true
         }
 
         // **On lit AVANT d effacer.** Le greffon rend le premier nom trouve, donc celui du chemin le plus
@@ -75754,50 +75761,56 @@ ogame.chat = {
         // Ce que la racine dit maintenant que le masque est tombe.
         var racine = (typeof $.cookie === "function") ? $.cookie("visibleChats") : null;
         if (racine === masquante) {
-            // Il n y avait pas de memoire de sous-chemin : rien n a ete efface qui comptait.
-            return
+            // Il n y avait pas de memoire de sous-chemin : le serveur a bien lu la racine.
+            return true
         }
 
-        // **LA POLITIQUE DE CONFLIT, et ce qu elle coute.** Deux memoires, aucun horodatage : rien ne dit
-        // laquelle est la plus recente. On tranche par la provenance — la racine est ecrite par TOUTES les
-        // pages, le sous-chemin seulement par les sous-pages d une famille. C est une **priorite
-        // deterministe**, pas une garantie de retrouver le dernier etat :
+        // **LA POLITIQUE DE CONFLIT — tranchee par Keven le 20 septembre 2026.**
         //
-        //   racine porteuse -> la racine gagne, le sous-chemin est perdu ;
-        //   racine absente, illisible ou vide, sous-chemin porteur -> le sous-chemin est adopte.
+        // « Une racine valide fait autorite, meme lorsqu elle est vide. Si j ai ferme mes conversations,
+        // elles ne doivent pas reapparaitre. »
         //
-        // **Ce que ce choix coute**, et il faut le dire :
-        //   - racine {j1} et sous-chemin {j9} : j9 est ABANDONNE, ce n est pas une fusion ;
-        //   - une conversation fermee sur une sous-page pendant que la racine en porte encore une autre :
-        //     la fermeture est oubliee, la conversation REAPPARAIT une fois ;
-        //   - une racine **volontairement vide** — le joueur a tout ferme sur une page ordinaire — est
-        //     traitee comme une memoire absente : le sous-chemin est adopte, donc des conversations
-        //     REAPPARAISSENT. C est le cas le plus discutable ; il est isole ci-dessous pour qu un changement
-        //     de politique tienne en une ligne, et il est epingle par un temoin qui le nomme.
+        // Le sous-chemin n est donc adopte que lorsqu il n y a **rien a contredire** :
+        //
+        //   racine porteuse           -> la racine gagne, sans fusion ;
+        //   racine VIDE               -> la racine gagne : une liste vide est une DECLARATION, pas une absence ;
+        //   racine absente ou illisible, sous-chemin porteur -> le sous-chemin est adopte.
+        //
+        // C est une priorite deterministe, **pas** une garantie de retrouver le dernier etat, et ce qu elle
+        // coute se dit : racine {j1} et sous-chemin {j9}, j9 est ABANDONNE — ce n est pas une fusion ; et une
+        // conversation ouverte uniquement depuis une sous-page est perdue si la racine porte quoi que ce soit
+        // de valide. Le choix assume : ne jamais contredire une fermeture volontaire.
         //
         // Tout cela ne dure qu une transition : ensuite il n y a plus qu une memoire, a la racine.
         var etatRacine = c.etatDeLaMemoire(racine);
         var etatMasquante = c.etatDeLaMemoire(masquante);
         if (etatMasquante !== "porteuse") {
-            // Rien a migrer : le sous-chemin etait absent, illisible, ou disait explicitement « rien d ouvert ».
-            return
+            // Le sous-chemin etait absent, illisible, ou disait « rien d ouvert ». Il n y a rien a migrer —
+            // mais le serveur l a lu, donc la charge de la page vient de lui : elle n est a jour que si la
+            // racine ne dit pas autre chose.
+            // Le sous-chemin n est pas porteur, donc la page n affiche rien. Elle est perimee exactement
+            // quand la racine, elle, a quelque chose a montrer.
+            return etatRacine !== "porteuse"
         }
-        if (etatRacine === "porteuse") {
-            // La racine a quelque chose a dire : elle gagne, et ce que portait le sous-chemin est perdu.
-            return
+        if (etatRacine !== "absente" && etatRacine !== "illisible") {
+            // La racine est VALIDE — porteuse ou vide — donc elle fait autorite, et ce que portait le
+            // sous-chemin est perdu. C est la decision de Keven : une fermeture ne se defait pas toute seule.
+            // Le serveur, lui, a lu le sous-chemin : sa charge utile est **perimee**, on le dit a l appelant.
+            return false
         }
-        // `absente`, `illisible` et `vide` menent ici au meme geste. **Les separer est une decision de jeu** :
-        // traiter `vide` comme une fermeture volontaire ferait perdre les conversations d un joueur qui
-        // n ouvre ses discussions que depuis une sous-page. Le jour ou Keven tranche, c est cette ligne.
-        $.cookie("visibleChats", masquante, c.MEMOIRE)
+        // Il ne reste que les deux cas ou la racine ne dit RIEN : elle n existe pas, ou elle est abimee.
+        // Le serveur a lu le sous-chemin, qu on vient d adopter : sa charge utile est donc la bonne.
+        $.cookie("visibleChats", masquante, c.MEMOIRE);
+
+        return true
     },
     /**
      * L etat d une memoire, **nomme** : `absente`, `illisible`, `vide` ou `porteuse`.
      *
-     * Les trois premiers menent aujourd hui au meme geste, mais ils ne disent pas la meme chose : un cookie
-     * absent est une memoire qui n existe pas, un cookie illisible une memoire abimee, et une liste vide une
-     * **declaration** — « rien n est ouvert ». Les distinguer ici permet de les eprouver separement et de
-     * changer la politique sans la redecouvrir.
+     * La distinction **decide** : un cookie absent est une memoire qui n existe pas, un cookie illisible une
+     * memoire abimee — ni l un ni l autre ne contredit quoi que ce soit. Une liste vide, elle, est une
+     * **declaration** : « rien n est ouvert ». Elle fait donc autorite comme une memoire porteuse, et c est
+     * ce qui empeche une conversation fermee de reapparaitre (decision de Keven, 20 septembre 2026).
      */
     etatDeLaMemoire: function (brut) {
         if (brut === null || brut === undefined || brut === "") {

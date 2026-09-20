@@ -540,14 +540,18 @@ test('sur une sous-page, une memoire masquante n empeche plus la restauration', 
  * conversations — un joueur qui n ouvre une discussion que depuis `/lifeforms/buildings` n ecrit qu elle. Les
  * quatre cas de divergence sont eprouves ici, avec la regle qui les tranche :
  *
- *   racine porteuse -> la racine gagne, **et ce que portait le sous-chemin est perdu** ;
- *   racine absente, illisible ou vide, sous-chemin porteur -> le sous-chemin est adopte ;
- *   sous-chemin non porteur -> rien a migrer ;
- *   pas de sous-chemin du tout -> rien a faire.
+ *   racine porteuse           -> la racine gagne, **et ce que portait le sous-chemin est perdu** ;
+ *   racine VIDE               -> la racine gagne aussi : une liste vide est une DECLARATION ;
+ *   racine absente ou illisible, sous-chemin porteur -> le sous-chemin est adopte ;
+ *   sous-chemin non porteur   -> rien a migrer.
+ *
+ * **Tranche par Keven le 20 septembre 2026** : « une racine valide fait autorite, meme lorsqu elle est vide.
+ * Si j ai ferme mes conversations, elles ne doivent pas reapparaitre. » Le sous-chemin n est donc adopte que
+ * lorsqu il n y a rien a contredire.
  *
  * **C est une priorite deterministe, pas une garantie de retrouver le dernier etat.** J avais ecrit « on ne
- * perd jamais, on ne ressuscite jamais » : c est faux dans les deux sens, et Keven l a releve. Les trois cas
- * ou cela se voit sont epingles plus bas, chacun nomme pour ce qu il coute.
+ * perd jamais, on ne ressuscite jamais » : c etait faux dans les deux sens, et Keven l a releve. Ce qui reste
+ * est epingle plus bas, nomme pour ce qu il coute.
  */
 function memoireDe(joueurs, alliances) {
     return JSON.stringify({
@@ -613,15 +617,17 @@ test('quand la racine porte des conversations, c est elle qui gagne', () => {
         'La racine est ecrite par toutes les pages : elle prime. Ce que portait le sous-chemin est perdu — c est le compromis.');
 });
 
-test('une racine vide cede la place au sous-chemin, une racine vide face a un sous-chemin vide ne change rien', () => {
+test('une racine VIDE fait autorite : le sous-chemin ne la remplace pas', () => {
     const vide = memoireDe([]);
 
-    const adopte = unMonde(undefined, [], 1280, 'https://exemple.test/lifeforms/buildings');
-    adopte.window.document.cookie = 'visibleChats=' + encodeURIComponent(vide) + '; path=/; max-age=604800';
-    adopte.window.document.cookie = 'visibleChats=' + encodeURIComponent(memoireDe([7])) + '; path=/lifeforms; max-age=604800';
-    adopte.chat.oublierLesMemoiresDUnSousChemin();
-    assert.deepEqual(cookiesNommes(adopte.window.document, 'visibleChats'), [memoireDe([7])],
-        'Une racine qui ne porte aucune conversation ne dit rien : le sous-chemin est adopte.');
+    // **Verdict inverse depuis la decision de Keven.** Une version precedente adoptait le sous-chemin ici :
+    // les conversations reapparaissaient apres une fermeture volontaire. Elles ne doivent pas.
+    const tenue = unMonde(undefined, [], 1280, 'https://exemple.test/lifeforms/buildings');
+    tenue.window.document.cookie = 'visibleChats=' + encodeURIComponent(vide) + '; path=/; max-age=604800';
+    tenue.window.document.cookie = 'visibleChats=' + encodeURIComponent(memoireDe([7])) + '; path=/lifeforms; max-age=604800';
+    tenue.chat.oublierLesMemoiresDUnSousChemin();
+    assert.deepEqual(cookiesNommes(tenue.window.document, 'visibleChats'), [vide],
+        'Une liste vide est une declaration : elle fait autorite, et rien ne reapparait.');
 
     const rien = unMonde(undefined, [], 1280, 'https://exemple.test/lifeforms/buildings');
     rien.window.document.cookie = 'visibleChats=' + encodeURIComponent(vide) + '; path=/; max-age=604800';
@@ -700,13 +706,12 @@ test('COMPROMIS, cas 2 : fermeture sur le sous-chemin, racine encore porteuse �
         'La racine prime : la fermeture faite sur la sous-page est oubliee, et j9 reapparaitra une fois.');
 });
 
-test('COMPROMIS, cas 3 : racine VOLONTAIREMENT vide — les conversations du sous-chemin REAPPARAISSENT', () => {
+test('DECISION : racine VOLONTAIREMENT vide — rien ne reapparait', () => {
     const monde = unMonde(undefined, [], 1280, 'https://exemple.test/lifeforms/buildings');
     const document = monde.window.document;
 
-    // Une racine vide n est pas une memoire manquante : c est une declaration, « rien n est ouvert ». Aujourd hui
-    // elle est traitee comme une absence, donc le sous-chemin gagne. C est le point le plus discutable de la
-    // politique, et le changer est une decision de jeu — ce temoin est la pour qu elle ne change pas en silence.
+    // Une racine vide n est pas une memoire manquante : c est une **declaration**, « rien n est ouvert ».
+    // Keven a tranche le 20 septembre 2026 : elle fait autorite. Une fermeture volontaire ne se defait pas.
     const videVolontaire = memoireDe([]);
     const sousChemin = memoireDe([7]);
     document.cookie = 'visibleChats=' + encodeURIComponent(videVolontaire) + '; path=/; max-age=604800';
@@ -717,11 +722,11 @@ test('COMPROMIS, cas 3 : racine VOLONTAIREMENT vide — les conversations du sou
 
     monde.chat.oublierLesMemoiresDUnSousChemin();
 
-    assert.deepEqual(cookiesNommes(document, 'visibleChats'), [sousChemin],
-        'Politique actuelle : une racine vide cede la place. Les conversations du sous-chemin reapparaissent.');
+    assert.deepEqual(cookiesNommes(document, 'visibleChats'), [videVolontaire],
+        'La racine vide fait autorite : les conversations fermees ne reapparaissent pas.');
 });
 
-test('les trois etats d une memoire sont distingues, meme s ils menent au meme geste', () => {
+test('les quatre etats d une memoire sont distingues, et deux seulement cedent la place', () => {
     const monde = unMonde(undefined, [], 1280, 'https://exemple.test/lifeforms/buildings');
     const etat = (brut) => monde.chat.etatDeLaMemoire(brut);
 
@@ -734,4 +739,125 @@ test('les trois etats d une memoire sont distingues, meme s ils menent au meme g
     assert.equal(etat(JSON.stringify({chatbar: false})), 'vide', 'Listes manquantes : rien d ouvert.');
     assert.equal(etat(memoireDe([7])), 'porteuse', 'Une conversation privee.');
     assert.equal(etat(memoireDe([], [42])), 'porteuse', 'Un canal d alliance compte autant.');
+});
+
+test('DECISION : seules une racine absente ou illisible cedent la place', () => {
+    const sousChemin = memoireDe([7]);
+
+    // 1. Racine absente : il n y a rien a contredire, le sous-chemin est adopte.
+    const absente = unMonde(undefined, [], 1280, 'https://exemple.test/lifeforms/buildings');
+    absente.window.document.cookie = 'visibleChats=' + encodeURIComponent(sousChemin) + '; path=/lifeforms; max-age=604800';
+    absente.chat.oublierLesMemoiresDUnSousChemin();
+    absente.window.document.cookie = 'visibleChats=; expires=Thu, 01 Jan 1970 00:00:01 GMT; path=/lifeforms';
+    assert.deepEqual(cookiesNommes(absente.window.document, 'visibleChats'), [sousChemin],
+        'Racine absente : le sous-chemin est adopte.');
+
+    // 2. Racine illisible : une memoire abimee ne contredit rien non plus.
+    const abimee = unMonde(undefined, [], 1280, 'https://exemple.test/lifeforms/buildings');
+    abimee.window.document.cookie = 'visibleChats=' + encodeURIComponent('{abime') + '; path=/; max-age=604800';
+    abimee.window.document.cookie = 'visibleChats=' + encodeURIComponent(sousChemin) + '; path=/lifeforms; max-age=604800';
+    assert.equal(abimee.chat.etatDeLaMemoire('{abime'), 'illisible', 'Premisse : la racine est bien illisible.');
+    abimee.chat.oublierLesMemoiresDUnSousChemin();
+    abimee.window.document.cookie = 'visibleChats=; expires=Thu, 01 Jan 1970 00:00:01 GMT; path=/lifeforms';
+    assert.deepEqual(cookiesNommes(abimee.window.document, 'visibleChats'), [sousChemin],
+        'Racine illisible : le sous-chemin est adopte, et il remplace la memoire abimee.');
+});
+
+function aLog(joueur) {
+    return {
+        playerId: joueur,
+        playerName: 'Joueur ' + joueur,
+        playerstatus: 'on',
+        chatItems: {},
+        chatItemsByDateAsc: []
+    };
+}
+
+/*
+ * **Le serveur lit le cookie AVANT le script : sa charge utile peut etre perimee.**
+ *
+ * Mesure au navigateur, 20 septembre 2026 : dans les cas ou la racine gagne, les cookies etaient corrects mais la
+ * PREMIERE page affichait encore les conversations du sous-chemin — le serveur avait construit `chatRestore` a
+ * partir de la memoire masquante, avant tout nettoyage. Une conversation fermee reapparaissait donc pour une page,
+ * ce que la decision de Keven interdit.
+ *
+ * `oublierLesMemoiresDUnSousChemin()` rend desormais si la page est encore digne de foi, et `restoreOpenChats()`
+ * ignore la charge utile quand elle ne l est pas.
+ */
+test('la charge utile de la page est PERIMEE quand la racine gagne : elle est ignoree', () => {
+    // La page porte j1 — ce que le serveur a lu du cookie masquant — alors que la racine dit j3.
+    const monde = unMonde(undefined, [aLog(1)], 1280, 'https://exemple.test/lifeforms/buildings');
+    const document = monde.window.document;
+    document.cookie = 'visibleChats=' + encodeURIComponent(memoireDe([3])) + '; path=/; max-age=604800';
+    document.cookie = 'visibleChats=' + encodeURIComponent(memoireDe([1])) + '; path=/lifeforms; max-age=604800';
+
+    monde.chat.restoreOpenChats();
+
+    // La charge utile (j1) est ignoree, et c est j3 — la racine — qui est redemande.
+    assert.equal(monde.requetes.length, 1, 'La reprise doit passer par le cookie de la racine, pas par la page.');
+    assert.equal(monde.requetes[0].donnees.playerId, 3, 'C est la conversation de la racine qui repart.');
+    assert.equal(monde.requetes[0].donnees.updateUnread, 0, 'Restaurer n est pas lire.');
+    assert.equal(monde.chat.data[1], undefined, 'La conversation perimee n a pas ete absorbee.');
+});
+
+test('une racine VIDE ignore aussi la charge utile : rien ne reapparait, pas meme pour une page', () => {
+    const monde = unMonde(undefined, [aLog(1)], 1280, 'https://exemple.test/lifeforms/buildings');
+    const document = monde.window.document;
+    document.cookie = 'visibleChats=' + encodeURIComponent(memoireDe([])) + '; path=/; max-age=604800';
+    document.cookie = 'visibleChats=' + encodeURIComponent(memoireDe([1])) + '; path=/lifeforms; max-age=604800';
+
+    monde.chat.restoreOpenChats();
+
+    assert.equal(monde.requetes.length, 0, 'Une racine vide fait autorite : rien n est redemande.');
+    assert.equal(monde.window.$('.chat_bar_list > li[data-playerid]').length, 0, 'Et rien n est pose a l ecran.');
+});
+
+test('sans memoire masquante, la charge utile de la page reste employee', () => {
+    // Premisse du couple precedent : sans cookie de sous-chemin, la page sert toujours, et sans aucune requete.
+    const monde = unMonde(undefined, [aLog(1)], 1280, 'https://exemple.test/resources');
+    monde.window.document.cookie = 'visibleChats=' + encodeURIComponent(memoireDe([1])) + '; path=/; max-age=604800';
+
+    monde.chat.restoreOpenChats();
+
+    assert.equal(monde.requetes.length, 0, 'La page porte deja l historique : aucune requete.');
+    assert.equal(monde.window.$('.chat_bar_list > li[data-playerid="1"]').length, 1, 'Et la conversation est posee.');
+});
+
+test('sous-chemin VIDE et racine porteuse : la page arrive vide, mais la racine est restauree', () => {
+    // Le serveur a lu le cookie du sous-chemin — vide — donc `chatRestore` est vide. Sans le drapeau de
+    // peremption, la restauration s arreterait la et la racine serait ignoree pour cette page.
+    const monde = unMonde(undefined, [], 1280, 'https://exemple.test/lifeforms/buildings');
+    const document = monde.window.document;
+    document.cookie = 'visibleChats=' + encodeURIComponent(memoireDe([3])) + '; path=/; max-age=604800';
+    document.cookie = 'visibleChats=' + encodeURIComponent(memoireDe([])) + '; path=/lifeforms; max-age=604800';
+
+    monde.chat.restoreOpenChats();
+
+    assert.equal(monde.requetes.length, 1, 'La conversation de la racine doit etre redemandee.');
+    assert.equal(monde.requetes[0].donnees.playerId, 3);
+    assert.equal(monde.requetes[0].donnees.updateUnread, 0, 'Restaurer n est pas lire.');
+});
+
+test('sous-chemin ILLISIBLE et racine porteuse : la racine est restauree elle aussi', () => {
+    const monde = unMonde(undefined, [], 1280, 'https://exemple.test/lifeforms/buildings');
+    const document = monde.window.document;
+    document.cookie = 'visibleChats=' + encodeURIComponent(memoireDe([3])) + '; path=/; max-age=604800';
+    document.cookie = 'visibleChats=' + encodeURIComponent('{abime') + '; path=/lifeforms; max-age=604800';
+
+    monde.chat.restoreOpenChats();
+
+    assert.equal(monde.requetes.length, 1, 'Une memoire de sous-chemin abimee ne doit pas effacer la racine.');
+    assert.equal(monde.requetes[0].donnees.playerId, 3);
+});
+
+test('sous-chemin vide ET racine vide : rien a restaurer, et aucune requete inutile', () => {
+    // Premisse du couple precedent : quand les deux disent « rien d ouvert », la page vide est la bonne reponse.
+    const monde = unMonde(undefined, [], 1280, 'https://exemple.test/lifeforms/buildings');
+    const document = monde.window.document;
+    document.cookie = 'visibleChats=' + encodeURIComponent(memoireDe([])) + '; path=/; max-age=604800';
+    document.cookie = 'visibleChats=' + encodeURIComponent(memoireDe([])) + '; path=/lifeforms; max-age=604800';
+
+    monde.chat.restoreOpenChats();
+
+    assert.equal(monde.requetes.length, 0, 'Deux memoires vides : rien ne doit partir sur le reseau.');
 });
