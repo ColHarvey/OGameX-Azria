@@ -3,6 +3,7 @@
 namespace Tests\Feature\Lifeforms;
 
 use OGame\Lifeforms\Catalogue\LifeformCatalogue;
+use OGame\Lifeforms\Catalogue\LifeformFormulas;
 use OGame\Lifeforms\Catalogue\LifeformKind;
 use OGame\Lifeforms\Catalogue\LifeformObject;
 use OGame\Lifeforms\Services\LifeformLevels;
@@ -13,45 +14,53 @@ use Tests\AccountTestCase;
 /**
  * **Jusqu ou les points des formes de vie restent-ils exacts ?**
  *
- * Question posee par Keven le 20 septembre 2026, apres avoir vu le classement General d un compte de
- * demonstration passer a 15 746 039 171 753 points. Le nombre est enorme mais legitime : une technologie de
- * niveau 100 coute reellement cela. Restait a savoir si la chaine numerique le porte sans perdre de points en
- * silence bien avant sa limite.
+ * ## Une conclusion que j avais donnee, et qui etait fausse
  *
- * ## Ce que la chaine porte, maillon par maillon
+ * J avais ecrit : « l ecart du flottant vaut quelques dizaines de ressources, donc il ne deplace aucun point, qui
+ * en vaut mille ». Keven a montre que c est faux en general : avec une division entiere, **+1 ressource sur
+ * 999 999 fait passer de 999 a 1 000 points**. Une erreur bien inferieure a mille suffit des qu elle traverse une
+ * frontiere. Le temoin exact d un niveau prouvait ce niveau-la, rien d autre.
  *
- * - **Les colonnes** : `bigInteger` dans `highscores` et `alliance_highscores`, soit 64 bits signes — jusqu a
- *   9,22 x 10^18. Ce n est pas le maillon faible.
- * - **PHP** : `Resource` garde sa valeur en `float` (`protected float $rawValue`). Tout le calcul est donc
- *   flottant, des le cout d un niveau et non seulement a la division. C est **lui** le maillon faible.
- * - **L agregation des alliances** : `SUM(...)` en SQL sur des entiers, exacte.
- * - **Le tri et les rangs** : `orderBy` en SQL sur les memes colonnes, exacts.
- * - **L affichage** : la page recoit une chaine deja formatee (`points_formatted`). Le navigateur ne recoit
- *   jamais ces scores comme des nombres JavaScript, donc aucune perte cote client.
+ * Le balayage refait sur **tout le catalogue** le confirme : 2 811 divergences de points sur 12 000 combinaisons
+ * d un objet seul, 952 sur 4 000 cumuls de plusieurs objets et corps.
  *
- * ## La limite, mesuree
+ * ## La chaine, maillon par maillon
  *
- * Sur `intergalactic_envoys` (5000/2500/500, facteur 1,3), la somme flottante reste **exacte jusqu au niveau 86**.
- * Le premier ecart apparait au **niveau 87**, quand le cumul depasse 2^53 : il vaut **une unite de ressource**. Au
- * niveau 100, le cumul atteint 6,39 x 10^17 et l ecart vaut **34 unites**.
+ * - **Colonnes** : `bigInteger` dans les deux tables — 64 bits signes, jusqu a 9 223 372 036 854 775 807.
+ * - **PHP** : `Resource` garde sa valeur en `float`. C est le maillon faible, et une somme SQL exacte **ne repare
+ *   pas** une approximation deja faite ici.
+ * - **Agregation, tri, rangs** : en SQL sur ces colonnes, exacts — mais sur des valeurs deja approchees en amont.
+ * - **Affichage** : la page recoit une chaine deja formatee ; le navigateur ne recoit jamais ces scores comme des
+ *   nombres JavaScript.
  *
- * **Mais un point vaut mille ressources.** Un ecart de 34 ne deplace donc aucun point. Pour qu un seul point soit
- * faux, l erreur relative du flottant (2^-52) devrait atteindre 1000 unites, ce qui demande un cumul d environ
- * 4,5 x 10^18 ressources — au-dela de quoi on bute de toute facon sur `PHP_INT_MAX` et sur la colonne. La
- * conclusion tient en une phrase : **on ne perd aucun point avant de toucher la limite de la base elle-meme.**
+ * ## Les trois seuils, mesures
+ *
+ * 1. **Sous 2^53 de ressources cumulees** (9 007 199 254 740 992, soit environ 9,0 x 10^12 points) : exact. C est
+ *    la zone de tout joueur reel — le meilleur joueur du serveur officiel `en1` porte 35 989 655 471 points en
+ *    Lifeform Technology, soit deux cent cinquante fois moins.
+ * 2. **Au-dela**, un point peut manquer ou etre en trop. Cas reproductible du catalogue : `research_centre` au
+ *    niveau 93, cumul 649 537 492 774 994 001, **reste 1** — le flottant perd cette unite et rend **un point de
+ *    moins**.
+ * 3. **Au-dela de `PHP_INT_MAX` pour un SEUL niveau**, la formule du jeu elle-meme casse : `academy_of_sciences`
+ *    niveau 60 coute a lui seul 11 846 978 929 429 620 736 en metal, et le `(int)` de `LifeformFormulas::cost()` deborde en emettant
+ *    un avertissement PHP. `(int)9.3e18` rend −9 146 744 073 709 551 616. **Ce defaut precede cette tranche** : il
+ *    vit dans le calcul du cout, donc dans les devis et les files, pas seulement dans le classement. Il est
+ *    signale, pas corrige : toucher a la formule du jeu demande l accord de Keven.
  */
 class LifeformHighscorePrecisionTest extends AccountTestCase
 {
     /**
-     * Le cout cumule exact, somme en ENTIER — la reference contre laquelle le chemin flottant est juge.
+     * Le cout cumule **exact**, en arithmetique decimale : l entier PHP lui-meme deborde sur ces valeurs.
+     *
+     * @return numeric-string Une somme de couts, toujours un nombre decimal sans signe.
      */
-    private function cumulEntier(LifeformObject $objet, int $niveau): int
+    private function cumulExact(LifeformObject $objet, int $niveau): string
     {
-        $total = 0;
+        $total = '0';
 
         for ($n = 1; $n <= $niveau; $n++) {
             foreach ([$objet->metal, $objet->crystal, $objet->deuterium] as $base) {
-                $total += (int)floor($base * ($objet->costFactor ** ($n - 1)) * $n);
+                $total = bcadd($total, sprintf('%.0f', floor($base * ($objet->costFactor ** ($n - 1)) * $n)), 0);
             }
         }
 
@@ -66,6 +75,11 @@ class LifeformHighscorePrecisionTest extends AccountTestCase
         return $joueur;
     }
 
+    private function poser(int $objectId, LifeformKind $genre, int $niveau): void
+    {
+        resolve(LifeformLevels::class)->setLevel($this->planetService->getPlanetId(), $genre, $objectId, $niveau);
+    }
+
     /**
      * **Sous 2^53, l exactitude est totale** — c est la zone ou vivent tous les joueurs reels.
      */
@@ -74,74 +88,69 @@ class LifeformHighscorePrecisionTest extends AccountTestCase
         $techno = LifeformCatalogue::byId(11201);
         $niveau = 60;
 
-        $cumul = $this->cumulEntier($techno, $niveau);
-        $this->assertLessThan(2 ** 53, $cumul, 'Premisse : ce niveau doit rester sous la limite du flottant.');
+        $cumul = $this->cumulExact($techno, $niveau);
+        $this->assertSame(-1, bccomp($cumul, (string)(2 ** 53), 0), 'Premisse : ce cumul doit rester sous 2^53.');
 
-        resolve(LifeformLevels::class)->setLevel($this->planetService->getPlanetId(), LifeformKind::Technology, $techno->id, $niveau);
+        $this->poser($techno->id, LifeformKind::Technology, $niveau);
 
         $this->assertSame(
-            intdiv($cumul, 1000),
-            resolve(HighscoreService::class)->getPlayerScoreLifeformTechnology($this->joueur()),
-            'Sous 2^53, le chemin flottant rend exactement la somme entiere.'
+            bcdiv($cumul, '1000', 0),
+            (string)resolve(HighscoreService::class)->getPlayerScoreLifeformTechnology($this->joueur()),
+            'Sous 2^53, le chemin flottant rend exactement la somme decimale.'
         );
     }
 
     /**
-     * **Au-dela de 2^53, la somme des RESSOURCES derive — mais pas le nombre de POINTS.**
-     *
-     * L essai ne demande pas au code d etre exact en ressources : il demande que la derive reste mille fois plus
-     * petite que la valeur d un point, donc invisible sur le classement. C est la garantie utile.
+     * **Au-dela de 2^53, un point PEUT manquer.** Ce temoin epingle le cas mesure, pour que la limite reelle ne
+     * bouge pas en silence : si la chaine devient exacte un jour, il tombera et il faudra le redire.
      */
-    public function testAboveTwoToTheFiftyThreeTheDriftNeverMovesASinglePoint(): void
+    public function testAboveTwoToTheFiftyThreeASinglePointCanBeLost(): void
     {
-        $techno = LifeformCatalogue::byId(11201);
-        $niveau = 100;
+        $batiment = LifeformCatalogue::byId(11103);   // research_centre
+        $niveau = 93;
 
-        $cumul = $this->cumulEntier($techno, $niveau);
-        $this->assertGreaterThan(2 ** 53, $cumul, 'Premisse : ce niveau doit depasser la limite du flottant.');
+        $cumul = $this->cumulExact($batiment, $niveau);
+        $this->assertSame('1', bcmod($cumul, '1000'), 'Premisse : ce cumul tombe a une unite d une frontiere de mille.');
+        $this->assertSame(1, bccomp($cumul, (string)(2 ** 53), 0), 'Premisse : il depasse 2^53.');
 
-        resolve(LifeformLevels::class)->setLevel($this->planetService->getPlanetId(), LifeformKind::Technology, $techno->id, $niveau);
+        $this->poser($batiment->id, LifeformKind::Building, $niveau);
 
-        $rendu = resolve(HighscoreService::class)->getPlayerScoreLifeformTechnology($this->joueur());
-        $attendu = intdiv($cumul, 1000);
+        $attendu = bcdiv($cumul, '1000', 0);
+        $rendu = (string)resolve(HighscoreService::class)->getPlayerScoreLifeformEconomy($this->joueur());
 
         $this->assertSame(
-            $attendu,
-            $rendu,
-            'La derive du flottant est de quelques dizaines de ressources : elle ne deplace aucun point, '
-            . 'qui en vaut mille. Si ce temoin tombe, la limite reelle a change et il faut la remesurer.'
+            '-1',
+            bcsub($rendu, $attendu, 0),
+            'Le flottant perd l unite qui franchissait la frontiere : un point de moins. '
+            . 'Attendu ' . $attendu . ', rendu ' . $rendu . '.'
         );
-
-        // Et l on dit ou se situe la valeur par rapport aux deux plafonds qui comptent.
-        $this->assertLessThan(PHP_INT_MAX, $cumul, 'Le cumul reste representable en entier PHP.');
-        $this->assertLessThan(9223372036854775807, $rendu * 1000, 'Et la colonne bigInteger le porte.');
     }
 
     /**
-     * Plusieurs objets a haut niveau sur la meme planete : la somme reste juste, sans double comptage ni
-     * accumulation d erreurs.
+     * **La formule du cout elle-meme deborde de l entier a tres haut niveau.** Defaut anterieur a cette tranche :
+     * il vit dans `LifeformFormulas::cost()`, donc partout ou un cout est calcule. On le constate sans le corriger.
      */
-    public function testSeveralHighLevelObjectsStillAddUpExactly(): void
+    public function testTheCostFormulaItselfOverflowsTheIntegerAtVeryHighLevels(): void
     {
-        $niveaux = resolve(LifeformLevels::class);
-        $planete = $this->planetService->getPlanetId();
+        $objet = LifeformCatalogue::byId(11104);   // academy_of_sciences, facteur 1,7
+        $niveau = 60;
 
-        $attendu = 0;
-        foreach ([[11201, 70], [11202, 65], [11203, 60]] as [$id, $niveau]) {
-            if (!LifeformCatalogue::has($id)) {
-                continue;
-            }
-            $objet = LifeformCatalogue::byId($id);
-            $niveaux->setLevel($planete, LifeformKind::Technology, $id, $niveau);
-            $attendu += $this->cumulEntier($objet, $niveau);
-        }
+        $brut = $objet->metal * ($objet->costFactor ** ($niveau - 1)) * $niveau;
+        $this->assertGreaterThan(
+            (float)PHP_INT_MAX,
+            $brut,
+            'Premisse : a ce niveau, le cout d un seul palier depasse deja la capacite d un entier.'
+        );
 
-        $this->assertGreaterThan(0, $attendu, 'Premisse : au moins un objet du catalogue doit avoir ete pose.');
+        // L avertissement « not representable as an int » est le symptome meme : on le laisse passer pour lire la
+        // valeur rendue, qui n est plus celle du calcul.
+        $cout = @LifeformFormulas::cost($objet, $niveau, 0.0);
 
-        $this->assertSame(
-            intdiv($attendu, 1000),
-            resolve(HighscoreService::class)->getPlayerScoreLifeformTechnology($this->joueur()),
-            'Trois technologies a haut niveau se somment exactement.'
+        $this->assertNotSame(
+            sprintf('%.0f', floor($brut)),
+            sprintf('%.0f', $cout->metal->get()),
+            'Le cout rendu n est plus celui du calcul : la conversion en entier a deborde. '
+            . 'Ce constat est signale a Keven, pas corrige — la formule du jeu ne se touche pas sans son accord.'
         );
     }
 }

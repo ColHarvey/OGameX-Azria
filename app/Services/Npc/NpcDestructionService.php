@@ -192,6 +192,10 @@ class NpcDestructionService
      * Une base peut tomber pendant que sa flotte est en raid — c'est meme le moment ou elle
      * est le plus vulnerable, et un joueur attentif le sait. L'equipage parti n'a alors plus
      * de monde ou revenir : ses missions sont soldees sur place.
+     *
+     * **Ses missions, et celles-la seules.** Voir le commentaire du filtre ci-dessous : la portee
+     * de cette requete etait le compte entier, ce qui devient faux des que l essaimage donne
+     * plusieurs corps a un pirate. `NpcDestructionScopeTest` le tient.
      */
     private function groundOutboundFleets(PlanetService $planet): void
     {
@@ -201,8 +205,21 @@ class NpcDestructionService
             return;
         }
 
+        // **Seulement les flottes de CE corps** (defaut repere par Keven, 20 septembre 2026). La requete
+        // portait sur tout le compte : tant qu une base pirate est seule, cela revient au meme, mais
+        // l essaimage donne plusieurs colonies a un meme compte — et la chute de l une soldait alors, en
+        // silence, les flottes des autres, encore vivantes.
+        //
+        // Les deux sens comptent : une flotte PARTIE d ici n a plus de port d attache, et une flotte qui
+        // RENTRE ici viserait une planete purgee. Une flotte d un joueur visant cette base n est pas
+        // touchee : la requete reste bornee au compte proprietaire.
+        $corps = $planet->getPlanetId();
+
         FleetMission::where('user_id', $owner->getId())
             ->where('processed', 0)
+            ->where(static function ($requete) use ($corps): void {
+                $requete->where('planet_id_from', $corps)->orWhere('planet_id_to', $corps);
+            })
             ->update(['processed' => 1]);
     }
 }
