@@ -177,6 +177,7 @@ return [
         'requirements_unmet' => 'The requirements are not met.',
         'population_unmet' => 'The planet population is too small for this level.',
         'insufficient_resources' => 'Not enough resources.',
+        'cost_not_representable' => 'This level cannot be built: its cost exceeds what the game can count.',
         'not_in_queue' => 'This work is no longer in the queue.',
         'slot_locked' => 'This slot is not open yet: the tier population is too small.',
         'slot_taken' => 'This slot is already taken, or this technology already sits elsewhere.',

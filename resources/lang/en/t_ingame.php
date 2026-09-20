@@ -1535,6 +1535,7 @@ return [
         'lifeform' => 'Lifeforms',
         'lifeform_economy' => 'Lifeform economy',
         'lifeform_technology' => 'Lifeform technology',
+        'lifeform_share' => 'Of which lifeforms: :points points',
         'cumulative_since' => 'Cumulative since :date',
         'refreshed_at' => 'Updated :date',
         'alliance_sum_current_members' => 'Sum of current members: it can decrease when a member leaves the alliance.',

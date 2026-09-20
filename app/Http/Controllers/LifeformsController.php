@@ -160,7 +160,13 @@ final class LifeformsController extends OGameController
             $niveau = $niveaux[$batiment->id] ?? 0;
             $dejaEnFile = $enFile->where('object_id', $batiment->id)->count();
             $cible = $niveau + $dejaEnFile + 1;
-            $devis = LifeformQuote::for($batiment, $cible, $niveaux, $planet->getObjectLevel('robot_factory'), $planet->getObjectLevel('nano_factory'), $vitesses);
+            // **Le cout du prochain niveau peut ne plus se representer** (garde de `LifeformFormulas::cost()`).
+            // La page continue alors de s afficher : la tuile porte son niveau, n offre pas l action, et le dit.
+            try {
+                $devis = LifeformQuote::for($batiment, $cible, $niveaux, $planet->getObjectLevel('robot_factory'), $planet->getObjectLevel('nano_factory'), $vitesses);
+            } catch (LifeformRefused) {
+                $devis = null;
+            }
             $tuiles[] = [
                 'object' => $batiment,
                 'title' => __('t_lifeforms.' . $batiment->machineName . '.title'),
@@ -171,7 +177,8 @@ final class LifeformsController extends OGameController
                 'available' => LifeformAvailability::isAvailable($batiment),
                 'requirements_met' => $this->queue->requirementsMet($batiment, $niveauxAvecFile),
                 'population_met' => $this->queue->populationMet($batiment, $cible, $etat),
-                'enough_resources' => $planet->hasResources($devis->price),
+                'enough_resources' => $devis !== null && $planet->hasResources($devis->price),
+                'cost_representable' => $devis !== null,
                 'queue_full' => $filePleine,
                 'vacation' => $vacances,
             ];
@@ -220,7 +227,13 @@ final class LifeformsController extends OGameController
         $enCours = $enFile->firstWhere('status', 'running');
         $cible = $niveau + $enFile->where('object_id', $objet->id)->count() + 1;
         $vitesses = $this->revisions->live();
-        $devis = LifeformQuote::for($objet, $cible, $niveaux, $planet->getObjectLevel('robot_factory'), $planet->getObjectLevel('nano_factory'), $vitesses);
+        try {
+            $devis = LifeformQuote::for($objet, $cible, $niveaux, $planet->getObjectLevel('robot_factory'), $planet->getObjectLevel('nano_factory'), $vitesses);
+        } catch (LifeformRefused $refus) {
+            // Le panneau existe pour proposer l ordre : sans devis il n y a rien a proposer. Il rend le refus,
+            // la page derriere lui reste entiere.
+            return response()->json(['success' => false, 'message' => __($refus->translationKey())], 409);
+        }
         $populationExigee = LifeformFormulas::populationRequired($objet, $cible);
 
         // Les prerequis se jugent avec la file, comme le service les juge (audit, journal §155.27).
@@ -375,8 +388,13 @@ final class LifeformsController extends OGameController
                 $peutRechercher = false;
                 if ($objet !== null && $ouvert && $centreOuvert && !$filePleine && !$vacances && !$enCoursIci) {
                     $cible = $niveau + $enFile->where('object_id', $objet->id)->count() + 1;
-                    $devis = LifeformQuote::for($objet, $cible, $niveaux, 0, 0, $vitesses, $essaim);
-                    $peutRechercher = $planet->hasResources($devis->price);
+                    try {
+                        $devis = LifeformQuote::for($objet, $cible, $niveaux, 0, 0, $vitesses, $essaim);
+                        $peutRechercher = $planet->hasResources($devis->price);
+                    } catch (LifeformRefused) {
+                        // Cout non representable : l action ne s offre pas, la page s affiche quand meme.
+                        $peutRechercher = false;
+                    }
                 }
                 $lignes[] = [
                     'slot' => $slot,
@@ -525,7 +543,11 @@ final class LifeformsController extends OGameController
         $enFile = $this->queue->queued($planet->getPlanetId(), LifeformKind::Technology);
         $enCours = $enFile->firstWhere('status', 'running');
         $cible = $niveau + $enFile->where('object_id', $objet->id)->count() + 1;
-        $devis = LifeformQuote::for($objet, $cible, $niveaux, 0, 0, $vitesses, $this->resolver->lifeformResearchTimeReductionOf($player->getId()));
+        try {
+            $devis = LifeformQuote::for($objet, $cible, $niveaux, 0, 0, $vitesses, $this->resolver->lifeformResearchTimeReductionOf($player->getId()));
+        } catch (LifeformRefused $refus) {
+            return response()->json(['success' => false, 'message' => __($refus->translationKey())], 409);
+        }
         $multiplicateur = $this->research->technologyBonusMultiplier($player->getId(), $objet->species, $niveaux);
         $ouvert = $this->research->isUnlocked((int)$emplacement->slot, $etat, $profil, $reduction);
 

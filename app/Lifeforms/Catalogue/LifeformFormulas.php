@@ -3,6 +3,7 @@
 namespace OGame\Lifeforms\Catalogue;
 
 use InvalidArgumentException;
+use OGame\Lifeforms\LifeformRefused;
 use OGame\Models\Resources;
 
 /**
@@ -38,6 +39,20 @@ final class LifeformFormulas
 {
     /**
      * Le cout d un niveau, reduit d une fraction (0 a 0,99) apres arrondi.
+     *
+     * **Un cout qui ne se represente plus est refuse, jamais converti.** A tres haut niveau,
+     * `base x facteur^(n-1) x n` depasse la capacite d un entier signe : PHP emet alors « not representable
+     * as an int » et rend une valeur fausse — `(int)9.3e18` vaut −9 146 744 073 709 551 616. Un palier
+     * devenait gratuit, ou payant a l envers, et la file pouvait s ecrire sur ce chiffre-la.
+     *
+     * Le refus se prononce **avant** la conversion, donc avant tout debit et toute ecriture. Il emprunte le
+     * mecanisme de refus deja en place (`LifeformRefused`), que les appelants savent presenter au joueur :
+     * la page n est pas fermee, le palier est simplement impossible.
+     *
+     * Ce n est pas un changement de regle de jeu : la formule est inchangee, c est sa representation qui est
+     * bornee (constat de Keven, 20 septembre 2026).
+     *
+     * @throws LifeformRefused Si un des trois couts depasse ce qu un entier porte.
      */
     public static function cost(LifeformObject $object, int $level, float $reduction = 0.0): Resources
     {
@@ -45,7 +60,19 @@ final class LifeformFormulas
             return new Resources(0, 0, 0, 0);
         }
         $reduction = self::fraction($reduction, 0.99);
-        $brut = fn (int $base): int => (int)floor((1 - $reduction) * floor($base * ($object->costFactor ** ($level - 1)) * $level));
+        $avantConversion = fn (int $base): float => (1 - $reduction) * floor($base * ($object->costFactor ** ($level - 1)) * $level);
+
+        foreach ([$object->metal, $object->crystal, $object->deuterium] as $base) {
+            $valeur = $avantConversion($base);
+            if ($valeur >= (float)PHP_INT_MAX) {
+                throw new LifeformRefused(
+                    LifeformRefused::COST_NOT_REPRESENTABLE,
+                    $object->machineName . ' niveau ' . $level
+                );
+            }
+        }
+
+        $brut = fn (int $base): int => (int)floor($avantConversion($base));
 
         return new Resources($brut($object->metal), $brut($object->crystal), $brut($object->deuterium), 0);
     }

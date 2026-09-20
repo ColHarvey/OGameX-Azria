@@ -2,8 +2,10 @@
 
 namespace OGame\Lifeforms\Score;
 
+use Illuminate\Support\Facades\Log;
 use OGame\Lifeforms\Catalogue\LifeformCatalogue;
 use OGame\Lifeforms\Catalogue\LifeformFormulas;
+use OGame\Lifeforms\LifeformRefused;
 use OGame\Lifeforms\Services\LifeformLevels;
 use OGame\Models\Resources;
 
@@ -54,7 +56,7 @@ final class LifeformScoreCalculator
      */
     public function buildingResourcesOf(int $planetId): Resources
     {
-        return $this->cumulative($this->levels->buildingLevelsOf($planetId));
+        return $this->cumulative($this->levels->buildingLevelsOf($planetId), $planetId);
     }
 
     /**
@@ -65,7 +67,7 @@ final class LifeformScoreCalculator
      */
     public function technologyResourcesOf(int $planetId): Resources
     {
-        return $this->cumulative($this->levels->technologyLevelsOf($planetId));
+        return $this->cumulative($this->levels->technologyLevelsOf($planetId), $planetId);
     }
 
     /**
@@ -73,7 +75,7 @@ final class LifeformScoreCalculator
      *
      * @param array<int, int> $niveaux Identifiant d objet => niveau atteint.
      */
-    private function cumulative(array $niveaux): Resources
+    private function cumulative(array $niveaux, int $planetId = 0): Resources
     {
         $total = new Resources(0, 0, 0, 0);
 
@@ -90,8 +92,24 @@ final class LifeformScoreCalculator
             $objet = LifeformCatalogue::byId($objectId);
 
             for ($palier = 1; $palier <= $niveau; $palier++) {
-                // **Cout nominal, reduction nulle** : voir `LifeformScoreOpenRules::COST_REDUCTIONS`.
-                $total->add(LifeformFormulas::cost($objet, $palier, LifeformScoreOpenRules::SCORING_REDUCTION));
+                try {
+                    // **Cout nominal, reduction nulle** : voir `LifeformScoreOpenRules::COST_REDUCTIONS`.
+                    $total->add(LifeformFormulas::cost($objet, $palier, LifeformScoreOpenRules::SCORING_REDUCTION));
+                } catch (LifeformRefused $refus) {
+                    // **Le classement ne ferme jamais une page.** Un palier dont le cout ne se represente plus
+                    // ne peut plus etre acquis : la garde de `LifeformFormulas::cost()` le refuse avant toute
+                    // ecriture. Un niveau pareil ne peut donc venir que d une ecriture directe en base — une
+                    // intervention d administration, ou un banc. On arrete de compter CET objet et on le dit
+                    // au journal : ce n est pas un plafonnement silencieux, c est un fait rapporte.
+                    Log::warning('Classement des formes de vie : cout non representable, objet ignore a partir de ce palier.', [
+                        'planet_id' => $planetId,
+                        'object_id' => $objectId,
+                        'palier' => $palier,
+                        'niveau_enregistre' => $niveau,
+                        'refus' => $refus->getMessage(),
+                    ]);
+                    break;
+                }
             }
         }
 

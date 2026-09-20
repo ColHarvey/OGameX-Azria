@@ -1260,6 +1260,7 @@ return [
         'lifeform' => 'Forme di vita',
         'lifeform_economy' => 'Economia delle forme di vita',
         'lifeform_technology' => 'Tecnologia delle forme di vita',
+        'lifeform_share' => 'Di cui forme di vita: :points punti',
         'cumulative_since' => 'Cumulato dal :date',
         'refreshed_at' => 'Aggiornato il :date',
         'alliance_sum_current_members' => 'Somma dei membri attuali: può diminuire quando un membro lascia l’alleanza.',

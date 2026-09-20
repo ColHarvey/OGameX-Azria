@@ -35,15 +35,19 @@ class NpcDestructionScopeTest extends AccountTestCase
     use SpawnsNpcBases;
 
     /**
-     * Une flotte en vol partie d un corps donne, qui n est pas encore traitee.
+     * Une flotte en vol entre deux corps, qui n est pas encore traitee.
+     *
+     * **Depart et arrivee sont distincts**, et c est le point : un montage ou les deux valent la base
+     * detruite confond « partie d ici » et « rentre ici ». Le filtre porte sur les deux colonnes, chacune
+     * doit donc etre eprouvee seule.
      */
-    private function uneFlotteEnVolDepuis(int $planetId, int $userId): FleetMission
+    private function uneFlotteEnVol(int $depart, int $arrivee, int $userId): FleetMission
     {
         // `FleetMission` n est pas remplissable en masse : on pose chaque colonne, comme les autres bancs.
         $mission = new FleetMission();
         $mission->user_id = $userId;
-        $mission->planet_id_from = $planetId;
-        $mission->planet_id_to = $planetId;
+        $mission->planet_id_from = $depart;
+        $mission->planet_id_to = $arrivee;
         $mission->galaxy_from = 1;
         $mission->system_from = 1;
         $mission->position_from = 1;
@@ -65,18 +69,18 @@ class NpcDestructionScopeTest extends AccountTestCase
     /**
      * Une seconde colonie pour le meme compte pirate — ce que l essaimage produit.
      */
-    private function uneSecondeBasePourLeMemeCompte(PlanetService $premiere): PlanetService
+    private function uneSecondeBasePourLeMemeCompte(PlanetService $premiere, int $decalage = 1): PlanetService
     {
         $proprietaire = $premiere->getPlayer();
         $this->assertNotNull($proprietaire);
 
         $modele = Planet::query()->findOrFail($premiere->getPlanetId());
         $copie = $modele->replicate();
-        $copie->name = 'Seconde base du banc';
+        $copie->name = 'Base du banc no ' . $decalage;
         // Une coordonnee libre, cherchee au-dela de la plage du banc pour ne bousculer personne.
         $copie->galaxy = (int)$modele->galaxy;
         $copie->system = (int)$modele->system;
-        $copie->planet = (int)$modele->planet + 1;
+        $copie->planet = (int)$modele->planet + $decalage;
         $copie->destroyed = 0;
         $copie->save();
 
@@ -86,7 +90,12 @@ class NpcDestructionScopeTest extends AccountTestCase
         return $seconde;
     }
 
-    public function testDestroyingOneBaseLeavesTheFleetsOfAnotherBaseAlone(): void
+    /**
+     * Le montage commun : deux bases pirates de plus sur le compte, et la premiere prete a tomber.
+     *
+     * @return array{premiere: PlanetService, deuxieme: PlanetService, troisieme: PlanetService, proprietaire: int}
+     */
+    private function troisBasesDuMemeCompte(): array
     {
         $premiere = $this->aSpawnedBase();
         $premiere = resolve(PlanetServiceFactory::class)->make($premiere->getPlanetId(), true);
@@ -94,28 +103,95 @@ class NpcDestructionScopeTest extends AccountTestCase
 
         $proprietaire = $premiere->getPlayer();
         $this->assertNotNull($proprietaire);
-        $seconde = $this->uneSecondeBasePourLeMemeCompte($premiere);
 
-        $flotteDeLaPremiere = $this->uneFlotteEnVolDepuis($premiere->getPlanetId(), $proprietaire->getId());
-        $flotteDeLaSeconde = $this->uneFlotteEnVolDepuis($seconde->getPlanetId(), $proprietaire->getId());
+        return [
+            'premiere' => $premiere,
+            'deuxieme' => $this->uneSecondeBasePourLeMemeCompte($premiere, 1),
+            'troisieme' => $this->uneSecondeBasePourLeMemeCompte($premiere, 2),
+            'proprietaire' => $proprietaire->getId(),
+        ];
+    }
 
-        // Premisse : les deux flottes sont bien en vol avant la destruction.
-        $this->assertSame(0, (int)$flotteDeLaPremiere->refresh()->processed);
-        $this->assertSame(0, (int)$flotteDeLaSeconde->refresh()->processed);
-
-        // La premiere base tombe : plus un vaisseau, plus une defense.
-        $tombee = resolve(NpcDestructionService::class)->destroy($premiere);
+    private function faireTomber(PlanetService $base): void
+    {
+        $tombee = resolve(NpcDestructionService::class)->destroy($base);
         $this->assertTrue($tombee, 'Premisse : la base doit bien tomber, sinon rien n est solde.');
+    }
 
-        $this->assertSame(
-            1,
-            (int)$flotteDeLaPremiere->refresh()->processed,
-            'La flotte partie de la base detruite n a plus de port d attache : elle est soldee.'
-        );
+    /**
+     * **Cas 1 : partie de la base detruite.** L equipage n a plus de port d attache.
+     */
+    public function testAFleetThatLeftTheDestroyedBaseIsSettled(): void
+    {
+        ['premiere' => $premiere, 'deuxieme' => $deuxieme, 'proprietaire' => $proprietaire] = $this->troisBasesDuMemeCompte();
+
+        $partie = $this->uneFlotteEnVol($premiere->getPlanetId(), $deuxieme->getPlanetId(), $proprietaire);
+        $this->assertSame(0, (int)$partie->refresh()->processed, 'Premisse : la flotte est en vol.');
+
+        $this->faireTomber($premiere);
+
+        $this->assertSame(1, (int)$partie->refresh()->processed, 'Une flotte partie de la base detruite doit etre soldee.');
+    }
+
+    /**
+     * **Cas 2 : elle rentre vers la base detruite.** Sa destination vient d etre purgee.
+     */
+    public function testAFleetHeadingBackToTheDestroyedBaseIsSettled(): void
+    {
+        ['premiere' => $premiere, 'deuxieme' => $deuxieme, 'proprietaire' => $proprietaire] = $this->troisBasesDuMemeCompte();
+
+        $rentre = $this->uneFlotteEnVol($deuxieme->getPlanetId(), $premiere->getPlanetId(), $proprietaire);
+        $this->assertSame(0, (int)$rentre->refresh()->processed, 'Premisse : la flotte est en vol.');
+
+        $this->faireTomber($premiere);
+
+        $this->assertSame(1, (int)$rentre->refresh()->processed, 'Une flotte qui rentre vers la base detruite doit etre soldee.');
+    }
+
+    /**
+     * **Cas 3 : entre deux AUTRES bases du meme compte.** C est le defaut que Keven a repere le 20 septembre 2026 :
+     * la requete portait sur tout le compte, et l essaimage en donne plusieurs.
+     */
+    public function testAFleetBetweenTwoOtherBasesOfTheSameAccountIsUntouched(): void
+    {
+        ['premiere' => $premiere, 'deuxieme' => $deuxieme, 'troisieme' => $troisieme, 'proprietaire' => $proprietaire] = $this->troisBasesDuMemeCompte();
+
+        $ailleurs = $this->uneFlotteEnVol($deuxieme->getPlanetId(), $troisieme->getPlanetId(), $proprietaire);
+        $this->assertSame(0, (int)$ailleurs->refresh()->processed, 'Premisse : la flotte est en vol.');
+
+        // Premisse du cas : cette flotte ne touche ni au depart ni a l arrivee la base qui tombe.
+        $this->assertNotSame($premiere->getPlanetId(), (int)$ailleurs->planet_id_from);
+        $this->assertNotSame($premiere->getPlanetId(), (int)$ailleurs->planet_id_to);
+
+        $this->faireTomber($premiere);
+
         $this->assertSame(
             0,
-            (int)$flotteDeLaSeconde->refresh()->processed,
-            'La flotte d une AUTRE base du meme compte, encore vivante, ne doit pas etre soldee.'
+            (int)$ailleurs->refresh()->processed,
+            'Une flotte entre deux autres bases du meme compte, encore vivantes, ne doit pas etre soldee.'
+        );
+    }
+
+    /**
+     * **Cas 4 : l attaque d un joueur contre la base.** Elle n appartient pas au compte pirate : la chute de la
+     * base ne la solde pas, et le joueur garde sa flotte.
+     */
+    public function testAPlayerFleetAimedAtTheBaseIsUntouched(): void
+    {
+        ['premiere' => $premiere, 'proprietaire' => $proprietaire] = $this->troisBasesDuMemeCompte();
+
+        $joueur = $this->currentUserId;
+        $this->assertNotSame($proprietaire, $joueur, 'Premisse : le joueur n est pas le pirate.');
+
+        $attaque = $this->uneFlotteEnVol($this->planetService->getPlanetId(), $premiere->getPlanetId(), $joueur);
+        $this->assertSame(0, (int)$attaque->refresh()->processed, 'Premisse : la flotte est en vol.');
+
+        $this->faireTomber($premiere);
+
+        $this->assertSame(
+            0,
+            (int)$attaque->refresh()->processed,
+            'La flotte d un joueur visant la base ne lui appartient pas : la chute de la base ne la solde pas.'
         );
     }
 }

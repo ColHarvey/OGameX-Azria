@@ -87,28 +87,12 @@
                                 </a>
                             </div>
 
-                        {{-- **Les trois classements des formes de vie** (journal §173). Le jeu officiel ne verse pas
-                             ces investissements dans l'Économie ni la Recherche : il tient deux catégories à part,
-                             dont la somme entre dans le Général. Leurs vignettes viennent d'une image propre — la
-                             planche des six est pleine —, temporaire et prévue pour être remplacée seule. --}}
-                        <a id="lifeform" class="stat_filter navButton fleft" href="javascript:void(0);" rel="8">
-                            <img src="/img/icons/3e567d6f16d040326c7a0ea29a4f41.gif" height="54" width="54">
-                            <span class="marker"></span>
-                            <span class="textlabel">{{ __('t_ingame.highscore.lifeform') }}</span>
-                        </a>
-
-                        <a id="lifeform_economy" class="stat_filter navButton fleft" href="javascript:void(0);" rel="9">
-                            <img src="/img/icons/3e567d6f16d040326c7a0ea29a4f41.gif" height="54" width="54">
-                            <span class="marker"></span>
-                            <span class="textlabel">{{ __('t_ingame.highscore.lifeform_economy') }}</span>
-                        </a>
-
-                        <a id="lifeform_technology" class="stat_filter navButton fleft" href="javascript:void(0);" rel="10">
-                            <img src="/img/icons/3e567d6f16d040326c7a0ea29a4f41.gif" height="54" width="54">
-                            <span class="marker"></span>
-                            <span class="textlabel">{{ __('t_ingame.highscore.lifeform_technology') }}</span>
-                        </a>
-
+                        {{-- **Pas de septieme onglet** (decision de Keven, 20 septembre 2026). Les formes de vie
+                             donnent bien leurs points — dans le score General, comptes une seule fois —, mais la
+                             barre de categories reste celle du jeu officiel. Le detail se lit sur le score lui-meme,
+                             ventile en batiments et technologies (voir `players_points.blade.php`). Les colonnes,
+                             les rangs et les calculs restent en place : c est l interface qui se simplifie, pas la
+                             mesure. La vignette violette provisoire est retiree avec eux, faute d avoir ete approuvee. --}}
                         </div>
                         <br class="clearfloat">
                     </div>

@@ -177,6 +177,7 @@ return [
         'requirements_unmet' => 'Les prérequis ne sont pas remplis.',
         'population_unmet' => 'La population de la planète est insuffisante pour ce niveau.',
         'insufficient_resources' => 'Ressources insuffisantes.',
+        'cost_not_representable' => 'Ce niveau ne peut pas être construit : son coût dépasse ce que le jeu sait compter.',
         'not_in_queue' => 'Ce travail n’est plus dans la file.',
         'slot_locked' => 'Cet emplacement n’est pas encore ouvert : la population du palier est insuffisante.',
         'slot_taken' => 'Cet emplacement est déjà occupé, ou cette technologie l’est déjà ailleurs.',

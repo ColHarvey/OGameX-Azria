@@ -1119,6 +1119,7 @@ return [
         'lifeform' => '生命形式',
         'lifeform_economy' => '生命形式經濟',
         'lifeform_technology' => '生命形式科技',
+        'lifeform_share' => '其中生命形式：:points 點',
         'cumulative_since' => '自 :date 起累計',
         'refreshed_at' => '更新於 :date',
         'alliance_sum_current_members' => '目前成員總和：成員離開聯盟時可能下降。',

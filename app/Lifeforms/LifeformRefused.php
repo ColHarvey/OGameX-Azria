@@ -32,6 +32,14 @@ final class LifeformRefused extends RuntimeException
     public const string RESET_TOO_SOON = 'reset_too_soon';
     public const string NOTHING_TO_RESET = 'nothing_to_reset';
     public const string RESEARCH_IN_PROGRESS = 'research_in_progress';
+
+    /**
+     * **Le cout de ce palier ne se represente plus.** A tres haut niveau, `base x facteur^(n-1) x n` depasse
+     * la capacite d un entier : la conversion rendait alors une valeur fausse, parfois negative — un palier
+     * gratuit, ou payant a l envers. Le refus est prononce avant toute conversion, tout debit et toute
+     * ecriture de file (constat de Keven, 20 septembre 2026).
+     */
+    public const string COST_NOT_REPRESENTABLE = 'cost_not_representable';
     public const string RESTORE_EXPIRED = 'restore_expired';
     public const string DISCOVERY_LOCKED = 'discovery_locked';
     public const string QUOTA_EXHAUSTED = 'quota_exhausted';

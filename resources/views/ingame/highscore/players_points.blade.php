@@ -175,7 +175,16 @@
                     </td>
 
                     <td class="score">
-                        @if($highscoreCurrentType == 3 && isset($highscorePlayer['total_ships']))
+                        {{-- **Le detail des formes de vie se lit sur le score General**, et nulle part ailleurs
+                             (decision de Keven, 20 septembre 2026, qui remplace les trois onglets). Les trois
+                             nombres viennent du meme enregistrement que le total affiche : le detail ne peut donc
+                             pas le contredire. Rien ne s affiche pour un compte sans formes de vie. --}}
+                        @if($highscoreCurrentType == 0 && ($highscorePlayer['lifeform_points'] ?? 0) > 0)
+                            <span class="tooltip js_hideTipOnMobile"
+                                  title="{{ __('t_ingame.highscore.lifeform_share', ['points' => \OGame\Facades\AppUtil::formatNumber($highscorePlayer['lifeform_points'])]) }}<br/>{{ __('t_ingame.highscore.lifeform_economy') }} : {{ \OGame\Facades\AppUtil::formatNumber($highscorePlayer['lifeform_economy_points']) }}<br/>{{ __('t_ingame.highscore.lifeform_technology') }} : {{ \OGame\Facades\AppUtil::formatNumber($highscorePlayer['lifeform_technology_points']) }}">
+                                {{ $highscorePlayer['points_formatted'] }}
+                            </span>
+                        @elseif($highscoreCurrentType == 3 && isset($highscorePlayer['total_ships']))
                             <span class="tooltip" title="{{ __('t_ingame.highscore.total_ships') }}: {{ number_format($highscorePlayer['total_ships']) }}">
                                 {{ $highscorePlayer['points_formatted'] }}
                             </span>

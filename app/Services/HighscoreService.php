@@ -495,6 +495,12 @@ class HighscoreService
                     'alliance_tag' => $allianceTag,
                     'alliance_id' => $allianceId,
                     'total_ships' => $totalShips,
+                    // **La ventilation des formes de vie, lue sur LA MEME photographie que le score.** Elle ne
+                    // recalcule rien : les trois colonnes viennent du meme enregistrement, donc le detail ne peut
+                    // pas contredire le total, et rien n est compte deux fois (decision de Keven, 20 septembre 2026).
+                    'lifeform_points' => (int)($playerScore->lifeform ?? 0),
+                    'lifeform_economy_points' => (int)($playerScore->lifeform_economy ?? 0),
+                    'lifeform_technology_points' => (int)($playerScore->lifeform_technology ?? 0),
                 ];
             }
             return $this->insertFactionRows($parsedHighscores);
@@ -690,6 +696,10 @@ class HighscoreService
                     'points_formatted' => $score_formatted,
                     'average_points' => $averageScore,
                     'average_points_formatted' => $averageScore_formatted,
+                    // Meme photographie que le score, donc meme total : voir `getHighscorePlayers()`.
+                    'lifeform_points' => (int)($allianceScore->lifeform ?? 0),
+                    'lifeform_economy_points' => (int)($allianceScore->lifeform_economy ?? 0),
+                    'lifeform_technology_points' => (int)($allianceScore->lifeform_technology ?? 0),
                     'member_count' => $memberCount,
                     'rank' => $allianceScore->{$this->highscoreType->name.'_rank'},
                 ];

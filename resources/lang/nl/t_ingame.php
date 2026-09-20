@@ -1260,6 +1260,7 @@ return [
         'lifeform' => 'Levensvormen',
         'lifeform_economy' => 'Economie van levensvormen',
         'lifeform_technology' => 'Technologie van levensvormen',
+        'lifeform_share' => 'Waarvan levensvormen: :points punten',
         'cumulative_since' => 'Cumulatief sinds :date',
         'refreshed_at' => 'Bijgewerkt op :date',
         'alliance_sum_current_members' => 'Som van de huidige leden: kan dalen wanneer een lid de alliantie verlaat.',

@@ -52,6 +52,10 @@
                             @elseif ($tile['queue_full'])
                                 data-status="disabled"
                                 title="{{ $tile['title'] }}<br/>{{ __('t_ingame.buildings.queue_full', ['nombre' => $queue_waiting_allowed]) }}"
+                            @elseif (!$tile['cost_representable'])
+                                {{-- Le cout du prochain niveau ne se represente plus : aucune somme ne l achete. --}}
+                                data-status="disabled"
+                                title="{{ $tile['title'] }}<br/>{{ __('t_lifeforms_ui.refused.cost_not_representable') }}"
                             @elseif (!$tile['enough_resources'])
                                 data-status="disabled"
                                 title="{{ $tile['title'] }}<br/>{{ __('t_ingame.buildings.not_enough_resources') }}"

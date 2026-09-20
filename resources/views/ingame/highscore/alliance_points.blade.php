@@ -102,7 +102,15 @@
                     </td>
 
                     <td class="score">
-                        {{ $highscoreAlliance['points_formatted'] }}
+                        @if($highscoreCurrentType == 0 && ($highscoreAlliance['lifeform_points'] ?? 0) > 0)
+                            {{-- Le meme detail que pour un joueur, sur le score general de l alliance. --}}
+                            <span class="tooltip js_hideTipOnMobile"
+                                  title="{{ __('t_ingame.highscore.lifeform_share', ['points' => \OGame\Facades\AppUtil::formatNumber($highscoreAlliance['lifeform_points'])]) }}<br/>{{ __('t_ingame.highscore.lifeform_economy') }} : {{ \OGame\Facades\AppUtil::formatNumber($highscoreAlliance['lifeform_economy_points']) }}<br/>{{ __('t_ingame.highscore.lifeform_technology') }} : {{ \OGame\Facades\AppUtil::formatNumber($highscoreAlliance['lifeform_technology_points']) }}">
+                                {{ $highscoreAlliance['points_formatted'] }}
+                            </span>
+                        @else
+                            {{ $highscoreAlliance['points_formatted'] }}
+                        @endif
                         <div class="small">ø{{ $highscoreAlliance['average_points_formatted'] }}</div>
                     </td>
                 </tr>
