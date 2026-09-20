@@ -319,7 +319,7 @@ class HighscoreService
      * etat agrege, par `MilitaryTallyPublisher` : les ecrire ici, joueur apres joueur, melangerait deux passages.
      *
      * @param PlayerService $player
-     * @return array{general: int, economy: int, research: int, military: int, honor: int}
+     * @return array{general: int, economy: int, research: int, military: int, honor: int, lifeform_economy: int, lifeform_technology: int, lifeform: int}
      * @throws Exception
      */
     public function getPlayerScores(PlayerService $player): array

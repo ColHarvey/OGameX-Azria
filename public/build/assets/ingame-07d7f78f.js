@@ -61742,6 +61742,21 @@ function initTooltips(selector) {
     Tipped.hide($(e.currentTarget).closest('.t_Tooltip')[0]);
   });
 
+  // **Une infobulle qui s ouvre aussi au clavier et au clic** (exigence de Keven, 20 septembre 2026).
+  //
+  // La delegation ci-dessous ne cree l infobulle qu au premier SURVOL : ni le clavier ni le tactile n y ont
+  // acces. Celle-ci fait le meme geste pour les seuls elements qui portent `tooltipFocusable` — aucune des
+  // infobulles existantes n est touchee. `focusin` et non `focus` : `focus` ne remonte pas, et une delegation
+  // ne le verrait jamais. `undelegate` d abord, comme ses voisines : `initTooltips()` est rappele apres chaque
+  // fragment ajax, et sans cela les gestionnaires se dedoubleraient a chaque chargement.
+  $(document).undelegate('.tooltipFocusable', 'focusin.tooltipFocus click.tooltipFocus').delegate('.tooltipFocusable', 'focusin.tooltipFocus click.tooltipFocus', function (e) {
+    addTooltip(this);
+    Tipped.show(this);
+  });
+  $(document).undelegate('.tooltipFocusable', 'focusout.tooltipFocus').delegate('.tooltipFocusable', 'focusout.tooltipFocus', function (e) {
+    Tipped.hide(this);
+  });
+
   if (typeof selector == "string") {
     $(document).undelegate(selector, 'mouseenter.tooltipLoad touchstart.tooltipLoad').delegate(selector, 'mouseenter.tooltipLoad touchstart.tooltipLoad', function (e) {
       addTooltip(this);
@@ -75706,19 +75721,72 @@ ogame.chat = {
      * ancetre : le geste ne fait rien. Sur `/lifeforms/buildings` il en efface un.
      */
     oublierLesMemoiresDUnSousChemin: function () {
-        var noms = ["visibleChats", "maximizeId"];
+        var c = ogame.chat;
         var segments = window.location.pathname.split("/");
+        var ancetres = [];
         var chemin = "";
-        // Le dernier segment est le document, pas un repertoire : on s arrete avant.
+        // Le dernier segment est le document, pas un repertoire : on s arrete avant. La racine n est jamais
+        // dans cette liste — c est elle qui porte la memoire a garder.
         for (var i = 1; i < segments.length - 1; i++) {
             if (segments[i] === "") {
                 continue
             }
             chemin += "/" + segments[i];
-            for (var j = 0; j < noms.length; j++) {
-                document.cookie = noms[j] + "=; expires=Thu, 01 Jan 1970 00:00:01 GMT; path=" + chemin
-            }
+            ancetres.push(chemin)
         }
+        if (!ancetres.length) {
+            return
+        }
+
+        // **On lit AVANT d effacer.** Le greffon rend le premier nom trouve, donc celui du chemin le plus
+        // specifique : c est la memoire du sous-chemin, s il y en a une.
+        var masquante = (typeof $.cookie === "function") ? $.cookie("visibleChats") : null;
+
+        var effacer = function (nom) {
+            for (var k = 0; k < ancetres.length; k++) {
+                document.cookie = nom + "=; expires=Thu, 01 Jan 1970 00:00:01 GMT; path=" + ancetres[k]
+            }
+        };
+        // `maximizeId` ne dit que « ouvre cette conversation au prochain rendu » : rien a migrer.
+        effacer("maximizeId");
+        effacer("visibleChats");
+
+        // Ce que la racine dit maintenant que le masque est tombe.
+        var racine = (typeof $.cookie === "function") ? $.cookie("visibleChats") : null;
+        if (racine === masquante) {
+            // Il n y avait pas de memoire de sous-chemin : rien n a ete efface qui comptait.
+            return
+        }
+        if (c.porteUneConversation(racine) || !c.porteUneConversation(masquante)) {
+            // La racine a quelque chose a dire, ou le sous-chemin n avait rien : la racine gagne.
+            return
+        }
+        // **Migration** : le sous-chemin etait la seule memoire a porter des conversations. On la recopie a
+        // la racine plutot que de la perdre. L effacement a deja eu lieu : elle ne masquera plus rien.
+        $.cookie("visibleChats", masquante, c.MEMOIRE)
+    },
+    /**
+     * Une memoire porte-t-elle au moins une conversation ? Une memoire absente, illisible, ou dont les deux
+     * listes sont vides ne dit rien : elle ne doit ni gagner ni etre migree.
+     */
+    porteUneConversation: function (brut) {
+        if (!brut) {
+            return false
+        }
+        var lu = null;
+        try {
+            lu = JSON.parse(brut)
+        } catch (e) {
+            return false
+        }
+        if (!lu || typeof lu !== "object") {
+            return false
+        }
+        var compte = function (liste) {
+            return $.isArray(liste) ? liste.length : 0
+        };
+
+        return (compte(lu.players) + compte(lu.associations)) > 0
     },
     updateVisibleState: function () {
         if (ogame.chat.restoringOpenChats) {

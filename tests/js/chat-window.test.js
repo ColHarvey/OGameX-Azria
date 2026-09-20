@@ -532,3 +532,125 @@ test('sur une sous-page, une memoire masquante n empeche plus la restauration', 
     assert.equal(monde.requetes[0].donnees.playerId, 7, 'Et c est la bonne.');
     assert.equal(monde.requetes[0].donnees.updateUnread, 0, 'Restaurer n est pas lire.');
 });
+
+/*
+ * **La migration de la memoire heritee** (defaut releve par Keven, 20 septembre 2026).
+ *
+ * Ma premiere version effacait la memoire du sous-chemin sans la lire. Or elle peut etre la SEULE a porter des
+ * conversations — un joueur qui n ouvre une discussion que depuis `/lifeforms/buildings` n ecrit qu elle. Les
+ * quatre cas de divergence sont eprouves ici, avec la regle qui les tranche :
+ *
+ *   racine non vide  -> la racine gagne (on ne ressuscite pas ce qui a ete ferme ailleurs) ;
+ *   racine vide ou absente, sous-chemin non vide -> le sous-chemin est adopte (on ne perd rien) ;
+ *   les deux vides   -> rien a garder ;
+ *   pas de sous-chemin -> rien a faire.
+ */
+function memoireDe(joueurs, alliances) {
+    return JSON.stringify({
+        chatbar: false,
+        players: joueurs,
+        associations: alliances || [],
+        ordre: joueurs.map((i) => 'j' + i),
+        reduits: []
+    });
+}
+
+function cookiesNommes(document, nom) {
+    return document.cookie.split('; ').filter((c) => c.indexOf(nom + '=') === 0)
+        .map((c) => decodeURIComponent(c.slice(nom.length + 1)));
+}
+
+test('le sous-chemin est adopte quand il est la seule memoire a porter des conversations', () => {
+    const monde = unMonde(undefined, [], 1280, 'https://exemple.test/lifeforms/buildings');
+    const document = monde.window.document;
+
+    // Le cas que mon premier correctif perdait : rien a la racine, tout dans le sous-chemin.
+    const seule = memoireDe([7, 9]);
+    document.cookie = 'visibleChats=' + encodeURIComponent(seule) + '; path=/lifeforms; max-age=604800';
+    assert.deepEqual(cookiesNommes(document, 'visibleChats'), [seule], 'Premisse : elle est bien la seule.');
+
+    monde.chat.oublierLesMemoiresDUnSousChemin();
+
+    // Elle a ete recopiee a la racine, et n existe plus au sous-chemin.
+    assert.deepEqual(cookiesNommes(document, 'visibleChats'), [seule],
+        'La memoire du sous-chemin doit avoir ete migree, pas supprimee.');
+
+    // Et la preuve qu elle vit desormais a la racine : elle survit a un effacement du sous-chemin.
+    document.cookie = 'visibleChats=; expires=Thu, 01 Jan 1970 00:00:01 GMT; path=/lifeforms';
+    assert.deepEqual(cookiesNommes(document, 'visibleChats'), [seule], 'Elle n a pas ete recopiee a la racine.');
+});
+
+test('les conversations migrees sont bien restaurees, et sans marquer de messages lus', () => {
+    const monde = unMonde(undefined, [], 1280, 'https://exemple.test/lifeforms/buildings');
+    monde.window.document.cookie = 'visibleChats=' + encodeURIComponent(memoireDe([7], [42]))
+        + '; path=/lifeforms; max-age=604800';
+
+    monde.chat.restoreOpenChats();
+
+    assert.equal(monde.requetes.length, 2, 'Les deux conversations de la memoire migree repartent.');
+    assert.equal(monde.requetes[0].donnees.playerId, 7);
+    assert.equal(monde.requetes[0].donnees.updateUnread, 0, 'Restaurer n est pas lire.');
+    assert.equal(monde.requetes[1].donnees.associationId, 42);
+    assert.equal(monde.requetes[1].donnees.updateUnread, 0);
+});
+
+test('quand la racine porte des conversations, c est elle qui gagne', () => {
+    const monde = unMonde(undefined, [], 1280, 'https://exemple.test/lifeforms/buildings');
+    const document = monde.window.document;
+
+    const racine = memoireDe([7]);
+    const masquante = memoireDe([9]);
+    document.cookie = 'visibleChats=' + encodeURIComponent(racine) + '; path=/; max-age=604800';
+    document.cookie = 'visibleChats=' + encodeURIComponent(masquante) + '; path=/lifeforms; max-age=604800';
+
+    monde.chat.oublierLesMemoiresDUnSousChemin();
+
+    assert.deepEqual(cookiesNommes(document, 'visibleChats'), [racine],
+        'La racine est ecrite par toutes les pages : elle prime, et on ne ressuscite pas ce qui a ete ferme ailleurs.');
+});
+
+test('une racine vide cede la place au sous-chemin, une racine vide face a un sous-chemin vide ne change rien', () => {
+    const vide = memoireDe([]);
+
+    const adopte = unMonde(undefined, [], 1280, 'https://exemple.test/lifeforms/buildings');
+    adopte.window.document.cookie = 'visibleChats=' + encodeURIComponent(vide) + '; path=/; max-age=604800';
+    adopte.window.document.cookie = 'visibleChats=' + encodeURIComponent(memoireDe([7])) + '; path=/lifeforms; max-age=604800';
+    adopte.chat.oublierLesMemoiresDUnSousChemin();
+    assert.deepEqual(cookiesNommes(adopte.window.document, 'visibleChats'), [memoireDe([7])],
+        'Une racine qui ne porte aucune conversation ne dit rien : le sous-chemin est adopte.');
+
+    const rien = unMonde(undefined, [], 1280, 'https://exemple.test/lifeforms/buildings');
+    rien.window.document.cookie = 'visibleChats=' + encodeURIComponent(vide) + '; path=/; max-age=604800';
+    rien.window.document.cookie = 'visibleChats=' + encodeURIComponent(vide) + '; path=/lifeforms; max-age=604800';
+    rien.chat.oublierLesMemoiresDUnSousChemin();
+    assert.deepEqual(cookiesNommes(rien.window.document, 'visibleChats'), [vide],
+        'Deux memoires vides : il en reste une, celle de la racine, et rien n a ete invente.');
+});
+
+test('un canal d alliance seul compte comme une conversation a migrer', () => {
+    const monde = unMonde(undefined, [], 1280, 'https://exemple.test/lifeforms/buildings');
+    const document = monde.window.document;
+
+    // Rien que le canal d alliance : si la lecture ne regardait que `players`, cette memoire paraitrait vide
+    // et serait effacee sans migration.
+    const alliance = memoireDe([], [42]);
+    document.cookie = 'visibleChats=' + encodeURIComponent(alliance) + '; path=/lifeforms; max-age=604800';
+
+    monde.chat.oublierLesMemoiresDUnSousChemin();
+
+    document.cookie = 'visibleChats=; expires=Thu, 01 Jan 1970 00:00:01 GMT; path=/lifeforms';
+    assert.deepEqual(cookiesNommes(document, 'visibleChats'), [alliance],
+        'Un canal d alliance est une conversation : il doit etre migre comme les autres.');
+});
+
+test('une memoire illisible au sous-chemin ne devient jamais la memoire de la racine', () => {
+    const monde = unMonde(undefined, [], 1280, 'https://exemple.test/lifeforms/buildings');
+    const document = monde.window.document;
+
+    document.cookie = 'visibleChats=' + encodeURIComponent('{ceci n est pas du JSON') + '; path=/lifeforms; max-age=604800';
+
+    monde.chat.oublierLesMemoiresDUnSousChemin();
+
+    assert.deepEqual(cookiesNommes(document, 'visibleChats'), [],
+        'Une memoire illisible ne porte aucune conversation : elle part, et rien ne la remplace.');
+});

@@ -29377,6 +29377,21 @@ function initTooltips(selector) {
     Tipped.hide($(e.currentTarget).closest('.t_Tooltip')[0]);
   });
 
+  // **Une infobulle qui s ouvre aussi au clavier et au clic** (exigence de Keven, 20 septembre 2026).
+  //
+  // La delegation ci-dessous ne cree l infobulle qu au premier SURVOL : ni le clavier ni le tactile n y ont
+  // acces. Celle-ci fait le meme geste pour les seuls elements qui portent `tooltipFocusable` — aucune des
+  // infobulles existantes n est touchee. `focusin` et non `focus` : `focus` ne remonte pas, et une delegation
+  // ne le verrait jamais. `undelegate` d abord, comme ses voisines : `initTooltips()` est rappele apres chaque
+  // fragment ajax, et sans cela les gestionnaires se dedoubleraient a chaque chargement.
+  $(document).undelegate('.tooltipFocusable', 'focusin.tooltipFocus click.tooltipFocus').delegate('.tooltipFocusable', 'focusin.tooltipFocus click.tooltipFocus', function (e) {
+    addTooltip(this);
+    Tipped.show(this);
+  });
+  $(document).undelegate('.tooltipFocusable', 'focusout.tooltipFocus').delegate('.tooltipFocusable', 'focusout.tooltipFocus', function (e) {
+    Tipped.hide(this);
+  });
+
   if (typeof selector == "string") {
     $(document).undelegate(selector, 'mouseenter.tooltipLoad touchstart.tooltipLoad').delegate(selector, 'mouseenter.tooltipLoad touchstart.tooltipLoad', function (e) {
       addTooltip(this);

@@ -104,10 +104,12 @@
                     <td class="score">
                         @if($highscoreCurrentType == 0 && ($highscoreAlliance['lifeform_points'] ?? 0) > 0)
                             {{-- Le meme detail que pour un joueur, sur le score general de l alliance. --}}
-                            <span class="tooltip js_hideTipOnMobile"
+                            @php $idDetail = 'lifeformShareAlliance-' . $highscoreAlliance['id']; @endphp
+                            <span class="tooltip tooltipFocusable" tabindex="0" aria-describedby="{{ $idDetail }}"
                                   title="{{ __('t_ingame.highscore.lifeform_share', ['points' => \OGame\Facades\AppUtil::formatNumber($highscoreAlliance['lifeform_points'])]) }}<br/>{{ __('t_ingame.highscore.lifeform_economy') }} : {{ \OGame\Facades\AppUtil::formatNumber($highscoreAlliance['lifeform_economy_points']) }}<br/>{{ __('t_ingame.highscore.lifeform_technology') }} : {{ \OGame\Facades\AppUtil::formatNumber($highscoreAlliance['lifeform_technology_points']) }}">
                                 {{ $highscoreAlliance['points_formatted'] }}
                             </span>
+                            <span id="{{ $idDetail }}" class="ui-helper-hidden-accessible">{{ __('t_ingame.highscore.lifeform_share', ['points' => \OGame\Facades\AppUtil::formatNumber($highscoreAlliance['lifeform_points'])]) }} — {{ __('t_ingame.highscore.lifeform_economy') }} : {{ \OGame\Facades\AppUtil::formatNumber($highscoreAlliance['lifeform_economy_points']) }} — {{ __('t_ingame.highscore.lifeform_technology') }} : {{ \OGame\Facades\AppUtil::formatNumber($highscoreAlliance['lifeform_technology_points']) }}</span>
                         @else
                             {{ $highscoreAlliance['points_formatted'] }}
                         @endif
