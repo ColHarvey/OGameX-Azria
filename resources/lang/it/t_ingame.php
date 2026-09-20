@@ -1487,4 +1487,18 @@ return [
         'network_failed'        => 'Impossibile inviare il messaggio. Il testo è stato conservato: riprova.',
         'not_authorized'        => 'Non puoi più scrivere in questa conversazione. Ricarica la pagina se i tuoi permessi sono cambiati.',
     ],
+    'daily_reward' => [
+        'title' => 'Ricompensa giornaliera',
+        'button_available' => 'Ricompensa giornaliera disponibile',
+        'button_claimed' => 'Ricompensa giornaliera già riscossa',
+        'claim' => 'Riscuoti',
+        'already_short' => 'Già riscossa',
+        'claimed' => 'Ricompensa riscossa.',
+        'already' => 'Hai già riscosso la ricompensa di oggi.',
+        'closed' => 'La ricompensa giornaliera non è attiva.',
+        'renewal' => 'Rinnovo alle 00:00, ora del server',
+        'expires_in' => 'Scade tra',
+        'next_in' => 'Prossima ricompensa tra',
+        'no_carry_over' => 'Ogni ricompensa non riscossa prima del rinnovo va perduta. Le ricompense non si accumulano.',
+    ],
 ];

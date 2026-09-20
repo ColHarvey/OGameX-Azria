@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+  <defs>
+    <linearGradient id="dailyGiftSteel" x1="16" y1="11" x2="16" y2="29" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#41657e"/><stop offset=".45" stop-color="#213c51"/><stop offset="1" stop-color="#102130"/>
+    </linearGradient>
+    <linearGradient id="dailyGiftLid" x1="16" y1="9" x2="16" y2="15" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7599ad"/><stop offset=".45" stop-color="#395a72"/><stop offset="1" stop-color="#1b3448"/>
+    </linearGradient>
+    <linearGradient id="dailyGiftGold" x1="13" y1="4" x2="19" y2="29" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#f8df99"/><stop offset=".4" stop-color="#d6ac57"/><stop offset="1" stop-color="#956629"/>
+    </linearGradient>
+  </defs>
+  <path d="M16 10c-1-4-3-7-6-6-4 1-3 6 1 6h5Zm0 0c1-4 3-7 6-6 4 1 3 6-1 6h-5Z" fill="#243e50" stroke="url(#dailyGiftGold)" stroke-width="1.8" stroke-linejoin="round"/>
+  <rect x="5" y="12" width="22" height="17" rx="2.5" fill="url(#dailyGiftSteel)" stroke="#080f17" stroke-width="2"/>
+  <rect x="6" y="13" width="20" height="15" rx="1.5" stroke="#58778b"/>
+  <path d="M8 17v8M24 17v8" stroke="#6e94ab" stroke-opacity=".3"/>
+  <rect x="3" y="10" width="26" height="6" rx="2" fill="url(#dailyGiftLid)" stroke="#080f17" stroke-width="2"/>
+  <path d="M5 11h22" stroke="#a4c6d8" stroke-opacity=".8" stroke-linecap="round"/>
+  <path d="M13.5 10h5v18h-5z" fill="url(#dailyGiftGold)" stroke="#5e482a"/>
+  <path d="M14.5 11v16" stroke="#f8e2a7" stroke-opacity=".65"/>
+</svg>

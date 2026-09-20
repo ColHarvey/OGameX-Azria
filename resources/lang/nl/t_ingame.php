@@ -1487,4 +1487,18 @@ return [
         'network_failed'        => 'Het bericht kon niet worden verzonden. Je tekst is bewaard: probeer het opnieuw.',
         'not_authorized'        => 'Je kunt niet meer schrijven in dit gesprek. Laad de pagina opnieuw als je rechten zijn gewijzigd.',
     ],
+    'daily_reward' => [
+        'title' => 'Dagelijkse beloning',
+        'button_available' => 'Dagelijkse beloning beschikbaar',
+        'button_claimed' => 'Dagelijkse beloning al geclaimd',
+        'claim' => 'Claimen',
+        'already_short' => 'Al geclaimd',
+        'claimed' => 'Beloning geclaimd.',
+        'already' => 'Je hebt de beloning van vandaag al geclaimd.',
+        'closed' => 'De dagelijkse beloning staat niet open.',
+        'renewal' => 'Vernieuwt om 00:00, servertijd',
+        'expires_in' => 'Verloopt over',
+        'next_in' => 'Volgende beloning over',
+        'no_carry_over' => 'Een beloning die niet vóór de vernieuwing is geclaimd, vervalt. Beloningen stapelen niet.',
+    ],
 ];

@@ -321,6 +321,30 @@
                     </div>
                 </div>
             </div>
+            @if (!empty($daily_reward['enabled']))
+                {{-- **La recompense quotidienne** (fonctionnalite d Azria, 20 septembre 2026).
+
+                     Elle vit A COTE de la rangee des compteurs, jamais dedans : `#resources` est un conteneur
+                     **flex**, et y ajouter une tuile a fait retrecir celle de la matiere noire de 89 a 49 px en
+                     deplacant tous les compteurs — mesure au navigateur. Ici, la rangee ne bouge pas d un pixel.
+
+                     L etat n est pas code par la seule couleur : le bouton porte un nom accessible qui dit s il
+                     reste quelque chose a reclamer. --}}
+                <div class="az-daily-gift-slot">
+                    <button type="button" id="dailyRewardButton"
+                            class="az-daily-gift{{ $daily_reward['claimed'] ? ' az-daily-gift--claimed' : '' }}"
+                            data-overlay-url="{{ route('daily_reward.overlay') }}"
+                            data-window-title="{{ __('t_ingame.daily_reward.title') }}"
+                            data-label-available="{{ __('t_ingame.daily_reward.button_available') }}"
+                            data-label-claimed="{{ __('t_ingame.daily_reward.button_claimed') }}"
+                            aria-label="{{ $daily_reward['claimed'] ? __('t_ingame.daily_reward.button_claimed') : __('t_ingame.daily_reward.button_available') }}"
+                            title="{{ $daily_reward['claimed'] ? __('t_ingame.daily_reward.button_claimed') : __('t_ingame.daily_reward.button_available') }}">
+                        {{-- L image est decorative : le bouton est deja nomme. --}}
+                        <img src="/img/icons/daily-gift.svg" width="28" height="28" alt="" class="az-daily-gift__icon">
+                        <span class="az-daily-gift__pip" aria-hidden="true"></span>
+                    </button>
+                </div>
+            @endif
         </div>
         <div id="commandercomponent" class="">
             @if (!empty($lifeforms['enabled']) || !empty($lifeforms['species']))
@@ -1808,6 +1832,11 @@ However, the Space Dock's engineers think that some of the remains can be salvag
                        une requete reseau — pour les afficher. Les contacts se chargent de leur cote, comme avant. */
                     ogame.chat.initChatBar(playerId);
                     ogame.chat.restoreOpenChats();
+
+                    // La recompense quotidienne : un seul jeu de gestionnaires, delegues, poses une fois.
+                    if (typeof initDailyReward === 'function') {
+                        initDailyReward();
+                    }
 
                     ogame.chat.showPlayerList('#chatBarPlayerList .cb_playerlist_box');
                     ogame.chat.showPlayerList('#sideBar');

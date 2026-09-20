@@ -739,6 +739,31 @@ class SettingsService
      *
      * @return bool
      */
+    /**
+     * La recompense quotidienne est-elle ouverte ? **Desarmee par defaut**, et elle le reste tant que Keven
+     * n a pas donne son accord.
+     *
+     * La lecture suit la convention du depot : les booleens sont stockes en chaine, et seul `'1'` vaut vrai —
+     * un `(bool)'false'` vaudrait vrai, piege deja paye.
+     */
+    public function dailyRewardEnabled(): bool
+    {
+        return $this->get('daily_reward_enabled', '0') === '1';
+    }
+
+    /**
+     * Le montant de la recompense quotidienne, en matiere noire. Entier **strictement positif** ; une valeur
+     * absurde en base (zero, negative, non numerique) retombe sur la valeur initiale de mille plutot que de
+     * crediter n importe quoi.
+     */
+    public function dailyRewardAmount(): int
+    {
+        $brut = $this->get('daily_reward_amount', '1000');
+        $montant = is_numeric($brut) ? (int)$brut : 0;
+
+        return $montant > 0 ? $montant : 1000;
+    }
+
     public function highscoreAdminVisible(): bool
     {
         return (bool)$this->get('highscore_admin_visible', 0);

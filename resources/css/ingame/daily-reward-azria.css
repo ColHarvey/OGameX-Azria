@@ -1,0 +1,192 @@
+/*
+ * La recompense quotidienne : le bouton de l en-tete et la fenetre.
+ *
+ * **Tout est prefixe** `.az-daily-gift` ou `.az-daily-reward` — aucune regle ne peut atteindre le chat, les
+ * recompenses existantes ou les pages de formes de vie. Aucun selecteur d element nu, aucune classe du jeu
+ * redefinie.
+ *
+ * Le bouton se pose a cote du compteur de matiere noire, dans la meme tuile : il ne deplace ni les compteurs, ni
+ * les officiers, ni la liste des planetes. Sa zone cliquable fait 44 px, au-dessus du minimum recommande, sans que
+ * l icone depasse 28 px.
+ */
+
+/*
+ * L emplacement du cadeau : **a cote** de la rangee des compteurs, jamais dedans.
+ *
+ * `#resources` est un conteneur flex : une tuile de plus y faisait retrecir celle de la matiere noire et
+ * deplacait tous les compteurs. Ici on se pose apres la rangee, dans `#resourcesbarcomponent` qui est deja
+ * en position absolue, et rien ne bouge. La bande libre avant le bloc des officiers fait 52 px.
+ */
+.az-daily-gift-slot {
+    position: absolute;
+    left: 100%;
+    top: 50%;
+    transform: translateY(-50%);
+    margin-left: 4px;
+}
+
+.az-daily-gift {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    margin: 0 0 0 2px;
+    vertical-align: middle;
+    cursor: pointer;
+
+    /* Le cadre bleu metallique du jeu, en degrade et bordure — pas une image de plus a charger. */
+    border: 1px solid #1b3448;
+    border-radius: 4px;
+    background: linear-gradient(180deg, #2b4a60 0%, #1a3145 45%, #0f2030 100%);
+    box-shadow: inset 0 1px 0 rgba(164, 198, 216, .25), 0 1px 2px rgba(0, 0, 0, .55);
+}
+
+.az-daily-gift:hover {
+    border-color: #3d6a88;
+    background: linear-gradient(180deg, #356e8c 0%, #1f3d54 45%, #13273a 100%);
+}
+
+.az-daily-gift:focus-visible {
+    outline: 2px solid #a4c6d8;
+    outline-offset: 2px;
+}
+
+.az-daily-gift__icon {
+    display: block;
+    width: 28px;
+    height: 28px;
+    /* Jamais d etirement differencie : la consigne du kit graphique. */
+    object-fit: contain;
+}
+
+/* **La pastille doree** appartient au bouton, pas au fichier SVG. */
+.az-daily-gift__pip {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #f8df99 0%, #d6ac57 55%, #956629 100%);
+    box-shadow: 0 0 3px rgba(248, 223, 153, .9);
+}
+
+/* Deja reclamee : l image s attenue, **le bouton et son texte restent lisibles**, et il reste consultable. */
+.az-daily-gift--claimed .az-daily-gift__icon {
+    filter: grayscale(1);
+    opacity: .55;
+}
+
+.az-daily-gift--claimed .az-daily-gift__pip {
+    display: none;
+}
+
+/* ---- La fenetre ---- */
+
+.az-daily-reward {
+    width: 100%;
+    max-width: 400px;
+    margin: 0 auto;
+    padding: 4px 6px 8px;
+    text-align: center;
+    color: #cfe2f2;
+}
+
+.az-daily-reward__illustration {
+    display: flex;
+    justify-content: center;
+    margin: 4px 0 10px;
+}
+
+.az-daily-reward__amount {
+    margin: 0 0 10px;
+    font-size: 16px;
+}
+
+.az-daily-reward__figure {
+    font-weight: 700;
+    color: #f8df99;
+}
+
+.az-daily-reward__unit {
+    color: #8fa9bf;
+}
+
+.az-daily-reward__renewal,
+.az-daily-reward__countdown {
+    margin: 0 0 8px;
+    font-size: 12px;
+    color: #8fa9bf;
+}
+
+.az-daily-reward__timer {
+    margin-left: 4px;
+    font-variant-numeric: tabular-nums;
+    color: #cfe2f2;
+}
+
+.az-daily-reward__action {
+    margin: 12px 0 10px;
+}
+
+/* Le bouton vert du jeu, repris par ses couleurs — la planche de sprites reste celle des boutons existants. */
+.az-daily-reward__claim {
+    min-width: 150px;
+    min-height: 30px;
+    padding: 4px 18px;
+    font-size: 13px;
+    font-weight: 700;
+    color: #eafbe6;
+    cursor: pointer;
+    border: 1px solid #1f4a1c;
+    border-radius: 4px;
+    background: linear-gradient(180deg, #5aa64f 0%, #3c7c35 48%, #27561f 100%);
+    box-shadow: inset 0 1px 0 rgba(215, 244, 208, .3), 0 1px 2px rgba(0, 0, 0, .5);
+}
+
+.az-daily-reward__claim:hover:not(:disabled) {
+    background: linear-gradient(180deg, #6cbb60 0%, #468e3d 48%, #2d6425 100%);
+}
+
+.az-daily-reward__claim:focus-visible {
+    outline: 2px solid #a4c6d8;
+    outline-offset: 2px;
+}
+
+.az-daily-reward__claim:disabled {
+    cursor: default;
+    color: #9db3a0;
+    border-color: #2b3a2a;
+    background: linear-gradient(180deg, #4a5a48 0%, #374434 48%, #28311f 100%);
+    box-shadow: none;
+}
+
+.az-daily-reward__warning {
+    margin: 0 0 6px;
+    font-size: 11px;
+    line-height: 1.45;
+    color: #8fa9bf;
+}
+
+.az-daily-reward__message {
+    margin: 0;
+    min-height: 16px;
+    font-size: 12px;
+    color: #a9d6a2;
+}
+
+/* Petits ecrans : la fenetre suit la largeur disponible, et rien ne deborde. */
+@media (max-width: 480px) {
+    .az-daily-reward {
+        max-width: 100%;
+        padding: 4px 2px 8px;
+    }
+
+    .az-daily-reward__claim {
+        width: 100%;
+        min-width: 0;
+    }
+}

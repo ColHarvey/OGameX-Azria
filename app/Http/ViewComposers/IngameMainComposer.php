@@ -14,6 +14,7 @@ use OGame\Models\AllianceMember;
 use OGame\Models\User;
 use OGame\Services\BuddyService;
 use OGame\Services\ChatService;
+use OGame\Services\DailyRewardService;
 use OGame\Services\EventMissionService;
 use OGame\Services\FleetMissionService;
 use OGame\Services\HighscoreService;
@@ -45,7 +46,7 @@ class IngameMainComposer
      * @param HighscoreService $highscoreService
      * @param BuddyService $buddyService
      */
-    public function __construct(private Request $request, private PlayerService $player, private MessageService $messageService, private SettingsService $settingsService, private FleetMissionService $fleetMissionService, private HighscoreService $highscoreService, private BuddyService $buddyService, private ChatService $chatService, private EventMissionService $eventMissionService, private LifeformBanner $lifeformBanner, private OpenConversations $openConversations)
+    public function __construct(private Request $request, private PlayerService $player, private MessageService $messageService, private SettingsService $settingsService, private FleetMissionService $fleetMissionService, private HighscoreService $highscoreService, private BuddyService $buddyService, private ChatService $chatService, private EventMissionService $eventMissionService, private LifeformBanner $lifeformBanner, private OpenConversations $openConversations, private DailyRewardService $dailyRewardService)
     {
     }
 
@@ -104,6 +105,10 @@ class IngameMainComposer
             // comme si elle se reloadait »). Le navigateur memorise les fenetres ouvertes dans le cookie
             // `visibleChats` ; la page rend leur historique tout de suite, au lieu de le redemander apres coup.
             'chatRestore' => $this->openConversations->fromCookie((int) auth()->id(), is_string($memoireDesConversations) ? $memoireDesConversations : null),
+            // **La recompense quotidienne** (fonctionnalite d Azria, 20 septembre 2026). L en-tete a besoin de
+            // deux choses seulement : la fonctionnalite est-elle ouverte, et le compte a-t-il deja reclame
+            // aujourd hui. La journee est celle du SERVEUR, dans le fuseau configure du jeu.
+            'daily_reward' => $this->dailyRewardService->stateFor($this->player->getUser(), Date::now()),
             'resources' => $resources,
             'resourceBarTicker' => $resourceBar->ticker,
             'currentPlayer' => $this->player,

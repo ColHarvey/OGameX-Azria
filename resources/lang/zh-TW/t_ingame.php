@@ -1321,4 +1321,18 @@ return [
         'network_failed'        => '訊息無法送出。你的文字已保留，請再試一次。',
         'not_authorized'        => '你已無法在此對話中發言。若權限已變更，請重新整理頁面。',
     ],
+    'daily_reward' => [
+        'title' => '每日獎勵',
+        'button_available' => '每日獎勵可領取',
+        'button_claimed' => '每日獎勵已領取',
+        'claim' => '領取',
+        'already_short' => '已領取',
+        'claimed' => '已領取獎勵。',
+        'already' => '您今天已經領過獎勵了。',
+        'closed' => '每日獎勵尚未開放。',
+        'renewal' => '每日 00:00 更新（伺服器時間）',
+        'expires_in' => '剩餘時間',
+        'next_in' => '下次獎勵',
+        'no_carry_over' => '更新前未領取的獎勵將會失效，獎勵不會累積。',
+    ],
 ];

@@ -15,6 +15,7 @@ use OGame\Http\Controllers\ChangeNickController;
 use OGame\Http\Controllers\CharacterClassController;
 use OGame\Http\Controllers\ChatController;
 use OGame\Http\Controllers\CombatController;
+use OGame\Http\Controllers\DailyRewardController;
 use OGame\Http\Controllers\DefenseController;
 use OGame\Http\Controllers\EventsController;
 use OGame\Http\Controllers\FacilitiesController;
@@ -81,6 +82,12 @@ Route::get('/ajax/main/contact', [RulesController::class, 'ajaxContact'])->name(
 // ecrire ; les arrivees restent livrees par les chemins qui les livrent deja.
 Route::middleware(['auth', 'banned', 'locale'])->group(function () {
     Route::get('/ajax/resourcebox', [ResourceBarController::class, 'show'])->name('resourcebox.ajax');
+
+    // **La recompense quotidienne** : l etat se lit, la reclamation s ecrit. Le serveur decide de la journee,
+    // du montant et de l eligibilite ; l horloge du navigateur n accorde aucun credit.
+    Route::get('/ajax/daily-reward', [DailyRewardController::class, 'state'])->name('daily_reward.state');
+    Route::post('/ajax/daily-reward/claim', [DailyRewardController::class, 'claim'])->name('daily_reward.claim');
+    Route::get('/overlay/daily-reward', [DailyRewardController::class, 'overlay'])->name('daily_reward.overlay');
 });
 
 // Group: all logged in pages:
