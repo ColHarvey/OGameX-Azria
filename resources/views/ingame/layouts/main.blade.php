@@ -340,7 +340,7 @@
                             aria-label="{{ $daily_reward['claimed'] ? __('t_ingame.daily_reward.button_claimed') : __('t_ingame.daily_reward.button_available') }}"
                             title="{{ $daily_reward['claimed'] ? __('t_ingame.daily_reward.button_claimed') : __('t_ingame.daily_reward.button_available') }}">
                         {{-- L image est decorative : le bouton est deja nomme. --}}
-                        <img src="/img/icons/daily-gift.svg" width="28" height="28" alt="" class="az-daily-gift__icon">
+                        <img src="/img/icons/daily-gift.svg" width="20" height="20" alt="" class="az-daily-gift__icon">
                         <span class="az-daily-gift__pip" aria-hidden="true"></span>
                     </button>
                 </div>

@@ -341,6 +341,127 @@ final class DailyRewardTest extends AccountTestCase
     }
 
     /**
+     * **L echeance se calcule, elle ne se force pas.**
+     *
+     * Le banc navigateur simule minuit en effacant la ligne et en mettant le compte a rebours a un : il
+     * prouve la **resynchronisation**, pas le calcul. Celui-ci se prouve ici, avec l horloge de test et rien
+     * d autre — on avance l heure du serveur seconde par seconde autour de minuit et on lit ce que le service
+     * en deduit.
+     */
+    public function testTheDeadlineIsComputedFromTheServerClockAlone(): void
+    {
+        $this->pinSettings(['daily_reward_enabled' => 1]);
+        $fuseau = config('app.timezone');
+        $compte = $this->compte();
+
+        // Quatre instants autour de minuit, et ce que le serveur doit en dire.
+        $attendus = [
+            '2026-09-21 00:00:00' => 86400,   // minuit pile : la journee entiere reste
+            '2026-09-21 12:00:00' => 43200,   // midi : la moitie
+            '2026-09-21 23:59:00' => 60,      // une minute avant
+            '2026-09-21 23:59:59' => 1,       // une seconde avant
+        ];
+
+        foreach ($attendus as $instant => $restant) {
+            $maintenant = Date::parse($instant, $fuseau);
+            $etat = $this->service()->stateFor($compte, $maintenant);
+
+            $this->assertSame($restant, $etat['seconds_remaining'], "A $instant il doit rester $restant secondes.");
+            // **La journee, elle, ne change pas avant minuit.**
+            $this->assertSame('2026-09-21', $this->service()->serverDay($maintenant), "A $instant on est encore le 21.");
+            $this->assertSame(
+                '2026-09-22 00:00:00',
+                $this->service()->nextRenewal($maintenant)->format('Y-m-d H:i:s'),
+                "A $instant le renouvellement vise minuit, pas vingt-quatre heures plus tard."
+            );
+        }
+
+        // **Une seconde plus tard, tout a bascule** — et la marche est d exactement une seconde.
+        $juste = Date::parse('2026-09-22 00:00:00', $fuseau);
+        $this->assertSame('2026-09-22', $this->service()->serverDay($juste), 'La journee n a pas tourne a minuit.');
+        $this->assertSame(86400, $this->service()->stateFor($compte, $juste)['seconds_remaining']);
+        $this->assertSame(
+            '2026-09-23 00:00:00',
+            $this->service()->nextRenewal($juste)->format('Y-m-d H:i:s'),
+            'Le renouvellement suivant n est pas le minuit d apres.'
+        );
+        $this->assertSame(
+            1,
+            $juste->getTimestamp() - Date::parse('2026-09-21 23:59:59', $fuseau)->getTimestamp(),
+            'Premisse : ces deux instants sont bien separes d une seconde.'
+        );
+    }
+
+    /**
+     * **L echeance ne depend d aucune reclamation.** Reclamer a 23 h 55 ne repousse pas le renouvellement de
+     * vingt-quatre heures : il reste minuit.
+     */
+    public function testClaimingDoesNotPushTheDeadlineAway(): void
+    {
+        $this->pinSettings(['daily_reward_enabled' => 1, 'daily_reward_amount' => 1000]);
+        $fuseau = config('app.timezone');
+
+        $tard = Date::parse('2026-09-21 23:55:00', $fuseau);
+        $avantReclamation = $this->service()->stateFor($this->compte(), $tard)['seconds_remaining'];
+
+        $this->service()->claim($this->compte(), $tard);
+
+        $apresReclamation = $this->service()->stateFor($this->compte(), $tard)['seconds_remaining'];
+
+        $this->assertSame(300, $avantReclamation, 'Cinq minutes avant minuit, il reste trois cents secondes.');
+        $this->assertSame(
+            $avantReclamation,
+            $apresReclamation,
+            'La reclamation a deplace l echeance : elle doit rester minuit, quoi qu il arrive.'
+        );
+    }
+
+    /**
+     * **Le mode vacances n empeche pas la recompense** — decision de Keven, 20 septembre 2026.
+     *
+     * « Le joueur se connecte et reclame sa recompense, sans lancer de production ni d action militaire. »
+     * C est un choix de jeu, pas une consequence du code : rien ne bloquait, et rien ne bloquera. Ce temoin
+     * existe pour que la decision survive a la prochaine relecture — si quelqu un ajoute un refus en vacances,
+     * il tombe et il faudra en reparler a Keven.
+     *
+     * **Les autres regles ne changent pas** : une fois par journee du serveur, aucun cumul, aucun rattrapage.
+     */
+    public function testVacationModeDoesNotPreventTheDailyReward(): void
+    {
+        $this->pinSettings(['daily_reward_enabled' => 1, 'daily_reward_amount' => 1000]);
+
+        $compte = $this->compte();
+        $compte->vacation_mode = true;
+        $compte->vacation_mode_activated_at = Date::now()->subDays(3);
+        $compte->save();
+
+        // Premisse : le compte est bien en vacances, sinon l essai ne mesure rien.
+        $joueur = resolve(\OGame\Factories\PlayerServiceFactory::class)->make($this->currentUserId, true);
+        $this->assertTrue($joueur->isInVacationMode(), 'Le banc n a pas reussi a mettre le compte en vacances.');
+
+        $avant = $this->matiereNoire();
+
+        // **Par la vraie route**, pas seulement par le service : c est la ou un refus serait pose.
+        $reponse = $this->post(route('daily_reward.claim'), ['_token' => csrf_token()]);
+        $reponse->assertStatus(200);
+        $reponse->assertJsonPath('claimed_now', true);
+        $this->assertSame($avant + 1000, $this->matiereNoire(), 'Un compte en vacances n a pas ete credite.');
+
+        // Et les regles tiennent quand meme : une seule fois pour la journee.
+        $this->post(route('daily_reward.claim'), ['_token' => csrf_token()])->assertJsonPath('claimed_now', false);
+        $this->assertSame($avant + 1000, $this->matiereNoire(), 'Les vacances ont ouvert un second credit.');
+
+        // Aucun rattrapage non plus : trois journees d absence ne valent qu une recompense au retour.
+        $retour = Date::now()->addDays(4);
+        $this->assertSame(DailyRewardService::CLAIMED, $this->service()->claim($this->compte(), $retour));
+        $this->assertSame($avant + 2000, $this->matiereNoire(), 'Les journees d absence ont ete rattrapees.');
+
+        $compte->vacation_mode = false;
+        $compte->vacation_mode_activated_at = null;
+        $compte->save();
+    }
+
+    /**
      * Les douze libelles existent dans les cinq langues : une clef absente rendrait l anglais en silence.
      */
     public function testEveryLabelExistsInEveryLanguage(): void

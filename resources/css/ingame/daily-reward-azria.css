@@ -15,69 +15,117 @@
  *
  * `#resources` est un conteneur flex : une tuile de plus y faisait retrecir celle de la matiere noire et
  * deplacait tous les compteurs. Ici on se pose apres la rangee, dans `#resourcesbarcomponent` qui est deja
- * en position absolue, et rien ne bouge. La bande libre avant le bloc des officiers fait 52 px.
+ * en position absolue, et rien ne bouge.
+ *
+ * **Les nombres viennent d une mesure**, pas d une estimation :
+ *
+ *   icone de matiere noire   824 -> 872, centre vertical 84
+ *   BANDE LIBRE              872 -> 924, soit 52 px
+ *   formes de vie            924 -> 964, 40 x 40, centre 84
+ *   classe                   964 -> 1004, 40 x 40, centre 84
+ *   officiers               1004 -> 1187, centre 83
+ *
+ * Le centre vertical des petites icones voisines vaut donc **84**. `#resourcesbarcomponent` commence a 52 :
+ * `84 - 52 = 32`. C est ce decalage qu on pose, plutot qu un `50 %` qui centrerait sur la rangee (77) et
+ * laisserait le cadeau sept pixels trop haut — ce que la capture de Keven montrait.
  */
 .az-daily-gift-slot {
     position: absolute;
     left: 100%;
-    top: 50%;
+    top: 32px;
     transform: translateY(-50%);
-    margin-left: 4px;
+    /*
+     * **La marge se regle sur l encre, pas sur les boites.** Dix pixels donnaient bien 9,6 et 10,1 entre les
+     * boites — mais le biseau du bloc de matiere noire deborde de la sienne et peint jusqu a 874,50, la ou
+     * elle finit a 872. Mesure de l encre a onze pixels : 15,75 a gauche, 16,25 a droite.
+     */
+    margin-left: 11px;
 }
 
+/*
+ * **La zone cliquable et le dessin ne font pas la meme taille.** Le dessin reste discret — vingt pixels,
+ * comme les petites icones voisines — tandis que la zone atteignable en fait trente-deux. Elle tient au
+ * milieu de la bande libre et ne recouvre donc ni la matiere noire ni les portraits.
+ *
+ * **Aucun fond permanent, aucun cadre.** Le bouton est transparent au repos : un leger bleu au survol, un
+ * contour au focus, rien de plus (retour de Keven, 20 septembre 2026).
+ */
 .az-daily-gift {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     position: relative;
-    width: 44px;
-    height: 44px;
+    width: 32px;
+    height: 32px;
     padding: 0;
-    margin: 0 0 0 2px;
+    margin: 0;
     vertical-align: middle;
     cursor: pointer;
-
-    /* Le cadre bleu metallique du jeu, en degrade et bordure — pas une image de plus a charger. */
-    border: 1px solid #1b3448;
+    border: 0;
     border-radius: 4px;
-    background: linear-gradient(180deg, #2b4a60 0%, #1a3145 45%, #0f2030 100%);
-    box-shadow: inset 0 1px 0 rgba(164, 198, 216, .25), 0 1px 2px rgba(0, 0, 0, .55);
+    background: transparent;
+    box-shadow: none;
 }
 
 .az-daily-gift:hover {
-    border-color: #3d6a88;
-    background: linear-gradient(180deg, #356e8c 0%, #1f3d54 45%, #13273a 100%);
+    background: rgba(61, 106, 136, .3);
 }
 
 .az-daily-gift:focus-visible {
     outline: 2px solid #a4c6d8;
-    outline-offset: 2px;
+    outline-offset: 1px;
+}
+
+/*
+ * **Au doigt, trente-deux pixels ne suffisent pas.** On agrandit la cible sans deplacer le dessin ni
+ * empieter : six pixels en haut et en bas, ou la place est libre, quatre de chaque cote, ou il reste huit
+ * pixels jusqu a la boite du bloc de matiere noire et neuf jusqu a celle des portraits.
+ *
+ * Le fond du survol reste sur le bouton : la zone etendue attrape le doigt, elle ne se voit pas.
+ */
+@media (pointer: coarse) {
+    .az-daily-gift::before {
+        content: '';
+        position: absolute;
+        top: -6px;
+        right: -4px;
+        bottom: -6px;
+        left: -4px;
+    }
 }
 
 .az-daily-gift__icon {
     display: block;
-    width: 28px;
-    height: 28px;
+    width: 20px;
+    height: 20px;
     /* Jamais d etirement differencie : la consigne du kit graphique. */
     object-fit: contain;
 }
 
-/* **La pastille doree** appartient au bouton, pas au fichier SVG. */
+/*
+ * **La pastille doree** appartient au bouton, pas au fichier SVG. Elle se pose au coin du DESSIN — qui
+ * occupe 20 px au centre des 32, donc de 6 a 26 — et non au coin de la zone cliquable, ou elle flotterait.
+ */
 .az-daily-gift__pip {
     position: absolute;
     top: 4px;
     right: 4px;
-    width: 9px;
-    height: 9px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
     background: radial-gradient(circle at 35% 35%, #f8df99 0%, #d6ac57 55%, #956629 100%);
-    box-shadow: 0 0 3px rgba(248, 223, 153, .9);
+    box-shadow: 0 0 3px rgba(248, 223, 153, .8);
 }
 
-/* Deja reclamee : l image s attenue, **le bouton et son texte restent lisibles**, et il reste consultable. */
+/*
+ * Deja reclamee : le dessin s attenue **sans devenir illisible**, et le bouton reste cliquable — c est par
+ * lui qu on consulte le delai avant la prochaine recompense.
+ *
+ * Une desaturation complete effacait le bleu et l or ; on garde un reste de couleur.
+ */
 .az-daily-gift--claimed .az-daily-gift__icon {
-    filter: grayscale(1);
-    opacity: .55;
+    filter: grayscale(.75);
+    opacity: .6;
 }
 
 .az-daily-gift--claimed .az-daily-gift__pip {
