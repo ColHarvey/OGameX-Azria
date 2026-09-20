@@ -21,7 +21,7 @@ const SOURCE = new URL('../../resources/js/ingame/chat.js', import.meta.url);
 /**
  * Une barre de chat au theme Azria, avec le seul onglet que le gabarit pose : les contacts.
  */
-function unMonde(cookie, charge) {
+function unMonde(cookie, charge, largeur) {
     const dom = new JSDOM(
         '<!doctype html><html><body><div id="chatBar" class="azria-chat">'
         + '<ul class="chat_bar_list"><li id="chatBarPlayerList" class="chat_bar_pl_list_item">'
@@ -36,9 +36,14 @@ function unMonde(cookie, charge) {
     // chose que jQuery regarde : une boite a zero quand elle est masquee, non nulle sinon — et pour une fenetre de
     // conversation, sa vraie largeur sous le theme (350 px, comme la feuille la pose), puisque `azriaDeck()` s en
     // sert pour ranger les fenetres cote a cote.
+    // **Le corps de la page a une largeur, sinon le banc joue un autre jeu** : `updateChatBar()` lit
+    // `$("body").innerWidth()`, qui vaut zero sans mise en page — la barre partait alors dans la branche
+    // « petit ecran », celle qui FERME les autres conversations pour n en garder qu une. Le banc mesurait donc
+    // un telephone en croyant mesurer un bureau.
     Object.defineProperty(window.HTMLElement.prototype, 'offsetWidth', {
         get() {
             if (this.style.display === 'none') { return 0; }
+            if (this.tagName === 'BODY' || this.tagName === 'HTML') { return largeur || 1280; }
             return this.classList.contains('chat_box') ? 350 : 120;
         }
     });
@@ -254,4 +259,71 @@ test('la barre initialisee deux fois ne dedouble pas ses gestionnaires', () => {
     assert.equal(panneau.is(':visible'), true, 'Un clic ouvre les contacts.');
     $('#chatBarPlayerList').trigger('click');
     assert.equal(panneau.is(':visible'), false, 'Le clic suivant les referme.');
+});
+test('ouvrir une conversation la memorise, quel que soit le chemin', () => {
+    // Le defaut de Keven : `updateVisibleState()` ne vivait que dans quatre gestionnaires de clic de la BARRE.
+    // Ouvrir depuis le panneau des contacts n en traverse aucun — la memoire retardait donc d un clic, et la
+    // derniere conversation ouverte n y entrait jamais.
+    const monde = unMonde(undefined);
+
+    monde.chat.absorbChatLog({ playerId: 7, playerName: 'Cap James Kirk', playerstatus: 'offline', chatItems: {}, chatItemsByDateAsc: [] });
+    monde.chat.showChat({ playerId: 7 });
+
+    assert.ok(monde.memoire.visibleChats, 'Ouvrir ecrit la memoire, sans attendre un clic ailleurs.');
+    const apresJoueur = JSON.parse(monde.memoire.visibleChats);
+    assert.deepEqual(Array.from(apresJoueur.players), [7], 'La conversation privee ouverte est retenue.');
+
+    monde.chat.absorbChatLog({ associationId: 42, associationName: 'Les Pirates', playerstatus: 'online', chatItems: {}, chatItemsByDateAsc: [] });
+    monde.chat.showChat({ associationId: 42 });
+
+    const apresAlliance = JSON.parse(monde.memoire.visibleChats);
+    assert.deepEqual(Array.from(apresAlliance.players), [7], 'La premiere conversation reste retenue.');
+    assert.deepEqual(Array.from(apresAlliance.associations), [42], 'Et le canal d alliance, ouvert en dernier, l est aussi — c est lui qui disparaissait.');
+});
+
+test('fermer une conversation l oublie, sinon elle revient a la page suivante', () => {
+    const monde = unMonde(undefined);
+    monde.chat.absorbChatLog({ playerId: 7, playerName: 'Cap James Kirk', playerstatus: 'offline', chatItems: {}, chatItemsByDateAsc: [] });
+    monde.chat.showChat({ playerId: 7 });
+    assert.deepEqual(Array.from(JSON.parse(monde.memoire.visibleChats).players), [7], 'Premisse : elle est bien ouverte et retenue.');
+
+    monde.chat.closeChatBox(7, 0);
+
+    assert.deepEqual(Array.from(JSON.parse(monde.memoire.visibleChats).players), [], 'Fermee, elle quitte la memoire.');
+});
+
+test('la restauration ne piétine pas la memoire qu elle vient de lire', () => {
+    // Pendant la restauration les fenetres ne sont pas encore posees a l ecran : lire le DOM a cet instant
+    // effacerait justement ce qu on rouvre. Le cookie porte deja la verite — on n y touche pas.
+    const memoireDAvant = JSON.stringify({ chatbar: false, players: [7], associations: [42] });
+    const monde = unMonde(memoireDAvant, [
+        { playerId: 7, playerName: 'Cap James Kirk', playerstatus: 'offline', chatItems: {}, chatItemsByDateAsc: [] },
+        { associationId: 42, associationName: 'Les Pirates', playerstatus: 'online', chatItems: {}, chatItemsByDateAsc: [] }
+    ]);
+
+    monde.chat.restoreOpenChats();
+
+    const apres = JSON.parse(monde.memoire.visibleChats);
+    assert.deepEqual(Array.from(apres.players), [7], 'La conversation privee memorisee est toujours la.');
+    assert.deepEqual(Array.from(apres.associations), [42], 'Le canal d alliance aussi.');
+    assert.equal(monde.chat.restoringOpenChats, false, 'Et le drapeau est rabaisse : la suite memorise de nouveau.');
+});
+test('sur petit ecran, la barre n affiche qu une conversation mais n en oublie aucune', () => {
+    // Sous le theme, un ecran de moins de 620 px ne porte qu une fenetre : `updateChatBar()` ferme les autres.
+    // Si la memoire suivait cet affichage pendant la restauration, elle se reduirait a une seule conversation — et
+    // les autres seraient perdues pour de bon, y compris de retour sur un grand ecran. Elle s abstient donc.
+    const memoireDAvant = JSON.stringify({ chatbar: false, players: [7], associations: [42] });
+    const monde = unMonde(memoireDAvant, [
+        { playerId: 7, playerName: 'Cap James Kirk', playerstatus: 'offline', chatItems: {}, chatItemsByDateAsc: [] },
+        { associationId: 42, associationName: 'Les Pirates', playerstatus: 'online', chatItems: {}, chatItemsByDateAsc: [] }
+    ], 400);
+
+    monde.chat.restoreOpenChats();
+
+    const ouvertes = monde.window.$('.chat_bar_list > .chat_bar_list_item.open').length;
+    assert.equal(ouvertes, 1, 'Premisse : sur un ecran etroit, la barre ne garde bien qu une fenetre ouverte.');
+
+    const apres = JSON.parse(monde.memoire.visibleChats);
+    assert.deepEqual(Array.from(apres.players), [7], 'La conversation privee reste memorisee, meme masquee.');
+    assert.deepEqual(Array.from(apres.associations), [42], 'Et le canal d alliance aussi : l ecran ne decide pas de la memoire.');
 });

@@ -536,6 +536,7 @@ ogame.chat = {
             // Ce que la page restaure EST ce qui est ouvert : le reste du script le lit dans `visibleChats`, et
             // `setVisibilityState()` refermerait sinon ce qu on vient de poser.
             visibleChats = {chatbar: false, players: [], associations: []};
+            c.restoringOpenChats = true;
             $.each(chatRestore, function (i, charge) {
                 c.absorbChatLog(charge);
                 c.showChat(charge);
@@ -547,6 +548,7 @@ ogame.chat = {
                     }
                 }
             });
+            c.restoringOpenChats = false;
             return
         }
         if (typeof $.cookie !== 'function') {
@@ -758,7 +760,9 @@ ogame.chat = {
                     fermer(a)
                 }
             }
-        })
+        });
+        // Et la fermeture de meme : le X de l onglet ne memorisait rien, donc une conversation fermee revenait.
+        ogame.chat.updateVisibleState()
     },
     getVisibleChats: function () {
         if (typeof visibleChats == "undefined") {
@@ -1252,6 +1256,11 @@ ogame.chat = {
             }
             g.updateChatBar(f)
         }
+        // **La memoire suit l ouverture** (constat de Keven, 19 septembre 2026) : `updateVisibleState()` ne vivait que
+        // dans quatre gestionnaires de clic de la BARRE, et ouvrir depuis le panneau des contacts n en traverse aucun.
+        // Le cookie retardait donc d un clic : le canal d alliance ouvert en dernier n y entrait jamais, et il
+        // disparaissait au changement de page.
+        g.updateVisibleState()
     },
     showChatHistory: function (e) {
         var d = $(".js_chatHistory");
@@ -1452,7 +1461,20 @@ ogame.chat = {
             }
         })
     },
+    /**
+     * Ce que le navigateur retient des conversations ouvertes, pour la page suivante.
+     *
+     * **Elle est appelee a chaque ouverture et a chaque fermeture**, pas seulement depuis les gestionnaires de la
+     * barre : ouvrir depuis le panneau des contacts ne traverse aucun d eux, et la memoire retardait d un clic.
+     *
+     * **Pendant la restauration, elle s abstient** : les fenetres ne sont pas encore posees a l ecran, et une lecture
+     * prematuree du DOM effacerait justement ce qu on vient de rouvrir. Le cookie porte deja la verite — c est de lui
+     * que la page tient sa charge utile.
+     */
     updateVisibleState: function () {
+        if (ogame.chat.restoringOpenChats) {
+            return
+        }
         var b = {chatbar: false, players: [], associations: []};
         $(".chat_bar_list>.chat_bar_list_item").each(function () {
             var a = $(this);

@@ -7,6 +7,7 @@ use OGame\Models\User;
 use OGame\Services\AllianceService;
 use OGame\Services\ChatService;
 use Tests\AccountTestCase;
+use Tests\Support\DetachesFromAnyAlliance;
 
 /**
  * **Les conversations ouvertes arrivent avec la page** (constat de Keven, 19 septembre 2026, journal §170).
@@ -19,6 +20,36 @@ use Tests\AccountTestCase;
  */
 class ChatOpenConversationsTest extends AccountTestCase
 {
+    use DetachesFromAnyAlliance;
+
+    /** Les alliances que cette classe a fondees : elle les defait, comme le trait l exige. @var array<int, int> */
+    private array $alliancesDuBanc = [];
+
+    protected function tearDown(): void
+    {
+        $this->dissolveTheBenchAlliances(...$this->alliancesDuBanc);
+        $this->alliancesDuBanc = [];
+
+        parent::tearDown();
+    }
+
+    /**
+     * Une alliance du banc, fondee par un joueur neuf, que le compte de l essai rejoint. L appartenance passe par le
+     * trait : la colonne, l inscription et la ligne d historique ensemble, jamais la colonne seule.
+     */
+    private function uneAllianceRejointe(User $fondateur, string $prefixe): int
+    {
+        $tag = $prefixe . random_int(1000, 9999);
+        $alliance = resolve(AllianceService::class)->createAlliance((int)$fondateur->id, $tag, 'Alliance du banc ' . $tag);
+        $this->alliancesDuBanc[] = (int)$alliance->id;
+
+        $moi = User::find($this->currentUserId);
+        $this->assertNotNull($moi);
+        $this->joinTheBenchAlliance($moi, (int)$alliance->id);
+
+        return (int)$alliance->id;
+    }
+
     /**
      * Le cookie tel que `chat.js` l ecrit : du JSON, encode pour une entete HTTP.
      *
@@ -82,6 +113,50 @@ class ChatOpenConversationsTest extends AccountTestCase
         $this->assertSame([], $charge, 'Le canal d une alliance dont on n est pas membre n est jamais rendu.');
         $this->assertNull(resolve(OpenConversations::class)->withAlliance($this->currentUserId, (int)$alliance->id), 'Et la fabrique le refuse aussi, directement.');
         $this->assertNotNull(resolve(OpenConversations::class)->withAlliance((int)$etranger->id, (int)$alliance->id), 'Pour un membre, en revanche, le canal existe — sinon l essai ne prouverait que l absence de donnees.');
+    }
+
+    /**
+     * **Le canal de l alliance survit lui aussi au changement de page** (constat de Keven, 19 septembre 2026) : « quand
+     * je change de page le chat d alliance disparait », alors que les conversations privees, elles, restaient.
+     *
+     * Le temoin precedent ne couvrait que le refus oppose a un NON-membre. Celui-ci parcourt le chemin complet pour un
+     * membre : le cookie que `chat.js` ecrit, la page, et la charge utile qu elle publie.
+     */
+    public function testThePageCarriesTheAllianceChannelOfAMember(): void
+    {
+        $fondateur = $this->unAutreJoueur();
+        $alliance = $this->uneAllianceRejointe($fondateur, 'B');
+        resolve(ChatService::class)->sendAllianceMessage((int)$fondateur->id, $alliance, 'Rendez-vous sur la lune');
+
+        // La premisse avant la mesure : sans elle, un canal absent ne prouverait que l absence d appartenance.
+        $this->assertNotNull(
+            resolve(OpenConversations::class)->withAlliance($this->currentUserId, $alliance),
+            'Le joueur est bien membre de cette alliance.'
+        );
+
+        $charge = $this->chargeDeLaPage(self::memoire([], [$alliance]));
+
+        $this->assertCount(1, $charge, 'Le canal de l alliance est rendu par la page.');
+        $this->assertSame($alliance, $charge[0]['associationId'] ?? null, 'Et il porte son identifiant d alliance.');
+        $this->assertStringContainsString('Rendez-vous sur la lune', (string)json_encode($charge[0]['chatItems'] ?? []));
+    }
+
+    /**
+     * Et les deux ensemble, comme Keven les avait ouverts : une conversation privee ET le canal de l alliance.
+     */
+    public function testThePageCarriesAPrivateConversationAndTheAllianceChannelTogether(): void
+    {
+        $fondateur = $this->unAutreJoueur();
+        $alliance = $this->uneAllianceRejointe($fondateur, 'C');
+        resolve(ChatService::class)->sendAllianceMessage((int)$fondateur->id, $alliance, 'Message du canal');
+        resolve(ChatService::class)->sendDirectMessage((int)$fondateur->id, $this->currentUserId, 'Message prive');
+
+        $charge = $this->chargeDeLaPage(self::memoire([(int)$fondateur->id], [$alliance]));
+
+        $this->assertCount(2, $charge, 'Les deux conversations ouvertes reviennent, pas une seule.');
+        $genres = array_map(static fn (array $c): string => isset($c['associationId']) ? 'alliance' : 'joueur', $charge);
+        sort($genres);
+        $this->assertSame(['alliance', 'joueur'], $genres, 'Une conversation privee et un canal d alliance.');
     }
 
     public function testWithoutMemoryOrWithAnUnreadableOneThePageCarriesNothing(): void
