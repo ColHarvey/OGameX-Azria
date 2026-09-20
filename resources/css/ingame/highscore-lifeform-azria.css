@@ -1,0 +1,40 @@
+/*
+ * Les trois onglets du classement des formes de vie.
+ *
+ * **Tout est prefixe `#highscoreContent`** : cette page seule, et aucune des six cases existantes n est touchee.
+ *
+ * ## Pourquoi un fichier d image a part
+ *
+ * La planche officielle du classement (`1fd57fa51cdb81035382943e635348.gif`) fait exactement 324 x 108 px, soit six
+ * vignettes de 54 px, toutes prises. Il n y a aucune place pour une septieme, et l elargir obligerait a reecrire un
+ * fichier que six regles existantes adressent deja par leurs decalages.
+ *
+ * Les trois nouveaux onglets prennent donc leur propre image, `highscore-lifeform-tile.png`, une bande de trois
+ * cases (162 x 108). Les six anciennes gardent la leur, octet pour octet, et leurs positions ne bougent pas.
+ *
+ * ## Cette image est temporaire, et concue pour etre remplacee
+ *
+ * Elle est composee a partir des ressources du depot : le CADRE d une case officielle — carre arrondi, degrade,
+ * hachures, bordure — teinte dans un violet qu aucune des six n emploie, et un portrait d espece reduit pris dans
+ * `lifeform/lifeformtype_sprite.png`. Le jour ou les icones officielles seront disponibles, il suffira de
+ * remplacer **ce seul fichier** par une bande de meme taille : les trois positions ci-dessous sont deja celles
+ * d une bande de trois, et aucune regle n aura a changer.
+ */
+
+#highscoreContent #lifeform,
+#highscoreContent #lifeform_economy,
+#highscoreContent #lifeform_technology {
+    background-image: url("/img/icons/highscore-lifeform-tile.png");
+}
+
+#highscoreContent #lifeform {
+    background-position: 0 0;
+}
+
+#highscoreContent #lifeform_economy {
+    background-position: -54px 0;
+}
+
+#highscoreContent #lifeform_technology {
+    background-position: -108px 0;
+}
