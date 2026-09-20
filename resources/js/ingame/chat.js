@@ -194,7 +194,7 @@ ogame.chat = {
         });
         if (typeof $.cookie("maximizeId") == "string" || typeof $.cookie("maximizeId") == "number") {
             $('#chatMsgList .msg[data-playerid="' + $.cookie("maximizeId") + '"]').trigger("click");
-            $.cookie("maximizeId", null)
+            $.cookie("maximizeId", null, ogame.chat.MEMOIRE)
         }
     },
     getTotalNewChatCounter: function () {
@@ -551,6 +551,8 @@ ogame.chat = {
             return
         }
         c.openChatsRestored = true;
+        // L heritage d abord : sinon la lecture ci-dessous tomberait encore sur la memoire masquante.
+        c.oublierLesMemoiresDUnSousChemin();
         // **La page porte deja l historique des conversations ouvertes** : on les pose sans une requete, donc sans
         // le battement pendant lequel la fenetre manquait a l ecran (constat de Keven, 19 septembre 2026).
         if (typeof chatRestore !== 'undefined' && $.isArray(chatRestore) && chatRestore.length) {
@@ -606,21 +608,62 @@ ogame.chat = {
             }
             return vus
         };
+        // **La reprise par le cookie rend le meme etat que la reprise par la page.** Elle sert quand le
+        // serveur n a rien pu lire — page ancienne, ou memoire qui venait d etre masquee par un sous-chemin.
+        // Comme l autre branche, elle dit tout de suite ce qui est ouvert (sinon l arrivee de la liste des
+        // contacts refermerait ce qu on rouvre), puis remet l ordre et les reduits quand les fenetres sont la.
+        var joueurs = entiers(memoire.players);
+        var alliances = entiers(memoire.associations);
+        visibleChats = {
+            chatbar: false,
+            players: $.map(joueurs, function (identifiant) {
+                return {partnerId: identifiant}
+            }),
+            associations: alliances.slice()
+        };
+        c.restoringOpenChats = true;
         var reste = 5;
-        $.each(entiers(memoire.players), function (i, id) {
+        var attendus = [];
+        $.each(joueurs, function (i, id) {
             if (reste <= 0 || $(".chat_bar_list .chat_bar_list_item[data-playerid='" + id + "']").length) {
                 return
             }
             reste--;
+            attendus.push("[data-playerid='" + id + "']");
+            // Le dernier argument reste faux : rouvrir une fenetre n est pas lire ses messages.
             c.loadChatLogWithPlayer(id, undefined, undefined, false)
         });
-        $.each(entiers(memoire.associations), function (i, id) {
+        $.each(alliances, function (i, id) {
             if (reste <= 0 || $(".chat_bar_list .chat_bar_list_item[data-associationid='" + id + "']").length) {
                 return
             }
             reste--;
+            attendus.push("[data-associationid='" + id + "']");
             c.loadChatLogWithAssociation(id, undefined, undefined, false)
-        })
+        });
+        if (!attendus.length) {
+            c.restoringOpenChats = false;
+            return
+        }
+        // Les historiques arrivent par le reseau : on attend les fenetres, au plus trois secondes, puis on
+        // applique l ordre memorise — depuis la memoire LUE, jamais depuis un cookie reecrit entre-temps.
+        var essais = 0;
+        var minuteur = window.setInterval(function () {
+            essais++;
+            var poses = 0;
+            $.each(attendus, function (i, selecteur) {
+                if ($(".chat_bar_list .chat_bar_list_item" + selecteur).length) {
+                    poses++
+                }
+            });
+            if (poses < attendus.length && essais < 30) {
+                return
+            }
+            window.clearInterval(minuteur);
+            c.appliquerOrdreEtReduction(memoire);
+            c.restoringOpenChats = false;
+            c.updateVisibleState()
+        }, 100)
     },
     initChat: function (c, d, associationId) {
         ogame.chat.playerId = c;
@@ -930,7 +973,7 @@ ogame.chat = {
         $(".chat_bar_list").on("click.chatBar", ".chat_box .chat_box_title .icon_maximize", function () {
             var c = $(this).parent();
             var d = $(c).parent().data("playerid");
-            $.cookie("maximizeId", d);
+            $.cookie("maximizeId", d, ogame.chat.MEMOIRE);
             $(".chat_bar_list_item.open .chat_box_title .icon_close").trigger("click");
             window.location = bigChatLink + "&playerId=" + d
         })
@@ -945,7 +988,7 @@ ogame.chat = {
                 $("#chatMsgList .msg[data-playerId=" + $.cookie("maximizeId") + "]").trigger("click")
             }
         }
-        $.cookie("maximizeId", null)
+        $.cookie("maximizeId", null, ogame.chat.MEMOIRE)
     },
     createChatBox: function (l) {
         var n = ogame.chat;
@@ -1493,6 +1536,41 @@ ogame.chat = {
      * prematuree du DOM effacerait justement ce qu on vient de rouvrir. Le cookie porte deja la verite — c est de lui
      * que la page tient sa charge utile.
      */
+    /**
+     * **Le chemin de la memoire du chat, toujours la racine du site.**
+     *
+     * `$.cookie` n ecrit `path=` que si on le lui passe (`options.path ? '; path=' + options.path : ''`), et
+     * sans lui le navigateur retombe sur le REPERTOIRE du document courant. Toutes les pages du jeu tiennent
+     * en un segment, donc le repertoire vaut `/` — sauf les pages de formes de vie, en deux segments, ou il
+     * vaut `/lifeforms`. Une ecriture faite la creait un SECOND cookie du meme nom, qui masquait l autre sur
+     * ces pages-la : `$.cookie` rend le premier trouve, et PHP aussi. La conversation ouverte disparaissait
+     * en arrivant sur `/lifeforms/buildings` et revenait sur `/resources` (mesure du 20 septembre 2026).
+     */
+    MEMOIRE: {expires: 7, path: "/"},
+    /**
+     * Effacer les memoires du chat nees d un sous-chemin, avant la premiere lecture.
+     *
+     * Le correctif ci-dessus empeche d en creer de nouvelles ; celles deja posees dans les navigateurs
+     * survivraient sept jours et continueraient de masquer la bonne. Le script ne peut pas LIRE le chemin
+     * d un cookie — mais il peut l effacer a coup sur : on efface le nom a chaque repertoire ancetre du
+     * chemin courant, **sauf la racine**, qui porte la memoire a garder. Sur `/resources` il n y a aucun
+     * ancetre : le geste ne fait rien. Sur `/lifeforms/buildings` il en efface un.
+     */
+    oublierLesMemoiresDUnSousChemin: function () {
+        var noms = ["visibleChats", "maximizeId"];
+        var segments = window.location.pathname.split("/");
+        var chemin = "";
+        // Le dernier segment est le document, pas un repertoire : on s arrete avant.
+        for (var i = 1; i < segments.length - 1; i++) {
+            if (segments[i] === "") {
+                continue
+            }
+            chemin += "/" + segments[i];
+            for (var j = 0; j < noms.length; j++) {
+                document.cookie = noms[j] + "=; expires=Thu, 01 Jan 1970 00:00:01 GMT; path=" + chemin
+            }
+        }
+    },
     updateVisibleState: function () {
         if (ogame.chat.restoringOpenChats) {
             return
@@ -1531,7 +1609,7 @@ ogame.chat = {
                 b.reduits.push(jeton)
             }
         });
-        $.cookie("visibleChats", JSON.stringify(b), {expires: 7});
+        $.cookie("visibleChats", JSON.stringify(b), ogame.chat.MEMOIRE);
         // **La memoire vive dit la meme chose que le cookie.** `setVisibilityState()` lit la variable
         // `visibleChats`, que personne ne remettait a jour : une conversation ouverte avant l arrivee de la
         // liste des contacts n y figurait pas, et se faisait FERMER des que cette liste arrivait — quelques
@@ -1554,20 +1632,23 @@ ogame.chat = {
      *
      * Un cookie ecrit par une version precedente ne porte ni `ordre` ni `reduits` : on ne touche alors a rien.
      */
-    appliquerOrdreEtReduction: function () {
+    appliquerOrdreEtReduction: function (memoire) {
         var c = ogame.chat;
-        if (typeof $.cookie !== "function") {
-            return
-        }
-        var brut = $.cookie("visibleChats");
-        if (!brut) {
-            return
-        }
-        var memoire = null;
-        try {
-            memoire = JSON.parse(brut)
-        } catch (e) {
-            return
+        // La memoire peut etre donnee par l appelant : la reprise par le cookie l a deja lue, et le cookie
+        // aura pu etre reecrit entre-temps par l ouverture des fenetres qu on vient justement de poser.
+        if (memoire === undefined) {
+            if (typeof $.cookie !== "function") {
+                return
+            }
+            var brut = $.cookie("visibleChats");
+            if (!brut) {
+                return
+            }
+            try {
+                memoire = JSON.parse(brut)
+            } catch (e) {
+                return
+            }
         }
         if (!memoire || typeof memoire !== "object") {
             return

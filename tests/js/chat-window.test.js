@@ -21,13 +21,13 @@ const SOURCE = new URL('../../resources/js/ingame/chat.js', import.meta.url);
 /**
  * Une barre de chat au theme Azria, avec le seul onglet que le gabarit pose : les contacts.
  */
-function unMonde(cookie, charge, largeur) {
+function unMonde(cookie, charge, largeur, adresse) {
     const dom = new JSDOM(
         '<!doctype html><html><body><div id="chatBar" class="azria-chat">'
         + '<ul class="chat_bar_list"><li id="chatBarPlayerList" class="chat_bar_pl_list_item">'
         + '<div class="cb_playerlist_box" style="display: none;"></div></li></ul>'
         + '</div></body></html>',
-        { runScripts: 'dangerously', url: 'https://exemple.test/overview' }
+        { runScripts: 'dangerously', url: adresse || 'https://exemple.test/overview' }
     );
     const { window } = dom;
 
@@ -63,14 +63,40 @@ function unMonde(cookie, charge, largeur) {
     // lui qu on eprouve.
     window.$.fn.mCustomScrollbar = function () { return this; };
 
-    const memoire = { visibleChats: cookie };
-    window.$.cookie = function (nom, valeur) {
+    // **Le faux cookie porte la regle du vrai.** Le greffon du jeu lit `document.cookie`, decode, et s arrete
+    // au PREMIER nom qui correspond : c est ce `break` qui fait qu une memoire de sous-chemin en masque une
+    // autre. Une simple table nom -> valeur serait aveugle aux chemins — donc aveugle au defaut qu on eprouve.
+    // jsdom tient un vrai bocal a cookies et respecte les chemins ; on s en sert.
+    const memoire = {};
+    const options = {};
+    window.$.cookie = function (nom, valeur, reglages) {
         if (valeur === undefined) {
-            return memoire[nom];
+            const entrees = window.document.cookie.split('; ');
+            for (let i = 0; i < entrees.length; i++) {
+                const coupe = entrees[i].indexOf('=');
+                if (coupe > 0 && decodeURIComponent(entrees[i].slice(0, coupe)) === nom) {
+                    return decodeURIComponent(entrees[i].slice(coupe + 1));
+                }
+            }
+            return undefined;
         }
         memoire[nom] = valeur;
+        options[nom] = reglages;
+        const morceaux = [encodeURIComponent(nom), '=', encodeURIComponent(String(valeur))];
+        if (reglages && typeof reglages.expires === 'number') {
+            morceaux.push('; max-age=' + (reglages.expires * 86400));
+        }
+        if (reglages && reglages.path) {
+            morceaux.push('; path=' + reglages.path);
+        }
+        window.document.cookie = morceaux.join('');
         return valeur;
     };
+    if (cookie !== undefined) {
+        // La memoire que la page trouve en arrivant, posee a la racine comme le jeu la pose.
+        window.document.cookie = 'visibleChats=' + encodeURIComponent(cookie) + '; path=/; max-age=604800';
+        memoire.visibleChats = cookie;
+    }
 
     window.ogame = {};
     window.chatUrl = '/ajax/chat';
@@ -92,7 +118,7 @@ function unMonde(cookie, charge, largeur) {
     script.textContent = readFileSync(SOURCE, 'utf8');
     window.document.body.appendChild(script);
 
-    return { window, requetes, memoire, chat: window.ogame.chat };
+    return { window, requetes, memoire, options, chat: window.ogame.chat };
 }
 
 test('l en-tete d une conversation ferme et reduit, et n offre plus d ouvrir la messagerie', () => {
@@ -433,4 +459,76 @@ test('les conversations restaurees reprennent leur ordre et leur etat', () => {
 
     const ouverte = $('.chat_bar_list_item[data-playerid="7"]');
     assert.equal(ouverte.hasClass('open'), true, 'Les autres reviennent ouvertes.');
+});
+/*
+ * **La memoire du chat vit a la racine du site** (defaut reproduit le 20 septembre 2026, journal §174).
+ *
+ * `$.cookie` n ecrit `path=` que si on le lui passe, et sans lui le navigateur retombe sur le REPERTOIRE du
+ * document. Toutes les pages du jeu tiennent en un segment — `/resources`, `/overview`, `/lifeforms` — sauf les
+ * sous-pages des formes de vie, ou le repertoire vaut `/lifeforms`. Une ecriture faite la creait un SECOND cookie
+ * du meme nom, qui masquait l autre sur ces pages : la conversation ouverte disparaissait en arrivant sur
+ * `/lifeforms/buildings` et revenait sur `/resources`. L etat n etait pas perdu, il etait masque.
+ */
+test('la memoire des conversations est ecrite a la racine du site, jamais au repertoire de la page', () => {
+    const monde = unMonde(undefined, [], 1280, 'https://exemple.test/lifeforms/buildings');
+
+    monde.chat.updateVisibleState();
+
+    const reglages = monde.options.visibleChats;
+    assert.ok(reglages, 'La memoire est ecrite avec des reglages, pas sans.');
+    assert.equal(reglages.path, '/', 'Le chemin est nomme, et c est la racine — sinon le navigateur prendrait /lifeforms.');
+    assert.equal(reglages.expires, 7, 'La duree ne change pas.');
+});
+
+test('la memoire heritee d un sous-chemin est effacee, celle de la racine survit', () => {
+    const monde = unMonde(undefined, [], 1280, 'https://exemple.test/lifeforms/buildings');
+    const document = monde.window.document;
+
+    // L etat que portent deja les navigateurs des joueurs : deux cookies du meme nom, a deux chemins.
+    document.cookie = 'visibleChats=racine; path=/; max-age=604800';
+    document.cookie = 'visibleChats=sous-chemin; path=/lifeforms; max-age=604800';
+    const avant = document.cookie.split('; ').filter((c) => c.indexOf('visibleChats=') === 0);
+    assert.equal(avant.length, 2, 'Premisse : les deux memoires coexistent sur cette page.');
+
+    monde.chat.oublierLesMemoiresDUnSousChemin();
+
+    const apres = document.cookie.split('; ').filter((c) => c.indexOf('visibleChats=') === 0);
+    assert.deepEqual(apres, ['visibleChats=racine'], 'Seule la memoire du sous-chemin part ; celle de la racine reste.');
+});
+
+test('sur une page a un seul segment, le nettoyage ne touche a rien', () => {
+    const monde = unMonde(undefined, [], 1280, 'https://exemple.test/resources');
+    const document = monde.window.document;
+
+    document.cookie = 'visibleChats=racine; path=/; max-age=604800';
+    document.cookie = 'maximizeId=7; path=/; max-age=604800';
+
+    monde.chat.oublierLesMemoiresDUnSousChemin();
+
+    const restants = document.cookie.split('; ').sort();
+    assert.deepEqual(restants, ['maximizeId=7', 'visibleChats=racine'],
+        'Aucun repertoire ancetre autre que la racine : le geste n efface rien.');
+});
+
+/*
+ * **Le nettoyage precede la lecture, sinon il ne sert a rien.** Ce temoin ferme la mutation qui commentait
+ * l appel dans `restoreOpenChats()` : le correctif etait present, mais arrivait trop tard.
+ */
+test('sur une sous-page, une memoire masquante n empeche plus la restauration', () => {
+    const monde = unMonde(undefined, [], 1280, 'https://exemple.test/lifeforms/buildings');
+    const document = monde.window.document;
+
+    const racine = JSON.stringify({ chatbar: false, players: [7], associations: [], ordre: ['j7'], reduits: [] });
+    const masquante = JSON.stringify({ chatbar: false, players: [], associations: [], ordre: [], reduits: [] });
+    document.cookie = 'visibleChats=' + encodeURIComponent(racine) + '; path=/; max-age=604800';
+    document.cookie = 'visibleChats=' + encodeURIComponent(masquante) + '; path=/lifeforms; max-age=604800';
+
+    // Premisse : sans nettoyage, c est bien la masquante que le greffon rendrait.
+    assert.equal(monde.window.$.cookie('visibleChats'), masquante, 'Premisse : la memoire du sous-chemin masque l autre.');
+
+    monde.chat.restoreOpenChats();
+
+    assert.equal(monde.requetes.length, 1, 'La conversation memorisee a la racine repart malgre la memoire masquante.');
+    assert.equal(monde.requetes[0].donnees.playerId, 7, 'Et c est la bonne.');
+    assert.equal(monde.requetes[0].donnees.updateUnread, 0, 'Restaurer n est pas lire.');
 });
