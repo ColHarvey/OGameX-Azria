@@ -84042,6 +84042,27 @@ var azDailyReward = {
     enVol: false,
 
     /**
+     * **L epoque de reclamation.** Elle avance a chaque reclamation lancee, et sert de critere de
+     * validite aux lectures d etat : une lecture partie sous l epoque N et revenue sous l epoque N+1
+     * decrit un monde d avant la reclamation, et se jette.
+     *
+     * **Numeroter les requetes a l emission ne suffisait pas.** Une lecture partie APRES la reclamation
+     * peut lire l etat AVANT son commit, puis arriver apres le succes : son numero superieur
+     * l autoriserait a remettre « non reclamee ». L ordre d emission cote navigateur ne dit rien de
+     * l ordre des operations cote serveur.
+     */
+    epoque: 0,
+
+    /** Une reclamation est-elle en cours ? Tant qu elle l est, aucune lecture ne part. */
+    reclamationEnCours: false,
+
+    /** Une lecture a-t-elle ete demandee pendant une reclamation ? Elle est due des la fin. */
+    relectureDue: false,
+
+    /** La relecture differee qui suit une issue non confirmee, s il y en a une d armee. */
+    minuterieRelecture: null,
+
+    /**
      * Le bouton de l en-tete. Il vit hors de la fenetre et doit refleter l etat meme fenetre fermee.
      */
     bouton: function () {
@@ -84182,14 +84203,23 @@ var azDailyReward = {
         if (!fenetre || d.enVol) {
             return;
         }
+        // **Pendant une reclamation, aucune lecture ne part.** Elle lirait un etat que le serveur n a pas
+        // encore valide, et sa reponse arriverait apres le succes. On la note due, et la fin de la
+        // reclamation la declenchera.
+        if (d.reclamationEnCours) {
+            d.relectureDue = true;
+
+            return;
+        }
         d.enVol = true;
+        var epoque = d.epoque;
         $.ajax({
             url: fenetre.getAttribute('data-state-url'),
             type: 'GET',
             dataType: 'json',
             success: function (etat) {
                 d.enVol = false;
-                d.appliquer(etat);
+                d.appliquerSi(epoque, etat);
             },
             error: function () {
                 d.enVol = false;
@@ -84213,28 +84243,90 @@ var azDailyReward = {
         }
         bouton.disabled = true;
 
+        // **La reclamation ouvre une epoque.** Les lectures en vol sont invalidees par ce seul
+        // changement, et celles qui voudraient partir sont suspendues.
+        d.epoque++;
+        d.reclamationEnCours = true;
+        d.relectureDue = false;
+        window.clearTimeout(d.minuterieRelecture);
+
+        // La reclamation est la seule a pouvoir ecrire pendant son epoque : sa reponse fait foi, quel que
+        // soit ce qu une lecture aurait pu dire entre-temps.
+        var appliquerLaReponse = function (reponse) {
+            d.reclamationEnCours = false;
+            d.appliquer(reponse);
+            d.dire(reponse.message || '');
+        };
+
         $.ajax({
             url: fenetre.getAttribute('data-claim-url'),
             type: 'POST',
             dataType: 'json',
             data: { _token: fenetre.getAttribute('data-token') },
             success: function (reponse) {
-                d.appliquer(reponse);
-                d.dire(reponse.message || '');
+                appliquerLaReponse(reponse);
+                d.relireSiDue();
             },
             error: function (xhr) {
                 var reponse = xhr && xhr.responseJSON ? xhr.responseJSON : null;
                 if (reponse) {
-                    d.appliquer(reponse);
-                    d.dire(reponse.message || '');
+                    appliquerLaReponse(reponse);
+
+                    // **Une issue non confirmee** : le serveur n a pas pu trancher, et une demande
+                    // concurrente du meme compte a pu aboutir entre-temps. La charge utile ci-dessus dit
+                    // l etat au moment de la reponse ; on le relit **une fois**, apres le delai indique,
+                    // pour que l affichage converge si l autre demande a gagne.
+                    //
+                    // Une seule relecture, jamais une boucle, et **jamais une nouvelle reclamation** : le
+                    // joueur decide de reessayer, pas le navigateur.
+                    if (reponse.retryable) {
+                        var delai = parseInt(xhr.getResponseHeader('Retry-After') || '2', 10);
+                        if (!(delai > 0)) {
+                            delai = 2;
+                        }
+                        window.clearTimeout(d.minuterieRelecture);
+                        d.minuterieRelecture = window.setTimeout(function () {
+                            d.resynchroniser();
+                        }, delai * 1000);
+                    } else {
+                        d.relireSiDue();
+                    }
                 } else {
-                    // **Une reponse perdue ne dit pas que rien n a ete credite.** On redemande l etat plutot que
-                    // de supposer : une nouvelle tentative retrouverait la reclamation sans recrediter.
+                    // **Une reponse perdue laisse l issue indeterminee dans les deux sens.** Le POST peut
+                    // encore etre en traitement cote serveur au moment ou le navigateur constate l echec :
+                    // une lecture qui repondrait « non reclamee » n etablirait donc **pas** que la
+                    // reclamation echouera. Elle dit ce que le serveur voyait a cet instant, rien de plus,
+                    // et une lecture ulterieure fera converger l affichage.
+                    //
+                    // Redemander reste sans risque, mais pour une raison qui n est pas ici : c est la
+                    // contrainte unique, **cote serveur**, qui interdit un second credit — jamais ce que
+                    // le navigateur croit savoir.
+                    d.reclamationEnCours = false;
                     bouton.disabled = false;
-                    d.resynchroniser();
+                    d.relectureDue = true;
+                    d.relireSiDue();
                 }
             }
         });
+    },
+
+    /**
+     * Lancer la lecture qu une reclamation avait suspendue, s il y en avait une.
+     *
+     * Elle part **apres** que la reponse de la reclamation a ete appliquee.
+     *
+     * **Apres un succes**, elle lit un serveur qui a deja valide : sa reponse ne peut plus revenir en
+     * arriere. **Apres une coupure ou un delai depasse**, en revanche, le POST peut encore etre en
+     * traitement — la lecture ne tranche alors rien, et c est une lecture ulterieure qui fera converger.
+     * Ne pas confondre les deux cas : seul le premier autorise a dire que l etat lu est definitif.
+     */
+    relireSiDue: function () {
+        var d = azDailyReward;
+        if (!d.relectureDue) {
+            return;
+        }
+        d.relectureDue = false;
+        d.resynchroniser();
     },
 
     dire: function (texte) {
@@ -84251,6 +84343,22 @@ var azDailyReward = {
     /**
      * Appliquer un etat rendu par le serveur : la fenetre, le bouton de l en-tete, et le compteur.
      */
+    /**
+     * Appliquer un etat **seulement s il n a pas ete invalide**.
+     *
+     * Le rejet se fait ici, **avant tout effet** : une reponse jetee ne touche ni le bouton, ni le
+     * message, ni le compteur, ni la minuterie. Rend `true` si l etat a bien ete applique.
+     */
+    appliquerSi: function (epoque, etat) {
+        var d = azDailyReward;
+        if (d.reclamationEnCours || epoque !== d.epoque) {
+            return false;
+        }
+        d.appliquer(etat);
+
+        return true;
+    },
+
     appliquer: function (etat) {
         var d = azDailyReward;
         if (!etat || typeof etat !== 'object') {

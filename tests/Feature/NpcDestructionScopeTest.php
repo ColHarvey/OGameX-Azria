@@ -75,12 +75,23 @@ class NpcDestructionScopeTest extends AccountTestCase
         $this->assertNotNull($proprietaire);
 
         $modele = Planet::query()->findOrFail($premiere->getPlanetId());
+
+        // **La position se cherche, elle ne se suppose pas.** Cette aide ajoutait un decalage au numero de la
+        // premiere base sous un commentaire qui annoncait une recherche — et n en faisait aucune. La base du
+        // processus garde les corps des classes precedentes : en integration continue, ou la repartition entre
+        // processus differe de celle d ici, la coordonnee etait deja prise et la contrainte d unicite
+        // `(galaxy, system, planet, planet_type)` tombait. Deux erreurs au run `35546466756`.
+        [$galaxie, $systeme, $position] = $this->unePositionLibre(
+            (int)$modele->galaxy,
+            (int)$modele->system,
+            (int)$modele->planet_type
+        );
+
         $copie = $modele->replicate();
         $copie->name = 'Base du banc no ' . $decalage;
-        // Une coordonnee libre, cherchee au-dela de la plage du banc pour ne bousculer personne.
-        $copie->galaxy = (int)$modele->galaxy;
-        $copie->system = (int)$modele->system;
-        $copie->planet = (int)$modele->planet + $decalage;
+        $copie->galaxy = $galaxie;
+        $copie->system = $systeme;
+        $copie->planet = $position;
         $copie->destroyed = 0;
         $copie->save();
 
@@ -88,6 +99,38 @@ class NpcDestructionScopeTest extends AccountTestCase
         $this->assertNotNull($seconde, 'La seconde base doit exister.');
 
         return $seconde;
+    }
+
+    /**
+     * Une position reellement libre dans la galaxie du modele, cherchee et non devinee.
+     *
+     * On balaie les quinze emplacements de chaque systeme a partir de celui du modele. L essai **echoue** s il
+     * n en trouve aucun : un banc qui se rabattrait en silence sur une position prise ne prouverait rien, et
+     * l erreur d insertion arriverait plus loin, sous une autre forme.
+     *
+     * @return array{0: int, 1: int, 2: int}
+     */
+    private function unePositionLibre(int $galaxie, int $systeme, int $type): array
+    {
+        for ($s = $systeme; $s < $systeme + 60; $s++) {
+            for ($p = 1; $p <= 15; $p++) {
+                $prise = Planet::query()
+                    ->where('galaxy', $galaxie)
+                    ->where('system', $s)
+                    ->where('planet', $p)
+                    ->where('planet_type', $type)
+                    ->exists();
+
+                if (!$prise) {
+                    return [$galaxie, $s, $p];
+                }
+            }
+        }
+
+        $this->fail(
+            "Aucune position libre dans la galaxie $galaxie entre les systemes $systeme et "
+            . ($systeme + 59) . " : le banc ne peut pas poser sa base."
+        );
     }
 
     /**

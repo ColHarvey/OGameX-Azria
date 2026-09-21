@@ -55,6 +55,33 @@ use Tests\AccountTestCase;
 class LifeformHighscorePrecisionTest extends AccountTestCase
 {
     /**
+     * **`bcscale()` est un reglage global du processus**, et cette classe le levait sans jamais le rendre.
+     *
+     * Consequence mesuree au passage sequentiel : `ExactDivisionTest` comparait son calcul a un oracle bcmath
+     * et rougissait — non par une faute du code de production, qui rendait la bonne valeur, mais parce que
+     * son appel a `bcmod()` **omettait l echelle**. `bcmod()` en accepte une depuis PHP 7.2 ; un appel qui
+     * ne la donne pas retombe sur le `bcscale` global, ici laisse a 120. L oracle rendait alors
+     * `"9223372036853987420.000..."`, et le transtypage `(int)` d une chaine a point decimal passe par un
+     * **flottant** : au-dela de 2^53 la valeur se degrade, et 420 devenait 328.
+     *
+     * L echelle est donc relevee avant et remise apres, comme n importe quel interrupteur.
+     */
+    private int $echelleAvant = 0;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->echelleAvant = bcscale();
+    }
+
+    protected function tearDown(): void
+    {
+        bcscale($this->echelleAvant);
+        parent::tearDown();
+    }
+
+    /**
      * Le decimal nominal d un facteur : la plus courte ecriture decimale qui redonne exactement ce flottant.
      *
      * C est ce que la source du catalogue ecrit (`costFactor: 1.4`). Le retour est **verifie**, pas suppose : si un

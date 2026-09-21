@@ -39,6 +39,12 @@ final class DailyRewardRouteProtectionTest extends AccountTestCase
     public function testAGuestReachesNoneOfTheThreeRoutes(): void
     {
         $this->pinSettings(['daily_reward_enabled' => 1]);
+
+        // **On compte en ecart, jamais a zero.** La base d un processus garde les lignes des classes
+        // precedentes : « zero ligne au total » ne dit rien du visiteur, et rougissait au passage sequentiel
+        // pour une raison etrangere a la securite.
+        $avant = DailyReward::query()->count();
+
         $this->post('/logout');
         $this->assertGuest();
 
@@ -46,7 +52,11 @@ final class DailyRewardRouteProtectionTest extends AccountTestCase
         $this->get(route('daily_reward.overlay'))->assertRedirect(route('login'));
         $this->post(route('daily_reward.claim'), ['_token' => csrf_token()])->assertRedirect(route('login'));
 
-        $this->assertSame(0, DailyReward::query()->count(), 'Un visiteur a reclame une recompense.');
+        $this->assertSame(
+            $avant,
+            DailyReward::query()->count(),
+            'Un visiteur a fait naitre une ligne de recompense.'
+        );
     }
 
     /**

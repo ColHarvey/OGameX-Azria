@@ -55,6 +55,10 @@ final class DailyRewardTest extends AccountTestCase
      */
     public function testTheFeatureIsClosedUntilItIsExplicitlyOpened(): void
     {
+        // **L absence se pose, elle ne se suppose pas.** Cet essai mesure ce que rend le code quand la table ne
+        // porte rien ; sur la base partagee d un processus, une classe voisine a pu ecrire la ligne.
+        $this->removeSettings(['daily_reward_enabled', 'daily_reward_amount']);
+
         $etat = $this->service()->stateFor($this->compte(), Date::now());
         $this->assertFalse($etat['enabled'], 'La recompense quotidienne est ouverte par defaut.');
 

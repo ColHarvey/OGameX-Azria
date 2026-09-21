@@ -1496,6 +1496,7 @@ return [
         'claimed' => 'Ricompensa riscossa.',
         'already' => 'Hai già riscosso la ricompensa di oggi.',
         'closed' => 'La ricompensa giornaliera non è attiva.',
+        'busy' => 'Impossibile confermare il riscatto in questo momento. Riprova tra un istante.',
         'renewal' => 'Rinnovo alle 00:00, ora del server',
         'expires_in' => 'Scade tra',
         'next_in' => 'Prossima ricompensa tra',

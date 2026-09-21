@@ -1496,6 +1496,7 @@ return [
         'claimed' => 'Beloning geclaimd.',
         'already' => 'Je hebt de beloning van vandaag al geclaimd.',
         'closed' => 'De dagelijkse beloning staat niet open.',
+        'busy' => 'Kan het claimen op dit moment niet bevestigen. Probeer het zo meteen opnieuw.',
         'renewal' => 'Vernieuwt om 00:00, servertijd',
         'expires_in' => 'Verloopt over',
         'next_in' => 'Volgende beloning over',

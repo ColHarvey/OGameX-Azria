@@ -62,6 +62,21 @@ class DailyRewardController extends OGameController
             ] + $this->presente(), 409);
         }
 
+        // **Trop de monde en meme temps, et l issue n est pas confirmee.** Cette tentative n a rien ecrit,
+        // mais une demande concurrente du meme compte a pu aboutir : on ne l affirme donc pas. Le joueur
+        // lit « impossible de confirmer, reessayez », et la charge utile jointe porte **l etat reel du
+        // serveur** — c est elle qui fait foi, pas ce message.
+        //
+        // 503 avec `Retry-After`, le code qui dit exactement « indisponible pour un instant », jamais 500 :
+        // un 500 ferait afficher au jeu une erreur generique a la place de ce texte.
+        if ($issue === DailyRewardService::BUSY) {
+            return response()->json([
+                'success' => false,
+                'retryable' => true,
+                'message' => __('t_ingame.daily_reward.busy'),
+            ] + $this->presente(), 503, ['Retry-After' => '2']);
+        }
+
         return response()->json([
             'success' => true,
             // **Deja reclamee n est pas une erreur** : c est le cas d une reponse perdue, et le joueur doit voir

@@ -162,4 +162,68 @@ class PinsSettingsTest extends UnitTestCase
             'The service still serves a value the table no longer carries: its cache was left incoherent.'
         );
     }
+
+    /**
+     * **Un reglage qui existait revient a sa valeur d avant apres un retrait.**
+     *
+     * `removeSettings()` sert a etablir une absence — un essai qui mesure une valeur **par defaut** doit
+     * pouvoir garantir que la table ne porte rien. Mais elle doit rendre le monde comme elle l a trouve, sinon
+     * elle deplace la fuite au lieu de la fermer.
+     *
+     * Le monde de depart n est pas la valeur par defaut : sans cela, « rendu » et « jamais touche »
+     * coincideraient et le temoin ne prouverait rien.
+     */
+    public function testRemovingAPreexistingSettingGivesItsFormerValueBack(): void
+    {
+        $reglages = resolve(SettingsService::class);
+        $clef = 'debris_field_from_ships';
+
+        $reglages->set($clef, 42);
+        $this->assertTrue(Setting::query()->where('key', $clef)->exists(), 'Premisse : la ligne existe avant le retrait.');
+
+        $this->removeSettings([$clef]);
+
+        $this->assertFalse(
+            Setting::query()->where('key', $clef)->exists(),
+            'Le retrait n a pas supprime la ligne : une absence ne serait donc jamais etablie.'
+        );
+        $this->assertSame(
+            'defaut',
+            $reglages->get($clef, 'defaut'),
+            'Le service sert encore une valeur que la table ne porte plus : son cache n a pas ete vide.'
+        );
+
+        $this->restorePinnedSettings();
+
+        $this->assertSame('42', $reglages->get($clef, ''), 'La valeur d avant n a pas ete rendue.');
+        $this->assertTrue(Setting::query()->where('key', $clef)->exists(), 'La ligne d avant n a pas ete recreee.');
+    }
+
+    /**
+     * **Une absence initiale reste une absence.**
+     *
+     * Retirer ce qui n existait pas, puis rendre, ne doit fabriquer aucune ligne. Une ligne ecrite par un essai
+     * survivrait a un changement du defaut et dirait l ancienne valeur pour toujours — le depot l a paye sur le
+     * delai d alliance.
+     */
+    public function testRemovingAnAbsentSettingLeavesItAbsentAfterTheRestore(): void
+    {
+        $clef = 'temoin_isolation_reglages';
+
+        Setting::query()->where('key', $clef)->delete();
+        $this->assertFalse(Setting::query()->where('key', $clef)->exists(), 'Premisse : la clef n existe pas.');
+
+        $this->removeSettings([$clef]);
+        $this->restorePinnedSettings();
+
+        $this->assertFalse(
+            Setting::query()->where('key', $clef)->exists(),
+            'Le retour a fabrique une ligne que personne n avait jamais ecrite.'
+        );
+        $this->assertSame(
+            'defaut',
+            resolve(SettingsService::class)->get($clef, 'defaut'),
+            'Le service sert une valeur pour une clef que la table ne porte pas.'
+        );
+    }
 }

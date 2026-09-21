@@ -120,6 +120,49 @@ jobs:
             echo "identique=non" >> "$GITHUB_OUTPUT"
           fi
 
+      # **Une difference de presentation avertit ; une difference de contenu doit faire echouer.**
+      #
+      # Mesure du 20 septembre 2026 (run `35544903937`) : le manifeste commite differait de celui construit —
+      # et l ecart etait entierement typographique, quatre espaces d indentation contre deux et un saut de
+      # ligne final. Laravel lit ce fichier par `json_decode` : aucun effet en jeu.
+      #
+      # Mais l avertissement seul ne distingue pas ce cas-la d un vrai defaut, ou le manifeste nommerait un
+      # autre fichier que celui qui est commite — et le jeu servirait alors un asset absent. Ce controle-ci
+      # compare les manifestes **decodes et normalises** : l espacement disparait, le contenu reste.
+      - name: Exiger que les manifestes decodes soient egaux
+        run: |
+          set -euo pipefail
+          php -r '
+            $lire = static function (string $chemin): array {
+              $table = json_decode((string)file_get_contents($chemin), true, 512, JSON_THROW_ON_ERROR);
+              $trier = static function (array $t) use (&$trier): array {
+                ksort($t);
+                foreach ($t as $clef => $valeur) { if (is_array($valeur)) { $t[$clef] = $trier($valeur); } }
+                return $t;
+              };
+              return $trier($table);
+            };
+            $depot = $lire("/tmp/commite/build/manifest.json");
+            $construit = $lire("public/build/manifest.json");
+            if ($depot === $construit) {
+              echo "Les manifestes decodes sont egaux : tout ecart restant est de presentation.\n";
+              exit(0);
+            }
+            echo "Les manifestes different par leur CONTENU, pas seulement par leur presentation :\n\n";
+            foreach ($construit as $clef => $valeur) {
+              if (($depot[$clef] ?? null) !== $valeur) {
+                echo "  $clef\n    depot    : " . json_encode($depot[$clef] ?? null) . "\n";
+                echo "    construit: " . json_encode($valeur) . "\n";
+              }
+            }
+            foreach ($depot as $clef => $valeur) {
+              if (!array_key_exists($clef, $construit)) {
+                echo "  $clef : present au depot, absent du build\n";
+              }
+            }
+            exit(1);
+          '
+
       # **Le contenu du bundle du jeu compte plus que son nom.** Rollup nomme ses propres entrees
       # avec sa propre empreinte ; le bundle concatene, lui, doit contenir exactement les memes
       # sources. Ce controle-la ne pardonne rien : si `combat.js` manque, il tombe.

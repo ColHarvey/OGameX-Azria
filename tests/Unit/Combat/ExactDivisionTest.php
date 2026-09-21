@@ -236,8 +236,22 @@ class ExactDivisionTest extends UnitTestCase
                     "The oracle disagrees on the quotient of {$montant} x {$poids} / {$total}."
                 );
 
+                // **L echelle est imposee ici, et le transtypage refuse une chaine a point decimal.**
+                //
+                // `bcmod()` sans troisieme argument lit le `bcscale` **global** du processus. Une classe
+                // voisine l avait laisse a 120 : l oracle rendait alors `"…420.000000…"`, et `(int)` sur une
+                // chaine a point decimal passe par un **flottant**, qui degrade au-dela de 2^53 — l oracle
+                // annoncait 9223372036853987328 la ou la vraie valeur, celle du code de production, etait
+                // 9223372036853987420. Un temoin ne doit pas dependre d un etat global qu il ne pose pas.
+                $resteAttendu = bcmod($produit, (string)$total, 0);
+                $this->assertMatchesRegularExpression(
+                    '/^-?\d+$/',
+                    $resteAttendu,
+                    "L oracle n a pas rendu un entier : {$resteAttendu}. Un bcscale global le corromprait."
+                );
+
                 $this->assertSame(
-                    (int)bcmod($produit, (string)$total),
+                    (int)$resteAttendu,
                     $obtenu->remainder,
                     "The oracle disagrees on the remainder of {$montant} x {$poids} / {$total}."
                 );

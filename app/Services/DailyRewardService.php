@@ -2,9 +2,11 @@
 
 namespace OGame\Services;
 
+use Illuminate\Database\DetectsConcurrencyErrors;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use OGame\Enums\DarkMatterTransactionType;
 use OGame\Models\DailyReward;
 use OGame\Models\User;
@@ -41,6 +43,11 @@ use OGame\Models\User;
  */
 class DailyRewardService
 {
+    // **La meme regle que Laravel pour reconnaitre un conflit de concurrence.** Reecrire cette
+    // classification ferait deriver mon verdict de celui qui decide des reprises : les deux doivent
+    // s accorder, sinon une erreur reprise serait rendue comme definitive, ou l inverse.
+    use DetectsConcurrencyErrors;
+
     /** Le compte a ete credite maintenant. */
     public const string CLAIMED = 'claimed';
 
@@ -49,6 +56,22 @@ class DailyRewardService
 
     /** La fonctionnalite est fermee. */
     public const string CLOSED = 'closed';
+
+    /**
+     * **La base etait trop disputee pour trancher, et l issue reste inconnue.**
+     *
+     * Ce que le service sait : **cette tentative-ci** a ete annulee et n a rien ecrit. Ce qu il ne sait
+     * pas : si une autre demande du meme compte a abouti entre-temps. Promettre « rien n a ete credite »
+     * serait donc affirmer plus que ce qui est etabli (correction de Keven, 20 septembre 2026) ; le
+     * message dit « impossible de confirmer », et le client relit l etat du serveur.
+     *
+     * Redemander reste sans risque : la contrainte unique interdit un second credit, et la demande
+     * suivante rendra `ALREADY` si la journee a bien ete prise.
+     */
+    public const string BUSY = 'busy';
+
+    /** Le nombre de tentatives accordees a une reclamation avant de rendre `BUSY`. */
+    public const int ATTEMPTS = 5;
 
     public function __construct(
         private DarkMatterService $darkMatterService,
@@ -109,8 +132,14 @@ class DailyRewardService
     /**
      * Reclamer la recompense du jour.
      *
-     * Rend `CLOSED` si la fonctionnalite est fermee, `ALREADY` si le compte l avait deja pour cette journee — y
-     * compris lorsque deux demandes arrivent en meme temps et que la base refuse la seconde —, `CLAIMED` sinon.
+     * Quatre issues, et aucune n est une erreur pour le joueur :
+     *
+     * - `CLOSED`  — la fonctionnalite est fermee ;
+     * - `ALREADY` — le compte l avait deja pour cette journee, y compris quand deux demandes arrivent ensemble
+     *               et que la base refuse la seconde ;
+     * - `BUSY`    — la base etait trop disputee pour trancher : **cette tentative** n a rien ecrit, et l issue
+     *               d une eventuelle demande concurrente reste inconnue. Redemander est sans risque ;
+     * - `CLAIMED` — le compte vient d etre credite.
      *
      * **Aucun credit n a lieu hors d une insertion reussie.** L insertion et le credit vivent dans la meme
      * transaction : si le credit echoue, la ligne disparait avec lui et une nouvelle tentative reste possible.
@@ -123,6 +152,12 @@ class DailyRewardService
 
         $journee = $this->serverDay($now);
         $montant = $this->settingsService->dailyRewardAmount();
+
+        // **Le compteur passe par un objet, jamais par un entier capture par reference** : PHPStan tient une
+        // variable ainsi capturee pour constante et ne verrait jamais la valeur incrementee dans la fermeture.
+        $essais = new class () {
+            public int $tentatives = 0;
+        };
 
         try {
             // **Cinq tentatives, et la raison tient a InnoDB.** Quatre demandes simultanees insertent la meme
@@ -139,7 +174,9 @@ class DailyRewardService
             //
             // Laravel ne reprend que les erreurs de concurrence : une panne provoquee entre les deux
             // ecritures remonte toujours du premier coup, et le temoin d atomicite reste valable.
-            return DB::transaction(function () use ($user, $now, $journee, $montant): string {
+            return DB::transaction(function () use ($user, $now, $journee, $montant, $essais): string {
+                $essais->tentatives++;
+
                 // **L insertion d abord.** C est elle qui tranche : si une autre demande a deja pris cette
                 // journee, le moteur refuse ici, avant tout credit.
                 DailyReward::query()->create([
@@ -157,16 +194,41 @@ class DailyRewardService
                 );
 
                 return self::CLAIMED;
-            }, 5);
+            }, self::ATTEMPTS);
         } catch (QueryException $erreur) {
             // **Une seconde demande pour la meme journee.** On ne devine pas : on relit. Si la ligne est la, la
-            // recompense etait deja prise et rien ne doit etre credite ; sinon l erreur est autre chose et
-            // remonte.
+            // recompense etait deja prise et rien ne doit etre credite.
             if ($this->alreadyClaimed($user, $now)) {
                 return self::ALREADY;
             }
 
+            // **Les tentatives sont epuisees et le conflit tient toujours.** La derniere transaction a ete
+            // annulee, donc cette tentative-ci n a rien ecrit ; mais une demande concurrente du meme compte
+            // a pu aboutir entre la relecture ci-dessus et cet instant. On ne promet donc pas « rien n a ete
+            // credite » : on dit que l issue n est pas confirmee, et le client relit l etat du serveur.
+            // Redemander est sans risque — l insertion reste la seule porte, la contrainte unique le seul juge.
+            if ($this->causedByConcurrencyError($erreur)) {
+                Log::warning('Recompense quotidienne : conflit tenace, issue non confirmee.', [
+                    'user_id' => $user->id,
+                    'reward_date' => $journee,
+                    'tentatives' => $essais->tentatives,
+                ]);
+
+                return self::BUSY;
+            }
+
             throw $erreur;
+        } finally {
+            // **La trace d une tentative annulee puis reprise.** Sans elle, une course verte ne dit pas si la
+            // reprise a servi : peut-etre qu aucun interblocage ne s est produit (remarque de Keven,
+            // 20 septembre 2026). Cette ligne-la, elle, ne s ecrit que si une tentative a bien ete rejouee.
+            if ($essais->tentatives > 1) {
+                Log::info('Recompense quotidienne : reclamation reprise apres un conflit.', [
+                    'user_id' => $user->id,
+                    'reward_date' => $journee,
+                    'tentatives' => $essais->tentatives,
+                ]);
+            }
         }
     }
 }

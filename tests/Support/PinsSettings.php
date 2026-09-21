@@ -71,6 +71,36 @@ trait PinsSettings
     }
 
     /**
+     * **Etablir qu un reglage n existe pas**, au lieu de le supposer.
+     *
+     * Un essai qui verifie une valeur **par defaut** verifie ce que rend le code quand la table ne porte rien.
+     * Sur la base partagee d un processus, une classe voisine a pu ecrire la ligne : l essai lit alors sa
+     * valeur et non le defaut. `DailyRewardTest::testTheFeatureIsClosedUntilItIsExplicitlyOpened` est tombe
+     * ainsi au passage sequentiel — la fonctionnalite lui paraissait « ouverte par defaut » parce qu une autre
+     * classe l avait armee.
+     *
+     * L etat anterieur est releve comme pour `pinSettings()`, donc `restorePinnedSettings()` le rend.
+     *
+     * @param list<string> $clefs
+     */
+    protected function removeSettings(array $clefs): void
+    {
+        $reglages = resolve(SettingsService::class);
+
+        foreach ($clefs as $clef) {
+            if (!array_key_exists($clef, $this->reglagesAvant)) {
+                $ligne = Setting::query()->where('key', $clef)->value('value');
+
+                $this->reglagesAvant[$clef] = $ligne === null ? null : (string)$ligne;
+            }
+
+            Setting::query()->where('key', $clef)->delete();
+        }
+
+        $this->forgetTheSettingsCache($reglages);
+    }
+
+    /**
      * Rend les reglages poses — leur valeur, et leur absence. Sans effet si rien n a ete pose.
      */
     protected function restorePinnedSettings(): void
