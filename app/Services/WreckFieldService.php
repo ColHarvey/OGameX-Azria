@@ -145,6 +145,27 @@ class WreckFieldService
     }
 
     /**
+     * Load a wreck field by its identifier.
+     *
+     * L'identite exacte d'un champ, la ou les coordonnees ne suffisent plus : plusieurs champs vivent aux memes
+     * coordonnees depuis que leur unicite a ete retiree, et une commande doit agir sur celui qu'elle a montre au
+     * joueur — jamais sur « le premier a cet endroit ».
+     *
+     * @return bool True if the wreck field exists and was loaded, false otherwise.
+     */
+    public function loadById(int $wreckFieldId): bool
+    {
+        $wreckField = WreckField::query()->whereKey($wreckFieldId)->first();
+
+        if ($wreckField !== null) {
+            $this->wreckField = $wreckField;
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
      * Load an active or blocked wreck field for the given coordinates.
      * Prefers active over blocked, and skips repairing wreck fields.
      *
