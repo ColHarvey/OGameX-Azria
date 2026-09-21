@@ -125,6 +125,20 @@ class DailyRewardService
         $montant = $this->settingsService->dailyRewardAmount();
 
         try {
+            // **Cinq tentatives, et la raison tient a InnoDB.** Quatre demandes simultanees insertent la meme
+            // clef unique ; le moteur prend un verrou de proximite pour verifier l unicite, et des trois
+            // demandeurs il en designe une victime avec l erreur 1213. Mesure au bac le 20 septembre 2026 :
+            // un processus sur quatre mourait ainsi, et le joueur lisait une erreur au lieu de « deja
+            // reclamee » — alors meme que l invariant tenait, un seul credit ayant eu lieu.
+            //
+            // Une reprise est sure ici, et pas seulement commode : la victime a ete **annulee**, donc rien
+            // n a ete credite. A la tentative suivante, soit le gagnant a valide et l insertion tombe sur la
+            // clef unique — le `catch` relit et rend ALREADY —, soit elle attend son verrou puis tombe sur la
+            // meme clef. Aucun nombre de tentatives ne peut produire deux credits : c est la contrainte
+            // unique qui l interdit, pas le compte de reprises.
+            //
+            // Laravel ne reprend que les erreurs de concurrence : une panne provoquee entre les deux
+            // ecritures remonte toujours du premier coup, et le temoin d atomicite reste valable.
             return DB::transaction(function () use ($user, $now, $journee, $montant): string {
                 // **L insertion d abord.** C est elle qui tranche : si une autre demande a deja pris cette
                 // journee, le moteur refuse ici, avant tout credit.
@@ -143,7 +157,7 @@ class DailyRewardService
                 );
 
                 return self::CLAIMED;
-            });
+            }, 5);
         } catch (QueryException $erreur) {
             // **Une seconde demande pour la meme journee.** On ne devine pas : on relit. Si la ligne est la, la
             // recompense etait deja prise et rien ne doit etre credite ; sinon l erreur est autre chose et
