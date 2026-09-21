@@ -43,6 +43,9 @@ class AppServiceProvider extends ServiceProvider
         // Register composer file for the main ingame layout.
         view()->composer('ingame.layouts.main', 'OGame\Http\ViewComposers\IngameMainComposer');
 
+        // La bulle d annonce n est attachee qu a la vue generale : c est le seul endroit ou elle s affiche.
+        view()->composer('ingame.overview.index', 'OGame\Http\ViewComposers\OverviewAnnouncementComposer');
+
         // Register model observers
         User::observe(UserObserver::class);
         Message::observe(MessageObserver::class);

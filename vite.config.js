@@ -35,6 +35,7 @@ const ingameScripts = [
     // DEFINITIONS au chargement : ni appel, ni acces au DOM, donc il ne peut pas lever avant que le suivant
     // ne tourne.
     'resources/js/ingame/daily-reward.js',
+    'resources/js/ingame/announcement.js',
     'resources/js/ingame/planet-list-construction.js',
 ]
 

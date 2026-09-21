@@ -10,6 +10,7 @@ use OGame\Http\Controllers\Admin\ServerAdministrationController;
 use OGame\Http\Controllers\Admin\ServerSettingsController as AdminServerSettingsController;
 use OGame\Http\Controllers\AllianceController;
 use OGame\Http\Controllers\AllianceDepotController;
+use OGame\Http\Controllers\AnnouncementBubbleController;
 use OGame\Http\Controllers\BuddiesController;
 use OGame\Http\Controllers\ChangeNickController;
 use OGame\Http\Controllers\CharacterClassController;
@@ -88,6 +89,11 @@ Route::middleware(['auth', 'banned', 'locale'])->group(function () {
     Route::get('/ajax/daily-reward', [DailyRewardController::class, 'state'])->name('daily_reward.state');
     Route::post('/ajax/daily-reward/claim', [DailyRewardController::class, 'claim'])->name('daily_reward.claim');
     Route::get('/overlay/daily-reward', [DailyRewardController::class, 'overlay'])->name('daily_reward.overlay');
+
+    // **La fermeture d une bulle d annonce** : hors de `globalgame`, comme la recompense et le bandeau des
+    // ressources — masquer une annonce ne doit faire avancer ni l activite du compte ni ses missions.
+    Route::post('/ajax/announcement/dismiss', [AnnouncementBubbleController::class, 'dismiss'])
+        ->name('announcement.dismiss');
 });
 
 // Group: all logged in pages:
@@ -355,6 +361,18 @@ Route::middleware(['auth', 'globalgame', 'locale', 'admin'])->group(function () 
     // Annonces aux joueurs
     Route::get('/admin/announcement', [AnnouncementController::class, 'index'])->name('admin.announcement.index');
     Route::post('/admin/announcement', [AnnouncementController::class, 'send'])->name('admin.announcement.send');
+
+    // La bulle de la vue generale. Quatre gestes distincts, et aucun n en fait deux : enregistrer
+    // n affiche rien, l apercu n ecrit rien, l interrupteur ne publie rien, et seule la publication
+    // consomme une version.
+    Route::post('/admin/announcement/bubble', [AnnouncementBubbleController::class, 'save'])
+        ->name('admin.announcement.bubble.save');
+    Route::post('/admin/announcement/bubble/publish', [AnnouncementBubbleController::class, 'publish'])
+        ->name('admin.announcement.bubble.publish');
+    Route::post('/admin/announcement/bubble/toggle', [AnnouncementBubbleController::class, 'toggle'])
+        ->name('admin.announcement.bubble.toggle');
+    Route::post('/admin/announcement/bubble/preview', [AnnouncementBubbleController::class, 'preview'])
+        ->name('admin.announcement.bubble.preview');
 
     Route::get('/admin/event', [EventController::class, 'index'])->name('admin.event.index');
     Route::post('/admin/event', [EventController::class, 'update'])->name('admin.event.update');

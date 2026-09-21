@@ -276,6 +276,14 @@
              desalignait la rangee (journal §155.23). --}}
         @include('ingame.lifeforms.partials.held', ['held' => $lifeforms['held'] ?? null])
 
+        {{-- La bulle d annonce : sous le paysage, avant les files, dans le flux. Elle vient APRES le
+             bandeau de suspension — un avertissement d etat doit rester le plus visible. --}}
+        @isset($announcement)
+            @if($announcement)
+                @include('ingame.announcement.bubble', ['announcement' => $announcement])
+            @endif
+        @endisset
+
         <div id="productionboxBottom">
             <div class="productionBoxBuildings boxColumn building">
                 <div id="productionboxbuildingcomponent" class="productionboxbuilding injectedComponent parent overview">

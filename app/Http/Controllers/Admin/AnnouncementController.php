@@ -8,13 +8,24 @@ use OGame\GameMessages\AdminAnnouncement;
 use OGame\Http\Controllers\OGameController;
 use OGame\Models\Message;
 use OGame\Models\User;
+use OGame\Services\AnnouncementBubbleService;
 use OGame\Services\PlayerService;
 
 class AnnouncementController extends OGameController
 {
-    public function index(PlayerService $player): View
+    /**
+     * La page des annonces : deux onglets, deux formulaires independants.
+     *
+     * Le second a besoin de son brouillon et de la version courante. `send()`, lui, n est pas touche — ni son
+     * chemin, ni son nom, ni son circuit : il ecrit toujours dans la boite de reception en jeu, jamais en
+     * courriel, et une publication de bulle ne lui emprunte rien.
+     */
+    public function index(PlayerService $player, AnnouncementBubbleService $bubbles): View
     {
-        return view('ingame.admin.announcement');
+        return view('ingame.admin.announcement', [
+            'bubble' => $bubbles->configuration(),
+            'current' => $bubbles->currentVersion(),
+        ]);
     }
 
     public function send(PlayerService $player): RedirectResponse

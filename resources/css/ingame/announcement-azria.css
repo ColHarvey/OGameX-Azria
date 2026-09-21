@@ -1,0 +1,38 @@
+/*
+ * La bulle d annonce de la vue generale.
+ *
+ * Graphisme du kit fourni (`player-announcement-kit/announcement.css`), repris tel quel : cadre bleu acier
+ * arrondi, petite antenne cyan, badge dore, bouton bleu facultatif et croix discrete.
+ *
+ * **Toutes les regles sont limitees a `.azria-announcement`** : aucune ne peut atteindre un element existant
+ * du jeu. Le kit le garantissait deja, et c est ce qui rend ce fichier sur a importer.
+ *
+ * Deux proprietes portent des exigences de Keven :
+ *
+ *   - `white-space: pre-wrap` sur le message rend les retours a la ligne **sans** `nl2br`, donc sans HTML
+ *     libre — le texte reste echappe de bout en bout ;
+ *   - aucune hauteur fixe : un texte long s etend au lieu d etre coupe.
+ */
+/* Custom announcement artwork. Scoped: does not restyle existing game elements. */
+.azria-announcement {
+  box-sizing:border-box; position:relative; display:grid;
+  grid-template-columns:40px minmax(0,1fr); gap:14px;
+  width:100%; margin:14px 0; padding:16px 42px 16px 16px;
+  border:1px solid #5689aa; border-radius:10px;
+  background:linear-gradient(115deg,rgba(30,68,94,.35),transparent 60%),linear-gradient(#102839,#081722);
+  box-shadow:inset 0 1px 0 #719db044,0 3px 9px #0006;
+  color:#c7d9e7; font:13px/1.55 Arial,sans-serif;
+}
+.azria-announcement *, .azria-announcement *::before, .azria-announcement *::after {box-sizing:border-box;}
+.azria-announcement .azria-announcement__icon {width:40px;height:40px;align-self:start;filter:drop-shadow(0 0 5px #54b6ef66);}
+.azria-announcement .azria-announcement__heading {display:flex;align-items:center;flex-wrap:wrap;gap:9px;margin:0 0 7px;}
+.azria-announcement .azria-announcement__title {margin:0;color:#e0effb;font-size:16px;line-height:1.3;overflow-wrap:anywhere;}
+.azria-announcement .azria-announcement__badge {padding:2px 7px;border:1px solid #d6b66e;border-radius:4px;background:linear-gradient(#dabb78,#a67b36);color:#18212a;font-size:10px;font-weight:bold;letter-spacing:.4px;}
+.azria-announcement .azria-announcement__body {margin:0;white-space:pre-wrap;overflow-wrap:anywhere;}
+.azria-announcement .azria-announcement__actions {display:flex;justify-content:flex-end;margin-top:10px;}
+.azria-announcement .azria-announcement__link {display:inline-block;padding:5px 14px;border:1px solid #5287aa;border-radius:5px;background:linear-gradient(#254b6d,#102f49);color:#e2efff;font-weight:bold;text-decoration:none;}
+.azria-announcement .azria-announcement__link:hover {background:linear-gradient(#356181,#19405d);}
+.azria-announcement .azria-announcement__close {position:absolute;right:4px;top:4px;width:32px;height:32px;padding:0;border:0;border-radius:5px;background:transparent;color:#b8d5e8;font:24px/1 Arial;cursor:pointer;}
+.azria-announcement .azria-announcement__close:hover {background:#82bce51a;color:white;}
+.azria-announcement .azria-announcement__close:focus-visible, .azria-announcement .azria-announcement__link:focus-visible {outline:2px solid #b0e0ff;outline-offset:3px;}
+@media(max-width:480px){.azria-announcement {grid-template-columns:28px minmax(0,1fr);gap:9px;padding-left:12px;}.azria-announcement .azria-announcement__icon {width:28px;height:28px;}.azria-announcement .azria-announcement__title {font-size:14px;}}

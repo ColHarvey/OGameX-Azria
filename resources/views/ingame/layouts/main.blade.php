@@ -1838,6 +1838,12 @@ However, the Space Dock's engineers think that some of the remains can be salvag
                         initDailyReward();
                     }
 
+                    // La bulle d annonce. Son gestionnaire est **delegue au document**, donc il fonctionne
+                    // meme si la bulle n est pas sur la page courante — et il est idempotent.
+                    if (typeof initAnnouncement === 'function') {
+                        initAnnouncement();
+                    }
+
                     ogame.chat.showPlayerList('#chatBarPlayerList .cb_playerlist_box');
                     ogame.chat.showPlayerList('#sideBar');
                     var initChatAsyncInterval = window.setInterval(initChatAsync, 100);

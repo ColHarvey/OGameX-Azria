@@ -38,10 +38,10 @@ class MigrationForeignKeyTypesTest extends TestCase
         $migrations = $this->migrations();
         $this->assertGreaterThan(80, count($migrations), 'Premisse : les migrations sont bien lues.');
 
-        $identites = $this->identitesParTable($migrations);
+        $tables = $this->colonnesParTable($migrations);
         $this->assertSame(
             self::PETIT,
-            $identites['users'] ?? null,
+            $tables['users']['id'] ?? null,
             'Premisse : `users.id` est un `increments`, donc `int unsigned`. Si cela change, ce temoin doit changer aussi.'
         );
 
@@ -50,12 +50,12 @@ class MigrationForeignKeyTypesTest extends TestCase
         $vues = 0;
 
         foreach ($migrations as $chemin => $source) {
-            foreach ($this->clesEtrangeres($source) as [$colonne, $cible]) {
+            foreach ($this->clesEtrangeres($source) as [$colonne, $cible, $colonneCible]) {
                 $vues++;
 
-                $attendu = $identites[$cible] ?? null;
+                $attendu = $tables[$cible][$colonneCible] ?? null;
                 if ($attendu === null) {
-                    $illisibles[] = basename($chemin) . " : table visee `$cible` introuvable";
+                    $illisibles[] = basename($chemin) . " : `$cible`.`$colonneCible` introuvable";
 
                     continue;
                 }
@@ -68,7 +68,8 @@ class MigrationForeignKeyTypesTest extends TestCase
                 }
 
                 if ($declare !== $attendu) {
-                    $fautes[] = basename($chemin) . " : `$colonne` est $declare, mais `$cible`.`id` est $attendu";
+                    $fautes[] = basename($chemin)
+                        . " : `$colonne` est $declare, mais `$cible`.`$colonneCible` est $attendu";
                 }
             }
         }
@@ -94,17 +95,22 @@ class MigrationForeignKeyTypesTest extends TestCase
     }
 
     /**
-     * La famille de l identite de chaque table creee.
+     * La famille de **chaque colonne** de chaque table creee, pas seulement de son identite.
+     *
+     * Une premiere version ne relevait que l identite, et ne reconnaissait donc que les cles etrangeres en
+     * `references('id')`. Une cle vers une autre colonne unique — `announcement_bubble_dismissals.version`
+     * vers `announcement_bubble_versions.version` — etait **sautee en silence**, ce que ce temoin promet
+     * precisement de ne pas faire.
      *
      * @param array<string, string> $migrations
-     * @return array<string, string>
+     * @return array<string, array<string, string>>
      */
-    private function identitesParTable(array $migrations): array
+    private function colonnesParTable(array $migrations): array
     {
-        $identites = [];
+        $tables = [];
 
         foreach ($migrations as $source) {
-            // On decoupe sur les `Schema::create('<table>', ...)` pour attribuer chaque identite a sa table.
+            // On decoupe sur les `Schema::create('<table>', ...)` pour attribuer chaque colonne a sa table.
             $morceaux = preg_split("/Schema::create\\('([a-z_]+)'/", $source, -1, PREG_SPLIT_DELIM_CAPTURE);
             if ($morceaux === false) {
                 continue;
@@ -115,30 +121,37 @@ class MigrationForeignKeyTypesTest extends TestCase
                 $corps = $morceaux[$i + 1] ?? '';
 
                 if (preg_match("/\\\$table->bigIncrements\\('id'\\)|\\\$table->id\\(\\)/", $corps) === 1) {
-                    $identites[$table] = self::GRAND;
+                    $tables[$table]['id'] = self::GRAND;
                 } elseif (preg_match("/\\\$table->increments\\('id'\\)/", $corps) === 1) {
-                    $identites[$table] = self::PETIT;
+                    $tables[$table]['id'] = self::PETIT;
+                }
+
+                if (preg_match_all("/\\\$table->(unsignedBigInteger|unsignedInteger|bigIncrements|increments|foreignId)\\('([a-z_]+)'\\)/", $corps, $m, PREG_SET_ORDER) !== false) {
+                    foreach ($m as $set) {
+                        $grand = in_array($set[1], ['unsignedBigInteger', 'bigIncrements', 'foreignId'], true);
+                        $tables[$table][$set[2]] = $grand ? self::GRAND : self::PETIT;
+                    }
                 }
             }
         }
 
-        return $identites;
+        return $tables;
     }
 
     /**
-     * Les couples (colonne portante, table visee) d une migration.
+     * Les triplets (colonne portante, table visee, colonne visee) d une migration.
      *
-     * @return list<array{0: string, 1: string}>
+     * @return list<array{0: string, 1: string, 2: string}>
      */
     private function clesEtrangeres(string $source): array
     {
-        // `foreign('col')` ou `foreign('col', 'nom_de_index')`, puis la table visee.
-        $motif = "/->foreign\\(\\s*'([a-z_]+)'(?:\\s*,\\s*'[a-z_0-9]+')?\\s*\\)[^;]*?->references\\('id'\\)->on\\('([a-z_]+)'\\)/s";
+        // `foreign('col')` ou `foreign('col', 'nom_de_index')`, puis la colonne et la table visees.
+        $motif = "/->foreign\\(\\s*'([a-z_]+)'(?:\\s*,\\s*'[a-z_0-9]+')?\\s*\\)[^;]*?->references\\('([a-z_]+)'\\)->on\\('([a-z_]+)'\\)/s";
         if (preg_match_all($motif, $source, $m, PREG_SET_ORDER) === false) {
             return [];
         }
 
-        return array_map(static fn (array $set): array => [$set[1], $set[2]], $m);
+        return array_map(static fn (array $set): array => [$set[1], $set[3], $set[2]], $m);
     }
 
     /**
