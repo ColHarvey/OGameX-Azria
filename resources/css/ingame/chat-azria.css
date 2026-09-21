@@ -742,3 +742,130 @@
         font-size: 16px;
     }
 }
+
+/* ---------------------------------------------------------------- les non-lus : pastille, bandeau, son */
+/* La pastille des messages non lus, distincte du nombre de contacts en ligne qui reste a sa place. Posee en
+   absolu sur le bouton Contacts : elle ne deplace ni la barre ni les onglets. Absente a zero ([hidden]). */
+#chatBar.azria-chat .onlineCount {
+    position: relative;
+}
+#chatBar.azria-chat .az-unread-pip {
+    position: absolute;
+    top: -6px;
+    right: -4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    height: 16px;
+    padding: 0 6px 0 5px;
+    border-radius: 8px;
+    border: 1px solid #a88a3a;
+    background: linear-gradient(#e7c65a, #c99e2e);
+    color: #2a1f05;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 14px;
+    letter-spacing: .2px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .45);
+    pointer-events: none;
+}
+#chatBar.azria-chat .az-unread-pip[hidden] {
+    display: none;
+}
+#chatBar.azria-chat .az-unread-pip .az-svg {
+    width: 10px;
+    height: 10px;
+}
+/* Un bref halo quand le nombre monte, puis plus rien : jamais de clignotement permanent. Deux classes posees
+   a la suite par le module — l anneau apparait, puis se dissipe par transition — et pas de `@keyframes` : la
+   feuille du theme ne porte que des selecteurs sous #chatBar.azria-chat, et « 0% » n en est pas un. */
+#chatBar.azria-chat .az-unread-pip--halo {
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .45), 0 0 0 4px rgba(231, 198, 90, .85);
+}
+#chatBar.azria-chat .az-unread-pip--halo-out {
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .45), 0 0 0 10px rgba(231, 198, 90, 0);
+    transition: box-shadow 1.1s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+    #chatBar.azria-chat .az-unread-pip--halo,
+    #chatBar.azria-chat .az-unread-pip--halo-out {
+        box-shadow: 0 1px 2px rgba(0, 0, 0, .45);
+        transition: none;
+    }
+}
+
+/* Le bouton du son dans l en-tete des contacts : meme corps que celui qui replie le panneau. */
+#chatBar.azria-chat .az-sound[aria-pressed="true"] {
+    color: #e7c65a;
+}
+
+/* Le bandeau : bleu metallique, cinq secondes, sans contenu prive, **en bas a gauche de la fenetre du
+   navigateur**. Les fenetres de conversation se rangent a droite, et l une s ouvre d elle-meme a la reception
+   (§158) : pose a droite, le bandeau couvrait son champ de saisie. Et un `left` en absolu se mesure dans la
+   boite de #chatBar, qui n occupe que ses onglets a droite : le bandeau y restait — mesure du temoin de
+   non-chevauchement, 21 septembre 2026. `fixed` l ancre a la fenetre, la ou la barre ne range rien. */
+#chatBar.azria-chat .az-toast-stack {
+    position: fixed;
+    left: 12px;
+    bottom: 48px;
+    align-items: flex-start;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    z-index: 30;
+    pointer-events: none;
+}
+#chatBar.azria-chat .az-toast {
+    display: inline-flex;
+    align-items: stretch;
+    max-width: 340px;
+    border: 1px solid #4f7396;
+    border-radius: 4px;
+    background: linear-gradient(100deg, #1c344a, #142638);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(140, 177, 208, .25);
+    color: #c7d9e5;
+    font-size: 12px;
+    line-height: 1.4;
+    pointer-events: auto;
+}
+#chatBar.azria-chat .az-toast-body,
+#chatBar.azria-chat .az-toast-close {
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+#chatBar.azria-chat .az-toast-body {
+    flex: 1 1 auto;
+    padding: 8px 10px;
+    text-align: left;
+    overflow-wrap: anywhere;
+}
+#chatBar.azria-chat .az-toast-body:hover,
+#chatBar.azria-chat .az-toast-body:focus-visible {
+    background: rgba(140, 177, 208, .1);
+    outline: none;
+}
+#chatBar.azria-chat .az-toast-name {
+    font-weight: 700;
+    color: #e7c65a;
+    text-transform: uppercase;
+    letter-spacing: .3px;
+}
+#chatBar.azria-chat .az-toast-count {
+    margin-left: 4px;
+    color: #8eafca;
+}
+#chatBar.azria-chat .az-toast-close {
+    flex: 0 0 auto;
+    padding: 0 10px;
+    border-left: 1px solid #314b62;
+    color: #8eafca;
+    font-size: 16px;
+}
+#chatBar.azria-chat .az-toast-close:hover,
+#chatBar.azria-chat .az-toast-close:focus-visible {
+    color: #dce9f2;
+    outline: none;
+}

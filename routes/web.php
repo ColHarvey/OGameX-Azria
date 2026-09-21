@@ -15,6 +15,7 @@ use OGame\Http\Controllers\BuddiesController;
 use OGame\Http\Controllers\ChangeNickController;
 use OGame\Http\Controllers\CharacterClassController;
 use OGame\Http\Controllers\ChatController;
+use OGame\Http\Controllers\ChatUnreadController;
 use OGame\Http\Controllers\CombatController;
 use OGame\Http\Controllers\DailyRewardController;
 use OGame\Http\Controllers\DefenseController;
@@ -94,6 +95,12 @@ Route::middleware(['auth', 'banned', 'locale'])->group(function () {
     // ressources — masquer une annonce ne doit faire avancer ni l activite du compte ni ses missions.
     Route::post('/ajax/announcement/dismiss', [AnnouncementBubbleController::class, 'dismiss'])
         ->name('announcement.dismiss');
+
+    // **Les non-lus du chat** : la photographie se lit, le marquage s ecrit. Hors de `globalgame` pour la meme
+    // raison que le bandeau : une veille qui le traverserait ferait paraitre actif, dans la Galaxie et « en
+    // ligne », tout joueur ayant un onglet ouvert. `auth` et `banned` restent.
+    Route::get('/ajax/chat/unread', [ChatUnreadController::class, 'snapshot'])->name('chat.unread');
+    Route::post('/ajax/chat/seen', [ChatUnreadController::class, 'seen'])->name('chat.seen');
 });
 
 // Group: all logged in pages:

@@ -1486,6 +1486,12 @@ return [
         'load_error'            => 'De contacten konden niet worden geladen.',
         'network_failed'        => 'Het bericht kon niet worden verzonden. Je tekst is bewaard: probeer het opnieuw.',
         'not_authorized'        => 'Je kunt niet meer schrijven in dit gesprek. Laad de pagina opnieuw als je rechten zijn gewijzigd.',
+        'unread_one'            => '1 ongelezen bericht',
+        'unread_many'           => '#+# ongelezen berichten',
+        'toast_sent'            => 'heeft je een bericht gestuurd',
+        'toast_close'           => 'Melding sluiten',
+        'sound_on'              => 'Meldingsgeluid: aan',
+        'sound_off'             => 'Meldingsgeluid: uit',
     ],
     'announcement' => [
         'tab_message' => 'Bericht in het spel',

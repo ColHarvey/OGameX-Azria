@@ -24,6 +24,7 @@ const ingameScripts = [
     'resources/js/ingame/echo.js',
     'resources/js/ingame/chat.js',
     'resources/js/ingame/chat-general.js',
+    'resources/js/ingame/chat-unread.js',
     'resources/js/ingame/combat.js',
     'resources/js/ingame/galaxy-wormhole.js',
     'resources/js/ingame/galaxy-tactical.js',

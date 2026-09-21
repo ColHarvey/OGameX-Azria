@@ -94,6 +94,9 @@ class AllianceService
                 'joined_at' => now(),
             ]);
 
+            // Le curseur de lecture du canal nait avec l appartenance, dans la meme transaction.
+            resolve(ChatService::class)->openAllianceCursor($userId, (int)$alliance->id);
+
             // Update user's alliance_id and clear cooldown
             /** @phpstan-ignore assign.propertyType */
             $user->alliance_id = $alliance->id;
@@ -291,6 +294,9 @@ class AllianceService
                 'joined_at' => now(),
             ]);
 
+            // Le curseur de lecture du canal nait avec l appartenance : l historique d avant n est pas un non-lu.
+            resolve(ChatService::class)->openAllianceCursor((int)$application->user_id, (int)$application->alliance_id);
+
             // Update user's alliance_id and clear cooldown
             /** @phpstan-ignore assign.propertyType */
             $applicant->alliance_id = $application->alliance_id;
@@ -362,6 +368,7 @@ class AllianceService
         try {
             // Remove member
             $memberToKick->delete();
+            resolve(ChatService::class)->closeAllianceCursor($memberUserId, $allianceId);
 
             // Update user's alliance_id
             // **Etre exclu compte comme partir.** Le plan nomme les trois departs ensemble ; sans
@@ -410,6 +417,7 @@ class AllianceService
         try {
             // Remove member
             $member->delete();
+            resolve(ChatService::class)->closeAllianceCursor($userId, (int)$member->alliance_id);
 
             // Update user's alliance_id and set cooldown
             $user->alliance_id = null;

@@ -1105,6 +1105,17 @@
                     // Ce que le joueur lit quand son message n est pas parti, ou que la conversation lui est refusee (§167).
                     'NETWORK_FAILED'           => __('t_ingame.chat.network_failed'),
                     'NOT_AUTHORIZED'           => __('t_ingame.chat.not_authorized'),
+                    // Les non-lus : la pastille, le bandeau et le bouton du son (module chat-unread.js).
+                    'UNREAD_ONE'               => __('t_ingame.chat.unread_one'),
+                    'UNREAD_MANY'              => __('t_ingame.chat.unread_many'),
+                    'TOAST_SENT'               => __('t_ingame.chat.toast_sent'),
+                    'TOAST_CLOSE'              => __('t_ingame.chat.toast_close'),
+                    'SOUND_ON'                 => __('t_ingame.chat.sound_on'),
+                    'SOUND_OFF'                => __('t_ingame.chat.sound_off'),
+                ]) !!};
+                var chatUnreadUrls = {!! json_encode([
+                    'snapshot' => route('chat.unread'),
+                    'seen'     => route('chat.seen'),
                 ]) !!};
                 var eventboxLoca = {!! json_encode([
                     'mission'      => __('t_ingame.layout.eventbox_mission'),
@@ -1853,6 +1864,9 @@ However, the Space Dock's engineers think that some of the remains can be salvag
                             clearInterval(initChatAsyncInterval);
                             ogame.chat.initChatBar(playerId);
                             ogame.chat.initChat(playerId, isMobile, {{ auth()->user()->alliance_id ?? 'null' }});
+                            if (ogame.chatUnread) {
+                                ogame.chatUnread.init({ urls: chatUnreadUrls, playerId: playerId, allianceId: {{ auth()->user()->alliance_id ?? 'null' }} });
+                            }
                             ogame.chat.updateCustomScrollbar($('.scrollContainer'));
                         }
                     }

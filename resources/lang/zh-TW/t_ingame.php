@@ -1320,6 +1320,12 @@ return [
         'load_error'            => '無法載入聯絡人。',
         'network_failed'        => '訊息無法送出。你的文字已保留，請再試一次。',
         'not_authorized'        => '你已無法在此對話中發言。若權限已變更，請重新整理頁面。',
+        'unread_one'            => '1 則未讀訊息',
+        'unread_many'           => '#+# 則未讀訊息',
+        'toast_sent'            => '傳送了一則訊息給你',
+        'toast_close'           => '關閉通知',
+        'sound_on'              => '通知音效：開啟',
+        'sound_off'             => '通知音效：關閉',
     ],
     'announcement' => [
         'tab_message' => '遊戲內訊息',

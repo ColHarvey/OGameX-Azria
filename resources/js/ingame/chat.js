@@ -200,26 +200,17 @@ ogame.chat = {
     getTotalNewChatCounter: function () {
         return ogame.messagecounter.sumNewChatMessages
     },
+    /**
+     * Le total des non-lus vient du serveur, jamais d une somme de badges : un contact present dans la liste des
+     * amis ET dans celle de l alliance portait deux badges, et son message comptait deux fois (mesure du
+     * 21 septembre 2026). L infobulle du lien de chat n est plus reecrite ici — elle effacait le titre rendu par
+     * le serveur ; le module des non-lus la pose avec le nombre.
+     */
     updateTotalNewChatCounter: function () {
-        var b = 0;
-        if ($(".msg .new_msg_count").length > 0) {
-            $(".msg .new_msg_count").each(function () {
-                b += Number($(this).data("new-messages"))
-            })
-        } else {
-            if ($("#chatBarPlayerList .new_msg_count").length > 0) {
-                $("#chatBarPlayerList .new_msg_count").each(function () {
-                    b += Number($(this).data("new-messages"))
-                })
-            }
+        if (ogame.chatUnread && ogame.chatUnread.etat) {
+            return ogame.chatUnread.etat.total
         }
-        ogame.messagecounter.initialize(ogame.messagecounter.type_chat, ogame.chat.playerId);
-        if (ogame.messagecounter.sumNewChatMessages !== b) {
-            ogame.messagecounter.initChatCounter(b);
-            ogame.messagecounter.sumNewChatMessages = b;
-            ogame.messagecounter.update()
-        }
-        return b
+        return 0
     },
     retryConnection: function () {
         var b = ogame.chat;
@@ -353,52 +344,15 @@ ogame.chat = {
                 }
             }
         }
-        if (h.associationId !== undefined && h.associationId > 0) {
-            if ($('.chat_bar_list_item.open[data-associationid="' + h.associationId + '"]').length <= 0) {
-                var e = $('.new_msg_count[data-associationid="' + h.associationId + '"]').data("new-messages");
-                if (isNaN(e)) {
-                    e = 0
-                }
-                e++;
-                g.saveMessageCounterAssociation(e, h.associationId);
-                g.updateTotalNewChatCounter()
-            } else {
-                var f = {
-                    associationId: h.associationId,
-                    mode: 4,
-                    ajax: 1,
-                    updateUnread: 1
-                };
-                $.ajax({
-                    url: chatHistoryUrl,
-                    type: "POST",
-                    data: f,
-                    success: function (a) {
-                    },
-                    error: function (c, a, b) {
-                    }
-                })
-            }
-        } else {
-            if (h.senderId !== undefined && h.senderId > 0) {
-                ogame.messagemarker.setPartnerId(h.senderId);
-                if (!g.isOpen(h.senderId)) {
-                    ogame.messagecounter.initialize(ogame.messagecounter.type_chat, h.senderId);
-                    var e = parseInt(ogame.messagecounter.newChats[h.senderId]);
-                    if (isNaN(e)) {
-                        e = 0
-                    }
-                    e++;
-                    g.saveMessageCounter(e, h.senderId);
-                    ogame.messagemarker.updateNewMarker()
-                } else {
-                    g.saveMessageCounter(0, $(this).data("playerid"));
-                    ogame.messagemarker.updateNewMarker()
-                }
-            }
+        // **Les compteurs ne se devinent plus ici.** Cette branche incrementait un compteur en memoire, sommait les
+        // badges du DOM (un contact present dans deux listes comptait deux fois) et, fenetre ouverte, remettait a
+        // zero par `saveMessageCounter(0, $(this).data("playerid"))` — `this` n etant pas un element, l appel sortait
+        // par son `isNaN` sans rien faire (mesures du 21 septembre 2026). Le serveur est desormais la reference :
+        // le module des non-lus redemande l etat, et notifie si ce message n a pas deja ete vu.
+        if (ogame.chatUnread) {
+            ogame.chatUnread.messageRecu(h)
         }
-    },
-    cleanupUrl: function () {
+    },    cleanupUrl: function () {
         var k = window.location.href;
         var h = k.indexOf("&");
         if (h > 0) {
@@ -443,7 +397,9 @@ ogame.chat = {
         var m = ogame.chat;
         var o;
         if (typeof h == "undefined") {
-            h = true
+            // **Ouvrir n est pas lire.** L ouverture marquait tout l historique comme lu, messages jamais affiches
+            // compris ; seuls les messages entres dans la zone affichee marquent (`ogame.chatUnread`).
+            h = false
         }
         if (typeof p == "number") {
             o = p
@@ -476,7 +432,8 @@ ogame.chat = {
         var m = ogame.chat;
         var p;
         if (typeof h == "undefined") {
-            h = true
+            // Meme regle que pour une conversation directe : ouvrir le canal n est pas le lire.
+            h = false
         }
         if (typeof o == "number") {
             p = o
@@ -1950,6 +1907,9 @@ ogame.chat = {
         sub.append(document.createTextNode(c.loca('CONTACTS_ONLINE_SHORT').replace('#+#', String(online))));
         title.append(sub);
         header.append(title);
+        if (ogame.chatUnread && typeof ogame.chatUnread.boutonDuSon === 'function') {
+            header.append(ogame.chatUnread.boutonDuSon());
+        }
         header.append($('<button type="button" class="az-icon az-collapse"></button>').attr('title', c.loca('COLLAPSE_CONTACTS')).attr('aria-label', c.loca('COLLAPSE_CONTACTS')).html(c.azriaIcon('chevron-down')));
         root.append(header);
         // Les filtres : trois boutons qui posent les deux cases historiques (cachees) ; « tous » les decoche.

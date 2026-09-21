@@ -4,6 +4,7 @@ namespace OGame\Services;
 
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\DB;
 use OGame\Chat\PresentedAuthor;
 use OGame\Events\ChatMessageSent;
 use OGame\Models\ChatMessage;
@@ -165,13 +166,156 @@ class ChatService
     }
 
     /**
-     * Mark all alliance messages as read for a user.
-     * (Uses the read_at on sender's own view - we track per-message read status)
+     * L etat complet des non-lus du joueur : chaque conversation qui en porte, et le total.
+     *
+     * **Complete, et c est ce qui compte** : une conversation absente porte zero, et le navigateur remplace tout
+     * son etat par cette photographie. Le total est calcule ici, sur des conversations, jamais somme sur des
+     * badges — un contact present dans deux listes ne compte qu une fois.
+     *
+     * @return array{total: int, conversations: list<array{kind: string, playerId?: int, allianceId?: int, unread: int}>}
      */
-    public function markAllianceAsRead(int $allianceId): void
+    public function unreadSnapshot(int $userId): array
     {
-        // Alliance messages don't have per-user read tracking in this schema.
-        // The frontend handles unread counts via cookies/local state.
+        $conversations = [];
+        $total = 0;
+
+        foreach ($this->getUnreadCounts($userId) as $senderId => $count) {
+            $conversations[] = ['kind' => 'direct', 'playerId' => (int)$senderId, 'unread' => (int)$count];
+            $total += (int)$count;
+        }
+
+        $appartenance = DB::table('alliance_members')->where('user_id', $userId)->first(['alliance_id', 'joined_at']);
+        if ($appartenance !== null) {
+            $allianceId = (int)$appartenance->alliance_id;
+            $nonLus = $this->allianceUnreadCount($userId, $allianceId, $this->allianceCursor($userId, $allianceId, $appartenance->joined_at));
+            if ($nonLus > 0) {
+                $conversations[] = ['kind' => 'alliance', 'allianceId' => $allianceId, 'unread' => $nonLus];
+                $total += $nonLus;
+            }
+        }
+
+        return ['total' => $total, 'conversations' => $conversations];
+    }
+
+    /**
+     * Marquer lus **exactement** les messages directs vus, et eux seuls.
+     *
+     * Aucune hypothese de prefixe : sauter au dernier message ne marque pas ceux qu on n a pas affiches, et un
+     * message arrive pendant la requete n est pas dans la liste, donc reste non lu.
+     *
+     * @param list<int> $seenIds
+     * @return int le nombre de messages passes a « lu » par cet appel
+     */
+    public function markSeen(int $userId, int $partnerId, array $seenIds): int
+    {
+        $ids = array_values(array_unique(array_filter($seenIds, static fn (int $id): bool => $id > 0)));
+        if ($ids === []) {
+            return 0;
+        }
+
+        return ChatMessage::where('sender_id', $partnerId)
+            ->where('recipient_id', $userId)
+            ->whereNull('read_at')
+            ->whereIn('id', $ids)
+            ->update(['read_at' => now()]);
+    }
+
+    /**
+     * Avancer le curseur du canal d alliance jusqu au plus grand message affiche — et **jamais en arriere**.
+     *
+     * La clause `<` fait la garantie : deux onglets qui repondent dans le desordre ne le font pas reculer, et
+     * un curseur deja au-dela ne bouge pas. Le nombre de lignes rendu n est pas lu comme une possession
+     * (MariaDB compte les changees, SQLite les trouvees) : on relit.
+     *
+     * @return bool le curseur a-t-il avance
+     */
+    public function markAllianceSeenUpTo(int $userId, int $allianceId, int $seenUpToId): bool
+    {
+        $avant = (int)(DB::table('chat_alliance_reads')->where('user_id', $userId)->where('alliance_id', $allianceId)->value('last_read_message_id') ?? -1);
+        if ($avant === -1) {
+            $this->openAllianceCursor($userId, $allianceId, 0);
+            $avant = 0;
+        }
+
+        DB::table('chat_alliance_reads')
+            ->where('user_id', $userId)
+            ->where('alliance_id', $allianceId)
+            ->where('last_read_message_id', '<', $seenUpToId)
+            ->update(['last_read_message_id' => $seenUpToId, 'updated_at' => now()]);
+
+        $apres = (int)DB::table('chat_alliance_reads')->where('user_id', $userId)->where('alliance_id', $allianceId)->value('last_read_message_id');
+
+        return $apres > $avant;
+    }
+
+    public function isAllianceMember(int $userId, int $allianceId): bool
+    {
+        return DB::table('alliance_members')->where('user_id', $userId)->where('alliance_id', $allianceId)->exists();
+    }
+
+    public function isAnAllianceMessage(int $allianceId, int $messageId): bool
+    {
+        return ChatMessage::where('alliance_id', $allianceId)->whereKey($messageId)->exists();
+    }
+
+    /**
+     * Poser le curseur d un membre a son entree dans l alliance, sur la borne de cet instant.
+     *
+     * Sans borne donnee, elle vaut le dernier message de l alliance **maintenant** : ce qui precede l entree
+     * ne devient pas un tas de non-lus — et ce n est pas une interdiction de consulter l historique, qui reste
+     * entierement lisible. `insertOrIgnore` sur la clef unique : deux appels concurrents n ecrivent qu une
+     * ligne, et aucun ne recule un curseur existant.
+     */
+    public function openAllianceCursor(int $userId, int $allianceId, int|null $bound = null): void
+    {
+        $borne = $bound ?? (int)(ChatMessage::where('alliance_id', $allianceId)->max('id') ?? 0);
+
+        DB::table('chat_alliance_reads')->insertOrIgnore([
+            'user_id' => $userId,
+            'alliance_id' => $allianceId,
+            'last_read_message_id' => $borne,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
+    /** Quitter — ou etre exclu — retire le curseur : revenir le repose a l entree, sur une borne neuve. */
+    public function closeAllianceCursor(int $userId, int $allianceId): void
+    {
+        DB::table('chat_alliance_reads')->where('user_id', $userId)->where('alliance_id', $allianceId)->delete();
+    }
+
+    /** Les messages d alliance ecrits par un autre, au-dela du curseur. */
+    public function allianceUnreadCount(int $userId, int $allianceId, int $cursor): int
+    {
+        return ChatMessage::where('alliance_id', $allianceId)
+            ->where('id', '>', $cursor)
+            ->where('sender_id', '!=', $userId)
+            ->count();
+    }
+
+    /**
+     * Le curseur, ou sa creation si la ligne manque malgre tout.
+     *
+     * **Jamais « maintenant »** : la borne est le dernier message de l alliance **au moment de l adhesion**
+     * (`alliance_members.joined_at`). Une ligne absente ne peut donc pas avaler ce qui est arrive depuis
+     * l entree du membre. Puis relecture de la ligne effectivement en base : `insertOrIgnore` a pu perdre
+     * contre un appel concurrent, et c est celui-la qui fait foi.
+     */
+    private function allianceCursor(int $userId, int $allianceId, mixed $joinedAt): int
+    {
+        $curseur = DB::table('chat_alliance_reads')->where('user_id', $userId)->where('alliance_id', $allianceId)->value('last_read_message_id');
+        if ($curseur !== null) {
+            return (int)$curseur;
+        }
+
+        $requete = ChatMessage::where('alliance_id', $allianceId);
+        if (is_string($joinedAt) && $joinedAt !== '') {
+            $requete->where('created_at', '<=', $joinedAt);
+        }
+        $this->openAllianceCursor($userId, $allianceId, (int)($requete->max('id') ?? 0));
+
+        return (int)(DB::table('chat_alliance_reads')->where('user_id', $userId)->where('alliance_id', $allianceId)->value('last_read_message_id') ?? 0);
     }
 
     /**

@@ -1486,6 +1486,12 @@ return [
         'load_error'            => 'Impossibile caricare i contatti.',
         'network_failed'        => 'Impossibile inviare il messaggio. Il testo è stato conservato: riprova.',
         'not_authorized'        => 'Non puoi più scrivere in questa conversazione. Ricarica la pagina se i tuoi permessi sono cambiati.',
+        'unread_one'            => '1 messaggio non letto',
+        'unread_many'           => '#+# messaggi non letti',
+        'toast_sent'            => 'ti ha inviato un messaggio',
+        'toast_close'           => 'Chiudi la notifica',
+        'sound_on'              => 'Suono delle notifiche: attivo',
+        'sound_off'             => 'Suono delle notifiche: disattivato',
     ],
     'announcement' => [
         'tab_message' => 'Messaggio in gioco',
