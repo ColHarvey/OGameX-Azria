@@ -13,6 +13,20 @@ use Tests\AccountTestCase;
 
 class WreckFieldTest extends AccountTestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // Un essai etablit ce qu il exige : aucune epave a sa coordonnee avant lui, quoi que les voisins du
+        // processus y aient laisse — une fabrique cree un proprietaire que personne ne supprime, et son champ
+        // survivait a la liberation de la coordonnee (journal §182.7).
+        $coords = $this->planetService->getPlanetCoordinates();
+        WreckField::where('galaxy', $coords->galaxy)
+            ->where('system', $coords->system)
+            ->where('planet', $coords->position)
+            ->delete();
+    }
+
     private function getWreckFieldService(): WreckFieldService
     {
         $settingsService = resolve(SettingsService::class);
@@ -100,6 +114,7 @@ class WreckFieldTest extends AccountTestCase
             'galaxy' => $coords->galaxy,
             'system' => $coords->system,
             'planet' => $coords->position,
+            'owner_player_id' => $this->currentUserId,
             'status' => 'active',
             'ship_data' => [
                 ['machine_name' => 'light_fighter', 'quantity' => 10, 'repair_progress' => 0]
@@ -131,6 +146,7 @@ class WreckFieldTest extends AccountTestCase
             'galaxy' => $coords->galaxy,
             'system' => $coords->system,
             'planet' => $coords->position,
+            'owner_player_id' => $this->currentUserId,
             'status' => 'active',
             'ship_data' => [
                 ['machine_name' => 'light_fighter', 'quantity' => 5000000, 'repair_progress' => 0],
@@ -199,6 +215,7 @@ class WreckFieldTest extends AccountTestCase
             'galaxy' => $coords->galaxy,
             'system' => $coords->system,
             'planet' => $coords->position,
+            'owner_player_id' => $this->currentUserId,
             'status' => 'repairing',
             'ship_data' => [
                 ['machine_name' => 'light_fighter', 'quantity' => 10, 'repair_progress' => 0]
@@ -230,6 +247,7 @@ class WreckFieldTest extends AccountTestCase
             'galaxy' => $coords->galaxy,
             'system' => $coords->system,
             'planet' => $coords->position,
+            'owner_player_id' => $this->currentUserId,
             'status' => 'active',
             'ship_data' => [
                 ['machine_name' => 'light_fighter', 'quantity' => 10, 'repair_progress' => 0]
@@ -258,6 +276,7 @@ class WreckFieldTest extends AccountTestCase
             'galaxy' => $coords->galaxy,
             'system' => $coords->system,
             'planet' => $coords->position,
+            'owner_player_id' => $this->currentUserId,
             'status' => 'repairing',
             'ship_data' => [
                 ['machine_name' => 'light_fighter', 'quantity' => 10, 'repair_progress' => 0]
