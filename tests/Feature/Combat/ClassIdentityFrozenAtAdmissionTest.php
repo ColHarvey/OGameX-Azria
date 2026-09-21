@@ -25,7 +25,10 @@ use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Enums\CharacterClass;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameMissions\AttackMission;
+use OGame\GameMissions\BattleEngine\Draws\BattleDraws;
+use OGame\GameMissions\BattleEngine\Draws\SeededDraws;
 use OGame\GameMissions\BattleEngine\Models\AttackerFleetResult;
+use OGame\GameObjects\Models\Enums\GameObjectType;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\History\ClassHistoryRecorder;
 use OGame\Models\BattleReport;
@@ -34,8 +37,10 @@ use OGame\Models\FleetMission;
 use OGame\Models\Resources;
 use OGame\Services\ObjectService;
 use OGame\Services\SettingsService;
+use OGame\Services\WreckFieldService;
 use Tests\FleetDispatchTestCase;
 use Tests\RecordsClassHistory;
+use Tests\Support\PinsSettings;
 
 /**
  * **La classe elle-meme se gele a l admission**, pas seulement son bonus (correction approuvee par Keven,
@@ -76,7 +81,17 @@ use Tests\RecordsClassHistory;
 final class ClassIdentityFrozenAtAdmissionTest extends FleetDispatchTestCase
 {
     use OpensARallyWithAWindow;
+    use PinsSettings;
     use RecordsClassHistory;
+
+    /** La graine des batailles de cette classe : une bataille reproductible, pas un tirage au sort. */
+    private const int BATTLE_SEED = 20260921;
+
+    /** Le niveau de chantier spatial que le montage etablit : le plus haut, donc la part la plus grande. */
+    private const int SPACE_DOCK_LEVEL = 15;
+
+    /** Les trois colonnes que la photographie de l ouverture lit sur le proprietaire de la cible. */
+    private const array COMBAT_TECHNOLOGIES = ['weapon_technology', 'shielding_technology', 'armor_technology'];
 
     protected int $missionType = 1;
 
@@ -91,15 +106,39 @@ final class ClassIdentityFrozenAtAdmissionTest extends FleetDispatchTestCase
 
     private int|null $hamillChance = null;
 
+    /**
+     * Le proprietaire de la cible et les trois technologies qu il portait avant le montage.
+     *
+     * @var array{0: int, 1: array<string, int>}|null
+     */
+    private array|null $defenderTechnologies = null;
+
     protected function basicSetup(): void
     {
         $this->basicSetupForARally();
 
         // **Aucun seuil de champ d epaves** : ces essais portent sur la classe, pas sur l ampleur des pertes, que
-        // le moteur tire au sort. Remis au demontage — les reglages vivent en base.
-        $reglages = resolve(SettingsService::class);
-        $reglages->set('wreck_field_min_resources_loss', 0);
-        $reglages->set('wreck_field_min_fleet_percentage', 0);
+        // le moteur tire au sort.
+        //
+        // **Et la part recuperable est etablie, pas heritee.** Elle vaut
+        // `(100 - debris_field_from_ships) x multiplicateur du chantier`, et
+        // `calculateShipsForWreckField()` ne garde que `floor(perdus x part)` : sous un navire entier, elle
+        // ne rend rien et le champ d epaves devient **nul**. La classe ne posait ni le reglage ni le
+        // chantier — a 30 % de debris et niveau 1, la part tombait a 31,5 % et il fallait perdre quatre
+        // navires d un type. L ouvreuse en perdait sept : quatre de marge, et un rouge de CI le
+        // 21 septembre 2026 que ni seize processus ni la serie n avaient montre.
+        //
+        // Zero pour cent de debris et un chantier de niveau quinze portent la part a **56 %**, son maximum :
+        // deux navires suffisent. Les reglages sont **rendus a leur etat exact** au demontage.
+        $this->pinSettings([
+            'wreck_field_min_resources_loss' => 0,
+            'wreck_field_min_fleet_percentage' => 0,
+            'debris_field_from_ships' => 0,
+        ]);
+
+        // Le chantier du corps de depart : c est lui que la fermeture photographie, et le plancher
+        // `max(1, ...)` masquait son absence derriere le multiplicateur le plus bas.
+        DB::table('planets')->where('id', $this->planetService->getPlanetId())->update(['space_dock' => self::SPACE_DOCK_LEVEL]);
     }
 
     protected function messageCheckMissionArrival(): void
@@ -114,11 +153,20 @@ final class ClassIdentityFrozenAtAdmissionTest extends FleetDispatchTestCase
     {
         $reglages = resolve(SettingsService::class);
         $reglages->set('persistent_combat_enabled', '0');
-        $reglages->set('wreck_field_min_resources_loss', 150000);
-        $reglages->set('wreck_field_min_fleet_percentage', 5);
+
+        // **Rendus a leur etat exact**, valeur ou absence — et non a un defaut devine, qui survivrait a un
+        // changement de ce defaut en disant l ancienne valeur pour toujours.
+        $this->restorePinnedSettings();
 
         if ($this->hamillChance !== null) {
             $reglages->set('hamill_manoeuvre_chance', $this->hamillChance);
+        }
+
+        // **Rendues a leur valeur exacte.** Le proprietaire de la cible est partage par tout le processus :
+        // le laisser a zero ferait mentir le voisin qui comptait sur ses technologies.
+        if ($this->defenderTechnologies !== null) {
+            DB::table('users_tech')->where('user_id', $this->defenderTechnologies[0])->update($this->defenderTechnologies[1]);
+            $this->defenderTechnologies = null;
         }
 
         // La cible propre appartient au joueur etranger que les essais d un processus partagent.
@@ -255,9 +303,9 @@ final class ClassIdentityFrozenAtAdmissionTest extends FleetDispatchTestCase
     {
         [$combat, $mission] = $this->aLoneAttackProcessedLate(CharacterClass::GENERAL, function (): void {
             $this->recordCharacterClass($this->currentUserId, CharacterClass::COLLECTOR);
-        }, ['rocket_launcher' => 200]);
+        }, ['rocket_launcher' => 200], bataillesReproductibles: true);
 
-        $this->assertLossesAndSurvivors($combat);
+        $this->assertLossesAndSurvivors($combat, ['light_fighter' => 20, 'small_cargo' => 5]);
 
         $retours = $this->settleFromStorage($combat);
 
@@ -272,9 +320,9 @@ final class ClassIdentityFrozenAtAdmissionTest extends FleetDispatchTestCase
     {
         [$combat, $mission] = $this->aLoneAttackProcessedLate(CharacterClass::COLLECTOR, function (): void {
             $this->recordCharacterClass($this->currentUserId, CharacterClass::GENERAL);
-        }, ['rocket_launcher' => 200]);
+        }, ['rocket_launcher' => 200], bataillesReproductibles: true);
 
-        $this->assertLossesAndSurvivors($combat);
+        $this->assertLossesAndSurvivors($combat, ['light_fighter' => 45, 'small_cargo' => 9]);
 
         $retours = $this->settleFromStorage($combat);
 
@@ -292,7 +340,13 @@ final class ClassIdentityFrozenAtAdmissionTest extends FleetDispatchTestCase
      */
     public function testTwoFleetsOfOnePlayerAdmittedUnderTwoClassesDecideTheirWreckFieldsApart(): void
     {
-        [$ouvreuse, , $ouverture] = $this->aRallyAboutToOpen(200);
+        [$ouvreuse, $cible, $ouverture] = $this->aRallyAboutToOpen(200);
+
+        // Le monde d abord, la graine ensuite : l un ecrit en base, l autre dans le conteneur.
+        $this->establishACalmDefender($cible);
+
+        // Le montage a fini d envoyer ; la liaison survit donc jusqu au calcul.
+        $this->makeTheBattlesReproducible();
 
         // General avant l arrivee de l ouvreuse : l horloge est encore au depart.
         $this->recordCharacterClass($this->currentUserId, CharacterClass::GENERAL);
@@ -313,9 +367,28 @@ final class ClassIdentityFrozenAtAdmissionTest extends FleetDispatchTestCase
             'The closure did not photograph the General class of each fleet at its own admission.'
         );
 
+        // **Les pertes exactes de la graine**, flotte par flotte : c est la preuve que la liaison des tirages a
+        // survecu jusqu au calcul, et la premisse des deux assertions qui suivent.
+        //
+        // Le chiffre de la vague compte doublement. Elle perd **trois** chasseurs : a la part heritee de 31,5 %,
+        // `floor(3 x 0,315) = 0` — elle n aurait aucun champ d epaves **quelle que soit sa classe**, et le
+        // `assertNull` plus bas passait pour la mauvaise raison. A 56 %, `floor(3 x 0,56) = 1` : elle en
+        // formerait un si son admission l autorisait. Son absence est donc attribuable au Collecteur, et a lui
+        // seul.
+        $attendues = [
+            (int)$ouvreuse->id => ['light_fighter' => 12, 'small_cargo' => 2],
+            (int)$vague->id => ['light_fighter' => 3],
+        ];
+
         foreach (BattleResultCodec::fromStorage($relu->battle_result)->attackerFleetResults as $flotte) {
-            $this->assertGreaterThan(0, $flotte->unitsLost->getAmount(), 'The premise is missing: fleet ' . $flotte->fleetMissionId . ' lost nothing, no wreck field would exist either way.');
             $this->assertTrue($flotte->hasSurvivors(), 'The premise is missing: fleet ' . $flotte->fleetMissionId . ' has no survivor to bring a wreck field home.');
+            $this->assertArrayHasKey((int)$flotte->fleetMissionId, $attendues, 'An unexpected fleet fought: ' . $flotte->fleetMissionId);
+            $this->assertTheSeededBattleProduced(
+                $flotte->unitsLost,
+                $attendues[(int)$flotte->fleetMissionId],
+                'Fleet ' . $flotte->fleetMissionId
+            );
+            $this->assertARecoverableWreckWouldForm($flotte->unitsLost, (int)$flotte->fleetMissionId);
         }
 
         $retours = $this->settleFromStorage($relu);
@@ -637,6 +710,7 @@ final class ClassIdentityFrozenAtAdmissionTest extends FleetDispatchTestCase
         Resources|null $cargaison = null,
         bool $cibleInactive = false,
         Closure|null $avantLArrivee = null,
+        bool $bataillesReproductibles = false,
     ): array {
         for ($i = 0; $i < 6; $i++) {
             $this->createAndLoginUser();
@@ -657,6 +731,8 @@ final class ClassIdentityFrozenAtAdmissionTest extends FleetDispatchTestCase
             $avantLArrivee();
         }
 
+        $this->establishACalmDefender($planete->getPlanetId());
+
         $proprietaire = (int)DB::table('planets')->where('id', $planete->getPlanetId())->value('user_id');
         DB::table('users')->where('id', $proprietaire)->update(['tactical_retreat_ratio' => 0]);
         DB::table('planets')->where('id', $planete->getPlanetId())->update($cible + [
@@ -675,6 +751,12 @@ final class ClassIdentityFrozenAtAdmissionTest extends FleetDispatchTestCase
         $entreLArriveeEtLeTraitement($proprietaire);
 
         $this->travelTo(Date::createFromTimestamp($arrivee + 10));
+
+        // Apres le dernier envoi, avant le calcul : c est la seule fenetre ou la liaison survit.
+        if ($bataillesReproductibles) {
+            $this->makeTheBattlesReproducible();
+        }
+
         $combat = (new CombatOpeningService())->openOrJoin(FleetMission::query()->findOrFail($mission->id), $planete->getPlanetId(), $arrivee);
 
         $relu = CombatInstance::query()->findOrFail($combat->id);
@@ -682,6 +764,74 @@ final class ClassIdentityFrozenAtAdmissionTest extends FleetDispatchTestCase
         $this->assertSame('v2', $relu->unit_characteristics_version, 'The combat is not under the frozen at entry rule.');
 
         return [$relu, $mission, $arrivee];
+    }
+
+    /**
+     * **La cible est neuve ; son proprietaire ne l est pas.**
+     *
+     * `getNearbyForeignCleanPlanet()` cree bien une planete vierge pour chaque essai, mais elle appartient au
+     * joueur etranger que tous les essais d un processus partagent — et `OpeningStateRecorder::defenderFactsOf()`
+     * lit **sur ce compte** les trois technologies de combat avant de les geler.
+     *
+     * Mesure du 21 septembre 2026 : les porter a 10 juste avant l ouverture fait passer les pertes de l attaquante
+     * de 20 chasseurs et 5 transporteurs a **247 et 28**, sous la meme graine. Un voisin qui monte ces colonnes
+     * sans les rendre change donc la bataille, et la graine ne suffit plus a la rendre identique d un passage a
+     * l autre.
+     *
+     * Le montage les **etablit** a zero — il n en herite pas — et rend leur etat exact au demontage.
+     *
+     * Le bonus de classe du defenseur entre aussi dans la photographie, mais il a deja sa discipline :
+     * `RecordsClassHistory` interdit d ecrire la colonne seule et ses deux ecrivains la rendent dans un
+     * `finally`. Il est donc **verifie ici, pas ecrit** : si un voisin en laissait un, le rouge nommerait la
+     * cause au lieu de montrer des pertes inexplicables.
+     */
+    private function establishACalmDefender(int $planetId): void
+    {
+        $proprietaire = (int)DB::table('planets')->where('id', $planetId)->value('user_id');
+
+        if ($this->defenderTechnologies === null) {
+            $ligne = DB::table('users_tech')->where('user_id', $proprietaire)->first(self::COMBAT_TECHNOLOGIES);
+            $this->assertNotNull($ligne, 'Le proprietaire de la cible n a pas de ligne de technologies.');
+
+            $avant = [];
+            foreach (self::COMBAT_TECHNOLOGIES as $colonne) {
+                $avant[$colonne] = (int)$ligne->{$colonne};
+            }
+
+            $this->defenderTechnologies = [$proprietaire, $avant];
+        }
+
+        DB::table('users_tech')->where('user_id', $proprietaire)->update(array_fill_keys(self::COMBAT_TECHNOLOGIES, 0));
+
+        // **Par la fabrique, jamais par le conteneur** : `app()->make(PlayerService::class)` ecraserait le joueur
+        // de la requete en cours, que le middleware enregistre comme instance partagee.
+        $this->assertSame(
+            0,
+            resolve(PlayerServiceFactory::class)->make($proprietaire, true)->getCombatResearchBonusLevels(),
+            'Un voisin a laisse un bonus de classe au proprietaire de la cible (compte ' . $proprietaire . ') : la bataille '
+            . 'de cette graine ne serait plus celle qui est epinglee ici. Le rendre dans un `finally`, comme le font '
+            . 'les deux essais qui le posent.'
+        );
+    }
+
+    /**
+     * **La bataille cesse d etre tiree au sort.**
+     *
+     * Mesure du 21 septembre 2026, trois passages sur la meme cible propre : l ouvreuse perdait 8, puis 17,
+     * puis 9 chasseurs, et la vague 9, 6, puis 4. La cible n y est pour rien — elle est creee pour l essai ;
+     * c est le tirage du moteur qui varie. Or le champ d epaves ne garde que `floor(perdus x part)` : sous
+     * un navire entier il n existe pas, et l essai tombait sur une epave absente sans savoir pourquoi.
+     *
+     * **Posee apres le dernier envoi de flotte, jamais avant** : `dispatchFleet()` se termine par
+     * `reloadApplication()`, qui reconstruit le conteneur et efface toute liaison en silence.
+     *
+     * **Et verifiee au point d usage** : chaque essai qui en depend assure les pertes exactes de cette
+     * graine. Une liaison effacee donnerait d autres pertes, et l assertion le dirait — la couleur du
+     * temoin, elle, ne prouverait rien.
+     */
+    private function makeTheBattlesReproducible(): void
+    {
+        $this->app->bind(BattleDraws::class, static fn (): SeededDraws => new SeededDraws(self::BATTLE_SEED));
     }
 
     private function theLoneAttackUnits(): UnitCollection
@@ -714,12 +864,25 @@ final class ClassIdentityFrozenAtAdmissionTest extends FleetDispatchTestCase
         return is_numeric($valeur) ? (int)$valeur : null;
     }
 
-    private function assertLossesAndSurvivors(CombatInstance $combat): void
+    /**
+     * **Les pertes attendues sont propres a chaque essai**, et ce n est pas une commodite : la classe gelee
+     * change la bataille. Sous la meme graine, l attaque admise General perd 20 chasseurs et 5 transporteurs,
+     * celle admise Collecteur 45 et 9 — mesure faite. Une attente unique aurait donc menti pour l un des deux.
+     *
+     * @param array<string, int> $pertesAttendues
+     */
+    private function assertLossesAndSurvivors(CombatInstance $combat, array $pertesAttendues): void
     {
         $resultat = BattleResultCodec::fromStorage($combat->battle_result);
 
-        $this->assertGreaterThan(0, $resultat->attackerUnitsLost->getAmount(), 'The premise is missing: the attacker lost nothing, no wreck field would exist either way.');
         $this->assertGreaterThan(0, $resultat->attackerUnitsResult->getAmount(), 'The premise is missing: the attacker has no survivor, no return would carry a wreck field.');
+
+        // **Assez perdu pour qu un champ d epaves existe**, et non « assez perdu pour que le compte ne soit
+        // pas nul ». La difference decide l essai qui attend une epave — et surtout celui qui attend son
+        // ABSENCE : sans cette premisse, une bataille clemente rendrait `null` quelle que soit la classe, et
+        // le juste coinciderait avec le faux.
+        $this->assertTheSeededBattleProduced($resultat->attackerUnitsLost, $pertesAttendues, 'The lone attack');
+        $this->assertARecoverableWreckWouldForm($resultat->attackerUnitsLost, 0);
     }
 
     /**
@@ -728,6 +891,89 @@ final class ClassIdentityFrozenAtAdmissionTest extends FleetDispatchTestCase
      *
      * @return array<int, array{ressources: Resources, epaves: array<mixed>|null}> Par mission aller.
      */
+
+    /**
+     * **La graine se verifie au point d usage**, jamais par la couleur du temoin.
+     *
+     * `dispatchFleet()` se termine par `reloadApplication()` : une liaison posee avant un envoi est
+     * effacee **en silence**, et le moteur reprend son tirage au sort sans que rien ne le dise. La seule
+     * preuve qu elle a survecu est que la bataille a rendu exactement ce que cette graine rend.
+     *
+     * @param array<string, int> $attendu Les pertes exactes, par nom machine.
+     */
+    private function assertTheSeededBattleProduced(UnitCollection $perdues, array $attendu, string $qui): void
+    {
+        $reelles = [];
+        foreach ($perdues->units as $unite) {
+            if ($unite->amount > 0) {
+                $reelles[$unite->unitObject->machine_name] = $unite->amount;
+            }
+        }
+        ksort($reelles);
+        ksort($attendu);
+
+        $this->assertSame(
+            $attendu,
+            $reelles,
+            $qui . ' did not fight the seeded battle: the draws binding did not survive, or the engine changed.'
+        );
+    }
+
+    /**
+     * **La premisse dit ce dont le champ d epaves a besoin**, pas une approximation plus faible.
+     *
+     * `WreckFieldService::calculateShipsForWreckField()` ne garde que `floor(perdus x part)` par type de
+     * navire, et n emet **rien** quand ce compte tombe a zero pour tous. « Des unites ont ete perdues » ne
+     * suffit donc pas : trois chasseurs perdus a 31,5 % donnent zero, et l essai lisait une epave absente sans
+     * savoir pourquoi — c est le rouge de CI du 21 septembre 2026.
+     *
+     * On refait donc ici le seul calcul qui decide, et le message nomme le compte exact de chaque type.
+     */
+    private function assertARecoverableWreckWouldForm(UnitCollection $perdues, int $flotte): void
+    {
+        $part = $this->recoverableSharePercentage();
+
+        $detail = [];
+        $recuperables = 0;
+        foreach ($perdues->units as $unite) {
+            if ($unite->amount <= 0 || $unite->unitObject->type !== GameObjectType::Ship) {
+                continue;
+            }
+            $compte = (int)floor($unite->amount * ($part / 100));
+            $recuperables += $compte;
+            $detail[] = $unite->unitObject->machine_name . '=' . $unite->amount . ' -> ' . $compte;
+        }
+
+        $this->assertGreaterThan(
+            0,
+            $recuperables,
+            'The premise is missing: fleet ' . $flotte . ' lost too little for any ship to be recoverable at '
+            . $part . '% (' . implode(', ', $detail) . '). No wreck field would exist either way.'
+        );
+    }
+
+    /**
+     * La part recuperable que le montage etablit : `(100 - debris) x multiplicateur du chantier pose`.
+     *
+     * Elle est **lue du service**, jamais recopiee : une constante ecrite ici mentirait le jour ou les
+     * multiplicateurs changeraient, et la premisse mesurerait autre chose que le jeu.
+     */
+    private function recoverableSharePercentage(): float
+    {
+        $joueur = $this->planetService->getPlayer();
+        $this->assertNotNull($joueur, 'Le banc doit porter un joueur.');
+
+        $reglages = resolve(SettingsService::class);
+
+        return (new WreckFieldService(
+            $joueur,
+            $reglages,
+            $reglages->debrisFieldFromShips(),
+            $reglages->wreckFieldLifetimeHours(),
+            Date::now()->getTimestamp()
+        ))->getRecoverableWreckFieldPercentage(self::SPACE_DOCK_LEVEL);
+    }
+
     private function settleFromStorage(CombatInstance $combat): array
     {
         $echeance = (int)$combat->ends_at;
