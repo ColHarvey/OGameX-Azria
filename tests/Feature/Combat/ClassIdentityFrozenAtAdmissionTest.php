@@ -23,6 +23,7 @@ use OGame\Combat\Services\RallyClosureService;
 use OGame\Combat\Support\CombatantFrozenAtEntry;
 use OGame\Combat\Support\CombatParticipantKey;
 use OGame\Enums\CharacterClass;
+use OGame\Factories\PlanetServiceFactory;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameMissions\AttackMission;
 use OGame\GameMissions\BattleEngine\Draws\BattleDraws;
@@ -31,11 +32,14 @@ use OGame\GameMissions\BattleEngine\Models\AttackerFleetResult;
 use OGame\GameObjects\Models\Enums\GameObjectType;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\History\ClassHistoryRecorder;
+use OGame\Lifeforms\Combat\LifeformCombatPhotographer;
 use OGame\Models\BattleReport;
 use OGame\Models\CombatInstance;
+use OGame\Models\Enums\PlanetType;
 use OGame\Models\FleetMission;
 use OGame\Models\Resources;
 use OGame\Services\ObjectService;
+use OGame\Services\PlanetService;
 use OGame\Services\SettingsService;
 use OGame\Services\WreckFieldService;
 use Tests\FleetDispatchTestCase;
@@ -106,13 +110,6 @@ final class ClassIdentityFrozenAtAdmissionTest extends FleetDispatchTestCase
 
     private int|null $hamillChance = null;
 
-    /**
-     * Le proprietaire de la cible et les trois technologies qu il portait avant le montage.
-     *
-     * @var array{0: int, 1: array<string, int>}|null
-     */
-    private array|null $defenderTechnologies = null;
-
     protected function basicSetup(): void
     {
         $this->basicSetupForARally();
@@ -130,10 +127,18 @@ final class ClassIdentityFrozenAtAdmissionTest extends FleetDispatchTestCase
         //
         // Zero pour cent de debris et un chantier de niveau quinze portent la part a **56 %**, son maximum :
         // deux navires suffisent. Les reglages sont **rendus a leur etat exact** au demontage.
+        // **Les sept reglages que le moteur photographie**, pas trois. `PhotographedUniverse::fromLiveSettings()`
+        // en gele sept a l ouverture ; quatre etaient encore herites de ce qu un voisin avait laisse. Aucun ne
+        // change les pertes de cette graine — ils agissent apres la bataille —, mais un monde a moitie etabli
+        // n est pas un monde etabli, et le dire coute une ligne.
         $this->pinSettings([
             'wreck_field_min_resources_loss' => 0,
             'wreck_field_min_fleet_percentage' => 0,
             'debris_field_from_ships' => 0,
+            'debris_field_from_defense' => 0,
+            'debris_field_deuterium_on' => 0,
+            'defense_repair_rate' => 0,
+            'maximum_moon_chance' => 0,
         ]);
 
         // Le chantier du corps de depart : c est lui que la fermeture photographie, et le plancher
@@ -162,14 +167,8 @@ final class ClassIdentityFrozenAtAdmissionTest extends FleetDispatchTestCase
             $reglages->set('hamill_manoeuvre_chance', $this->hamillChance);
         }
 
-        // **Rendues a leur valeur exacte.** Le proprietaire de la cible est partage par tout le processus :
-        // le laisser a zero ferait mentir le voisin qui comptait sur ses technologies.
-        if ($this->defenderTechnologies !== null) {
-            DB::table('users_tech')->where('user_id', $this->defenderTechnologies[0])->update($this->defenderTechnologies[1]);
-            $this->defenderTechnologies = null;
-        }
-
-        // La cible propre appartient au joueur etranger que les essais d un processus partagent.
+        // **Rien a rendre du cote du defenseur** : il n appartient qu a cet essai (voir `aDedicatedTarget()`).
+        // Le seul etat partage que cette classe touche, ce sont les reglages d univers, et `PinsSettings` les rend.
         if ($this->inactiveOwner !== null) {
             DB::table('users')->where('id', $this->inactiveOwner[0])->update(['time' => $this->inactiveOwner[1]]);
         }
@@ -340,10 +339,7 @@ final class ClassIdentityFrozenAtAdmissionTest extends FleetDispatchTestCase
      */
     public function testTwoFleetsOfOnePlayerAdmittedUnderTwoClassesDecideTheirWreckFieldsApart(): void
     {
-        [$ouvreuse, $cible, $ouverture] = $this->aRallyAboutToOpen(200);
-
-        // Le monde d abord, la graine ensuite : l un ecrit en base, l autre dans le conteneur.
-        $this->establishACalmDefender($cible);
+        [$ouvreuse, , $ouverture] = $this->aRallyAboutToOpen(200);
 
         // Le montage a fini d envoyer ; la liaison survit donc jusqu au calcul.
         $this->makeTheBattlesReproducible();
@@ -714,6 +710,10 @@ final class ClassIdentityFrozenAtAdmissionTest extends FleetDispatchTestCase
     ): array {
         for ($i = 0; $i < 6; $i++) {
             $this->createAndLoginUser();
+            if ($i === 0) {
+                // Le premier des comptes de remplissage sera le defenseur : ne pour cet essai, et pour lui seul.
+                $this->spareAccount = $this->currentUserId;
+            }
         }
         $this->basicSetup();
 
@@ -723,15 +723,13 @@ final class ClassIdentityFrozenAtAdmissionTest extends FleetDispatchTestCase
 
         $this->recordCharacterClass($this->currentUserId, $aLAdmission);
 
-        $planete = $this->sendMissionToOtherPlayerCleanPlanet($this->theLoneAttackUnits(), $cargaison ?? new Resources(0, 0, 0, 0));
+        $planete = $this->aDedicatedTarget($this->theLoneAttackUnits(), $cargaison ?? new Resources(0, 0, 0, 0));
         $mission = $this->lastMissionDispatched();
         $arrivee = (int)$mission->time_arrival;
 
         if ($avantLArrivee !== null) {
             $avantLArrivee();
         }
-
-        $this->establishACalmDefender($planete->getPlanetId());
 
         $proprietaire = (int)DB::table('planets')->where('id', $planete->getPlanetId())->value('user_id');
         DB::table('users')->where('id', $proprietaire)->update(['tactical_retreat_ratio' => 0]);
@@ -767,50 +765,72 @@ final class ClassIdentityFrozenAtAdmissionTest extends FleetDispatchTestCase
     }
 
     /**
-     * **La cible est neuve ; son proprietaire ne l est pas.**
+     * **Une cible qui n appartient qu a cet essai.**
      *
-     * `getNearbyForeignCleanPlanet()` cree bien une planete vierge pour chaque essai, mais elle appartient au
-     * joueur etranger que tous les essais d un processus partagent — et `OpeningStateRecorder::defenderFactsOf()`
-     * lit **sur ce compte** les trois technologies de combat avant de les geler.
+     * `getNearbyForeignCleanPlanet()` cree bien une planete vierge, mais elle appartient au joueur etranger que
+     * tous les essais d un processus partagent — et `OpeningStateRecorder::defenderFactsOf()` lit **sur ce compte**
+     * les trois technologies de combat, la somme des bonus de classe, et les apports de formes de vie que
+     * `LifeformCombatPhotographer::ofBody()` prend chez le proprietaire.
      *
-     * Mesure du 21 septembre 2026 : les porter a 10 juste avant l ouverture fait passer les pertes de l attaquante
-     * de 20 chasseurs et 5 transporteurs a **247 et 28**, sous la meme graine. Un voisin qui monte ces colonnes
-     * sans les rendre change donc la bataille, et la graine ne suffit plus a la rendre identique d un passage a
-     * l autre.
+     * Mesure du 21 septembre 2026 : porter les trois technologies a 10 juste avant l ouverture fait passer les
+     * pertes de l attaquante de 20 chasseurs et 5 transporteurs a **247 et 28**, sous la meme graine.
      *
-     * Le montage les **etablit** a zero — il n en herite pas — et rend leur etat exact au demontage.
+     * Etablir chacune de ces entrees puis la rendre etait possible ; s en passer l est davantage. Le montage cree
+     * deja six comptes avant l attaquant, pour peupler la galaxie : le premier devient le proprietaire de la
+     * cible. Il est ne dans cet essai, il y meurt, **aucun voisin ne l a touche et aucun ne le touchera** — il n y
+     * a donc rien a rendre.
      *
-     * Le bonus de classe du defenseur entre aussi dans la photographie, mais il a deja sa discipline :
-     * `RecordsClassHistory` interdit d ecrire la colonne seule et ses deux ecrivains la rendent dans un
-     * `finally`. Il est donc **verifie ici, pas ecrit** : si un voisin en laissait un, le rouge nommerait la
-     * cause au lieu de montrer des pertes inexplicables.
+     * La garde qui suit ne protege pas d un voisin : elle protege d une creation de compte qui cesserait un jour
+     * d etre vierge.
      */
-    private function establishACalmDefender(int $planetId): void
+    private function aDedicatedTarget(UnitCollection $unites, Resources $cargaison): PlanetService
     {
-        $proprietaire = (int)DB::table('planets')->where('id', $planetId)->value('user_id');
+        $proprietaire = $this->spareAccount;
+        $this->assertIsInt($proprietaire, 'Le montage n a pas mis de compte de cote pour la cible.');
 
-        if ($this->defenderTechnologies === null) {
-            $ligne = DB::table('users_tech')->where('user_id', $proprietaire)->first(self::COMBAT_TECHNOLOGIES);
-            $this->assertNotNull($ligne, 'Le proprietaire de la cible n a pas de ligne de technologies.');
+        $planete = resolve(PlanetServiceFactory::class)->createAdditionalPlanetForPlayer(
+            resolve(PlayerServiceFactory::class)->make($proprietaire, true),
+            $this->getNearbyEmptyCoordinate()
+        );
 
-            $avant = [];
-            foreach (self::COMBAT_TECHNOLOGIES as $colonne) {
-                $avant[$colonne] = (int)$ligne->{$colonne};
-            }
+        $this->requireACalmDefender($proprietaire, $planete);
 
-            $this->defenderTechnologies = [$proprietaire, $avant];
+        $this->dispatchFleet($planete->getPlanetCoordinates(), $unites, $cargaison, PlanetType::Planet);
+
+        return $planete;
+    }
+
+    /**
+     * Le ralliement vise la meme cible dediee que l attaque seule : la couture du trait, redefinie ici.
+     */
+    protected function theTargetOfTheRally(UnitCollection $unites, Resources $cargaison): PlanetService
+    {
+        return $this->aDedicatedTarget($unites, $cargaison);
+    }
+
+    /**
+     * Ce que la photographie de l ouverture lira du defenseur, **verifie avant qu elle ne le lise**.
+     *
+     * Trois entrees, et ce sont celles que `OpeningStateRecorder::defenderFactsOf()` prend sur le compte :
+     * les technologies de combat, la somme des bonus de classe (personnelle et d alliance), et les apports de
+     * formes de vie. Le chantier spatial du corps, lui, nait a zero avec la planete.
+     */
+    private function requireACalmDefender(int $proprietaire, PlanetService $corps): void
+    {
+        $joueur = resolve(PlayerServiceFactory::class)->make($proprietaire, true);
+
+        foreach (self::COMBAT_TECHNOLOGIES as $colonne) {
+            $this->assertSame(0, $joueur->getResearchLevel($colonne), 'Le defenseur dedie porte deja ' . $colonne . ' : la bataille de cette graine ne serait plus celle qui est epinglee ici.');
         }
 
-        DB::table('users_tech')->where('user_id', $proprietaire)->update(array_fill_keys(self::COMBAT_TECHNOLOGIES, 0));
-
-        // **Par la fabrique, jamais par le conteneur** : `app()->make(PlayerService::class)` ecraserait le joueur
-        // de la requete en cours, que le middleware enregistre comme instance partagee.
-        $this->assertSame(
-            0,
-            resolve(PlayerServiceFactory::class)->make($proprietaire, true)->getCombatResearchBonusLevels(),
-            'Un voisin a laisse un bonus de classe au proprietaire de la cible (compte ' . $proprietaire . ') : la bataille '
-            . 'de cette graine ne serait plus celle qui est epinglee ici. Le rendre dans un `finally`, comme le font '
-            . 'les deux essais qui le posent.'
+        $this->assertSame(0, $joueur->getCombatResearchBonusLevels(), 'Le defenseur dedie porte deja un bonus de classe.');
+        // **Sur la colonne, pas sur le service** : celui-ci a ete charge avant, et un chantier pose entre-temps
+        // ne s y voit pas — la photographie de l ouverture, elle, le lirait. Mesure faite : la garde restait
+        // verte pendant qu un chantier de niveau douze attendait en base.
+        $this->assertSame(0, (int) DB::table('planets')->where('id', $corps->getPlanetId())->value('space_dock'), 'Le corps vise porte deja un chantier spatial.');
+        $this->assertTrue(
+            resolve(LifeformCombatPhotographer::class)->ofBody($corps)->isNone(),
+            'Le defenseur dedie porte deja un apport de formes de vie : le moteur le lirait dans la photographie.'
         );
     }
 

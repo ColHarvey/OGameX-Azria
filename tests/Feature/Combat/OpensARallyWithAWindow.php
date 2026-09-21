@@ -13,6 +13,7 @@ use OGame\Models\FleetMission;
 use OGame\Models\Planet\Coordinate;
 use OGame\Models\Resources;
 use OGame\Services\ObjectService;
+use OGame\Services\PlanetService;
 use OGame\Services\SettingsService;
 
 /**
@@ -37,6 +38,15 @@ trait OpensARallyWithAWindow
     protected const int RALLY_WINDOW_SECONDS = 18;
 
     protected const int RALLY_DEFENCES = 20;
+
+    /**
+     * Le premier des comptes de remplissage, mis de cote pour qui en veut un **qui n appartient qu a cet essai**.
+     *
+     * Le montage en cree six avant l attaquant, uniquement pour peupler la galaxie. Le premier fait donc un
+     * proprietaire de cible tout trouve : ne, vierge, et hors d atteinte des essais voisins — la ou le joueur
+     * etranger de `getNearbyForeignPlanet()` est partage par tout le processus.
+     */
+    protected int|null $spareAccount = null;
 
     protected function basicSetupForARally(): void
     {
@@ -86,6 +96,9 @@ trait OpensARallyWithAWindow
     {
         for ($i = 0; $i < 6; $i++) {
             $this->createAndLoginUser();
+            if ($i === 0) {
+                $this->spareAccount = $this->currentUserId;
+            }
         }
         $this->basicSetup();
 
@@ -100,7 +113,7 @@ trait OpensARallyWithAWindow
         $unites = new UnitCollection();
         $unites->addUnit(ObjectService::getUnitObjectByMachineName('small_cargo'), 50);
         $unites->addUnit(ObjectService::getUnitObjectByMachineName('light_fighter'), 350);
-        $cible = $this->sendMissionToOtherPlayerCleanPlanet($unites, $cargaison ?? new Resources(0, 0, 0, 0));
+        $cible = $this->theTargetOfTheRally($unites, $cargaison ?? new Resources(0, 0, 0, 0));
         $ouvreuse = $this->lastMissionDispatched();
         $ouverture = (int)$ouvreuse->time_arrival;
 
@@ -131,6 +144,18 @@ trait OpensARallyWithAWindow
         resolve(SettingsService::class)->set('persistent_combat_enabled', '1');
 
         return [$ouvreuse, $cible->getPlanetId(), $ouverture];
+    }
+
+    /**
+     * **La cible du ralliement, et a qui elle appartient.**
+     *
+     * Par defaut, la planete propre du joueur etranger voisin — celui que tous les essais d un processus
+     * partagent. Une classe qui a besoin d un proprietaire **a elle** redefinit cette methode ; c est la
+     * seule couture, et elle ne change rien pour les autres.
+     */
+    protected function theTargetOfTheRally(UnitCollection $unites, Resources $cargaison): PlanetService
+    {
+        return $this->sendMissionToOtherPlayerCleanPlanet($unites, $cargaison);
     }
 
     /**
