@@ -74489,23 +74489,18 @@ ogame.chat = {
         if (h.senderName !== undefined && h.senderId !== undefined) {
             g.playernames[h.senderId] = h.senderName
         }
+        // **A la reception, rien ne s ouvre.** Le plan valide par Keven le dit : la pastille et le bandeau signalent,
+        // le clic ouvre. Ce code chargeait l historique d une conversation fermee et `addChatItem` creait sa fenetre —
+        // un comportement herite, qui ne remplace pas cette decision. Desormais : une conversation fermee reste
+        // fermee (le message viendra avec l historique quand le joueur l ouvrira), une conversation reduite reste
+        // reduite (le message rejoint sa liste, cachee), une conversation ouverte reste ouverte.
         if ($(".chat_bar_list").length) {
-            if (h.associationId !== undefined && h.associationId > 0) {
-                if (g.data.association[h.associationId] === undefined) {
-                    g.loadChatLogWithAssociation(h.associationId, null, function () {
-                        g.addChatItem(h.senderId, h.associationId, h.text, h.id, true, $refData, h.date)
-                    }, false)
-                } else {
-                    g.addChatItem(h.senderId, h.associationId, h.text, h.id, true, $refData, h.date)
-                }
-            } else {
-                if (g.data[h.senderId] === undefined) {
-                    g.loadChatLogWithPlayer(h.senderId, null, function () {
-                        g.addChatItem(h.senderId, 0, h.text, h.id, true, $refData, h.date)
-                    }, false)
-                } else {
-                    g.addChatItem(h.senderId, 0, h.text, h.id, true, $refData, h.date)
-                }
+            var estAlliance = h.associationId !== undefined && h.associationId > 0;
+            var onglet = estAlliance
+                ? $(".chat_bar_list").find(".chat_bar_list_item[data-associationid='" + h.associationId + "']")
+                : $(".chat_bar_list").find(".chat_bar_list_item[data-playerid='" + h.senderId + "']");
+            if (onglet.length) {
+                g.addChatItem(h.senderId, estAlliance ? h.associationId : 0, h.text, h.id, true, $refData, h.date)
             }
         }
         // **Les compteurs ne se devinent plus ici.** Cette branche incrementait un compteur en memoire, sommait les
@@ -74516,7 +74511,8 @@ ogame.chat = {
         if (ogame.chatUnread) {
             ogame.chatUnread.messageRecu(h)
         }
-    },    cleanupUrl: function () {
+    },
+    cleanupUrl: function () {
         var k = window.location.href;
         var h = k.indexOf("&");
         if (h > 0) {
@@ -74855,24 +74851,26 @@ ogame.chat = {
         if (typeof A == "object") {
             y.refData = A
         }
+        // **Pas de fenetre, pas d ajout** — et surtout pas de fenetre creee ici : ce code ouvrait la conversation a la
+        // reception. Le message vit au serveur ; l historique le rendra a l ouverture.
         if (!q.length) {
-            var E = u.createChatBarContainer(F);
-            u.updateChatBar(E);
-            q = $(".chat_bar_list").find(".chat_bar_list_item[data-playerid='" + F + "']")
+            return
+        }
+        // **Le dedoublonnage porte sur l identifiant reel du message**, jamais sur sa date ni son HTML. L ancienne
+        // condition comparait la date BRUTE de l evenement au HTML FORMATE de la derniere date : jamais egaux, donc un
+        // message deja rendu par l historique etait ajoute une seconde fois (capture du 21 septembre 2026). Et elle
+        // effacait un second message distinct de meme texte et meme date. Deux messages distincts ont deux
+        // identifiants : ils s affichent tous les deux ; le meme identifiant, rejoue, ne s affiche qu une fois.
+        if (q.find('.chat_msg[data-chat-id="' + D + '"]').length) {
+            return
         }
         var w = u.createChatItem(y);
-        var s = u.getLastChatItemData();
-        // **Un chat vide n'a pas de dernier element** : `s` vaut alors `null`, et la condition
-        // d'origine faisait disparaitre le tout premier message jusqu'au rechargement. Rien a
-        // comparer ne veut pas dire rien a afficher.
-        if (s === null || y.date != s.date || y.chatContent != s.text) {
-            q.find(".chat").append(w);
-            u.updateCustomScrollbar(q.find(".chat_box_ctn"));
-            var C = $(".js_chatHistory");
-            if (C.length && (C.data("chatplayerid") == F || C.data("associationid") == x)) {
-                C.find(".chat.clearfix").append(w.clone());
-                u.updateCustomScrollbar($(".largeChatContainer"))
-            }
+        q.find(".chat").append(w);
+        u.updateCustomScrollbar(q.find(".chat_box_ctn"));
+        var C = $(".js_chatHistory");
+        if (C.length && (C.data("chatplayerid") == F || C.data("associationid") == x) && !C.find('.chat_msg[data-chat-id="' + D + '"]').length) {
+            C.find(".chat.clearfix").append(w.clone());
+            u.updateCustomScrollbar($(".largeChatContainer"))
         }
     },
     addToMoreBox: function (m) {
@@ -76712,7 +76710,7 @@ ogame.chatUnread = {
     VEILLE_CONNECTE_MS: 60000,
     VEILLE_DECONNECTE_MS: 20000,
     BANDEAU_MS: 5000,
-    BANDEAUX_MAX: 3,
+    BANDEAUX_MAX: 2,
     ANNEAU_TAILLE: 200,
     VUS_TAILLE: 500,
     MARQUAGE_ATTENTE_MS: 700,
@@ -77212,8 +77210,11 @@ ogame.chatUnread = {
         }
         var pile = barre.children('.az-toast-stack');
         if (!pile.length) {
+            // **Dans la bande de la barre, a gauche des onglets** : premier enfant de #chatBar (la barre est une ligne
+            // souple), hors de `.chat_bar_list` dont `updateChatBar()` compte les enfants. Pose au-dessus de la barre
+            // ou en bas a gauche de la fenetre, le bandeau recouvrait des controles (mesures du 21 septembre 2026).
             pile = $('<div class="az-toast-stack" aria-live="polite"></div>');
-            barre.append(pile);
+            barre.prepend(pile);
         }
         var clef = (m.associationId > 0) ? 'a:' + m.associationId : 'p:' + m.senderId;
         var existant = u.bandeaux[clef];
@@ -77241,12 +77242,62 @@ ogame.chatUnread = {
         var croix = $('<button type="button" class="az-toast-close"></button>').attr('title', u.loca('TOAST_CLOSE')).attr('aria-label', u.loca('TOAST_CLOSE')).text('×');
         croix.on('click', function () { u.fermerLeBandeau(clef); });
         element.append(corps).append(croix);
-        pile.append(element);
+        // Le plus recent en premier : sur petit ecran, la feuille ne montre que le premier.
+        pile.prepend(element);
+        // **Le bandeau ne recouvre aucun controle, ou il ne s affiche pas.** A 125 et 150 % sur une fenetre de
+        // 900 px, la bande de la barre passe sur le bas de la page : aucune position fixe ne tient le critere a
+        // toutes les tailles (mesure des neuf combinaisons, 21 septembre 2026). On mesure donc avant d afficher —
+        // dans la bande, puis au-dessus des onglets — et a defaut le bandeau s efface : la pastille et le son restent.
+        if (!u.placerSansRecouvrir(pile, element)) {
+            element.remove();
+            return;
+        }
         u.bandeaux[clef] = {
             element: element,
             compte: 1,
             minuterie: setTimeout(function () { u.fermerLeBandeau(clef); }, u.BANDEAU_MS)
         };
+    },
+
+    /**
+     * Placer la pile la ou elle ne recouvre rien : dans la bande de la barre (a gauche des onglets), sinon au-dessus
+     * des onglets (a droite), sinon nulle part. Rend vrai si une place a ete trouvee.
+     */
+    placerSansRecouvrir: function (pile, element) {
+        var u = ogame.chatUnread;
+        pile.removeClass('az-toast-stack--above');
+        if (!u.couvreUnControle(element)) {
+            return true;
+        }
+        pile.addClass('az-toast-stack--above');
+        if (!u.couvreUnControle(element)) {
+            return true;
+        }
+        pile.removeClass('az-toast-stack--above');
+        return false;
+    },
+
+    /**
+     * Le rectangle du bandeau croise-t-il un element interactif de la page — lien, bouton, champ, onglet ou fenetre
+     * de la barre — hors lui-meme ? Sans mise en page (banc), les rectangles sont nuls : rien n est recouvert.
+     */
+    couvreUnControle: function (element) {
+        var a = element[0].getBoundingClientRect();
+        if (!(a.width > 0 && a.height > 0)) {
+            return false;
+        }
+        var croise = false;
+        $('a, button, input, textarea, select, [role="button"], #chatBar .chat_bar_list > li, #chatBar .chat_box').each(function () {
+            if (element[0].contains(this)) {
+                return;
+            }
+            var b = this.getBoundingClientRect();
+            if (b.width > 0 && b.height > 0 && !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom)) {
+                croise = true;
+                return false;
+            }
+        });
+        return croise;
     },
 
     fermerLeBandeau: function (clef) {

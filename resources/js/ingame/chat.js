@@ -325,23 +325,18 @@ ogame.chat = {
         if (h.senderName !== undefined && h.senderId !== undefined) {
             g.playernames[h.senderId] = h.senderName
         }
+        // **A la reception, rien ne s ouvre.** Le plan valide par Keven le dit : la pastille et le bandeau signalent,
+        // le clic ouvre. Ce code chargeait l historique d une conversation fermee et `addChatItem` creait sa fenetre —
+        // un comportement herite, qui ne remplace pas cette decision. Desormais : une conversation fermee reste
+        // fermee (le message viendra avec l historique quand le joueur l ouvrira), une conversation reduite reste
+        // reduite (le message rejoint sa liste, cachee), une conversation ouverte reste ouverte.
         if ($(".chat_bar_list").length) {
-            if (h.associationId !== undefined && h.associationId > 0) {
-                if (g.data.association[h.associationId] === undefined) {
-                    g.loadChatLogWithAssociation(h.associationId, null, function () {
-                        g.addChatItem(h.senderId, h.associationId, h.text, h.id, true, $refData, h.date)
-                    }, false)
-                } else {
-                    g.addChatItem(h.senderId, h.associationId, h.text, h.id, true, $refData, h.date)
-                }
-            } else {
-                if (g.data[h.senderId] === undefined) {
-                    g.loadChatLogWithPlayer(h.senderId, null, function () {
-                        g.addChatItem(h.senderId, 0, h.text, h.id, true, $refData, h.date)
-                    }, false)
-                } else {
-                    g.addChatItem(h.senderId, 0, h.text, h.id, true, $refData, h.date)
-                }
+            var estAlliance = h.associationId !== undefined && h.associationId > 0;
+            var onglet = estAlliance
+                ? $(".chat_bar_list").find(".chat_bar_list_item[data-associationid='" + h.associationId + "']")
+                : $(".chat_bar_list").find(".chat_bar_list_item[data-playerid='" + h.senderId + "']");
+            if (onglet.length) {
+                g.addChatItem(h.senderId, estAlliance ? h.associationId : 0, h.text, h.id, true, $refData, h.date)
             }
         }
         // **Les compteurs ne se devinent plus ici.** Cette branche incrementait un compteur en memoire, sommait les
@@ -352,7 +347,8 @@ ogame.chat = {
         if (ogame.chatUnread) {
             ogame.chatUnread.messageRecu(h)
         }
-    },    cleanupUrl: function () {
+    },
+    cleanupUrl: function () {
         var k = window.location.href;
         var h = k.indexOf("&");
         if (h > 0) {
@@ -691,24 +687,26 @@ ogame.chat = {
         if (typeof A == "object") {
             y.refData = A
         }
+        // **Pas de fenetre, pas d ajout** — et surtout pas de fenetre creee ici : ce code ouvrait la conversation a la
+        // reception. Le message vit au serveur ; l historique le rendra a l ouverture.
         if (!q.length) {
-            var E = u.createChatBarContainer(F);
-            u.updateChatBar(E);
-            q = $(".chat_bar_list").find(".chat_bar_list_item[data-playerid='" + F + "']")
+            return
+        }
+        // **Le dedoublonnage porte sur l identifiant reel du message**, jamais sur sa date ni son HTML. L ancienne
+        // condition comparait la date BRUTE de l evenement au HTML FORMATE de la derniere date : jamais egaux, donc un
+        // message deja rendu par l historique etait ajoute une seconde fois (capture du 21 septembre 2026). Et elle
+        // effacait un second message distinct de meme texte et meme date. Deux messages distincts ont deux
+        // identifiants : ils s affichent tous les deux ; le meme identifiant, rejoue, ne s affiche qu une fois.
+        if (q.find('.chat_msg[data-chat-id="' + D + '"]').length) {
+            return
         }
         var w = u.createChatItem(y);
-        var s = u.getLastChatItemData();
-        // **Un chat vide n'a pas de dernier element** : `s` vaut alors `null`, et la condition
-        // d'origine faisait disparaitre le tout premier message jusqu'au rechargement. Rien a
-        // comparer ne veut pas dire rien a afficher.
-        if (s === null || y.date != s.date || y.chatContent != s.text) {
-            q.find(".chat").append(w);
-            u.updateCustomScrollbar(q.find(".chat_box_ctn"));
-            var C = $(".js_chatHistory");
-            if (C.length && (C.data("chatplayerid") == F || C.data("associationid") == x)) {
-                C.find(".chat.clearfix").append(w.clone());
-                u.updateCustomScrollbar($(".largeChatContainer"))
-            }
+        q.find(".chat").append(w);
+        u.updateCustomScrollbar(q.find(".chat_box_ctn"));
+        var C = $(".js_chatHistory");
+        if (C.length && (C.data("chatplayerid") == F || C.data("associationid") == x) && !C.find('.chat_msg[data-chat-id="' + D + '"]').length) {
+            C.find(".chat.clearfix").append(w.clone());
+            u.updateCustomScrollbar($(".largeChatContainer"))
         }
     },
     addToMoreBox: function (m) {

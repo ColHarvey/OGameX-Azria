@@ -205,20 +205,35 @@ class ChatRealtimeDeliveryTest extends AccountTestCase
     }
 
     /**
-     * Le premier message d'un chat vide s'affiche.
+     * Le premier message d'un chat vide s'affiche, et un message n'est rendu qu'une fois.
      *
-     * `getLastChatItemData()` rend `null` quand aucun element n'existe encore, et la condition
-     * d'origine — `s !== null && ...` — faisait alors disparaitre le message jusqu'au rechargement.
-     * Rien a comparer ne veut pas dire rien a afficher.
+     * L'histoire de cette garde : la condition d'origine — `s !== null && ...` — faisait disparaitre le premier
+     * message d'un chat vide ; sa correction (`s === null || y.date != s.date || y.chatContent != s.text`)
+     * comparait la date brute de l'evenement au HTML formate de la derniere date — jamais egaux, donc un message
+     * deja rendu par l'historique etait ajoute une seconde fois — et effacait un second message distinct de meme
+     * texte et meme date (§182.9). **La garde porte desormais sur l'identifiant reel du message**, et la
+     * comparaison de date ou de texte a disparu. Le comportement — premier message d'un chat vide affiche, deux
+     * messages distincts de meme texte gardes, meme identifiant rendu une fois dans les deux ordres d'arrivee —
+     * est eprouve par `tests/js/chat-reception.test.js` ; ici, la forme du code qui le porte.
      */
     public function testTheFirstMessageOfAnEmptyChatIsDisplayed(): void
     {
         $source = (string)file_get_contents(base_path('resources/js/ingame/chat.js'));
 
         $this->assertStringContainsString(
-            'if (s === null || y.date != s.date || y.chatContent != s.text) {',
+            'if (q.find(\'.chat_msg[data-chat-id="\' + D + \'"]\').length) {',
             $source,
-            'An empty chat has no last item, and the guard drops the very first message it receives.'
+            'The live append no longer refuses a message by its real identifier: a message rendered by the history would be appended again.'
+        );
+        $this->assertStringNotContainsString(
+            'y.date != s.date',
+            $source,
+            'The guard compares dates again: two distinct messages sent the same second would be dropped, and a history date never equals a raw event date.'
+        );
+        $this->assertStringNotContainsString(
+            'y.chatContent != s.text',
+            $source,
+            'The guard compares texts again: two distinct messages with the same text would be dropped.'
         );
     }
 

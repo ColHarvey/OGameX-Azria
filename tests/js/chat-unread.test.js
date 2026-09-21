@@ -448,3 +448,48 @@ test('la veille ne sonde qu un onglet visible, et relit aussitot au retour', () 
     m.window.document.dispatchEvent(new m.window.Event('visibilitychange'));
     assert.equal(m.lectures().length, 3, 'Visible a nouveau : une lecture immediate.');
 });
+
+// ------------------------------------------------------------------ le bandeau ne recouvre aucun controle, ou il s efface
+
+test('le bandeau se pose dans la bande ; si elle recouvre un controle, au-dessus des onglets ; sinon nulle part — la pastille reste', () => {
+    const m = unMonde();
+    m.lectures()[0].reussir(photo(0));
+
+    // 1. La bande est libre : le bandeau y reste, sans la classe « au-dessus ».
+    m.u.couvreUnControle = () => false;
+    m.u.messageRecu({ id: 300, senderId: 2, senderName: 'Kirk', text: 'x', date: 1 });
+    assert.equal(m.$('#chatBar .az-toast').length, 1);
+    assert.equal(m.$('#chatBar .az-toast-stack').hasClass('az-toast-stack--above'), false, 'Dans la bande.');
+    assert.equal(m.$('#chatBar > .az-toast-stack:first-child').length, 1, 'Premier enfant de la barre : a gauche des onglets, hors de la liste.');
+    m.avancer(5000);
+
+    // 2. La bande recouvre un controle, la place au-dessus non : le bandeau monte.
+    let appels = 0;
+    m.u.couvreUnControle = () => (++appels === 1);
+    m.u.messageRecu({ id: 301, senderId: 3, senderName: 'Spock', text: 'x', date: 2 });
+    assert.equal(m.$('#chatBar .az-toast').length, 1);
+    assert.equal(m.$('#chatBar .az-toast-stack').hasClass('az-toast-stack--above'), true, 'Au-dessus des onglets.');
+    m.avancer(5000);
+
+    // 3. Les deux places recouvrent un controle : aucun bandeau, mais la pastille et le badge suivent quand meme.
+    m.u.couvreUnControle = () => true;
+    m.u.messageRecu({ id: 302, senderId: 4, senderName: 'Uhura', text: 'x', date: 3 });
+    assert.equal(m.$('#chatBar .az-toast').length, 0, 'Plutot aucun bandeau qu un controle recouvert.');
+    assert.equal(m.$('#chatBar .az-toast-stack').hasClass('az-toast-stack--above'), false, 'La pile est rendue a sa place.');
+    // Chaque message recu a fait avancer l epoque : la lecture en vol est perimee, sa reponse est ecartee et une
+    // lecture fraiche part — le protocole du §4. On repond aux deux ; seule la fraiche compte.
+    const perimee = m.lectures().length;
+    m.lectures()[perimee - 1].reussir(photo(9, [{ kind: 'direct', playerId: 4, unread: 9 }]));
+    assert.equal(m.haut().text(), '0', 'La photographie perimee n a rien ecrit.');
+    assert.equal(m.lectures().length, perimee + 1, 'Une lecture fraiche est partie.');
+    m.lectures()[perimee].reussir(photo(3, [{ kind: 'direct', playerId: 4, unread: 3 }]));
+    assert.equal(m.pastille().find('.az-unread-count').text(), '3');
+    assert.equal(m.haut().text(), '3');
+});
+
+test('sans mise en page, rien n est recouvert : couvreUnControle rend faux sur des rectangles nuls', () => {
+    const m = unMonde();
+    m.lectures()[0].reussir(photo(0));
+    m.u.messageRecu({ id: 310, senderId: 2, senderName: 'Kirk', text: 'x', date: 1 });
+    assert.equal(m.u.couvreUnControle(m.$('#chatBar .az-toast')), false);
+});

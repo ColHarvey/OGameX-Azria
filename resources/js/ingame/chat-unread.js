@@ -54,7 +54,7 @@ ogame.chatUnread = {
     VEILLE_CONNECTE_MS: 60000,
     VEILLE_DECONNECTE_MS: 20000,
     BANDEAU_MS: 5000,
-    BANDEAUX_MAX: 3,
+    BANDEAUX_MAX: 2,
     ANNEAU_TAILLE: 200,
     VUS_TAILLE: 500,
     MARQUAGE_ATTENTE_MS: 700,
@@ -554,8 +554,11 @@ ogame.chatUnread = {
         }
         var pile = barre.children('.az-toast-stack');
         if (!pile.length) {
+            // **Dans la bande de la barre, a gauche des onglets** : premier enfant de #chatBar (la barre est une ligne
+            // souple), hors de `.chat_bar_list` dont `updateChatBar()` compte les enfants. Pose au-dessus de la barre
+            // ou en bas a gauche de la fenetre, le bandeau recouvrait des controles (mesures du 21 septembre 2026).
             pile = $('<div class="az-toast-stack" aria-live="polite"></div>');
-            barre.append(pile);
+            barre.prepend(pile);
         }
         var clef = (m.associationId > 0) ? 'a:' + m.associationId : 'p:' + m.senderId;
         var existant = u.bandeaux[clef];
@@ -583,12 +586,62 @@ ogame.chatUnread = {
         var croix = $('<button type="button" class="az-toast-close"></button>').attr('title', u.loca('TOAST_CLOSE')).attr('aria-label', u.loca('TOAST_CLOSE')).text('×');
         croix.on('click', function () { u.fermerLeBandeau(clef); });
         element.append(corps).append(croix);
-        pile.append(element);
+        // Le plus recent en premier : sur petit ecran, la feuille ne montre que le premier.
+        pile.prepend(element);
+        // **Le bandeau ne recouvre aucun controle, ou il ne s affiche pas.** A 125 et 150 % sur une fenetre de
+        // 900 px, la bande de la barre passe sur le bas de la page : aucune position fixe ne tient le critere a
+        // toutes les tailles (mesure des neuf combinaisons, 21 septembre 2026). On mesure donc avant d afficher —
+        // dans la bande, puis au-dessus des onglets — et a defaut le bandeau s efface : la pastille et le son restent.
+        if (!u.placerSansRecouvrir(pile, element)) {
+            element.remove();
+            return;
+        }
         u.bandeaux[clef] = {
             element: element,
             compte: 1,
             minuterie: setTimeout(function () { u.fermerLeBandeau(clef); }, u.BANDEAU_MS)
         };
+    },
+
+    /**
+     * Placer la pile la ou elle ne recouvre rien : dans la bande de la barre (a gauche des onglets), sinon au-dessus
+     * des onglets (a droite), sinon nulle part. Rend vrai si une place a ete trouvee.
+     */
+    placerSansRecouvrir: function (pile, element) {
+        var u = ogame.chatUnread;
+        pile.removeClass('az-toast-stack--above');
+        if (!u.couvreUnControle(element)) {
+            return true;
+        }
+        pile.addClass('az-toast-stack--above');
+        if (!u.couvreUnControle(element)) {
+            return true;
+        }
+        pile.removeClass('az-toast-stack--above');
+        return false;
+    },
+
+    /**
+     * Le rectangle du bandeau croise-t-il un element interactif de la page — lien, bouton, champ, onglet ou fenetre
+     * de la barre — hors lui-meme ? Sans mise en page (banc), les rectangles sont nuls : rien n est recouvert.
+     */
+    couvreUnControle: function (element) {
+        var a = element[0].getBoundingClientRect();
+        if (!(a.width > 0 && a.height > 0)) {
+            return false;
+        }
+        var croise = false;
+        $('a, button, input, textarea, select, [role="button"], #chatBar .chat_bar_list > li, #chatBar .chat_box').each(function () {
+            if (element[0].contains(this)) {
+                return;
+            }
+            var b = this.getBoundingClientRect();
+            if (b.width > 0 && b.height > 0 && !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom)) {
+                croise = true;
+                return false;
+            }
+        });
+        return croise;
     },
 
     fermerLeBandeau: function (clef) {

@@ -32,6 +32,11 @@
     height: var(--az-tab-height);
     font: 11px Arial, sans-serif;
     color: var(--az-text);
+    /* Une ligne souple : le bandeau des notifications (premier enfant) a gauche, les onglets a droite. Dans le
+       flux, rien ne se recouvre — ni les onglets, ni les fenetres, qui vivent au-dessus de la bande. */
+    display: flex;
+    align-items: flex-end;
+    justify-content: flex-end;
 }
 #chatBar.azria-chat *,
 #chatBar.azria-chat *::before,
@@ -799,34 +804,42 @@
     color: #e7c65a;
 }
 
-/* Le bandeau : bleu metallique, cinq secondes, sans contenu prive, **en bas a gauche de la fenetre du
-   navigateur**. Les fenetres de conversation se rangent a droite, et l une s ouvre d elle-meme a la reception
-   (§158) : pose a droite, le bandeau couvrait son champ de saisie. Et un `left` en absolu se mesure dans la
-   boite de #chatBar, qui n occupe que ses onglets a droite : le bandeau y restait — mesure du temoin de
-   non-chevauchement, 21 septembre 2026. `fixed` l ancre a la fenetre, la ou la barre ne range rien. */
+/* Le bandeau : bleu metallique, cinq secondes, sans contenu prive, **dans la bande de la barre, a gauche des
+   onglets**. Pose au-dessus de la barre il couvrait la fenetre que la reception ouvrait ; en bas a gauche de la
+   fenetre du navigateur il couvrait les derniers boutons du menu a 150 % et un lien de file a 1024/800 px
+   (mesure des neuf combinaisons, 21 septembre 2026). Aucune zone fixe de la page n est libre a toutes les
+   tailles ; la bande de la barre n est occupee que par les onglets, et dans le flux rien ne se recouvre. Il vit
+   hors de `.chat_bar_list` : `updateChatBar()` compte les enfants de la liste pour sa largeur. */
 #chatBar.azria-chat .az-toast-stack {
-    position: fixed;
-    left: 12px;
-    bottom: 48px;
-    align-items: flex-start;
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
+    align-items: flex-end;
     gap: 6px;
-    z-index: 30;
-    pointer-events: none;
+    margin: 0 8px 0 0;
+    order: -1;
+}
+/* La seconde place : au-dessus des onglets, a droite, hors du flux. Essayee quand la bande recouvrirait un
+   controle ; si elle en recouvre un aussi, le bandeau ne s affiche pas (`placerSansRecouvrir`). */
+#chatBar.azria-chat .az-toast-stack--above {
+    position: absolute;
+    right: 8px;
+    bottom: calc(100% + 6px);
+    flex-direction: column;
+    align-items: flex-end;
+    margin: 0;
 }
 #chatBar.azria-chat .az-toast {
     display: inline-flex;
     align-items: stretch;
-    max-width: 340px;
+    height: var(--az-tab-height);
+    max-width: 260px;
     border: 1px solid #4f7396;
-    border-radius: 4px;
+    border-radius: 8px;
     background: linear-gradient(100deg, #1c344a, #142638);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(140, 177, 208, .25);
+    box-shadow: inset 0 1px #6c879933;
     color: #c7d9e5;
-    font-size: 12px;
-    line-height: 1.4;
-    pointer-events: auto;
+    font-size: 11px;
+    line-height: calc(var(--az-tab-height) - 2px);
 }
 #chatBar.azria-chat .az-toast-body,
 #chatBar.azria-chat .az-toast-close {
@@ -838,9 +851,12 @@
 }
 #chatBar.azria-chat .az-toast-body {
     flex: 1 1 auto;
-    padding: 8px 10px;
+    min-width: 0;
+    padding: 0 10px;
     text-align: left;
-    overflow-wrap: anywhere;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 #chatBar.azria-chat .az-toast-body:hover,
 #chatBar.azria-chat .az-toast-body:focus-visible {
@@ -859,10 +875,19 @@
 }
 #chatBar.azria-chat .az-toast-close {
     flex: 0 0 auto;
-    padding: 0 10px;
+    padding: 0 9px;
     border-left: 1px solid #314b62;
     color: #8eafca;
-    font-size: 16px;
+    font-size: 15px;
+}
+/* Petit ecran : un seul bandeau a la fois, le plus recent. */
+@media (max-width: 620px) {
+    #chatBar.azria-chat .az-toast:nth-child(n+2) {
+        display: none;
+    }
+    #chatBar.azria-chat .az-toast {
+        max-width: 180px;
+    }
 }
 #chatBar.azria-chat .az-toast-close:hover,
 #chatBar.azria-chat .az-toast-close:focus-visible {
