@@ -545,23 +545,39 @@
     padding: 10px 12px 4px;
     height: 180px;
 }
+/* **La bulle appartient aux deux camps**, et `.odd` ne garde que la couleur et le cote.
+   Mesure du 21 septembre 2026, deux sessions reelles et le meme mot des deux cotes : le message recu
+   n avait qu un `padding-left` et une `border-left`, et retombait pour le reste sur la feuille heritee
+   (`.chat_msg { background: #252f3a; border: 1px solid #000 }`). Fond gris terne, contour noir, et
+   **aucun espace interieur en haut, a droite ni en bas** : une bande de 35 px la ou la bulle envoyee en
+   faisait 53. Ce n etait pas une ancienne regle qui gagnait — c est celle-ci qui ne decrivait pas de bulle. */
 #chatBar.azria-chat .chat_box .chat_msg {
+    /* **La largeur epouse le contenu**, l en-tete compris : le `msg_head` est une ligne souple dont la
+       largeur maximale vaut auteur + 8 px + date, donc une bulle d un seul mot reste assez large pour les
+       porter. Avant, toute bulle occupait 281 px des 309 disponibles, « Salut » comme un paragraphe.
+       `box-sizing` est explicite : le plafond comprend bordures et espace interieur, comme demande. */
+    box-sizing: border-box;
+    width: fit-content;
     max-width: 91%;
     margin: 0 0 14px;
-    padding: 0 0 0 10px;
+    padding: 9px 12px;
+    border: 1px solid #2b4257;
     border-left: 2px solid #3a5268;
+    border-radius: 3px;
+    background: linear-gradient(100deg, #17242f, #1b2a37);
     font-size: 12px;
     line-height: 1.5;
     color: #c7d9e5;
+    /* `anywhere`, pas `break-word` : lui seul reduit la largeur minimale du contenu, donc une adresse sans
+       espace revient a la ligne au lieu d elargir la bulle jusqu a son plafond. */
     overflow-wrap: anywhere;
     list-style: none;
 }
 #chatBar.azria-chat .chat_box .chat_msg.odd {
-    margin: 0 0 14px 20px;
-    padding: 9px 12px;
-    border: 1px solid #314b62;
-    border-left: 2px solid #7399b8;
-    border-radius: 3px;
+    /* La couleur et le cote, rien d autre : memes marges, memes coins, meme espace interieur que le recu. */
+    margin-left: auto;
+    border-color: #314b62;
+    border-left-color: #7399b8;
     background: linear-gradient(100deg, #1c344a, var(--az-message));
 }
 #chatBar.azria-chat .chat_box .msg_head {
@@ -576,6 +592,8 @@
     line-height: normal;
 }
 #chatBar.azria-chat .chat_box .msg_head .msg_title {
+    min-width: 0;
+    overflow-wrap: anywhere;
     order: 1;
     color: #8eafca;
     text-transform: uppercase;
