@@ -172,20 +172,29 @@ class EmpireProjectionTest extends AccountTestCase
     }
 
     /**
-     * **Un total de moyenne se nomme.** « ø 5 » ne dit pas sur quoi il porte ; le serveur fournit le libelle, et
-     * l effet d une technologie de forme de vie ne s additionne jamais colonne par colonne.
+     * **Sans espece de forme de vie, le groupe n existe pas** — et la page n invente rien pour autant.
+     *
+     * Ce compte de banc n en a pas : le groupe est absent des lignes, le total ne porte aucune cellule de forme de vie,
+     * et le reste de la page ne s en trouve pas amputé. Ce que ce groupe rend **quand une espece existe** est etabli
+     * par `EmpireLifeformProjectionTest`, qui en installe une : ici on tient l autre moitie, celle du compte sans espece.
      */
-    public function testTheSummaryNamesItsAveragesAndNeverMultipliesAccountWideEffects(): void
+    public function testAnAccountWithoutASpeciesSimplyHasNoLifeformGroup(): void
     {
         $charge = $this->projection()->of($this->player(), false, (int)now()->timestamp);
 
-        if ($charge['summary'] === []) {
-            $this->markTestSkipped('Ce compte de banc n a pas d espece de forme de vie.');
+        $this->assertArrayNotHasKey('lifeforms', $charge['groups'], 'Sans espece, aucune ligne de forme de vie.');
+        $this->assertSame([], $charge['summary'], 'Sans espece, le total ne porte aucune cellule fournie par le serveur.');
+
+        foreach ($charge['planets'] as $colonne) {
+            $this->assertArrayNotHasKey('lf_species', $colonne);
+            $this->assertArrayNotHasKey('lf_population', $colonne);
         }
 
-        $this->assertArrayHasKey('lf_effects', $charge['summary']);
-        $this->assertArrayHasKey('lf_species', $charge['summary']);
-        $this->assertStringContainsString((string)count($charge['planets']), $charge['summary']['lf_species']['title'] ?? '');
+        // Et le reste de la page est intact : les six autres groupes sont la.
+        $this->assertSame(
+            ['resources', 'supply', 'station', 'research', 'shipyard', 'defense'],
+            array_keys($charge['groups']),
+        );
     }
 
     /**

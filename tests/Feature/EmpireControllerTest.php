@@ -142,9 +142,9 @@ class EmpireControllerTest extends AccountTestCase
     {
         $ids = DB::table('planets')->where('user_id', $this->currentUserId)->where('planet_type', 1)->orderBy('id')->pluck('id')->all();
 
-        if (count($ids) < 2) {
-            $this->markTestSkipped('Il faut deux planetes pour eprouver un ordre.');
-        }
+        // Le banc pose deux planetes ; on l exige plutot que de se passer, car la CI refuse tout essai ignore — et un
+        // essai qui se passe ne prouve rien le jour ou le montage change.
+        $this->assertGreaterThanOrEqual(2, count($ids), 'Il faut deux planetes pour eprouver un ordre.');
 
         $inverse = array_reverse($ids);
         $this->post('/ajax/empire/order', [
