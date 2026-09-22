@@ -8,6 +8,7 @@ use Illuminate\View\View;
 use OGame\Models\Alliance;
 use OGame\Models\Planet;
 use OGame\Models\User;
+use OGame\Services\AllianceClassService;
 
 class SearchController extends OGameController
 {
@@ -27,7 +28,7 @@ class SearchController extends OGameController
      * @param Request $request
      * @return JsonResponse
      */
-    public function search(Request $request): JsonResponse
+    public function search(Request $request, AllianceClassService $allianceClasses): JsonResponse
     {
         $searchText = $request->input('searchtext', '');
         $category = (int)$request->input('category', 2); // Default to player search (2)
@@ -43,7 +44,7 @@ class SearchController extends OGameController
         $results = match ($category) {
             2 => $this->searchPlayers($searchText),
             3 => $this->searchPlanets($searchText),
-            4 => $this->searchAlliances($searchText),
+            4 => $this->searchAlliances($searchText, $allianceClasses),
             default => [],
         };
 
@@ -109,9 +110,10 @@ class SearchController extends OGameController
      * Search for alliances by name or tag
      *
      * @param string $searchText
+     * @param AllianceClassService $allianceClasses
      * @return array<int, array<string, mixed>>
      */
-    private function searchAlliances(string $searchText): array
+    private function searchAlliances(string $searchText, AllianceClassService $allianceClasses): array
     {
         $alliances = Alliance::where('alliance_name', 'LIKE', '%' . $searchText . '%')
             ->orWhere('alliance_tag', 'LIKE', '%' . $searchText . '%')
@@ -129,6 +131,9 @@ class SearchController extends OGameController
                 'rank' => $alliance->highscore->general_rank ?? '?',
                 'points' => $alliance->highscore->general ?? 0,
                 'is_open' => $alliance->is_open,
+                // La classe de l'alliance, par son nom machine (warrior, trader, explorer), `none` sans classe : c'est la
+                // classe CSS de l'embleme de 20 px que le resultat affiche devant le nom.
+                'class' => $allianceClasses->classOfAlliance($alliance)?->getMachineName() ?? 'none',
                 'type' => 'alliance',
             ];
         }

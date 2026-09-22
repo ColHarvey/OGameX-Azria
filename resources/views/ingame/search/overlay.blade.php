@@ -189,12 +189,20 @@
                 // Format points with thousands separators
                 const formattedPoints = new Intl.NumberFormat('en-US').format(result.points);
 
+                // Tag et nom ouvrent la fiche publique dans une fenetre du jeu, par le module `alliance-profile.js`
+                // (delegue sur le document : il voit ce fragment injecte). Adresse reelle en href, jamais les marqueurs
+                // du gestionnaire historique (`overlay`) ; un Ctrl-clic ouvre un onglet. Second dialogue au-dessus de
+                // la recherche : Echap ne ferme que lui, le focus revient sur ce lien.
+                const profileAttrs = ' href="' + infoUrl + '" data-alliance-profile="' + result.id + '" data-alliance-tag="' + escapeHtml(result.tag) + '"';
+
                 html += '<tr class="' + rowClass + '">';
                 html += '<td class="allyTag">';
-                html += '<span class="dark_highlight_tablet">' + escapeHtml(result.tag) + '</span>';
+                html += '<a class="dark_highlight_tablet"' + profileAttrs + '>' + escapeHtml(result.tag) + '</a>';
                 html += '</td>';
                 html += '<td class="allyName">';
-                html += '<span class="dark_highlight_tablet alliance_class small none">' + escapeHtml(result.name) + '</span>';
+                // L embleme de 20 px de la classe de l alliance (`none` sans classe), par la regle `.alliance_class.small.<classe>`.
+                const classe = /^(none|warrior|trader|explorer)$/.test(result.class) ? result.class : 'none';
+                html += '<a class="dark_highlight_tablet alliance_class small ' + classe + '"' + profileAttrs + '>' + escapeHtml(result.name) + '</a>';
                 html += '</td>';
                 html += '<td class="allyMembers">' + result.member_count + '</td>';
                 html += '<td class="allyMembers">' + (result.rank || '?') + '</td>';

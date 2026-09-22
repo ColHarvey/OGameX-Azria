@@ -1009,17 +1009,20 @@ ul.chat_bar_list .newMsgMarker {
     width: 20px;
     height: 20px;
 }
+/* Les emblemes de 20 px existants (img/mco/allianceclasses) : les fichiers `img/icons/alliance/class_*.png` que
+   ces regles visaient n ont jamais ete dans le depot — chaque tag de la recherche et chaque rapport d espionnage
+   demandait une image en 404 (mesure du 22 septembre 2026). */
 .alliance_class.small.none:before {
-    background: url("/img/icons/alliance/class_none.png") no-repeat;
+    background: url("/img/mco/allianceclasses/neutral_20.png") no-repeat;
 }
 .alliance_class.small.explorer:before {
-    background: url("/img/icons/alliance/class_explorer.png") no-repeat;
+    background: url("/img/mco/allianceclasses/explorer_20.png") no-repeat;
 }
 .alliance_class.small.trader:before {
-    background: url("/img/icons/alliance/class_trader.png") no-repeat;
+    background: url("/img/mco/allianceclasses/trader_20.png") no-repeat;
 }
 .alliance_class.small.warrior:before {
-    background: url("/img/icons/alliance/class_warrior.png") no-repeat;
+    background: url("/img/mco/allianceclasses/warrior_20.png") no-repeat;
 }
 
 #alliance .alliance_class.small:before {
