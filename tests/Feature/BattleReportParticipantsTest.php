@@ -91,6 +91,19 @@ final class BattleReportParticipantsTest extends FleetDispatchTestCase
         parent::tearDown();
     }
 
+    /**
+     * **Un nom lu dans la charge JSON se compare avec l echappement du JSON, pas avec celui du HTML.**
+     *
+     * La page ecrit ce nom deux fois : en HTML, ou l apostrophe devient `&#039;`, et dans `var combatData = @json(...)`,
+     * ou elle devient `'` — `@json` pose `JSON_HEX_APOS` et ses voisins. Comparer la seconde occurrence a la
+     * premiere ne marchait que tant que le nom tire au hasard par le montage n avait pas d apostrophe : « Cayla
+     * O'Conner V » a fait tomber l essai un passage sur beaucoup, sans que rien du jeu ait change.
+     */
+    private function commeDansLeJson(string $valeur): string
+    {
+        return trim((string)json_encode($valeur, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT), '"');
+    }
+
     public function testEachParticipantIsFrozenWithItsOwnCharacteristicsAndTheReportShowsThem(): void
     {
         // L attaquant : armes 5, et la Revision generale (chasseur leger) niveau 3 des Mechas : +0,9 % sur le chasseur.
@@ -233,7 +246,7 @@ final class BattleReportParticipantsTest extends FleetDispatchTestCase
         $this->assertMatchesRegularExpression('/setCombatLoca\(\s*"Armes:",\s*"Boucliers:",\s*"Armure:",\s*"Classe:"/', $page, 'Les libelles que le script reecrit sont traduits.');
         $this->assertStringNotContainsString("'Weapons:'", $page);
         $clefScript = static fn (string $clef): string => str_replace(':', '_', $clef);
-        $this->assertStringContainsString('"' . $clefScript(CombatParticipantKey::forFleet((int)$missionRenfort->id)) . '":{"ownerName":"' . e($joueurRenfort->getUsername(false)), $page);
+        $this->assertStringContainsString('"' . $clefScript(CombatParticipantKey::forFleet((int)$missionRenfort->id)) . '":{"ownerName":"' . $this->commeDansLeJson($joueurRenfort->getUsername(false)), $page);
         $this->assertStringContainsString('"weaponPercentage":100', $page);
         $this->assertStringContainsString('"shipDetails":{"204":{"armor":800,"weapon":100,"shield":20,"count":15}}', $page);
         $this->assertStringContainsString('"shipDetails":{"204":{"armor":603,"weapon":75,"shield":15,"count":30}}', $page);
@@ -282,7 +295,7 @@ final class BattleReportParticipantsTest extends FleetDispatchTestCase
         $this->assertStringNotContainsString('<select id="defender_select_combatreport"', $ancien, 'Un seul membre par camp : le choix n existe pas.');
         $this->assertStringNotContainsString('Bonus des formes de vie', $ancien);
         $this->assertStringContainsString('"shipDetails":{"204":{"count":30}}', $ancien, 'Aucune caracteristique inventee pour un rapport ancien.');
-        $this->assertStringContainsString('"garrison":{"ownerName":"' . e($proprietaire->getUsername(false)) . '"', $ancien);
+        $this->assertStringContainsString('"garrison":{"ownerName":"' . $this->commeDansLeJson($proprietaire->getUsername(false)) . '"', $ancien);
         $this->assertStringContainsString('"ownerCoordinates":"' . $cible->getPlanetCoordinates()->asString() . '"', $ancien);
         foreach (['115473', '4492924', '2:488:1', 'PTL', '8196210', '"armor": 1160'] as $invente) {
             $this->assertStringNotContainsString($invente, $ancien);
@@ -308,7 +321,15 @@ final class BattleReportParticipantsTest extends FleetDispatchTestCase
      */
     private function aBuddyWithAPlanet(int $friendOfUserId, int|null $system = null): PlanetService
     {
+        /*
+         * **Une apostrophe dans le pseudonyme, toujours.** La fabrique en tire un au hasard, et le rapport ecrit ce nom
+         * dans deux echappements — `&#039;` en HTML, `'` dans la charge JSON. Tant que le tirage n en donnait pas,
+         * les deux coincidaient et l essai passait sans rien etablir ; le jour ou « Cayla O'Conner V » est sorti, il est
+         * tombe. Le cas est donc pose, pas espere.
+         */
         $utilisateur = User::factory()->create();
+        $utilisateur->username = "O'" . $utilisateur->username;
+        $utilisateur->save();
         $this->comptesCrees[] = $utilisateur->id;
         if ($system === null) {
             $planete = $this->createPlanetAtSafeCoordinate($utilisateur->id);
