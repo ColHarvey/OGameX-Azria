@@ -195,7 +195,20 @@ final class MilitaryTalliesBattleTest extends FleetDispatchTestCase
 
         $evenements = $this->evenements('battle:mission:' . $mission->id . ':');
         $this->assertCount(2, $evenements, 'La garnison PNJ a recu un evenement.');
-        $this->assertSame([$comptes['premiere'], $comptes['seconde']], array_map(static fn (stdClass $e): int => (int)$e->player_id, array_values($evenements)), 'Les deux attaquantes ne sont pas les seules creditees.');
+        // **Chaque credit est rattache a SA flotte**, et l ordre ne decide de rien. Les evenements etaient lus dans
+        // l ordre alphabetique de leur clef et compares a un ordre suppose : or la clef porte l identifiant de la
+        // mission en texte, et `Fleet:100` precede `Fleet:99`. A chaque passage de dizaine l ordre s inversait, et
+        // l essai rougissait sans qu aucune regle n ait change.
+        $crediteurs = array_map(static fn (stdClass $e): int => (int)$e->player_id, $evenements);
+        ksort($crediteurs);
+
+        $attendus = [
+            'battle:mission:' . $mission->id . ':' . CombatParticipantKey::forFleet((int)$mission->id) => $comptes['premiere'],
+            'battle:mission:' . $mission->id . ':' . CombatParticipantKey::forFleet((int)$mission->id + 1) => $comptes['seconde'],
+        ];
+        ksort($attendus);
+
+        $this->assertSame($attendus, $crediteurs, 'Les deux attaquantes ne sont pas les seules creditees, chacune sur sa flotte.');
         $this->assertNotContains($comptes['garnison'], array_map(static fn (stdClass $e): int => (int)$e->player_id, array_values($evenements)), 'Le PNJ a ete credite.');
         $this->assertSame(
             $issue->computed[$corps]['lost'],
