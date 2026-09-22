@@ -2,15 +2,23 @@
 
 namespace Tests\Feature;
 
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use OGame\Factories\PlayerServiceFactory;
+use OGame\GameMissions\BattleEngine\Draws\BattleDraws;
+use OGame\GameMissions\BattleEngine\Draws\SeededDraws;
 use OGame\GameMissions\BattleEngine\Models\BattleResult;
 use OGame\GameMissions\BattleEngine\Models\DefenderFleetResult;
 use OGame\GameObjects\Models\Units\UnitCollection;
 use OGame\Models\FleetMission;
 use OGame\Models\Patrol;
 use OGame\Models\Resources;
+use OGame\Models\User;
 use OGame\Patrol\Combat\SpatialBattle;
 use OGame\Patrol\Combat\SpatialSettlement;
 use OGame\Patrol\Enums\PatrolState;
+use OGame\Services\InitialUserDataService;
+use OGame\Services\ObjectService;
 use OGame\Services\SettingsService;
 use Tests\AccountTestCase;
 
@@ -46,15 +54,93 @@ final class SpatialCargoConservationTest extends AccountTestCase
 {
     use StagesASpatialBattle;
 
+    /**
+     * La graine de la bataille. Choisie parce qu elle produit une destruction PARTIELLE avec les
+     * caracteristiques que ce montage pose ; les essais l etablissent quand meme par leurs premisses,
+     * et ne lisent jamais un nombre de survivants ecrit d avance.
+     */
+    private const GRAINE = 4242;
+
+    /**
+     * Le niveau d armes, de boucliers et de blindage pose aux DEUX camps avant le gel.
+     */
+    private const TECHNOLOGIES = 0;
+
+    private int $defenseurId;
+
     protected function setUp(): void
     {
         parent::setUp();
+
+        // **Le defenseur nait AVANT le saut d horloge.** Le gel a l admission exige une decision de classe
+        // connue STRICTEMENT avant l instant d arrivee : un compte cree a la meme seconde fait suspendre la
+        // patrouille (« aucune decision connue avant l instant ... »).
+        $this->defenseurId = $this->unDefenseurDedie();
 
         // Les arrivees suivent la naissance des comptes : une attaque datee de la seconde ou nait son
         // proprietaire se ferait suspendre par le gel a l admission.
         $this->travelTo(now()->addHour());
 
         resolve(SettingsService::class)->set('patrols_enabled', '1');
+
+        // **Une bataille reproductible, par la couture prevue pour cela.** `SpatialBattle` construit son
+        // moteur lui-meme et n offre pas `withDraws()` : la source se resout au conteneur, et c est la que
+        // le banc la remplace — sans toucher une regle de production.
+        $this->app->bind(BattleDraws::class, static fn (): SeededDraws => new SeededDraws(self::GRAINE));
+
+        // **Un defenseur a nous, et des technologies posees aux deux camps AVANT le gel.** Le montage
+        // prenait « le premier compte autre que le joueur » — le compte systeme, en pratique — dont les
+        // caracteristiques decident pourtant l issue. Mesure du 22 septembre 2026 : aux caracteristiques
+        // initiales, vingt graines donnent toutes une destruction partielle ; l attaquante portee au
+        // niveau 4 les rend toutes totales. Le scenario est donc stabilise ici, ce qui n explique pas
+        // l echec initial — sa cause reste inconnue.
+        $this->poserLesTechnologies($this->defenseurId, self::TECHNOLOGIES);
+        $this->poserLesTechnologies($this->currentUserId, self::TECHNOLOGIES);
+    }
+
+    /**
+     * Un compte neuf, a nous, qui ne sert qu a tenir la patrouille : aucun compte partage n est touche,
+     * donc aucun n est a restaurer.
+     */
+    private function unDefenseurDedie(): int
+    {
+        $compte = User::factory()->create(['username' => 'spatial_' . Str::random(16)]);
+
+        if ($compte->hasRole('admin')) {
+            $compte->removeRole('admin');
+            $compte->save();
+        }
+
+        resolve(InitialUserDataService::class)->createFor($compte);
+
+        return (int)$compte->id;
+    }
+
+    private function poserLesTechnologies(int $joueur, int $niveau): void
+    {
+        DB::table('users_tech')->where('user_id', $joueur)->update([
+            'weapon_technology' => $niveau,
+            'shielding_technology' => $niveau,
+            'armor_technology' => $niveau,
+        ]);
+    }
+
+    /**
+     * Ce que le moteur recoit vraiment pour un type d unite : la coque, le bouclier et la puissance
+     * DEJA calcules pour ce proprietaire — le meme calcul que `AttackerFleet::toBattleUnits()`.
+     *
+     * @return array{coque: int, bouclier: int, puissance: int}
+     */
+    private function caracteristiquesVuesParLeMoteur(int $proprietaire, string $machineName): array
+    {
+        $joueur = resolve(PlayerServiceFactory::class)->make($proprietaire);
+        $objet = resolve(ObjectService::class)->getUnitObjectByMachineName($machineName);
+
+        return [
+            'coque' => (int)$objet->properties->structural_integrity->calculate($joueur)->totalValue,
+            'bouclier' => (int)$objet->properties->shield->calculate($joueur)->totalValue,
+            'puissance' => (int)$objet->properties->attack->calculate($joueur)->totalValue,
+        ];
     }
 
     protected function tearDown(): void
@@ -72,7 +158,7 @@ final class SpatialCargoConservationTest extends AccountTestCase
         $emporte = new Resources(40_000, 0, 0, 0);
         $portee = new Resources(4_000, 2_000, 0, 0);
 
-        [$patrouille, $segment] = $this->unePatrouillePosee(['battle_ship' => 40, 'small_cargo' => 25], cargaison: $portee);
+        [$patrouille, $segment] = $this->unePatrouillePosee(['battle_ship' => 40, 'small_cargo' => 25], cargaison: $portee, proprietaire: $this->defenseurId);
         $attaque = $this->uneAttaqueArrivee($patrouille, $segment, ['cruiser' => 90, 'small_cargo' => 30], $emporte);
 
         $resultat = resolve(SpatialBattle::class)->fight($attaque, $patrouille, $segment);
@@ -81,6 +167,21 @@ final class SpatialCargoConservationTest extends AccountTestCase
         $defense = $this->defenceResultOf($resultat, (int)$segment->id);
 
         // --- Les premisses : sans elles, le juste et le faux coincideraient ---
+
+        // **Les entrees, avant toute issue.** La bataille se decide sur ce que le moteur recoit : une coque,
+        // un bouclier et une puissance deja calcules pour chaque proprietaire. Le montage les pose ; ces
+        // trois lignes etablissent qu il les a bien posees, au lieu de les supposer.
+        $this->assertSame(
+            ['coque' => 27_000, 'bouclier' => 50, 'puissance' => 400],
+            $this->caracteristiquesVuesParLeMoteur($this->currentUserId, 'cruiser'),
+            'L attaquante n a pas les caracteristiques que le montage pose.'
+        );
+        $this->assertSame(
+            ['coque' => 60_000, 'bouclier' => 200, 'puissance' => 1_000],
+            $this->caracteristiquesVuesParLeMoteur($this->defenseurId, 'battle_ship'),
+            'Le defenseur n a pas les caracteristiques que le montage pose.'
+        );
+
         $this->assertGreaterThan(0, count($resultat->rounds), 'Aucun round : les deux camps ne se sont pas rencontres.');
         $this->assertGreaterThan(0, $flotte->unitsResult->getAmount(), 'L attaquante est entierement detruite : ce n est pas une destruction partielle.');
         $this->assertGreaterThan(0, $flotte->unitsLost->getAmount(), 'L attaquante n a rien perdu : la cargaison perdue serait nulle.');
@@ -122,7 +223,7 @@ final class SpatialCargoConservationTest extends AccountTestCase
     {
         $emporte = new Resources(20_000, 0, 0, 0);
 
-        [$patrouille, $segment] = $this->unePatrouillePosee(['battle_ship' => 60]);
+        [$patrouille, $segment] = $this->unePatrouillePosee(['battle_ship' => 60], proprietaire: $this->defenseurId);
         $attaque = $this->uneAttaqueArrivee($patrouille, $segment, ['small_cargo' => 10], $emporte);
 
         $resultat = resolve(SpatialBattle::class)->fight($attaque, $patrouille, $segment);
@@ -149,7 +250,7 @@ final class SpatialCargoConservationTest extends AccountTestCase
         $emporte = new Resources(10_000, 0, 0, 0);
         $portee = new Resources(4_000, 2_000, 0, 0);
 
-        [$patrouille, $segment] = $this->unePatrouillePosee(['light_fighter' => 5], cargaison: $portee);
+        [$patrouille, $segment] = $this->unePatrouillePosee(['light_fighter' => 5], cargaison: $portee, proprietaire: $this->defenseurId);
         $attaque = $this->uneAttaqueArrivee($patrouille, $segment, ['battle_ship' => 60], $emporte);
 
         $resultat = resolve(SpatialBattle::class)->fight($attaque, $patrouille, $segment);

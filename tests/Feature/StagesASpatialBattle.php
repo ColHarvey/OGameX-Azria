@@ -26,9 +26,12 @@ trait StagesASpatialBattle
      * @param Resources|null $cargaison Ce que le segment porte ; par defaut 4000 de metal et 2000 de cristal.
      * @return array{0: Patrol, 1: FleetMission}
      */
-    protected function unePatrouillePosee(array $unites, int $x = 120, int $y = -80, int $galaxie = 4, int $systeme = 77, Resources|null $cargaison = null): array
+    protected function unePatrouillePosee(array $unites, int $x = 120, int $y = -80, int $galaxie = 4, int $systeme = 77, Resources|null $cargaison = null, int|null $proprietaire = null): array
     {
-        $defenseur = $this->getSecondPlayerId();
+        // **Un banc qui exige une issue precise nomme son defenseur.** Par defaut on garde le comportement
+        // d origine — le premier compte venu du processus —, mais un essai dont la conclusion depend des
+        // caracteristiques peut passer le sien, pose et tenu par lui.
+        $defenseur = $proprietaire ?? $this->getSecondPlayerId();
 
         $patrouille = Patrol::forceCreate([
             'user_id' => $defenseur,
