@@ -90,6 +90,8 @@ use Spatie\Permission\Traits\HasRoles;
  * @method static Builder|User withoutRole($roles, $guard = null)
  * @property string|null $username_updated_at
  * @method static Builder|User whereUsernameUpdatedAt($value)
+ * @property string|null $empire_order l ordre des colonnes de la vue Empire, deux listes JSON (planetes, lunes)
+ * @method static Builder|User whereEmpireOrder($value)
  * @mixin \Eloquent
  */
 #[Fillable([

@@ -653,6 +653,26 @@
                         </a>
                     </li>
 
+                    {{-- La vue Empire, juste sous la vue generale (decision de Keven). L icone existe deja dans le
+                         sprite des menus : `.menuImage.empire`, aucune feuille a ecrire. --}}
+                    <li>
+                        <span class="menu_icon">
+                            <a href="{{ route('empire.index') }}"
+                               class="tooltipRight js_hideTipOnMobile "
+                               target="_self"
+                               title="{{ __('t_ingame.layout.menu_empire_title') }}">
+                                <div class="menuImage empire {{ (Request::is('empire') ? 'highlighted' : '') }}"></div>
+                            </a>
+                        </span>
+                        <a class="menubutton {{ (Request::is('empire') ? 'selected' : '') }}"
+                           href="{{ route('empire.index') }}"
+                           accesskey=""
+                           target="_self"
+                        >
+                            <span class="textlabel">{{ __('t_ingame.layout.menu_empire') }}</span>
+                        </a>
+                    </li>
+
                     <li>
                         <span class="menu_icon">
                             <a href="{{ route('resources.settings') }}"

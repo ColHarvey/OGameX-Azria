@@ -19,6 +19,7 @@ use OGame\Http\Controllers\ChatUnreadController;
 use OGame\Http\Controllers\CombatController;
 use OGame\Http\Controllers\DailyRewardController;
 use OGame\Http\Controllers\DefenseController;
+use OGame\Http\Controllers\EmpireController;
 use OGame\Http\Controllers\EventsController;
 use OGame\Http\Controllers\FacilitiesController;
 use OGame\Http\Controllers\FleetController;
@@ -101,12 +102,23 @@ Route::middleware(['auth', 'banned', 'locale'])->group(function () {
     // ligne », tout joueur ayant un onglet ouvert. `auth` et `banned` restent.
     Route::get('/ajax/chat/unread', [ChatUnreadController::class, 'snapshot'])->name('chat.unread');
     Route::post('/ajax/chat/seen', [ChatUnreadController::class, 'seen'])->name('chat.seen');
+
+    // **L actualisation de la vue Empire.** Hors de `globalgame` pour la meme raison que le bandeau : demander une
+    // photographie ne doit faire avancer ni le compte, ni la planete courante, ni les missions. `auth` et `banned`
+    // restent, et la projection ne parcourt que les corps du joueur de la session. L **ouverture** de la page, elle,
+    // passe par le groupe complet plus bas : ouvrir une page de jeu fait avancer le compte, et c est voulu.
+    Route::get('/ajax/empire', [EmpireController::class, 'refresh'])->name('empire.refresh');
 });
 
 // Group: all logged in pages:
 Route::middleware(['auth', 'banned', 'globalgame', 'locale', 'firstlogin'])->group(function () {
     // Overview
     Route::get('/overview', [OverviewController::class, 'index'])->name('overview.index');
+
+    // **La vue Empire** : l ouverture de la page, et le rangement des colonnes — deux gestes du joueur, donc le groupe
+    // complet. L actualisation, elle, vit plus haut, hors de `globalgame`.
+    Route::get('/empire', [EmpireController::class, 'index'])->name('empire.index');
+    Route::post('/ajax/empire/order', [EmpireController::class, 'order'])->name('empire.order');
 
     // Resources
     Route::get('/resources', [ResourcesController::class, 'index'])->name('resources.index');

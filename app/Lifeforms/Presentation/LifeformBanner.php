@@ -100,14 +100,14 @@ final class LifeformBanner
      * 2. le mode vacances le suspend entierement — ni croissance, ni consommation ;
      * 3. un instant anterieur a la derniere actualisation ne rejoue rien (`stateAt()` s en charge).
      */
-    private function projectedState(PlanetService $planet, LifeformPlanet $row): DemographicState|null
+    private function projectedState(PlanetService $planet, LifeformPlanet $row, int|null $at = null): DemographicState|null
     {
         $joueur = $planet->getPlayer();
         if ($joueur !== null && $joueur->isInVacationMode()) {
             return null;
         }
 
-        $instant = (int)Date::now()->timestamp;
+        $instant = $at ?? (int)Date::now()->timestamp;
         $borne = $this->hold->until($planet->getPlanetId(), $instant);
 
         return $this->demography->stateAt($row, $borne === null ? $instant : min($instant, $borne));
@@ -130,9 +130,9 @@ final class LifeformBanner
      *
      * @return Suspension|null
      */
-    public function heldOn(PlanetService $planet): array|null
+    public function heldOn(PlanetService $planet, int|null $at = null): array|null
     {
-        $depuis = $this->hold->until($planet->getPlanetId(), (int)Date::now()->timestamp);
+        $depuis = $this->hold->until($planet->getPlanetId(), $at ?? (int)Date::now()->timestamp);
         if ($depuis === null) {
             return null;
         }
@@ -141,16 +141,24 @@ final class LifeformBanner
     }
 
     /**
+     * **L instant est explicite quand l appelant en tient un.**
+     *
+     * Le bandeau lit une planete a la fois : « maintenant » lui suffit, et `$at` reste nul. Une page qui projette
+     * plusieurs corps — la vue Empire — doit les projeter **au meme instant**, sinon son total additionne des
+     * valeurs qui n ont jamais coexiste : chaque appel relirait l horloge. Le calcul, lui, prend deja un instant
+     * (`LifeformDemography::stateAt`) ; il ne manquait que le chemin pour le lui donner.
+     *
+     * @param int|null $at instant de la photographie, ou null pour « maintenant » (comportement d origine)
      * @return Chiffres|null
      */
-    public function planetFigures(PlanetService $planet, Species $species): array|null
+    public function planetFigures(PlanetService $planet, Species $species, int|null $at = null): array|null
     {
         $etat = LifeformPlanet::query()->where('planet_id', $planet->getPlanetId())->first();
         if ($etat === null) {
             return null;
         }
         $profil = PlanetLifeformProfile::fromLevels($species, $this->levels->buildingLevelsOf($planet->getPlanetId()), $this->revisions->live()->demography());
-        $projete = $this->projectedState($planet, $etat);
+        $projete = $this->projectedState($planet, $etat, $at);
         $population = $projete === null ? (float)$etat->population : $projete->population;
         $nourris = $profil->inhabitantsFed();
         $satisfaits = min($population, $nourris);

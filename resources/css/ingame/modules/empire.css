@@ -1,0 +1,142 @@
+/*
+ * La vue Empire — ce que la feuille heritee ne couvre pas.
+ *
+ * Tout l habillage du tableau vient deja de `#empireComponent` (469500b3…css, 13777-14262) : fond, onglets, en-tetes
+ * de groupe, colonnes, lignes paires et impaires, couleurs d etat. Ne vivent ici que quatre choses qu elle ignore :
+ * l emplacement des lunes, la barre d actualisation, l etat sans lune, et les deux regles qui rendent le defilement
+ * lisible.
+ */
+
+/*
+ * ## Les lunes gardent leurs images
+ *
+ * `img/moons/big` fait 109 px la ou les planetes font 156. Plutot que d etirer (une lune deformee) ou de fabriquer de
+ * nouvelles images, l emplacement garde la taille des planetes et l image y est **centree a sa taille**. Sans cet
+ * emplacement fixe, la colonne d une lune serait plus courte que son en-tete et toutes ses lignes se decaleraient.
+ */
+#empireComponent .planet .planetImg {
+    height: 156px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#empireComponent .planet .planetImg img {
+    max-width: 156px;
+    max-height: 156px;
+    width: auto;
+    height: auto;
+}
+
+/*
+ * ## Le tableau tient dans la colonne du jeu, et defile sur lui-meme
+ *
+ * Le cadre du jeu est fait de trois colonnes flottantes : le menu, le contenu (`#middle`), et la barre des planetes
+ * (`#rechts`). La feuille heritee donne 1 000 px au contenu de la vue Empire, la colonne `#middle` n en fait qu environ
+ * 680, et le tableau, lui, mesure 2 655 px pour quatorze planetes : il passait **sous la liste des planetes**, qui en
+ * recouvrait une colonne entiere — mesure du 22 septembre 2026, a 1 400, 1 600, 1 920 et 2 560 px de large, toujours
+ * la meme colonne perdue.
+ *
+ * Le tableau devient donc un panneau qui defile sur lui-meme, borne a la largeur que la colonne lui laisse. Rien n est
+ * cache, rien ne recouvre rien, et les regles collantes plus bas s accrochent desormais a ce panneau. Sa hauteur est
+ * **mesuree** par `empire.js` a partir de sa position reelle : une valeur devinee serait fausse des que le bandeau
+ * change de taille.
+ */
+#empireComponent #mainContent {
+    width: auto;
+    max-width: 100%;
+    overflow: auto;
+}
+
+/* ## La barre d actualisation : l instant de la photographie, et ce qui se passe quand elle echoue. */
+#empireComponent .empireBar {
+    padding: 6px 0 2px;
+    text-align: right;
+    color: #848484;
+    font: 11px Verdana, Arial, sans-serif;
+}
+
+#empireComponent .empireRefreshButton {
+    margin-left: 8px;
+    padding: 3px 10px;
+    color: #6f9fc8;
+    background: #1b2530;
+    border: 1px solid #3d4b5a;
+    border-radius: 3px;
+    cursor: pointer;
+    font: inherit;
+}
+
+#empireComponent .no-touch .empireRefreshButton:hover,
+#empireComponent .empireRefreshButton:hover {
+    color: #fff;
+    border-color: #6f9fc8;
+}
+
+#empireComponent .empireStale {
+    margin-left: 10px;
+    color: #ff8a80;
+}
+
+/* ## Aucune lune : une phrase, jamais une grille vide. */
+#empireComponent .empireEmpty {
+    max-width: 600px;
+    margin: 40px auto;
+    padding: 16px 20px;
+    color: #a19491;
+    background: rgba(13, 16, 20, .85);
+    border: 1px solid #000;
+    border-radius: 6px;
+    font: 12px/1.6 Verdana, Arial, sans-serif;
+    text-align: center;
+}
+
+#empireComponent .empireEmpty strong {
+    display: block;
+    margin-bottom: 4px;
+    color: #fff;
+    font-size: 13px;
+}
+
+/*
+ * ## Le defilement doit rester lisible
+ *
+ * Quatorze planetes font 2 655 px a 100 %, 3 983 px a 150 %, pour un ecran utile de 1 384 px. La disposition heritee
+ * met les intitules de lignes dans une colonne flottante et les noms de planetes tout en haut : defiler a droite
+ * emporte les uns, descendre emporte les autres, et une valeur ne dit plus ni sa ligne ni sa planete (mesure du
+ * 22 septembre 2026 : zero intitule et zero nom visibles, aux trois zooms).
+ *
+ * Deux regles suffisent. Le fond est explicite : ces blocs sont transparents par defaut, et les valeurs defileraient
+ * sous le texte.
+ */
+#empireComponent .header {
+    position: sticky;
+    left: 0;
+    z-index: 6;
+    background: #0b0e12;
+    box-shadow: 2px 0 6px rgba(0, 0, 0, .75);
+}
+
+#empireComponent .header h3 {
+    position: sticky;
+    top: 0;
+    z-index: 7;
+    background: #0b0e12;
+}
+
+/*
+ * Le nom de colonne est sorti de son en-tete par `empire.js` — un element colle ne sort jamais de son bloc conteneur,
+ * et `.planetHead` ne fait que 257 px. La frise de l en-tete est donc recoupee en deux : la bande porte ses vingt-quatre
+ * premiers pixels, l en-tete la suite. A hauteur zero, l affichage est identique au pixel pres.
+ */
+#empireComponent .planet > .planetname {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    width: 158px;
+    background: #0b0e12 url("/img/icons/2a79578123dfab859b1440d465bf6b.gif") 0 0 no-repeat;
+}
+
+#empireComponent .planet > .planetname + .planetHead {
+    background-position: 0 -24px;
+}
