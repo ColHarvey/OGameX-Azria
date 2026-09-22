@@ -1157,40 +1157,13 @@
             });
 
             // Handle ignore player button clicks
-            $(document).on('click', '.ignorePlayerLink', function(e) {
-                e.preventDefault();
-                var playerId = $(this).data('playerid');
-                var playerName = $(this).data('playername');
-
-                if (playerId && playerName) {
-                    // Confirm before ignoring
-                    if (confirm(@json(__('t_ingame.buddy.ignore_confirm')) + ' ' + playerName + '?')) {
-                        $.ajax({
-                            url: '{{ route('buddies.ignore') }}',
-                            type: 'POST',
-                            data: {
-                                ignored_user_id: playerId,
-                                _token: '{{ csrf_token() }}'
-                            },
-                            success: function(response) {
-                                if (response.success) {
-                                    fadeBox(@json(__('t_ingame.buddy.ignore_success')), false);
-                                } else {
-                                    fadeBox(response.message || @json(__('t_ingame.buddy.ignore_failed')), true);
-                                }
-                            },
-                            error: function(xhr) {
-                                var errorMessage = @json(__('t_ingame.buddy.ignore_failed'));
-                                if (xhr.responseJSON && xhr.responseJSON.message) {
-                                    errorMessage = xhr.responseJSON.message;
-                                }
-                                fadeBox(errorMessage, true);
-                            }
-                        });
-                    }
-                }
-                return false;
-            });
+            {{-- **Ignorer un joueur n a qu un mecanisme**, celui du bundle : il demande confirmation puis
+                 soumet le formulaire que le controleur attend, lequel repond par une redirection. Un second
+                 gestionnaire vivait ici, en ajax : un clic partait donc deux fois vers la meme route, et cet
+                 appel-ci testait de surcroit un `success` que le controleur ne rend jamais. Mesure du
+                 22 septembre 2026, depuis le vrai menu joueur. Les clefs `t_ingame.buddy.ignore_success` et
+                 `ignore_failed` ne servent plus a personne ; `ignore_confirm` est desormais publiee par le
+                 gabarit principal, pour le gestionnaire partage. --}}
         </script>
     </div>
     @endif

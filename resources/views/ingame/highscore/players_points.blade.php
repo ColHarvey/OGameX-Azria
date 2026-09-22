@@ -386,50 +386,29 @@
                 initHighscoreContent();
                 userWantsFocus = false;
 
+                {{-- **Ce fragment est reinjecte a chaque page et a chaque categorie**, et ce script est donc rejoue
+                     a chaque fois. Sans espace de nom ni retrait prealable, le gestionnaire ci-dessous s ajoutait
+                     sur `document` a chaque navigation : mesure du 22 septembre 2026, 29 puis 31, 33, 35... clics
+                     delegues apres cinq remplacements, soit un envoi de demande d ami repete autant de fois qu on
+                     avait change de page. `off` avant `on`, sur un espace de nom propre, comme le reste du jeu le
+                     fait deja (`unbind('resize.highscoreTop').bind(...)`).
+
+                     Un second gestionnaire vivait ici, pour `.ignorePlayerLink` : **ce tableau n a jamais rendu un
+                     seul lien de ce genre** (mesure : zero, au chargement comme apres cinq remplacements). Ces
+                     liens viennent du menu joueur de la Galaxie, qui porte deja son propre gestionnaire, et le
+                     bundle en porte un troisieme. Trois mecanismes pour une meme action, dont un mort : celui-ci
+                     est retire. Les clefs `t_ingame.highscore.are_you_sure_ignore`, `player_ignored` et
+                     `player_ignored_failed` ne servent donc plus a personne. --}}
+                $(document).off('click.highscoreActions');
+
                 // Handle buddy request button clicks
-                $(document).on('click', '.sendBuddyRequest, .sendBuddyRequestLink', function(e) {
+                $(document).on('click.highscoreActions', '.sendBuddyRequest, .sendBuddyRequestLink', function(e) {
                     e.preventDefault();
                     e.stopImmediatePropagation();
                     var playerId = $(this).data('playerid');
                     var playerName = $(this).data('playername');
                     if (playerId && playerName) {
                         window.sendBuddyRequestDialog(playerId, playerName);
-                    }
-                    return false;
-                });
-
-                // Handle ignore player button clicks
-                $(document).on('click', '.ignorePlayerLink', function(e) {
-                    e.preventDefault();
-                    var playerId = $(this).data('playerid');
-                    var playerName = $(this).data('playername');
-
-                    if (playerId && playerName) {
-                        // Confirm before ignoring
-                        if (confirm(@json(__('t_ingame.highscore.are_you_sure_ignore')) + ' ' + playerName + '?')) {
-                            $.ajax({
-                                url: '{{ route('buddies.ignore') }}',
-                                type: 'POST',
-                                data: {
-                                    ignored_user_id: playerId,
-                                    _token: '{{ csrf_token() }}'
-                                },
-                                success: function(response) {
-                                    if (response.success) {
-                                        fadeBox(@json(__('t_ingame.highscore.player_ignored')), false);
-                                    } else {
-                                        fadeBox(response.message || @json(__('t_ingame.highscore.player_ignored_failed')), true);
-                                    }
-                                },
-                                error: function(xhr) {
-                                    var errorMessage = @json(__('t_ingame.highscore.player_ignored_failed'));
-                                    if (xhr.responseJSON && xhr.responseJSON.message) {
-                                        errorMessage = xhr.responseJSON.message;
-                                    }
-                                    fadeBox(errorMessage, true);
-                                }
-                            });
-                        }
                     }
                     return false;
                 });

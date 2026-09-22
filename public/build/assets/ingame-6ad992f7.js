@@ -73945,10 +73945,24 @@ TechnologyDetails.prototype.setMaximumBuildableAmount = function () {
 // (galaxy/index.blade.php and highscore/players_points.blade.php) to open a BBCode dialog.
 // The old direct-send implementation has been removed to avoid conflicts.
 
+// **Le seul mecanisme qui ignore un joueur.** La page Galaxie en portait un second, en ajax, avec sa propre
+// confirmation : un clic partait alors deux fois vers la meme route — un appel ajax et une soumission —, et
+// l appel ajax testait de surcroit un `success` que le controleur ne rend jamais, puisqu il repond par une
+// redirection. La confirmation est donc remontee ici, devant la seule soumission qui reste.
 $(document).on('click', '.ignorePlayerLink', function(e) {
     e.preventDefault();
     var playerId = $(this).data('playerid');
-    
+    var playerName = $(this).data('playername');
+
+    // On demande TOUJOURS : si le texte manquait, la question se pose quand meme, plutot qu ignorer en silence.
+    var question = (window.LocalizationStrings && LocalizationStrings.ignorePlayer && LocalizationStrings.ignorePlayer.confirm)
+        ? LocalizationStrings.ignorePlayer.confirm + ' '
+        : '';
+
+    if (!confirm(question + (playerName || '') + '?')) {
+        return;
+    }
+
     // Create a form and submit it to redirect
     var form = $('<form>', {
         'method': 'POST',

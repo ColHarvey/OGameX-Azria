@@ -504,6 +504,33 @@ class HighscoreRankMovementTest extends AccountTestCase
     }
 
     /**
+     * **Le fragment du classement ne repose pas ses gestionnaires sans retirer les precedents.**
+     *
+     * Ce fragment est reinjecte a chaque changement de page et de categorie, et son script est rejoue a
+     * chaque fois. Sans espace de nom ni retrait prealable, les deux gestionnaires d action de ligne
+     * s ajoutaient sur `document` a chaque navigation : 29 clics delegues au chargement, puis 31, 33, 35,
+     * 37, 39 apres cinq remplacements (mesure au navigateur, 22 septembre 2026), soit un envoi de demande
+     * d ami repete autant de fois qu on avait change de page.
+     *
+     * **Ce temoin controle la forme, pas l effet** : l effet est mesure au navigateur (29 clics delegues,
+     * constants sur cinq remplacements). Il existe pour qu une reecriture future ne retire pas le retrait
+     * en silence.
+     */
+    public function testTheHighscoreFragmentClearsItsActionHandlersBeforeBindingThem(): void
+    {
+        $page = (string)$this->post('/ajax/highscore', ['category' => 1, 'type' => 0])->assertStatus(200)->getContent();
+
+        $this->assertStringContainsString("\$(document).off('click.highscoreActions');", $page, 'Le fragment ne retire pas son gestionnaire avant de le reposer.');
+        $this->assertStringContainsString("\$(document).on('click.highscoreActions', '.sendBuddyRequest, .sendBuddyRequestLink'", $page);
+        $this->assertStringNotContainsString("\$(document).on('click', '.sendBuddyRequest", $page, 'Un gestionnaire sans espace de nom ne peut pas etre retire.');
+
+        // **Le tableau ne rend aucun lien « ignorer »** — ils viennent du menu joueur de la Galaxie, qui porte
+        // son propre gestionnaire, et le bundle en porte un troisieme. Celui du fragment etait mort, et deux
+        // mecanismes pour une meme action valent deux declenchements : il est retire.
+        $this->assertStringNotContainsString('ignorePlayerLink', $page, 'Le fragment ne doit ni rendre ni lier de lien « ignorer ».');
+    }
+
+    /**
      * Trois comptes classes 1, 2, 3 dans toutes les categories ordinaires.
      *
      * @return array<int, int> Les identifiants, dans l ordre des rangs.

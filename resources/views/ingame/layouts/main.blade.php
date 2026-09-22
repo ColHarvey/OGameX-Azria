@@ -1043,6 +1043,10 @@
                     'planetOrder'          => ['lock' => __('t_ingame.layout.js_planet_lock'), 'unlock' => __('t_ingame.layout.js_planet_unlock')],
                     'darkMatter'           => __('t_ingame.layout.res_dark_matter'),
                     'activateItem'         => ['upgradeItemQuestion' => __('t_ingame.layout.js_activate_item_question'), 'upgradeItemQuestionHeader' => __('t_ingame.layout.js_activate_item_header')],
+                    {{-- Ignorer un joueur demande confirmation, et cette confirmation vit desormais dans le seul
+                         mecanisme qui ignore : celui du bundle. La page Galaxie en portait une seconde, avec sa
+                         propre requete, et un clic partait donc deux fois (mesure du 22 septembre 2026). --}}
+                    'ignorePlayer'         => ['confirm' => __('t_ingame.buddy.ignore_confirm')],
                 ]) !!};
                 var constants = {
                     "espionage": 6,
