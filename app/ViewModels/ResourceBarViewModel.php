@@ -2,6 +2,7 @@
 
 namespace OGame\ViewModels;
 
+use Illuminate\Support\Facades\Date;
 use OGame\Facades\AppUtil;
 use OGame\Lifeforms\Presentation\LifeformBanner;
 use OGame\Services\FleetMissionService;
@@ -73,6 +74,14 @@ final class ResourceBarViewModel
         // — une lecture, comme tout ce que ce point d'entree rend (journal §156).
         $ticker['attack'] = ['hostile' => FleetMissionService::playerIsUnderAttack($player)];
 
+        // **De quel corps, et de quand.** Le corps etait deja nomme dans la demande ; l'instant manquait, et sans
+        // lui une reponse partie avant une depense pouvait etre appliquee apres elle, remettant a l'ecran le stock
+        // d'avant. Le navigateur refuse desormais toute reponse plus ancienne que la derniere appliquee pour ce
+        // meme corps. La precision est la microseconde : deux reponses du meme corps peuvent naitre dans la meme
+        // seconde.
+        $ticker['body'] = $planet->getPlanetId();
+        $ticker['generated_at'] = (float)Date::now()->format('U.u');
+
         return new self($resources, $ticker);
     }
 
@@ -143,6 +152,9 @@ final class ResourceBarViewModel
             'storage' => $lifeforms['living_space'],
             'production_second' => $lifeforms['growth_hour'] / 3600,
             'tooltip' => self::populationTooltip($lifeforms),
+            // Les faits que l'animation et la comparaison lisent ; le gabarit, lui, n'en a pas besoin.
+            'inhabitants_fed' => $lifeforms['fed_capacity'],
+            'full' => $lifeforms['full'],
         ];
         $resources['food'] = [
             'amount' => $food,
@@ -150,6 +162,9 @@ final class ResourceBarViewModel
             'storage' => (int)floor($lifeforms['food_storage']),
             'production_second' => $lifeforms['food_balance_hour'] / 3600,
             'tooltip' => self::foodTooltip($lifeforms),
+            'production_hour' => $lifeforms['food_production_hour'],
+            'consumption_hour' => $lifeforms['food_consumption_hour'],
+            'runs_out_in' => $lifeforms['food_runs_out_in'],
         ];
 
         return $resources;
@@ -251,7 +266,103 @@ final class ResourceBarViewModel
         $ticker['techs'] = new stdClass();
         $ticker['honorScore'] = self::HONOR_SCORE_OF_THE_TEMPLATE;
 
+        // **Les faits, a cote des tuiles et non dedans** : le compteur herite ne lit que les clefs qu'il connait,
+        // et une structure a part ne peut pas reveiller une de ses branches avec une valeur dont la semantique
+        // n'est pas la sienne.
+        $ticker['facts'] = self::factsOf($resources);
+
         return $ticker;
+    }
+
+    /**
+     * **Les faits derriere chaque infobulle**, en nombres — la structure dediee que le navigateur compare.
+     *
+     * ## Pourquoi elle existe
+     *
+     * Le module comparait la **chaine rendue** pour decider s'il fallait refaire les infobulles. Cette chaine porte
+     * le stock courant, qui bouge chaque seconde : la condition etait donc toujours vraie, et l'infobulle que le
+     * joueur lisait etait detruite toutes les trente secondes (journal §184.4). Comparer des faits reglerait ce
+     * point — mais retirer la chaine sans rien publier rendrait **aveugle** : pour l'energie, la production et la
+     * consommation n'existaient QUE dans la chaine ; pour la nourriture, seul un bilan etait publie, jamais ses
+     * deux termes. Ce sont ces faits-la, ici, sous des noms **qui ne sont pas ceux du compteur herite** — dont la
+     * semantique differe et qu'on ne doit pas reveiller.
+     *
+     * ## Ce que `per_second` et `stable_for` promettent
+     *
+     * `per_second` est le taux **effectif** a cet instant : la croissance vaut deja zero quand la planete est
+     * pleine ou affamee, c'est la regle du jeu qui le dit, pas le navigateur. `stable_for` est le nombre de
+     * secondes pendant lesquelles ce taux reste valable — jusqu'au plafond, jusqu'au grenier plein, ou jusqu'a la
+     * derniere bouchee. Au-dela, **le navigateur n'interpole plus** : il tient la valeur et redemande l'etat, au
+     * lieu d'afficher une progression que le serveur ne confirmerait pas. `null` veut dire « rien en vue ».
+     *
+     * @param array<string, array<string, mixed>> $resources
+     * @return array<string, array<string, mixed>>
+     */
+    private static function factsOf(array $resources): array
+    {
+        $faits = [];
+
+        foreach (['metal', 'crystal', 'deuterium'] as $name) {
+            $faits[$name] = [
+                'storage' => $resources[$name]['storage'],
+                'production_hour' => $resources[$name]['production_hour'],
+            ];
+        }
+
+        $faits['energy'] = [
+            'production' => $resources['energy']['production'],
+            'consumption' => $resources['energy']['consumption'],
+        ];
+
+        // La matiere noire n'affiche que son montant : aucun fait ne la gouverne, et elle ne s'anime jamais.
+        $faits['darkmatter'] = [];
+
+        if (!isset($resources['population'])) {
+            return $faits;
+        }
+
+        $population = (float)$resources['population']['amount'];
+        $espaceVital = (float)$resources['population']['storage'];
+        $croissance = (float)$resources['population']['production_second'];
+        $nourriture = (float)$resources['food']['amount'];
+        $grenier = (float)$resources['food']['storage'];
+        $bilan = (float)$resources['food']['production_second'];
+        $epuisement = $resources['food']['runs_out_in'];
+
+        // La croissance s'arrete au plafond ; et si la nourriture s'epuise avant, elle s'arrete la.
+        $popStable = null;
+        if ($croissance > 0.0) {
+            $popStable = max(0.0, ($espaceVital - $population) / $croissance);
+            if ($epuisement !== null) {
+                $popStable = min($popStable, (float)$epuisement);
+            }
+        }
+
+        // La nourriture change de regime quand elle atteint zero (famine) ou son grenier (production perdue).
+        $foodStable = null;
+        if ($bilan < 0.0) {
+            $foodStable = max(0.0, $nourriture / -$bilan);
+        } elseif ($bilan > 0.0) {
+            $foodStable = max(0.0, ($grenier - $nourriture) / $bilan);
+        }
+
+        $faits['population'] = [
+            'cap' => $espaceVital,
+            'per_second' => $croissance,
+            'stable_for' => $popStable,
+            'inhabitants_fed' => $resources['population']['inhabitants_fed'],
+            'full' => $resources['population']['full'],
+        ];
+        $faits['food'] = [
+            'cap' => $grenier,
+            'per_second' => $bilan,
+            'stable_for' => $foodStable,
+            'production_hour' => $resources['food']['production_hour'],
+            'consumption_hour' => $resources['food']['consumption_hour'],
+            'runs_out_in' => $epuisement,
+        ];
+
+        return $faits;
     }
 
     /**
@@ -279,8 +390,11 @@ final class ResourceBarViewModel
     {
         $html = '';
 
+        // **Les valeurs sont echappees elles aussi.** Ce sont aujourd'hui des nombres formates et des durees, donc
+        // rien d'hostile ; mais cette chaine est desormais ecrite dans le DOM d'une infobulle **ouverte** par le
+        // navigateur (mise a jour en place, sans reconstruction), et ce qui entre dans le DOM s'echappe a la source.
         foreach ($rows as [$label, $class, $value]) {
-            $html .= '<tr><th>' . e($label) . '</th><td><span class="' . $class . '">' . $value . '</span></td></tr>';
+            $html .= '<tr><th>' . e($label) . '</th><td><span class="' . e($class) . '">' . e($value) . '</span></td></tr>';
         }
 
         return e($title) . '|<table class="resourceTooltip">' . $html . '</table>';

@@ -84479,12 +84479,28 @@ window.playOGameXWormhole = function (canvas) {
  * part quand la premiere revient (`demandeDue`). Les rappels des appelants sont livres avec la
  * demande qui les a pris ; un rappel arrive pendant le vol attend la demande due.
  *
- * `reloadResources()` refait les cinq infobulles du bandeau (`changeTooltip` les detruit puis les
+ * `reloadResources()` refait toutes les infobulles du bandeau (`changeTooltip` les detruit puis les
  * recree) : appele toutes les trente secondes, il fermait sous le curseur l'infobulle qu'un joueur
- * etait en train de lire. Ce module ne l'appelle donc que lorsque **le texte d'une infobulle
- * change vraiment** — une production, un stockage, un plafond. Le reste du temps il ecrit les
- * montants dans le compteur et lui demande de se redessiner : le joueur garde son infobulle
- * ouverte et voit quand meme le bon nombre.
+ * etait en train de lire. La parade d'origine — « ne refaire que si le texte change » — etait
+ * **inerte** : ce texte porte le stock courant, qui bouge chaque seconde, donc la condition etait
+ * toujours vraie (mesure au navigateur, journal §184.4). Ce module ne detruit plus rien : toute
+ * infobulle dont le texte change est mise a jour **en place** — la seule tuile concernee, le contenu
+ * tel que le serveur l'a rendu et echappe, le `title` repose pour la prochaine ouverture. Le serveur
+ * publie a cote une **structure dediee de faits** (`facts`) : production, capacite, etats
+ * particuliers, taux et duree de validite des tuiles animees. Rien n'est masque, puisque rien n'est
+ * compare pour decider d'ecrire : un texte qui change s'ecrit. La reconstruction (`changeTooltip`)
+ * n'est plus qu'un secours, quand le noeud ouvert n'a pas la structure attendue — car
+ * `initTooltips()` ferme au passage l'infobulle ouverte d'une autre tuile (mesure en jeu).
+ *
+ * ## La population et la nourriture s'animent ici
+ *
+ * Le compteur herite les anime a partir de clefs que le serveur ne publie pas — ses deux branches
+ * sont mortes —, et le serveur ne projetait pas l'horloge demographique sur cette route : les deux
+ * tuiles affichaient l'etat du dernier chargement de page. Le serveur projette desormais, et ce
+ * module les anime a partir de champs **dedies** (`facts.population`, `facts.food`), dont la
+ * semantique est la notre et jamais celle du compteur herite. Le taux n'est cru que pendant
+ * `stable_for` secondes : au-dela — plafond, grenier plein, famine — rien n'est invente, la valeur
+ * est tenue et l'etat redemande.
  *
  * ## Quand le serveur va mal, le module se tait
  *
@@ -84506,8 +84522,14 @@ window.playOGameXWormhole = function (canvas) {
     /** Au-dela, la veille se tait : une panne ne doit pas devenir une tempete de requetes. */
     var ECHECS_AVANT_DE_SE_TAIRE = 3;
 
-    /** Les faits dont un changement refait les infobulles ; les montants seuls n'en refont aucune. */
-    var FAITS_DE_L_INFOBULLE = ['storage', 'production', 'tooltip'];
+    /** Les tuiles qui portent une infobulle, et l'identifiant de leur boite. */
+    var TUILES = ['metal', 'crystal', 'deuterium', 'energy', 'darkmatter', 'population', 'food'];
+
+    /** Les deux tuiles que le serveur decrit assez pour qu'on les anime ici. */
+    var TUILES_ANIMEES = ['population', 'food'];
+
+    /** La cadence de l'animation des tuiles animees, en millisecondes. */
+    var CADENCE_DE_L_ANIMATION = 1000;
 
     var demandeEnVol = false;
     var demandeDue = false;
@@ -84515,6 +84537,9 @@ window.playOGameXWormhole = function (canvas) {
     var veille = null;
     var arme = false;
     var echecsConsecutifs = 0;
+    var animation = null;
+    var horlogeDeLAnimation = null;
+    var dernierInstantApplique = null;
     var derniereCharge = null;
 
     function leBandeau() {
@@ -84572,47 +84597,167 @@ window.playOGameXWormhole = function (canvas) {
     }
 
     /**
-     * Une infobulle du bandeau changerait-elle de texte ?
-     *
-     * Comparer la charge recue a la precedente, ressource par ressource, sur les seuls faits que
-     * les infobulles portent. Une premiere charge, une ressource apparue ou disparue : on refait
-     * tout, c'est le cas sur.
+     * Les tuiles dont l'infobulle a change de texte depuis la derniere charge — ou depuis l'amorce de la page.
      */
-    function lesInfobullesChangent(reponse) {
-        if (derniereCharge === null) {
-            return true;
-        }
+    function lesInfobullesATraiter(reponse) {
+        var travaux = [];
 
-        var noms = Object.keys(reponse.resources);
+        TUILES.forEach(function (nom) {
+            var tuile = reponse.resources[nom];
 
-        if (noms.length !== Object.keys(derniereCharge).length) {
-            return true;
-        }
-
-        return noms.some(function (nom) {
-            var avant = derniereCharge[nom];
-
-            if (!avant) {
-                return true;
+            if (!tuile || typeof tuile.tooltip !== 'string') {
+                return;
             }
 
-            return FAITS_DE_L_INFOBULLE.some(function (fait) {
-                return reponse.resources[nom][fait] !== avant[fait];
-            });
+            var avant = derniereCharge === null ? null : derniereCharge.infobulles[nom];
+
+            if (avant === tuile.tooltip) {
+                return;
+            }
+
+            travaux.push({ nom: nom, texte: tuile.tooltip, precedent: avant });
         });
+
+        return travaux;
+    }
+
+    /**
+     * Partir de ce que le compteur de la page tient deja.
+     *
+     * **La premiere reponse n'est pas une premiere charge.** Le gabarit amorce le compteur lui-meme
+     * (`reloadResources(@json(...))`), sans passer par ce module : sans cette amorce, la premiere resynchronisation
+     * etait traitee comme une premiere charge, refaisait toutes les infobulles, et detruisait celle que le joueur
+     * lisait — mesure en jeu, a la seconde 29 (journal §186). Les textes des infobulles sont dans le compteur ; les
+     * faits, eux, ne seront connus qu'a la premiere reponse, et jusque-la rien n'est refait.
+     */
+    function retenirLAmorce() {
+        var compteur = window.resourcesBar;
+
+        if (!compteur || !compteur.resources) {
+            return;
+        }
+
+        var infobulles = {};
+        var trouvee = false;
+
+        TUILES.forEach(function (nom) {
+            var tuile = compteur.resources[nom];
+
+            if (tuile && typeof tuile.tooltip === 'string') {
+                infobulles[nom] = tuile.tooltip;
+                trouvee = true;
+            }
+        });
+
+        if (trouvee) {
+            derniereCharge = { infobulles: infobulles };
+        }
     }
 
     function retenirLaCharge(reponse) {
-        derniereCharge = {};
+        derniereCharge = { infobulles: {} };
 
         Object.keys(reponse.resources).forEach(function (nom) {
-            var fait = reponse.resources[nom];
-            derniereCharge[nom] = {
-                storage: fait.storage,
-                production: fait.production,
-                tooltip: fait.tooltip
-            };
+            derniereCharge.infobulles[nom] = reponse.resources[nom].tooltip;
         });
+    }
+
+    /**
+     * Remplacer le contenu d'une infobulle **ouverte**, sans la detruire.
+     *
+     * Mesure faite sur le Tipped reellement servi (journal §185.1) : `Tipped.refresh()` ne relit pas l'attribut
+     * `title` — le texte ne change pas —, et `changeTooltip()` ferme l'infobulle sous le curseur. Ce qui marche :
+     * ecrire dans le noeud ouvert pour le joueur qui lit maintenant, **et** poser le `title` pour la prochaine
+     * ouverture, que Tipped relit alors.
+     *
+     * Le contenu est celui que le serveur a compose et **echappe** ; la structure visee est celle que
+     * `initTooltips()` construit : `.htmlTooltip` > `h1` + `.splitLine` + le tableau.
+     */
+    function ecrireLInfobulleEnPlace(nom, texte, textePrecedent) {
+        var boite = document.getElementById(nom + '_box');
+
+        if (!boite) {
+            return false;
+        }
+
+        // **A qui appartient l'infobulle ouverte ?** Tipped n'en montre qu'une, sans lien DOM avec sa boite. On ne
+        // devine pas : elle est a cette boite si son titre est celui que la boite portait **avant** cette ecriture.
+        // Sans ce contrôle, une reponse qui change plusieurs infobulles reecrivait l'infobulle ouverte pour chacune
+        // d'elles, et le joueur finissait par lire la derniere de la liste sous le nom d'une autre (vu au banc).
+        //
+        // **Ce titre vient de la memoire du module, pas de l'attribut** : Tipped retire `title` de la boite apres
+        // l'avoir lu, donc a la premiere resynchronisation l'attribut est vide et rien ne correspondait — mesure en
+        // jeu, « Disponible » n'etait reecrit qu'a la seconde. Le texte precedent (l'amorce de la page, puis la
+        // reponse d'avant) porte le titre ; l'attribut n'est qu'un repli.
+        var titrePrecedent = String(textePrecedent || boite.getAttribute('title') || '').split('|')[0].trim();
+
+        // L'attribut est pose directement : `changeTooltip()` du jeu fait de meme, et le module ne depend pas de
+        // jQuery pour une ecriture que le DOM sait faire.
+        boite.setAttribute('title', texte);
+
+        var ouverte = lInfobulleOuverteDe(titrePrecedent);
+
+        if (!ouverte) {
+            // Rien d'ouvert : le `title` suffit, la prochaine ouverture le lira.
+            return true;
+        }
+
+        var enveloppe = ouverte.querySelector('.htmlTooltip') || ouverte;
+        var ancienne = enveloppe.querySelector('table');
+
+        if (!ancienne) {
+            return false;
+        }
+
+        var morceaux = String(texte).split('|');
+        var titre = morceaux.length > 1 ? morceaux[0] : null;
+        var provisoire = document.createElement('div');
+        provisoire.innerHTML = morceaux.length > 1 ? morceaux.slice(1).join('|') : morceaux[0];
+        var neuve = provisoire.querySelector('table');
+
+        if (!neuve) {
+            return false;
+        }
+
+        var entete = enveloppe.querySelector('h1');
+
+        if (entete && titre !== null) {
+            entete.textContent = titre;
+        }
+
+        ancienne.parentNode.replaceChild(neuve, ancienne);
+
+        return true;
+    }
+
+    /**
+     * L'infobulle visible, s'il y en a une, et si elle appartient bien a cette boite.
+     *
+     * Tipped n'en montre qu'une a la fois ; elle vit en fin de document, sans lien DOM avec sa boite. Le lien se
+     * lit sur l'etat de la boite (`data-tooltipLoaded`) et sur la visibilite calculee.
+     */
+    function lInfobulleOuverteDe(titreAttendu) {
+        var liste = document.querySelectorAll('.tpd-tooltip');
+
+        // **Celle dont le titre correspond, quel que soit son rang** : Tipped laisse derriere lui des noeuds d'autres
+        // survols, et prendre le premier visible manquait la notre (mesure en jeu : « Disponible » non reecrit a la
+        // premiere resynchronisation). Le titre affiche est celui que la boite portait — c'est le lien, et il ne
+        // depend d'aucune bibliotheque.
+        for (var i = 0; i < liste.length; i++) {
+            var style = window.getComputedStyle(liste[i]);
+
+            if (style.display === 'none' || style.visibility === 'hidden') {
+                continue;
+            }
+
+            var entete = liste[i].querySelector('h1');
+
+            if (entete && entete.textContent.trim() === titreAttendu) {
+                return liste[i];
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -84647,15 +84792,202 @@ window.playOGameXWormhole = function (canvas) {
      * Appliquer la reponse : le chemin complet quand une infobulle change, les montants sinon.
      */
     function appliquer(reponse, rappels) {
-        if (lesInfobullesChangent(reponse) || !ecrireLesMontants(reponse)) {
+        if (derniereCharge === null) {
+            retenirLAmorce();
+        }
+
+        var travaux = lesInfobullesATraiter(reponse);
+        var premiere = derniereCharge === null;
+
+        if (premiere || !ecrireLesMontants(reponse)) {
+            // Premiere charge, ou compteur pas dans l'etat attendu : le chemin complet, qui ne suppose rien.
             window.reloadResources(reponse, function (ressources) {
                 livrer(rappels, ressources);
             });
         } else {
+            travaux.forEach(function (travail) {
+                // **La seule ressource concernee, et toujours en place.** Le contenu vient rendu du serveur, et ses
+                // lignes ne changent pas de nombre : un fait qui change (production, capacite) s'ecrit comme un
+                // montant. Reconstruire ne servait qu'a remesurer la boite — et `initTooltips()` fermait au passage
+                // l'infobulle ouverte d'une AUTRE tuile (mesure en jeu, journal §186). La reconstruction n'est plus
+                // qu'un secours, quand le noeud ouvert n'a pas la structure attendue.
+                if (!ecrireLInfobulleEnPlace(travail.nom, travail.texte, travail.precedent)) {
+                    refaireLInfobulle(travail.nom, travail.texte);
+                }
+            });
+
             livrer(rappels, reponse.resources);
         }
 
         retenirLaCharge(reponse);
+        reglerLAnimation(reponse);
+    }
+
+    /**
+     * Le chemin d'origine pour une seule boite : detruire et reconstruire. Il ferme l'infobulle ouverte ; il n'est
+     * pris qu'en secours, quand l'ecriture en place n'a pas trouve la structure qu'elle attend.
+     */
+    function refaireLInfobulle(nom, texte) {
+        var boite = document.getElementById(nom + '_box');
+
+        if (!boite || typeof window.changeTooltip !== 'function') {
+            return;
+        }
+
+        try {
+            // L'element brut : `changeTooltip()` l'enveloppe lui-meme (`$(object)`).
+            window.changeTooltip(boite, texte);
+        } catch (e) {
+            signaler('l infobulle de ' + nom + ' n a pas pu etre refaite', e);
+        }
+    }
+
+    /**
+     * Regler l'animation de la population et de la nourriture sur la charge qui vient d'arriver.
+     *
+     * **Ces deux tuiles ne bougeaient pas du tout** : le compteur herite les anime a partir de clefs que le serveur
+     * ne publie pas (`capableToFeed`, `growthRate`, `singleFoodConsumption`), donc ses deux branches sont mortes ;
+     * et le serveur ne projetait pas l'horloge demographique sur cette route. Les valeurs affichees etaient celles
+     * du dernier chargement de page (journal §185.4). Le serveur projette desormais, et l'animation vit ici, sur des
+     * champs **dedies** dont la semantique est la notre — jamais ceux du compteur herite.
+     */
+    function reglerLAnimation(reponse) {
+        var faits = reponse.facts || {};
+        var tuiles = {};
+        var aAnimer = false;
+
+        TUILES_ANIMEES.forEach(function (nom) {
+            var fait = faits[nom];
+            var tuile = reponse.resources[nom];
+
+            if (!fait || !tuile || typeof fait.per_second !== 'number' || typeof tuile.amount !== 'number') {
+                return;
+            }
+
+            tuiles[nom] = {
+                depart: tuile.amount,
+                parSeconde: fait.per_second,
+                plafond: typeof fait.cap === 'number' ? fait.cap : null,
+                stableJusqua: typeof fait.stable_for === 'number' ? fait.stable_for : null
+            };
+
+            // **Un taux qui ne vaut pour aucune seconde n'anime rien.** En famine, ou au grenier plein, le serveur
+            // publie `stable_for = 0` : interpoler serait inventer, et redemander l'etat a chaque battement etait une
+            // boucle de requetes (sept en trente-cinq secondes, mesure en jeu). La veille de trente secondes suffit.
+            if (fait.per_second !== 0 && (typeof fait.stable_for !== 'number' || fait.stable_for > 0)) {
+                aAnimer = true;
+            }
+        });
+
+        animation = { depuis: Date.now(), tuiles: tuiles };
+
+        if (aAnimer) {
+            demarrerLAnimation();
+        } else {
+            // Rien ne croit ni ne decroit : plafond atteint, famine stable, ou aucune forme de vie. On n'anime pas —
+            // une tuile immobile est la verite, une tuile qui avance serait une invention.
+            arreterLAnimation();
+        }
+    }
+
+    /**
+     * Avancer les tuiles animees d'un battement.
+     *
+     * **Le taux est celui du serveur, et il ne vaut que pendant `stable_for` secondes** — jusqu'au plafond d'espace
+     * vital, jusqu'au grenier plein, ou jusqu'a la derniere bouchee. Au-dela, la suite depend de regles (famine,
+     * retour a la population de base) que le navigateur n'a pas a rejouer : on tient la derniere valeur sure et on
+     * **redemande l'etat** plutot que d'afficher une progression que le serveur ne confirmerait pas.
+     */
+    function avancerLAnimation() {
+        var compteur = window.resourcesBar;
+
+        if (animation === null || !compteur || !compteur.resources || typeof compteur.refresh !== 'function') {
+            return;
+        }
+
+        var ecoule = (Date.now() - animation.depuis) / 1000;
+        var aResynchroniser = false;
+        var ecrit = false;
+
+        Object.keys(animation.tuiles).forEach(function (nom) {
+            var tuile = animation.tuiles[nom];
+
+            if (!compteur.resources[nom]) {
+                return;
+            }
+
+            var duree = ecoule;
+
+            if (tuile.stableJusqua !== null && ecoule > tuile.stableJusqua) {
+                duree = tuile.stableJusqua;
+                aResynchroniser = true;
+            }
+
+            var valeur = tuile.depart + tuile.parSeconde * duree;
+
+            if (tuile.plafond !== null) {
+                valeur = Math.min(valeur, tuile.plafond);
+            }
+
+            valeur = Math.max(0, valeur);
+
+            if (compteur.resources[nom].amount !== valeur) {
+                compteur.resources[nom].amount = valeur;
+                ecrit = true;
+            }
+        });
+
+        if (ecrit) {
+            compteur.refresh();
+        }
+
+        if (aResynchroniser) {
+            arreterLAnimation();
+            synchroniser();
+        }
+    }
+
+    function demarrerLAnimation() {
+        if (horlogeDeLAnimation !== null) {
+            return;
+        }
+
+        horlogeDeLAnimation = window.setInterval(function () {
+            // Onglet masque : on n'anime pas. Le retour sur l'onglet resynchronise, et l'animation repart de la.
+            if (!document.hidden) {
+                avancerLAnimation();
+            }
+        }, CADENCE_DE_L_ANIMATION);
+    }
+
+    function arreterLAnimation() {
+        if (horlogeDeLAnimation !== null) {
+            window.clearInterval(horlogeDeLAnimation);
+            horlogeDeLAnimation = null;
+        }
+    }
+
+    /**
+     * Cette reponse est-elle recevable ?
+     *
+     * Deux refus, et le second est le moins evident. **Un autre corps** : la page nomme le sien, une reponse qui
+     * parle d'un autre n'est pas la sienne. **Une reponse plus ancienne que la derniere appliquee pour ce meme
+     * corps** : entre son depart et son arrivee, une depense, une livraison ou une recompense a pu changer le
+     * stock, et l'appliquer remettrait a l'ecran l'etat d'avant. Le rechargement de page lors d'un changement de
+     * planete ne couvre pas cette course-la : elle se joue sur une page qui ne bouge pas.
+     */
+    function reponseRecevable(reponse) {
+        var corps = corpsDeLaPage();
+
+        if (corps !== null && typeof reponse.body === 'number' && reponse.body !== corps) {
+            return false;
+        }
+
+        if (typeof reponse.generated_at !== 'number') {
+            return true;
+        }
+
+        return dernierInstantApplique === null || reponse.generated_at >= dernierInstantApplique;
     }
 
     /**
@@ -84710,7 +85042,18 @@ window.playOGameXWormhole = function (canvas) {
                         return;
                     }
 
+                    // **Le reseau a repondu, quoi qu'il advienne de la suite** : une reponse perimee n'est pas une
+                    // panne, et la veille ne doit pas se taire a cause d'elle.
                     echecsConsecutifs = 0;
+
+                    if (!reponseRecevable(reponse)) {
+                        return;
+                    }
+
+                    if (typeof reponse.generated_at === 'number') {
+                        dernierInstantApplique = reponse.generated_at;
+                    }
+
                     appliquer(reponse, rappels);
                 } catch (e) {
                     signaler('la reponse n a pas pu etre appliquee', e);

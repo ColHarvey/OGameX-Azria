@@ -82,7 +82,31 @@ class ResourceBarTest extends AccountTestCase
         $this->assertStringContainsString(AppUtil::formatNumber($joueur->getDarkMatter()), $charge['resources']['darkmatter']['tooltip'], 'L infobulle de la matiere noire ne porte pas son montant.');
 
         // `planetList` : la cle a molette de la liste des planetes voyage avec le bandeau (`PlanetListConstructionViewModel`).
-        $this->assertSame(['resources', 'techs', 'honorScore', 'planetList', 'attack'], array_keys($charge));
+        // `facts` : la structure dediee derriere les infobulles — c'est elle que le navigateur compare, plus jamais
+        // la chaine rendue, qui porte le stock courant et changeait donc a chaque seconde (journal §185.2).
+        // `body` et `generated_at` : de quel corps, et de quand — la garde contre une reponse perimee.
+        $this->assertSame(['resources', 'techs', 'honorScore', 'facts', 'planetList', 'attack', 'body', 'generated_at'], array_keys($charge));
+
+        // **Aucun montant dans les faits** : c'est toute la correction. Un montant y ferait changer la comparaison
+        // a chaque seconde, et l'infobulle du joueur se refermerait sous son curseur comme avant.
+        foreach ($charge['facts'] as $nom => $faits) {
+            $this->assertArrayNotHasKey('amount', $faits, $nom . ' : un montant est entre dans les faits.');
+        }
+
+        $this->assertSame(['storage', 'production_hour'], array_keys($charge['facts']['metal']));
+        $this->assertEqualsWithDelta($planete->getMetalProductionPerHour(), $charge['facts']['metal']['production_hour'], 0.001);
+        $this->assertEqualsWithDelta($planete->metalStorage()->get(), $charge['facts']['metal']['storage'], 0.001);
+
+        // **L'energie ne publiait aucun fait** : sa production et sa consommation n'existaient que dans la chaine,
+        // et une comparaison qui ne regarderait plus la chaine serait devenue aveugle a leur changement.
+        $this->assertSame(['production', 'consumption'], array_keys($charge['facts']['energy']));
+        $this->assertEqualsWithDelta($planete->energyProduction()->get(), $charge['facts']['energy']['production'], 0.001);
+        $this->assertEqualsWithDelta($planete->energyConsumption()->get(), $charge['facts']['energy']['consumption'], 0.001);
+
+        $this->assertSame([], $charge['facts']['darkmatter'], 'La matiere noire n affiche que son montant : aucun fait ne la gouverne.');
+
+        $this->assertSame($this->planetService->getPlanetId(), $charge['body']);
+        $this->assertGreaterThan(0, $charge['generated_at'], 'La reponse ne dit pas de quand elle date : une reponse perimee ne pourrait pas etre reconnue.');
         // L alarme d attaque du bandeau voyage avec le meme objet (journal §156) : un booleen, jamais un compte ni une echeance.
         $this->assertSame(['hostile' => false], $charge['attack']);
         $this->assertSame([], $charge['techs']);

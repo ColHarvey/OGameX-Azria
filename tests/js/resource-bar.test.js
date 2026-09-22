@@ -28,9 +28,16 @@ import { JSDOM } from 'jsdom';
 const SOURCE = new URL('../../resources/js/ingame/resource-bar.js', import.meta.url);
 const ADRESSE = '/ajax/resourcebox';
 
+/** Les titres d infobulle que le serveur rend, tels que les reponses du banc les portent. */
+const TITRES = { metal: 'Metal', crystal: 'Cristal', deuterium: 'Deuterium', energy: 'Energie', darkmatter: 'Matiere noire', population: 'Population', food: 'Nourriture' };
+
 /** Une reponse du serveur telle que `/ajax/resourcebox` la rend. */
-function uneReponse(metal = 1000, { storage = 10000, production = 0.5, tooltip = 'Metal|<table></table>' } = {}) {
-    return {
+function uneReponse(metal = 1000, {
+    storage = 10000, production = 0.5, tooltip = 'Metal|<table></table>',
+    productionHeure = 1800, energie = { production: 100, consumption: 80 },
+    vie = null, instant = null, corps = null
+} = {}) {
+    const reponse = {
         resources: {
             metal: { amount: metal, storage, baseProduction: 0, production, tooltip, classesListItem: '' },
             crystal: { amount: 500, storage: 10000, baseProduction: 0, production: 0.25, tooltip: 'Cristal|<table></table>', classesListItem: '' },
@@ -38,9 +45,30 @@ function uneReponse(metal = 1000, { storage = 10000, production = 0.5, tooltip =
             energy: { amount: 20, tooltip: 'Energie|<table></table>', classesListItem: '' },
             darkmatter: { amount: 0, tooltip: 'Matiere noire|<table></table>', classesListItem: '' }
         },
+        // **La structure dediee** : les faits derriere chaque infobulle, en nombres. Le montant n en fait pas
+        // partie — c est tout l objet de la correction.
+        facts: {
+            metal: { storage, production_hour: productionHeure },
+            crystal: { storage: 10000, production_hour: 900 },
+            deuterium: { storage: 10000, production_hour: 360 },
+            energy: { production: energie.production, consumption: energie.consumption },
+            darkmatter: {}
+        },
         techs: {},
         honorScore: 11
     };
+
+    if (instant !== null) { reponse.generated_at = instant; }
+    if (corps !== null) { reponse.body = corps; }
+
+    if (vie !== null) {
+        reponse.resources.population = { amount: vie.population, storage: vie.espaceVital, baseProduction: 0, production: vie.croissance, tooltip: vie.infobullePopulation || 'Population|<table></table>', classesListItem: '' };
+        reponse.resources.food = { amount: vie.nourriture, storage: vie.grenier, baseProduction: 0, production: vie.bilan, tooltip: vie.infobulleNourriture || 'Nourriture|<table></table>', classesListItem: '' };
+        reponse.facts.population = { cap: vie.espaceVital, per_second: vie.croissance, stable_for: vie.popStable === undefined ? null : vie.popStable, inhabitants_fed: vie.nourris || 0, full: !!vie.plein };
+        reponse.facts.food = { cap: vie.grenier, per_second: vie.bilan, stable_for: vie.foodStable === undefined ? null : vie.foodStable, production_hour: 0, consumption_hour: 0, runs_out_in: null };
+    }
+
+    return reponse;
 }
 
 /**
@@ -80,7 +108,10 @@ function faireJQuery() {
  */
 function unMonde({ avecDiffuseur = true, avecBarre = true, avecAdresse = true, avecCorps = true, avecCompteur = true, amorcer = true } = {}) {
     const bandeau = avecBarre
-        ? '<div id="resourcesbarcomponent"' + (avecAdresse ? ' data-resourcebox-url="' + ADRESSE + '"' : '') + '><span id="resources_metal">0</span></div>'
+        ? '<div id="resourcesbarcomponent"' + (avecAdresse ? ' data-resourcebox-url="' + ADRESSE + '"' : '') + '><span id="resources_metal">0</span>'
+            + Object.entries(TITRES)
+                .map(([nom, titre]) => '<li id="' + nom + '_box" title="' + titre + '|<table></table>"></li>').join('')
+            + '</div>'
         : '<div id="rien"></div>';
     const metas = '<meta name="ogame-player-id" content="7">'
         + (avecCorps ? '<meta name="ogame-planet-id" content="4242">' : '');
@@ -108,12 +139,23 @@ function unMonde({ avecDiffuseur = true, avecBarre = true, avecAdresse = true, a
         window.resourcesBar = {
             resources: {
                 metal: { amount: 0 }, crystal: { amount: 0 }, deuterium: { amount: 0 },
-                energy: { amount: 0 }, darkmatter: { amount: 0 }
+                energy: { amount: 0 }, darkmatter: { amount: 0 },
+                population: { amount: 0 }, food: { amount: 0 }
             },
             redessins: 0,
             refresh() { this.redessins++; }
         };
     }
+
+    /*
+     * `changeTooltip()` du jeu : il DETRUIT puis recree l infobulle de la boite qu on lui donne. Le faux porte la
+     * regle du vrai — il note quelle boite a ete refaite —, sinon une reconstruction de trop passerait inapercue.
+     */
+    const refaites = [];
+    window.changeTooltip = function (boite, texte) {
+        const element = boite && boite.length ? boite[0] : boite;
+        refaites.push({ boite: element && element.id, texte });
+    };
 
     const recharges = [];
     window.reloadResources = function (donnees, rappel) {
@@ -147,6 +189,13 @@ function unMonde({ avecDiffuseur = true, avecBarre = true, avecAdresse = true, a
             })
         };
     }
+
+    /*
+     * **L horloge du monde.** L animation lit `Date.now()` et calcule le temps ECOULE depuis la derniere charge :
+     * compter les battements aurait masque un battement perdu ou double. Le banc la pilote donc a la seconde.
+     */
+    let horloge = 1_700_000_000_000;
+    window.Date.now = () => horloge;
 
     const veilles = [];
     const setIntervalReel = window.setInterval.bind(window);
@@ -204,7 +253,32 @@ function unMonde({ avecDiffuseur = true, avecBarre = true, avecAdresse = true, a
     return {
         window, demandes, recharges, ecouteurs, abonnements, veilles, talon,
         unMouvementAnnonce, laVeille, rendreVisible, fermer,
+        /* Le battement d une seconde qui anime la population et la nourriture. */
+        lAnimation: () => veilles.find((v) => v.delai === 1000) || null,
+        /* L horloge du monde, pilotable : l animation lit le temps ecoule, elle ne compte pas les battements. */
+        avancerLHorloge: (secondes) => { horloge += secondes * 1000; },
         infobulles: () => infobullesRefaites,
+        refaites,
+        /*
+         * Une infobulle OUVERTE, telle que Tipped la construit : un noeud `.tpd-tooltip` visible, en fin de
+         * document, portant `.htmlTooltip > h1 + table`. Elle n a aucun lien DOM avec sa boite — c est ce qui
+         * oblige le module a la retrouver.
+         */
+        ouvrirLInfobulle: (titre, tableau) => {
+            const noeud = window.document.createElement('div');
+            noeud.className = 'tpd-tooltip';
+            noeud.innerHTML = '<div class="htmlTooltip"><h1>' + titre + '</h1><div class="splitLine"></div>' + tableau + '</div>';
+            window.document.body.appendChild(noeud);
+            return noeud;
+        },
+        infobulleOuverte: () => {
+            const noeud = window.document.querySelector('.tpd-tooltip');
+            return noeud ? { noeud, texte: noeud.textContent.replace(/\s+/g, ' ').trim() } : null;
+        },
+        titreDe: (nom) => {
+            const boite = window.document.getElementById(nom + '_box');
+            return boite ? boite.getAttribute('title') : null;
+        },
         compteur: () => window.resourcesBar
     };
 }
@@ -265,7 +339,7 @@ test('une infobulle survolee survit a une synchronisation qui ne change que les 
     monde.fermer();
 });
 
-test('une infobulle est refaite des qu un de ses faits change', () => {
+test('un fait qui change met a jour la seule infobulle concernee, en place', () => {
     const monde = unMonde();
 
     monde.laVeille().fonction();
@@ -273,14 +347,57 @@ test('une infobulle est refaite des qu un de ses faits change', () => {
 
     // Une mine finit : la production horaire change, donc le texte de l infobulle aussi.
     monde.laVeille().fonction();
-    monde.demandes[1].repondre(uneReponse(1000, { production: 0.9, tooltip: 'Metal|<table>autre</table>' }));
+    monde.demandes[1].repondre(uneReponse(1000, { productionHeure: 3240, tooltip: 'Metal|<table>autre</table>' }));
 
-    assert.equal(monde.infobulles(), 2, 'Une infobulle dont le texte change n est pas refaite : le joueur lit une production perimee.');
+    assert.deepEqual(monde.refaites.map((r) => r.boite), [], 'Une infobulle a ete reconstruite : initTooltips() fermerait au passage celle d une autre tuile.');
+    assert.match(monde.titreDe('metal'), /autre/, 'Le nouveau texte du metal n a pas ete pose.');
+    assert.equal(monde.titreDe('crystal'), TITRES.crystal + '|<table></table>', 'Le cristal, que rien ne concerne, a ete touche.');
+    assert.equal(monde.infobulles(), 1, 'Le chemin complet ne sert qu a la premiere charge.');
 
     monde.fermer();
 });
 
-test('un stockage agrandi refait les infobulles', () => {
+test('un montant qui change seul n en refait aucune, et met l infobulle ouverte a jour en place', () => {
+    const monde = unMonde();
+
+    monde.laVeille().fonction();
+    monde.demandes[0].repondre(uneReponse(1000, { tooltip: 'Metal|<table><tr><th>Disponible:</th><td><span>1.000</span></td></tr></table>' }));
+
+    const ouverte = monde.ouvrirLInfobulle('Metal', '<table><tr><th>Disponible:</th><td><span>1.000</span></td></tr></table>');
+
+    monde.laVeille().fonction();
+    monde.demandes[1].repondre(uneReponse(1200, { tooltip: 'Metal|<table><tr><th>Disponible:</th><td><span>1.200</span></td></tr></table>' }));
+
+    assert.deepEqual(monde.refaites.map((r) => r.boite), [], 'Une infobulle a ete detruite alors que seul le montant a bouge : elle se ferme sous le curseur du joueur.');
+    assert.equal(monde.infobulleOuverte().noeud, ouverte, 'Le noeud de l infobulle a ete remplace : ce n est plus une mise a jour en place.');
+    assert.match(monde.infobulleOuverte().texte, /1\.200/, 'L infobulle ouverte porte encore l ancien montant.');
+    assert.match(monde.titreDe('metal'), /1\.200/, 'Le titre n a pas ete repose : la prochaine ouverture montrerait l ancien montant.');
+
+    monde.fermer();
+});
+
+test('plusieurs valeurs qui changent d un coup : chaque infobulle concernee suit, et elle seule', () => {
+    const monde = unMonde();
+
+    monde.laVeille().fonction();
+    monde.demandes[0].repondre(uneReponse(1000));
+
+    monde.ouvrirLInfobulle('Energie', '<table><tr><th>Production:</th><td><span>100</span></td></tr></table>');
+
+    // Une centrale finit : l energie change de faits ; le metal ne change que de montant.
+    monde.laVeille().fonction();
+    const reponse = uneReponse(1100, { tooltip: 'Metal|<table>metal neuf</table>', energie: { production: 300, consumption: 80 } });
+    reponse.resources.energy.tooltip = 'Energie|<table><tr><th>Production:</th><td><span>300</span></td></tr></table>';
+    monde.demandes[1].repondre(reponse);
+
+    assert.deepEqual(monde.refaites.map((r) => r.boite), [], 'Une infobulle a ete reconstruite.');
+    assert.match(monde.titreDe('energy'), /300/, 'L energie a change de faits : son titre devait etre repose en place.');
+    assert.match(monde.titreDe('metal'), /metal neuf/, 'Le metal a change de montant : son titre devait etre repose en place.');
+
+    monde.fermer();
+});
+
+test('un stockage agrandi met a jour l infobulle du metal, en place', () => {
     const monde = unMonde();
 
     monde.laVeille().fonction();
@@ -289,7 +406,46 @@ test('un stockage agrandi refait les infobulles', () => {
     monde.laVeille().fonction();
     monde.demandes[1].repondre(uneReponse(1000, { storage: 20000, tooltip: 'Metal|<table>plus grand</table>' }));
 
-    assert.equal(monde.infobulles(), 2);
+    assert.deepEqual(monde.refaites.map((r) => r.boite), []);
+    assert.match(monde.titreDe('metal'), /plus grand/);
+
+    monde.fermer();
+});
+
+test('une reponse plus ancienne que la derniere appliquee, pour le meme corps, est ignoree', () => {
+    const monde = unMonde();
+
+    monde.laVeille().fonction();
+    // Une depense a eu lieu : le stock tombe a 200, et cette reponse-la est la plus recente.
+    monde.demandes[0].repondre(uneReponse(200, { instant: 1000.5 }));
+    assert.equal(monde.window.resourcesBar.resources.metal.amount, 200);
+
+    // Une reponse partie AVANT la depense arrive maintenant : l appliquer remettrait 5000 a l ecran.
+    monde.laVeille().fonction();
+    monde.demandes[1].repondre(uneReponse(5000, { instant: 999.25 }));
+
+    assert.equal(monde.window.resourcesBar.resources.metal.amount, 200, 'Une reponse perimee a ete appliquee : le joueur revoit le stock d avant sa depense.');
+
+    // Et la suivante, plus recente, passe : la garde ne bloque pas le chemin.
+    monde.laVeille().fonction();
+    monde.demandes[2].repondre(uneReponse(260, { instant: 1030.75 }));
+    assert.equal(monde.window.resourcesBar.resources.metal.amount, 260);
+
+    monde.fermer();
+});
+
+test('une reponse qui parle d un autre corps est ignoree', () => {
+    // Le corps de la page est 4242 (balise `meta` du monde).
+    const monde = unMonde();
+
+    monde.laVeille().fonction();
+    monde.demandes[0].repondre(uneReponse(1000, { corps: 4242, instant: 10 }));
+    assert.equal(monde.window.resourcesBar.resources.metal.amount, 1000);
+
+    monde.laVeille().fonction();
+    monde.demandes[1].repondre(uneReponse(7777, { corps: 99, instant: 20 }));
+
+    assert.equal(monde.window.resourcesBar.resources.metal.amount, 1000, 'Le bandeau a pris les chiffres d un autre corps.');
 
     monde.fermer();
 });
@@ -601,6 +757,198 @@ test('charge pendant que la page se construit, le module s arme au DOMContentLoa
     assert.equal(monde.demandes.length, 1);
     monde.demandes[0].repondre(uneReponse());
     assert.equal(monde.demandes.length, 1, 'deux DOMContentLoaded ont abonne deux fois le retour d onglet : une demande due de trop');
+
+    monde.fermer();
+});
+
+/*
+ * ## L animation de la population et de la nourriture
+ *
+ * Ces deux tuiles ne bougeaient pas du tout : le compteur herite les anime a partir de clefs que le serveur ne
+ * publie pas, et le serveur ne projetait pas l horloge demographique sur cette route. Elles sont desormais animees
+ * ici, a partir de champs DEDIES — `facts.population` et `facts.food` —, et le taux n est cru que pendant
+ * `stable_for` secondes.
+ */
+
+const UNE_VIE = {
+    population: 1000, espaceVital: 15000, croissance: 2,
+    nourriture: 500, grenier: 9000, bilan: 3,
+    popStable: null, foodStable: null, nourris: 4000
+};
+
+function avecVie(surcharges = {}) {
+    return uneReponse(1000, { vie: Object.assign({}, UNE_VIE, surcharges) });
+}
+
+test('population et nourriture avancent au taux que le serveur publie', () => {
+    const monde = unMonde();
+
+    monde.laVeille().fonction();
+    monde.demandes[0].repondre(avecVie());
+
+    const animation = monde.lAnimation();
+    assert.ok(animation, 'aucun battement d animation n est arme alors que les deux tuiles croissent');
+
+    monde.avancerLHorloge(10);
+    animation.fonction();
+
+    assert.equal(monde.window.resourcesBar.resources.population.amount, 1020, 'La population n avance pas de sa croissance.');
+    assert.equal(monde.window.resourcesBar.resources.food.amount, 530, 'La nourriture n avance pas de son bilan.');
+
+    monde.fermer();
+});
+
+test('l energie et la matiere noire ne s accumulent jamais', () => {
+    const monde = unMonde();
+
+    monde.laVeille().fonction();
+    monde.demandes[0].repondre(avecVie());
+
+    monde.avancerLHorloge(60);
+    monde.lAnimation().fonction();
+
+    assert.equal(monde.window.resourcesBar.resources.energy.amount, 20, 'L energie s est accumulee : c est un bilan, pas un stock.');
+    assert.equal(monde.window.resourcesBar.resources.darkmatter.amount, 0, 'La matiere noire s est accumulee toute seule.');
+
+    monde.fermer();
+});
+
+test('au plafond d espace vital, la population ne depasse pas et rien n est invente', () => {
+    const monde = unMonde();
+
+    monde.laVeille().fonction();
+    // Cinq secondes avant le plafond : au-dela, le serveur seul sait ce qui suit.
+    monde.demandes[0].repondre(avecVie({ population: 14990, croissance: 2, popStable: 5 }));
+
+    monde.avancerLHorloge(60);
+    monde.lAnimation().fonction();
+
+    assert.equal(monde.window.resourcesBar.resources.population.amount, 15000, 'La population a depasse son espace vital, ou n a pas atteint son plafond.');
+    assert.equal(monde.demandes.length, 2, 'Le regime a change et aucune resynchronisation n a ete demandee : la tuile resterait sur une valeur inventee.');
+
+    monde.fermer();
+});
+
+test('nourriture epuisee : l animation s arrete a zero et redemande l etat', () => {
+    const monde = unMonde();
+
+    monde.laVeille().fonction();
+    // Dix secondes de reserve a -5 par seconde : la famine commence ensuite, et ses regles ne s interpolent pas.
+    monde.demandes[0].repondre(avecVie({ nourriture: 50, bilan: -5, foodStable: 10, croissance: 0, popStable: 0 }));
+
+    monde.avancerLHorloge(30);
+    monde.lAnimation().fonction();
+
+    assert.equal(monde.window.resourcesBar.resources.food.amount, 0, 'La nourriture est passee sous zero, ou ne s est pas videe.');
+    assert.equal(monde.demandes.length, 2, 'La famine commence et rien n a ete redemande au serveur.');
+
+    monde.fermer();
+});
+
+test('rien ne s anime quand aucun taux ne bouge', () => {
+    const monde = unMonde();
+
+    monde.laVeille().fonction();
+    monde.demandes[0].repondre(avecVie({ croissance: 0, bilan: 0 }));
+
+    assert.equal(monde.lAnimation(), null, 'Un battement tourne alors que rien ne croit : il ecrirait une progression inventee.');
+
+    monde.fermer();
+});
+
+test('onglet masque : l animation ne court pas, et le retour resynchronise', () => {
+    const monde = unMonde();
+
+    monde.laVeille().fonction();
+    monde.demandes[0].repondre(avecVie());
+
+    monde.rendreVisible(false);
+    monde.avancerLHorloge(20);
+    monde.lAnimation().fonction();
+
+    assert.equal(monde.window.resourcesBar.resources.population.amount, 1000, 'La tuile a avance alors que l onglet est masque.');
+
+    monde.rendreVisible(true);
+    assert.equal(monde.demandes.length, 2, 'Le retour sur l onglet n a pas redemande l etat.');
+
+    monde.fermer();
+});
+
+test('la page a amorce le compteur : la premiere resynchronisation ne refait aucune infobulle', () => {
+    const monde = unMonde();
+
+    // Le gabarit a deja donne au compteur ses textes d infobulle (`reloadResources(@json(...))`).
+    ['metal', 'crystal', 'deuterium', 'energy', 'darkmatter'].forEach((nom) => {
+        monde.window.resourcesBar.resources[nom].tooltip = TITRES[nom] + '|<table><tr><td>amorce</td></tr></table>';
+        monde.window.document.getElementById(nom + '_box').setAttribute('title', TITRES[nom] + '|<table><tr><td>amorce</td></tr></table>');
+    });
+    // Des lignes, comme le serveur les rend : du texte nu dans une table en serait sorti par l analyseur HTML.
+    const ouverte = monde.ouvrirLInfobulle('Metal', '<table><tr><td>amorce</td></tr></table>');
+
+    monde.laVeille().fonction();
+    monde.demandes[0].repondre(uneReponse(1000, { tooltip: 'Metal|<table><tr><td>a jour</td></tr></table>' }));
+
+    assert.equal(monde.infobulles(), 0, 'La premiere reponse a pris le chemin complet alors que la page avait amorce le compteur : toutes les infobulles ont ete refaites, celle du joueur avec.');
+    assert.deepEqual(monde.refaites.map((r) => r.boite), [], 'Une infobulle a ete refaite sans qu aucun fait connu ait change.');
+    assert.equal(monde.infobulleOuverte().noeud, ouverte, 'L infobulle ouverte a ete detruite a la premiere resynchronisation.');
+    assert.match(monde.infobulleOuverte().texte, /a jour/, 'L infobulle ouverte n a pas ete mise a jour en place : ' + monde.infobulleOuverte().texte + ' | title=' + monde.titreDe('metal'));
+
+    // Et la seconde reponse, ou un fait change, s ecrit en place elle aussi.
+    monde.laVeille().fonction();
+    monde.demandes[1].repondre(uneReponse(1000, { productionHeure: 9999, tooltip: 'Metal|<table><tr><td>mine finie</td></tr></table>' }));
+    assert.deepEqual(monde.refaites.map((r) => r.boite), []);
+    assert.match(monde.infobulleOuverte().texte, /mine finie/);
+
+    monde.fermer();
+});
+
+test('en famine, un taux qui ne vaut pour aucune seconde n arme aucun battement et ne redemande rien', () => {
+    const monde = unMonde();
+
+    monde.laVeille().fonction();
+    monde.demandes[0].repondre(avecVie({ nourriture: 0, bilan: -5, foodStable: 0, croissance: 0, popStable: 0 }));
+
+    assert.equal(monde.lAnimation(), null, 'Un battement tourne alors que le taux ne vaut pour aucune seconde : il redemanderait l etat a chaque seconde.');
+    assert.equal(monde.demandes.length, 1, 'Une requete est partie sans qu aucun battement ait franchi de borne : la boucle de requetes de la famine.');
+
+    monde.fermer();
+});
+
+test('l infobulle ouverte est reconnue par son titre, meme derriere un autre noeud visible', () => {
+    const monde = unMonde();
+
+    monde.laVeille().fonction();
+    monde.demandes[0].repondre(uneReponse(1000, { tooltip: 'Metal|<table><tr><td>avant</td></tr></table>' }));
+
+    // Un noeud d un autre survol, visible, vient AVANT le notre dans le document.
+    monde.ouvrirLInfobulle('Cristal', '<table><tr><td>autre</td></tr></table>');
+    const notre = monde.ouvrirLInfobulle('Metal', '<table><tr><td>avant</td></tr></table>');
+
+    monde.laVeille().fonction();
+    monde.demandes[1].repondre(uneReponse(1200, { tooltip: 'Metal|<table><tr><td>apres</td></tr></table>' }));
+
+    assert.match(notre.textContent, /apres/, 'L infobulle du metal n a pas ete reecrite : le premier noeud visible a ete pris pour la notre.');
+    assert.doesNotMatch(monde.window.document.querySelectorAll('.tpd-tooltip')[0].textContent, /apres/, 'Le noeud d un autre survol a ete reecrit avec le texte du metal.');
+
+    monde.fermer();
+});
+
+test('la boite sans attribut title (Tipped le retire) : l infobulle ouverte est quand meme reconnue, par la memoire du module', () => {
+    const monde = unMonde();
+
+    ['metal', 'crystal', 'deuterium', 'energy', 'darkmatter'].forEach((nom) => {
+        monde.window.resourcesBar.resources[nom].tooltip = TITRES[nom] + '|<table><tr><td>amorce</td></tr></table>';
+        // Comme dans le jeu : Tipped a lu le title et l a retire de la boite.
+        monde.window.document.getElementById(nom + '_box').removeAttribute('title');
+    });
+    const ouverte = monde.ouvrirLInfobulle('Metal', '<table><tr><td>amorce</td></tr></table>');
+
+    monde.laVeille().fonction();
+    monde.demandes[0].repondre(uneReponse(1000, { tooltip: 'Metal|<table><tr><td>a jour</td></tr></table>' }));
+
+    assert.equal(monde.infobulleOuverte().noeud, ouverte);
+    assert.match(monde.infobulleOuverte().texte, /a jour/, 'Sans attribut title, l infobulle ouverte n a pas ete reconnue : la premiere resynchronisation ne la met pas a jour.');
+    assert.match(monde.titreDe('metal'), /a jour/, 'Le title n a pas ete repose.');
 
     monde.fermer();
 });
