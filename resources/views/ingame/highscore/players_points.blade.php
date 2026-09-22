@@ -95,19 +95,7 @@
                     </td>
 
                     <td class="movement">
-                        @if (1 > 5)
-                            <span class="undermark"><img src="/img/icons/1c7545144452ec3e38c9fba216c4f9.gif" alt="up">
-                                <span class="stats_counter">(11)</span>
-                            </span>
-                        @elseif (1 == 1)
-                            <img src="/img/icons/ea5bf2cc93e52e22e3c1b80c7f7563.gif" alt="stay">
-                        @else
-                            <span class="overmark">
-                                <img src="/img/icons/7e6b4e65bec62ac2f10ea24ba76c51.gif" alt="down">
-                                <span class="stats_counter">(1)</span>
-                            </span>
-                        @endif
-
+                        @include('ingame.highscore.partials.rank-movement', ['movement' => $highscorePlayer['movement'] ?? null])
                     </td>
                     <td class="name">
                         <div class="highscoreNameFieldWrapper" style="height: unset;">

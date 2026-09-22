@@ -8,6 +8,7 @@ use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
 use OGame\Enums\HighscoreTypeEnum;
+use OGame\Highscore\RankReferencePublisher;
 use OGame\Military\MilitaryTallyPublisher;
 use OGame\Models\AllianceHighscore;
 use OGame\Models\Highscore;
@@ -21,7 +22,7 @@ class GenerateHighscoreRanks extends Command
     /**
      * Execute the console command.
      */
-    public function handle(SettingsService $settingsService, MilitaryTallyPublisher $militaryTallies): void
+    public function handle(SettingsService $settingsService, MilitaryTallyPublisher $militaryTallies, RankReferencePublisher $rankReferences): void
     {
         $adminVisible = $settingsService->highscoreAdminVisible();
 
@@ -41,6 +42,12 @@ class GenerateHighscoreRanks extends Command
             // Agrege ce qui attend, puis publie valeurs, rangs et date d'actualisation dans une seule transaction.
             // Rien n'est publie tant que la collecte n'est pas activee.
             $militaryTallies->publish();
+
+            // **La reference des variations ne tourne qu une fois par journee serveur**, et seulement ici :
+            // apres que TOUTES les categories ont recu leur rang, cumuls militaires compris. Une exception
+            // levee plus haut n atteint jamais cette ligne, donc une generation interrompue laisse la
+            // derniere reference valide entierement en place.
+            $this->info($rankReferences->publishIfDue()->message());
         } finally {
             // Clear highscore cache so changes are reflected immediately
             $this->clearHighscoreCache();

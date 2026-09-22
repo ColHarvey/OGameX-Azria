@@ -62,6 +62,10 @@ on:
       - 'app/Http/Controllers/FacilitiesController.php'
       - 'app/Console/Commands/Scheduler/CleanupWreckFields.php'
       - 'app/Models/WreckField.php'
+      # Classement : la reference des variations, sa rotation quotidienne et sa course a deux generateurs.
+      - 'app/Highscore/**'
+      - 'app/Services/HighscoreService.php'
+      - 'app/Console/Commands/Scheduler/GenerateHighscoreRanks.php'
       - 'tests/Feature/HullRepairTest.php'
       - 'tests/Feature/Patrol*.php'
       - 'tests/Feature/WreckField*.php'
@@ -115,6 +119,10 @@ on:
       - 'app/Http/Controllers/FacilitiesController.php'
       - 'app/Console/Commands/Scheduler/CleanupWreckFields.php'
       - 'app/Models/WreckField.php'
+      # Classement : la reference des variations, sa rotation quotidienne et sa course a deux generateurs.
+      - 'app/Highscore/**'
+      - 'app/Services/HighscoreService.php'
+      - 'app/Console/Commands/Scheduler/GenerateHighscoreRanks.php'
       - 'tests/Feature/HullRepairTest.php'
       - 'tests/Feature/Patrol*.php'
       - 'tests/Feature/WreckField*.php'
@@ -349,7 +357,7 @@ jobs:
         # le run qui porte les six courses du circuit des epaves (journal §183) en compte 193. Le commentaire
         # precedent annoncait 176 — un compte perime de plusieurs tranches.
         run: >-
-          php scripts/verifier-junit.php storage/logs/junit-mariadb.xml --minimum=193 --sans-ignores
+          php scripts/verifier-junit.php storage/logs/junit-mariadb.xml --minimum=195 --sans-ignores
           --exige=testTwoFreeFirstChoicesAtOnceGrantOnlyOneFreeClass
           --exige=testDisbandingWaitsOnTheAllianceBeforeLockingAnyAccount
           --exige=testTwoConcurrentDisbandsBothFinishAndLeaveTheAllianceGone
@@ -367,6 +375,8 @@ jobs:
           --exige=testABattleExtensionAndAStartAtOnceKeepTheTimerTrueToTheShipsItCovers
           --exige=testACollectionAndABurnAtOnceDeployOrBurnTheShipsNeverBoth
           --exige=testABattleHoldingThePlanetAndACollectionNeverDeadlock
+          --exige=testTwoSimultaneousGeneratorsPublishTheReferenceOnlyOnce
+          --exige=testTheNextDayTheRaceHappensAgainAndStillPublishesOnce
 
       - name: Publier les journaux
         if: always()

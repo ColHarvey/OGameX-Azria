@@ -85,7 +85,7 @@
                     </td>
 
                     <td class="movement">
-                        <img src="/img/icons/ea5bf2cc93e52e22e3c1b80c7f7563.gif" alt="stay">
+                        @include('ingame.highscore.partials.rank-movement', ['movement' => $highscoreAlliance['movement'] ?? null])
                     </td>
 
                     <td class="name">

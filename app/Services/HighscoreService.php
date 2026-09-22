@@ -4,6 +4,7 @@ namespace OGame\Services;
 
 use Cache;
 use Exception;
+use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use OGame\Enums\HighscoreTypeEnum;
@@ -11,6 +12,8 @@ use OGame\Facades\AppUtil;
 use OGame\Factories\PlayerServiceFactory;
 use OGame\GameObjects\CivilShipObjects;
 use OGame\GameObjects\MilitaryShipObjects;
+use OGame\Highscore\RankMovement;
+use OGame\Highscore\RankReferencePublisher;
 use OGame\Lifeforms\Score\LifeformScoreCalculator;
 use OGame\Models\Alliance;
 use OGame\Models\AllianceHighscore;
@@ -38,9 +41,49 @@ class HighscoreService
      *
      * @param PlayerServiceFactory $playerServiceFactory PlayerServiceFactory object.
      * @param SettingsService $settingsService SettingsService object.
+     * @param RankReferencePublisher $rankReferences La reference publiee des rangs, pour les variations.
      */
-    public function __construct(private PlayerServiceFactory $playerServiceFactory, private SettingsService $settingsService)
+    public function __construct(private PlayerServiceFactory $playerServiceFactory, private SettingsService $settingsService, private RankReferencePublisher $rankReferences)
     {
+    }
+
+    /**
+     * La variation telle que la vue la consomme : l instant de reference y est deja mis en forme, en
+     * heure du serveur, comme la note des cumuls militaires. La vue ne calcule rien.
+     *
+     * @return array{state: string, places: int, reference_at: int|null, reference_formatted: string|null}|null
+     */
+    private function movementRow(RankMovement|null $movement): array|null
+    {
+        if ($movement === null) {
+            return null;
+        }
+
+        $ligne = $movement->toArray();
+        $ligne['reference_formatted'] = $movement->referenceAt === null
+            ? null
+            : Date::createFromTimestamp($movement->referenceAt)->format('d.m.Y H:i');
+
+        return $ligne;
+    }
+
+    /**
+     * Un rang tel que la colonne le rend : un entier classe, ou rien.
+     *
+     * Le pilote rend un entier ou une chaine selon le moteur, et un rang nul marque un sujet hors
+     * classement. Un cast seul confondrait les deux.
+     */
+    private function aRankOrNothing(mixed $rank): int|null
+    {
+        if (is_int($rank)) {
+            return $rank > 0 ? $rank : null;
+        }
+
+        if (is_string($rank) && $rank !== '' && ctype_digit($rank)) {
+            return (int)$rank > 0 ? (int)$rank : null;
+        }
+
+        return null;
     }
 
     /**
@@ -449,6 +492,15 @@ class HighscoreService
 
             $highscores = $query->paginate(perPage: $perPage, page: $pageOn);
 
+            // **La variation se lit sur la reference publiee, elle ne se recalcule pas ici.** Une seule
+            // requete pour toute la page, aucune ecriture, et le resultat entre dans le meme cache de cinq
+            // minutes que les rangs qu il commente — celui que la tache des rangs oublie apres chaque passage.
+            $reference = $this->rankReferences->referenceFor(
+                RankReferencePublisher::SCOPE_PLAYER,
+                $this->highscoreType,
+                array_map(static fn ($ligne): int => (int)$ligne->player_id, $highscores->items()),
+            );
+
             foreach ($highscores as $playerScore) {
                 // Load player object
                 // TODO we only use this for the planet details now-- could we perhaps store the planet details in the highscore table too?.
@@ -490,6 +542,12 @@ class HighscoreService
                     'points_formatted' => $score_formatted,
                     'planet_coords' => $mainPlanet->getPlanetCoordinates(),
                     'rank' => $playerScore->{$this->highscoreType->name.'_rank'},
+                    // Absent quand la ligne n est pas classee ; « reference indisponible » tant qu aucune
+                    // reference n a ete publiee pour cette categorie.
+                    'movement' => $this->movementRow($reference->movementOf(
+                        (int)$playerScore->player_id,
+                        $this->aRankOrNothing($playerScore->{$this->highscoreType->name.'_rank'}),
+                    )),
                     'is_admin' => $playerService->isAdmin(),
                     'honor_points' => resolve(HonorService::class)->pointsOf($playerScore->player),
                     'alliance_tag' => $allianceTag,
@@ -676,6 +734,14 @@ class HighscoreService
                 ->orderBy($this->highscoreType->name.'_rank')
                 ->paginate(perPage: $perPage, page: $pageOn);
 
+            // Meme reference que les joueurs, sous sa propre portee : une alliance et un compte peuvent
+            // porter le meme identifiant sans jamais se confondre.
+            $reference = $this->rankReferences->referenceFor(
+                RankReferencePublisher::SCOPE_ALLIANCE,
+                $this->highscoreType,
+                array_map(static fn ($ligne): int => (int)$ligne->alliance_id, $highscores->items()),
+            );
+
             foreach ($highscores as $allianceScore) {
                 // Skip if alliance doesn't exist
                 if (!$allianceScore->alliance) {
@@ -702,6 +768,10 @@ class HighscoreService
                     'lifeform_technology_points' => (int)($allianceScore->lifeform_technology ?? 0),
                     'member_count' => $memberCount,
                     'rank' => $allianceScore->{$this->highscoreType->name.'_rank'},
+                    'movement' => $this->movementRow($reference->movementOf(
+                        (int)$allianceScore->alliance_id,
+                        $this->aRankOrNothing($allianceScore->{$this->highscoreType->name.'_rank'}),
+                    )),
                 ];
             }
             return $parsedHighscores;
