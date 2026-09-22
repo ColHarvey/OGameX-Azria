@@ -64,8 +64,13 @@ class CleanupWreckFields extends Command
                 continue;
             }
 
-            $wreckField->delete();
-            $count++;
+            // **La suppression porte sa condition** : entre la lecture ci-dessus et l'ecriture, un demarrage a pu
+            // passer l'epave en reparation. C'est la base qui arbitre, sur l'etat qu'elle tient a cet instant.
+            $count += WreckField::query()
+                ->whereKey($wreckField->id)
+                ->whereIn('status', ['active', 'blocked'])
+                ->where('expires_at', '<', now())
+                ->delete();
         }
 
         return $count;

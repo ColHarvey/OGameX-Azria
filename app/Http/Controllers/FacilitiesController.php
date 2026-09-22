@@ -331,8 +331,21 @@ class FacilitiesController extends AbstractBuildingsController
                 ])->setStatusCode(400)->header('Content-Type', 'application/json');
             }
 
-            // Load the wreck field for repairs
-            $wreckFieldService->loadForCoordinates($planetService->getPlanetCoordinates());
+            // **L'identite exacte du champ montre au joueur**, jamais « le premier a ces coordonnees » : plusieurs
+            // epaves vivent a la meme position (une vieille brulee, celle d'un ancien proprietaire), et un chargement
+            // par coordonnees seules rendait la plus ancienne. La transition reverifie proprietaire et etat sous
+            // verrou (journal §183).
+            if (!$wreckFieldService->loadById((int)$wreckField['id'])) {
+                // L'epave a disparu entre l'affichage et le clic (purge, deploiement automatique,
+                // recuperation concurrente) : le joueur lit une phrase traduite, pas un refus technique.
+                return response()->json([
+                    'success' => false,
+                    'error' => true,
+                    'message' => __('wreck_field.error_no_wreck_field'),
+                    'newAjaxToken' => csrf_token(),
+                ]);
+            }
+
             $wreckFieldService->startRepairs($spaceDockLevel);
 
             // Get updated data
@@ -423,8 +436,17 @@ class FacilitiesController extends AbstractBuildingsController
                 ]);
             }
 
-            // Load the wreck field to burn it
-            $wreckFieldService->loadForCoordinates($planetService->getPlanetCoordinates());
+            // L'identite exacte du champ montre au joueur, reverifiee sous verrou par la transition (voir startRepairs).
+            if (!$wreckFieldService->loadById((int)$wreckField['id'])) {
+                // L'epave a disparu entre l'affichage et le clic (purge, deploiement automatique,
+                // recuperation concurrente) : le joueur lit une phrase traduite, pas un refus technique.
+                return response()->json([
+                    'success' => false,
+                    'error' => true,
+                    'message' => __('wreck_field.error_no_wreck_field'),
+                    'newAjaxToken' => csrf_token(),
+                ]);
+            }
 
             $wreckFieldService->burnWreckField();
 

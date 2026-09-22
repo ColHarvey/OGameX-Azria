@@ -57,8 +57,15 @@ on:
       - 'app/Queues/**'
       - 'app/Services/BuildingQueueService.php'
       - 'app/Services/ResearchQueueService.php'
+      # Les epaves : transitions sous verrou, ordre planete puis champ, deblocage (journal §183).
+      - 'app/Services/WreckFieldService.php'
+      - 'app/Http/Controllers/FacilitiesController.php'
+      - 'app/Console/Commands/Scheduler/CleanupWreckFields.php'
+      - 'app/Models/WreckField.php'
       - 'tests/Feature/HullRepairTest.php'
       - 'tests/Feature/Patrol*.php'
+      - 'tests/Feature/WreckField*.php'
+      - 'tests/Feature/FacilitiesWreckFieldTest.php'
       - 'tests/MariaDb/**'
       - 'tests/*.php'
       - 'tests/Feature/Combat/**'
@@ -103,8 +110,15 @@ on:
       - 'app/Queues/**'
       - 'app/Services/BuildingQueueService.php'
       - 'app/Services/ResearchQueueService.php'
+      # Les epaves : transitions sous verrou, ordre planete puis champ, deblocage (journal §183).
+      - 'app/Services/WreckFieldService.php'
+      - 'app/Http/Controllers/FacilitiesController.php'
+      - 'app/Console/Commands/Scheduler/CleanupWreckFields.php'
+      - 'app/Models/WreckField.php'
       - 'tests/Feature/HullRepairTest.php'
       - 'tests/Feature/Patrol*.php'
+      - 'tests/Feature/WreckField*.php'
+      - 'tests/Feature/FacilitiesWreckFieldTest.php'
       - 'tests/MariaDb/**'
       - 'tests/*.php'
       - 'tests/Feature/Combat/**'
@@ -330,9 +344,12 @@ jobs:
         # historiques de classe sont exigees par leur nom (journal §143 et §144). 168 essais au run
         # 34695884708, plus ces cinq-la. Les trois courses des formes de vie (journal §155) le sont
         # aussi : un vert qui ne les nommerait pas ne prouverait pas qu elles ont tourne. Les deux courses
-        # de la recompense quotidienne (journal §178) s y ajoutent, avec le plancher qui monte a 176.
+        # de la recompense quotidienne (journal §178) s y ajoutent. **Le plancher se mesure, il ne s additionne
+        # pas** : le dernier run vert d avant la tranche des epaves (35614585118, SHA 3f46d803) ecrit essais=187, et
+        # le run qui porte les six courses du circuit des epaves (journal §183) en compte 193. Le commentaire
+        # precedent annoncait 176 — un compte perime de plusieurs tranches.
         run: >-
-          php scripts/verifier-junit.php storage/logs/junit-mariadb.xml --minimum=176 --sans-ignores
+          php scripts/verifier-junit.php storage/logs/junit-mariadb.xml --minimum=193 --sans-ignores
           --exige=testTwoFreeFirstChoicesAtOnceGrantOnlyOneFreeClass
           --exige=testDisbandingWaitsOnTheAllianceBeforeLockingAnyAccount
           --exige=testTwoConcurrentDisbandsBothFinishAndLeaveTheAllianceGone
@@ -344,6 +361,12 @@ jobs:
           --exige=testTwoSimultaneousRequestsNeverExceedTheQueueLimit
           --exige=testTwoSimultaneousClaimsCreditTheRewardExactlyOnce
           --exige=testARetryAfterTheRewardWasAlreadyGrantedCreditsNothing
+          --exige=testTwoSimultaneousStartsOnTheSameWreckStartOneRepairAndWriteOneTimer
+          --exige=testAStartAndABurnAtOnceLeaveExactlyOneOutcome
+          --exige=testTwoStartsOnTwoWrecksOfTheSameOwnerAtOnceLeaveOneRepairing
+          --exige=testABattleExtensionAndAStartAtOnceKeepTheTimerTrueToTheShipsItCovers
+          --exige=testACollectionAndABurnAtOnceDeployOrBurnTheShipsNeverBoth
+          --exige=testABattleHoldingThePlanetAndACollectionNeverDeadlock
 
       - name: Publier les journaux
         if: always()

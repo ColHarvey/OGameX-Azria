@@ -2,7 +2,9 @@
 
 namespace OGame\Services;
 
+use Closure;
 use Exception;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -145,6 +147,27 @@ class WreckFieldService
     }
 
     /**
+     * Load a wreck field by its identifier.
+     *
+     * L'identite exacte d'un champ, la ou les coordonnees ne suffisent plus : plusieurs champs vivent aux memes
+     * coordonnees depuis que leur unicite a ete retiree, et une commande doit agir sur celui qu'elle a montre au
+     * joueur — jamais sur « le premier a cet endroit ».
+     *
+     * @return bool True if the wreck field exists and was loaded, false otherwise.
+     */
+    public function loadById(int $wreckFieldId): bool
+    {
+        $wreckField = WreckField::query()->whereKey($wreckFieldId)->first();
+
+        if ($wreckField !== null) {
+            $this->wreckField = $wreckField;
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
      * Load an active or blocked wreck field for the given coordinates.
      * Prefers active over blocked, and skips repairing wreck fields.
      *
@@ -190,7 +213,10 @@ class WreckFieldService
     public function reload(): void
     {
         if ($this->wreckField) {
-            $this->loadForCoordinates($this->getCoordinates());
+            // **Par identifiant, jamais par coordonnees** : plusieurs epaves vivent a une meme position, et un
+            // rechargement par coordonnees rendait la plus ancienne — une brulee, ou celle d'un ancien
+            // proprietaire. C'est la classe de defaut que cette tranche ferme (journal §183).
+            $this->loadById((int)$this->wreckField->id);
         }
     }
 
@@ -279,24 +305,46 @@ class WreckFieldService
      */
     public function createWreckField(Coordinate $coordinate, array $shipData, int $ownerPlayerId): WreckField
     {
-        // Check if wreck field already exists at this location
-        $existingWreckField = WreckField::where('galaxy', $coordinate->galaxy)
-            ->where('system', $coordinate->system)
-            ->where('planet', $coordinate->position)
-            ->where('owner_player_id', $ownerPlayerId)
-            ->whereIn('status', ['active', 'repairing', 'blocked'])
-            ->first();
+        return DB::transaction(function () use ($coordinate, $shipData, $ownerPlayerId): WreckField {
+            // **Ce chemin ne verrouille aucune planete, et c'est voulu.** Ce qui serialise une extension par une
+            // bataille et un demarrage par le joueur, ce sont les lignes d'epaves, que les deux prennent ; le
+            // reglement d'un combat les tient deja. Prendre en plus la planete ajoutait, pour une cible **lune**,
+            // une ligne que le reglement n'avait pas listee avant ses epaves : epaves puis planete d'un cote,
+            // planete puis epaves de l'autre — un interblocage sur un chemin qui n'en avait aucun. Aucun chemin ne
+            // prend donc une epave **puis** une planete (journal §183).
+            //
+            // L'existant du proprietaire sous verrou : etendre, bloquer ou creer se decide sur l'etat que la
+            // transition precedente a laisse, jamais sur une lecture d'avant — une extension se glissait sous un
+            // minuteur calcule sans elle.
 
-        if ($existingWreckField) {
-            if ($existingWreckField->status === 'active') {
-                // Repairs haven't started - combine and reset expiration timer
-                $this->extendWreckFieldWithReset($existingWreckField, $shipData);
-                return $existingWreckField;
-            } else {
+            // Check if wreck field already exists at this location
+            //
+            // **L'ordre est explicite** : une active et une bloquee coexistent des qu'une bataille survient pendant
+            // une reparation, et sans `orderBy` c'est le plan d'execution qui choisissait laquelle repond. Une
+            // bloquee rendue la premiere faisait creer une troisieme ligne au lieu d'etendre l'active. `CASE`
+            // plutot que `FIELD()`, qui n'existe pas sous SQLite.
+            $existingWreckField = WreckField::where('galaxy', $coordinate->galaxy)
+                ->where('system', $coordinate->system)
+                ->where('planet', $coordinate->position)
+                ->where('owner_player_id', $ownerPlayerId)
+                ->whereIn('status', ['active', 'repairing', 'blocked'])
+                ->orderByRaw("CASE status WHEN 'active' THEN 0 WHEN 'repairing' THEN 1 ELSE 2 END")
+                ->orderBy('created_at')
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->first();
+
+            if ($existingWreckField) {
+                if ($existingWreckField->status === 'active') {
+                    // Repairs haven't started - combine and reset expiration timer
+                    $this->extendWreckFieldWithReset($existingWreckField, $shipData);
+                    return $existingWreckField;
+                }
+
                 // Repairs in progress or already blocked - create a separate blocked wreck field
                 return $this->createBlockedWreckField($coordinate, $shipData, $ownerPlayerId);
             }
-        } else {
+
             // Create new active wreck field
             $wreckField = new WreckField();
             $wreckField->galaxy = $coordinate->galaxy;
@@ -310,7 +358,7 @@ class WreckFieldService
             $wreckField->save();
 
             return $wreckField;
-        }
+        });
     }
 
     /**
@@ -465,6 +513,10 @@ class WreckFieldService
      */
     public function hasRepairingWreckFieldAt(Coordinate $coordinate, int $ownerPlayerId, int|null $excludeWreckFieldId = null): bool
     {
+        // **Une lecture verrouillante, pas une lecture coherente.** Sous `REPEATABLE READ`, une lecture ordinaire
+        // rend la photographie prise a la premiere lecture de la transaction — qui, dans le deploiement
+        // automatique, precede le verrou de la planete. La regle « une seule reparation a la fois » se lirait
+        // alors sur un etat d'avant. Ici, la base rend ce qu'elle tient maintenant.
         $query = WreckField::where('galaxy', $coordinate->galaxy)
             ->where('system', $coordinate->system)
             ->where('planet', $coordinate->position)
@@ -475,7 +527,7 @@ class WreckFieldService
             $query->where('id', '!=', $excludeWreckFieldId);
         }
 
-        return $query->exists();
+        return $query->lockForUpdate()->first() !== null;
     }
 
     /**
@@ -488,6 +540,13 @@ class WreckFieldService
      */
     public function unblockNextWreckField(Coordinate $coordinate, int $ownerPlayerId): void
     {
+        // Une epave bloquee attend la fin de la reparation en cours : tant qu'une autre epave de ce proprietaire est
+        // en reparation ici, rien n'est libere — une seule reparation a la fois, et « bloquee » garde son sens. Les
+        // etats du jeu n'atteignent pas ce cas d'eux-memes ; la garde tient pour tout appelant futur.
+        if ($this->hasRepairingWreckFieldAt($coordinate, $ownerPlayerId)) {
+            return;
+        }
+
         // Find the oldest blocked wreck field and change it to active
         $blockedWreckField = WreckField::where('galaxy', $coordinate->galaxy)
             ->where('system', $coordinate->system)
@@ -495,6 +554,7 @@ class WreckFieldService
             ->where('owner_player_id', $ownerPlayerId)
             ->where('status', 'blocked')
             ->orderBy('created_at', 'asc')
+            ->lockForUpdate()
             ->first();
 
         if ($blockedWreckField) {
@@ -512,32 +572,33 @@ class WreckFieldService
      */
     public function startRepairs(int $spaceDockLevel): bool
     {
-        if (!$this->wreckField) {
-            throw new Exception('No wreck field loaded');
-        }
+        $this->wreckField = $this->decideUnderLock(function (WreckField $wreckField) use ($spaceDockLevel): void {
+            if (!$wreckField->canBeRepaired()) {
+                throw new Exception('Wreck field cannot be repaired');
+            }
 
-        if (!$this->wreckField->canBeRepaired()) {
-            throw new Exception('Wreck field cannot be repaired');
-        }
+            if ($wreckField->getTotalShips() === 0) {
+                throw new Exception('No ships to repair');
+            }
 
-        if ($this->wreckField->getTotalShips() === 0) {
-            throw new Exception('No ships to repair');
-        }
+            // Une seule reparation a la fois pour ce proprietaire a cette position — lue sous le verrou de la
+            // planete, donc apres toute transition qui l'a precedee.
+            if ($this->hasRepairingWreckFieldAt($this->coordinatesOf($wreckField), (int)$wreckField->owner_player_id, (int)$wreckField->id)) {
+                throw new Exception('Another wreck field is already being repaired at this location');
+            }
 
-        // Check if there's already a wreck field being repaired at this location
-        $coordinates = $this->getCoordinates();
-        if ($this->hasRepairingWreckFieldAt($coordinates, $this->wreckField->owner_player_id, $this->wreckField->id)) {
-            throw new Exception('Another wreck field is already being repaired at this location');
-        }
+            // **Un seul instant pour les deux colonnes** : deux lectures de l'horloge separees par le calcul de la
+            // duree ecrivaient parfois un minuteur d'une seconde de trop, et le temoin qui le compare ne peut pas
+            // etre deterministe sur une valeur qui depend du temps d'execution.
+            $maintenant = now();
+            $wreckField->status = 'repairing';
+            $wreckField->repair_started_at = $maintenant;
+            $wreckField->space_dock_level = $spaceDockLevel;
 
-        $this->wreckField->status = 'repairing';
-        $this->wreckField->repair_started_at = now();
-        $this->wreckField->space_dock_level = $spaceDockLevel;
-
-        // Cap repair time between the configured minimum and maximum limits.
-        $repairDuration = $this->calculateRepairDuration($this->wreckField->getTotalShips());
-        $this->wreckField->repair_completed_at = now()->addSeconds($repairDuration);
-        $this->wreckField->save();
+            // Cap repair time between the configured minimum and maximum limits.
+            $wreckField->repair_completed_at = $maintenant->copy()->addSeconds($this->calculateRepairDuration($wreckField->getTotalShips()));
+            $wreckField->save();
+        });
 
         return true;
     }
@@ -570,27 +631,27 @@ class WreckFieldService
      */
     public function completeRepairs(): array
     {
-        if (!$this->wreckField) {
-            throw new Exception('No wreck field loaded');
-        }
+        $shipData = [];
+        $this->wreckField = $this->decideUnderLock(function (WreckField $wreckField) use (&$shipData): void {
+            if ($wreckField->status !== 'repairing') {
+                throw new Exception('No repairs in progress');
+            }
 
-        if ($this->wreckField->status !== 'repairing') {
-            throw new Exception('No repairs in progress');
-        }
+            $shipData = $wreckField->ship_data ?? [];
 
-        $shipData = $this->wreckField->ship_data ?? [];
+            // Mark all ships as repaired
+            foreach ($shipData as &$ship) {
+                $ship['repair_progress'] = 100;
+            }
+            unset($ship);
 
-        // Mark all ships as repaired
-        foreach ($shipData as &$ship) {
-            $ship['repair_progress'] = 100;
-        }
+            $wreckField->ship_data = $shipData;
+            $wreckField->status = 'completed';
+            $wreckField->save();
 
-        $this->wreckField->ship_data = $shipData;
-        $this->wreckField->status = 'completed';
-        $this->wreckField->save();
-
-        // Unblock the next wreck field at this location
-        $this->unblockNextWreckField($this->getCoordinates(), $this->wreckField->owner_player_id);
+            // Unblock the next wreck field at this location
+            $this->unblockNextWreckField($this->coordinatesOf($wreckField), (int)$wreckField->owner_player_id);
+        });
 
         return $shipData;
     }
@@ -603,21 +664,103 @@ class WreckFieldService
      */
     public function burnWreckField(): bool
     {
+        $this->wreckField = $this->decideUnderLock(function (WreckField $wreckField): void {
+            if (!$wreckField->canBeBurned()) {
+                throw new Exception('Wreck field cannot be burned while repairs are in progress');
+            }
+
+            $wreckField->status = 'burned';
+            $wreckField->save();
+
+            // Unblock the next wreck field at this location
+            $this->unblockNextWreckField($this->coordinatesOf($wreckField), (int)$wreckField->owner_player_id);
+        });
+
+        return true;
+    }
+
+    /**
+     * Une transition de l'epave chargee, decidee sur l'etat relu sous verrou, dans une transaction.
+     *
+     * ## Pourquoi relire
+     *
+     * « Verifier puis sauver » sur le modele en memoire laissait deux commandes se croiser : une epave brulee revenait
+     * en reparation, des vaisseaux en reparation etaient brules, un second demarrage remettait le minuteur a zero
+     * (journal §183, six courses MariaDB). La decision se prend ici sur la ligne relue `FOR UPDATE`, apres le verrou
+     * de la planete du corps — l'ordre du reglement d'une bataille, qui tient la planete avant d'ecrire l'epave.
+     *
+     * ## Ce qui est verifie avant toute decision
+     *
+     * L'epave existe encore et appartient au joueur de ce service : une commande du controleur agit sur l'identite
+     * exacte du champ qu'elle a montre au joueur, jamais sur celle d'un autre proprietaire de la position.
+     *
+     * @param Closure(WreckField): void $decision
+     * @throws Exception
+     */
+    private function decideUnderLock(Closure $decision): WreckField
+    {
         if (!$this->wreckField) {
             throw new Exception('No wreck field loaded');
         }
 
-        if (!$this->wreckField->canBeBurned()) {
-            throw new Exception('Wreck field cannot be burned while repairs are in progress');
-        }
+        $wreckFieldId = (int)$this->wreckField->id;
+        $coordinates = $this->coordinatesOf($this->wreckField);
 
-        $this->wreckField->status = 'burned';
-        $this->wreckField->save();
+        return DB::transaction(function () use ($wreckFieldId, $coordinates, $decision): WreckField {
+            $this->lockThePlanetAt($coordinates);
 
-        // Unblock the next wreck field at this location
-        $this->unblockNextWreckField($this->getCoordinates(), $this->wreckField->owner_player_id);
+            $wreckField = WreckField::query()->whereKey($wreckFieldId)->lockForUpdate()->first();
+            if ($wreckField === null || (int)$wreckField->owner_player_id !== $this->playerService->getId()) {
+                throw new Exception('Wreck field not found');
+            }
 
-        return true;
+            $decision($wreckField);
+
+            return $wreckField;
+        });
+    }
+
+    /**
+     * Tient la planete de ces coordonnees jusqu'a la fin de la transaction.
+     *
+     * C'est la ligne que les commandes du joueur prennent en premier — demarrer, bruler, recuperer, et le
+     * deploiement automatique — et c'est ce qui corrige le cycle reproduit au §183 : une recuperation qui prenait
+     * l'epave puis la planete, contre un reglement qui tient ses corps puis ecrit l'epave. **Cela ne dit rien des
+     * autres verrous du jeu** : d'autres chemins prennent d'autres lignes, et seule une course sur le bac etablit
+     * qu'un ordre tient.
+     *
+     * Une position sans planete (abandonnee, pas encore recolonisee) n'a rien a tenir : aucune bataille ne peut plus
+     * s'y produire, et aucune commande n'en part.
+     */
+    private function lockThePlanetAt(Coordinate $coordinates): void
+    {
+        Planet::query()
+            ->where('galaxy', $coordinates->galaxy)
+            ->where('system', $coordinates->system)
+            ->where('planet', $coordinates->position)
+            ->where('planet_type', PlanetType::Planet->value)
+            ->lockForUpdate()
+            ->first();
+    }
+
+    /**
+     * L'identifiant de la planete de ces coordonnees, ou `null` si la position n'en porte pas.
+     */
+    private function planetIdAt(Coordinate $coordinates): int|null
+    {
+        $id = Planet::query()
+            ->where('galaxy', $coordinates->galaxy)
+            ->where('system', $coordinates->system)
+            ->where('planet', $coordinates->position)
+            ->where('planet_type', PlanetType::Planet->value)
+            ->value('id');
+
+        return $id === null ? null : (int)$id;
+    }
+
+    private function coordinatesOf(WreckField $wreckField): Coordinate
+    {
+        return new Coordinate((int)$wreckField->galaxy, (int)$wreckField->system, (int)$wreckField->planet);
     }
 
     /**
@@ -714,6 +857,29 @@ class WreckFieldService
     public function collectRepairedShipsAtomic(Coordinate $coordinate, int $planetId): array
     {
         return DB::transaction(function () use ($coordinate, $planetId) {
+            // Les corps d'abord, l'epave ensuite : l'ordre du reglement d'une bataille, qui tient les planetes avant
+            // d'ecrire l'epave. L'ordre inverse formait un cycle avec lui, et MariaDB tuait l'un des deux
+            // (journal §183, course de l'interblocage).
+            //
+            // **Deux lignes peuvent etre en jeu, et elles se prennent par identifiant croissant** — la regle du
+            // reglement. Le corps credite est le corps courant du joueur : depuis une lune, ce n'est pas la planete
+            // de la position, qui est pourtant le point de serialisation de ses epaves. Ne tenir que le corps
+            // credite laissait deux commandes se croiser sur la meme epave sans jamais se rencontrer.
+            $corps = array_values(array_unique(array_filter([$planetId, $this->planetIdAt($coordinate)])));
+            sort($corps);
+
+            $lignes = Planet::query()
+                ->whereIn('id', $corps)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('id');
+
+            $lockedPlanet = $lignes->get($planetId);
+            if (!$lockedPlanet instanceof Planet) {
+                throw (new ModelNotFoundException())->setModel(Planet::class, [$planetId]);
+            }
+
             $wreckField = $this->lockCollectibleWreckField($coordinate);
 
             if (!$wreckField) {
@@ -725,11 +891,13 @@ class WreckFieldService
                 return $this->buildLateAddedShipsResult($currentShipData);
             }
 
-            $lockedPlanet = Planet::where('id', $planetId)
-                ->lockForUpdate()
-                ->firstOrFail();
-
             $collectionResult = $this->collectShipsFromWreckField($wreckField, $lockedPlanet);
+
+            // Une recuperation finale — plus rien ne reste, l'epave est effacee — libere l'epave suivante, dans cette
+            // transaction ; une recuperation partielle ne libere rien.
+            if ($collectionResult['remaining_ships'] === []) {
+                $this->unblockNextWreckField($coordinate, $this->playerService->getId());
+            }
 
             return [
                 'success' => true,
@@ -750,6 +918,26 @@ class WreckFieldService
     public function autoDeployWreckFieldAtomic(int $wreckFieldId): array|false
     {
         return DB::transaction(function () use ($wreckFieldId) {
+            // Lue d'abord sans verrou pour connaitre sa position, puis la planete tenue, puis l'epave relue sous
+            // verrou : l'ordre du reglement d'une bataille (journal §183).
+            $located = WreckField::query()->whereKey($wreckFieldId)->first();
+
+            if ($located === null || !in_array($located->status, ['repairing', 'completed'], true)) {
+                return false;
+            }
+
+            $lockedPlanet = Planet::where('user_id', $located->owner_player_id)
+                ->where('galaxy', $located->galaxy)
+                ->where('system', $located->system)
+                ->where('planet', $located->planet)
+                ->where('planet_type', PlanetType::Planet->value)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$lockedPlanet) {
+                throw new Exception("Could not find planet for wreck field at {$located->galaxy}:{$located->system}:{$located->planet}");
+            }
+
             $wreckField = WreckField::whereKey($wreckFieldId)
                 ->lockForUpdate()
                 ->first();
@@ -758,22 +946,15 @@ class WreckFieldService
                 return false;
             }
 
-            $lockedPlanet = Planet::where('user_id', $wreckField->owner_player_id)
-                ->where('galaxy', $wreckField->galaxy)
-                ->where('system', $wreckField->system)
-                ->where('planet', $wreckField->planet)
-                ->where('planet_type', PlanetType::Planet->value)
-                ->lockForUpdate()
-                ->first();
-
-            if (!$lockedPlanet) {
-                throw new Exception("Could not find planet for wreck field at {$wreckField->galaxy}:{$wreckField->system}:{$wreckField->planet}");
-            }
-
             $totalDeployed = $this->deployShipsToPlanetWithProgress($wreckField, $lockedPlanet);
             $planetId = $lockedPlanet->id;
-            $ownerPlayerId = $wreckField->owner_player_id;
+            $ownerPlayerId = (int)$wreckField->owner_player_id;
+            $coordinates = $this->coordinatesOf($wreckField);
             $wreckField->delete();
+
+            // Le deploiement automatique termine la reparation : l'epave suivante est liberee ici, dans la meme
+            // transaction que l'effacement.
+            $this->unblockNextWreckField($coordinates, $ownerPlayerId);
 
             return [
                 'total_deployed' => $totalDeployed,
@@ -1110,6 +1291,7 @@ class WreckFieldService
             $this->wreckField = $previousWreckField;
 
             $result[] = [
+                'id' => (int)$wreckField->id,
                 'wreck_field' => $wreckField,
                 'ship_data' => $shipData,
                 'time_remaining' => $timeRemaining,
