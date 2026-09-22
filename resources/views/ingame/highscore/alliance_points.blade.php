@@ -93,7 +93,10 @@
                             <span>{{ $highscoreAlliance['name'] }}</span>
                         </div>
                         <div class="ally-tag">
-                            <a href="{{ route('alliance.info', ['alliance_id' => $highscoreAlliance['id']]) }}" target="_blank" class="txt_link">[{{ $highscoreAlliance['tag'] }}]</a>
+                            {{-- Lien de consultation publique : adresse reelle en href, ouverture en fenetre par
+                                 `alliance-profile.js` sur un clic simple, onglet neuf sur Ctrl-clic. Ni classe
+                                 `overlay` ni `overlay=1`, qui feraient aussi reagir le gestionnaire historique. --}}
+                            <a href="{{ route('alliance.info', ['alliance_id' => $highscoreAlliance['id']]) }}" class="txt_link" data-alliance-profile="{{ $highscoreAlliance['id'] }}" data-alliance-tag="{{ $highscoreAlliance['tag'] }}">[{{ $highscoreAlliance['tag'] }}]</a>
                         </div>
                     </td>
 

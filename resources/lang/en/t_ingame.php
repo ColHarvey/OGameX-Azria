@@ -984,6 +984,15 @@ return [
 
         // Info popup
         'info_title'                    => 'Alliance Information',
+        'profile_members' => 'Members',
+        'profile_rank' => 'Overall rank',
+        'profile_points' => 'Points',
+        'profile_unranked' => 'Unranked',
+        'profile_description_none' => 'This alliance has no public presentation yet.',
+        'profile_missing' => 'This alliance does not exist or has been disbanded.',
+        'profile_load_failed' => 'The alliance profile could not be loaded. Please try again in a moment.',
+        'profile_logo_alt' => 'Logo of alliance :tag',
+        'profile_applied' => 'Application sent',
         'apply_confirm'                 => 'Do you want to apply to this alliance?',
         'redirect_confirm'              => 'By following this link, you will leave OGame. Do you wish to continue?',
 

@@ -1,0 +1,41 @@
+/* Custom component only. Let the existing game overlay own its backdrop and close control. */
+.azria-alliance-profile{box-sizing:border-box;width:100%;padding:20px;border:1px solid #496e89;border-radius:10px;background:linear-gradient(125deg,#173249,#081520 70%);color:#c9dce9;font:13px/1.6 Arial,sans-serif}
+.azria-alliance-profile *{box-sizing:border-box}
+.azria-alliance-profile .ap-header{display:flex;align-items:center;gap:16px;border-bottom:1px solid #38566d;padding-bottom:18px}
+.azria-alliance-profile .ap-logo{width:80px;height:80px;object-fit:contain;flex-shrink:0;border-radius:12px}
+.azria-alliance-profile .ap-identity{min-width:0}
+.azria-alliance-profile .ap-tag{color:#e3be73;font-size:13px;font-weight:bold;letter-spacing:1px}
+.azria-alliance-profile h2{margin:2px 0;color:#e4eff8;font-size:22px;line-height:1.25;overflow-wrap:anywhere}
+.azria-alliance-profile .ap-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:16px 0}
+.azria-alliance-profile .ap-stat{padding:12px 8px;border:1px solid #365872;border-radius:7px;background:#08152288;text-align:center;overflow-wrap:anywhere}
+.azria-alliance-profile .ap-stat dt{color:#a2bed2;font-size:12px}
+.azria-alliance-profile .ap-stat dd{margin:4px 0 0;color:#e2eff9;font-size:18px;font-weight:bold;font-variant-numeric:tabular-nums}
+.azria-alliance-profile .ap-class{display:flex;gap:14px;align-items:center;padding:14px;border:1px solid #496884;border-radius:7px;background:linear-gradient(100deg,#213b50,#0c1d2c)}
+.azria-alliance-profile .ap-class img{width:60px;height:60px;object-fit:contain;flex-shrink:0}
+.azria-alliance-profile h3{margin:0 0 6px;font-size:15px;color:#b9dff5}
+.azria-alliance-profile .ap-class p{margin:0;overflow-wrap:anywhere}
+.azria-alliance-profile .ap-description{margin-top:20px;overflow-wrap:anywhere}
+.azria-alliance-profile .ap-description img{max-width:100%;height:auto}
+.azria-alliance-profile .ap-description pre{white-space:pre-wrap}
+.azria-alliance-profile a{color:#abd9fb}
+.azria-alliance-profile a:focus-visible{outline:2px solid #c1e7ff;outline-offset:3px}
+@media(max-width:480px){.azria-alliance-profile{padding:14px}.azria-alliance-profile .ap-logo{width:56px;height:56px}.azria-alliance-profile h2{font-size:18px}.azria-alliance-profile .ap-stats{grid-template-columns:1fr}.azria-alliance-profile .ap-class{align-items:flex-start}}
+
+/* Ajouts Azria : chargement, absence, actions, page autonome et bloc de classe avec le sprite du jeu. */
+.overlayDiv.allianceProfile{padding:0;max-width:100%}
+.overlayDiv.allianceProfile .ap-loading{margin:20px;text-align:center;color:#a2bed2}
+.azria-alliance-profile.ap-missing{text-align:center;padding:28px 20px}
+.azria-alliance-profile.ap-missing p{margin:0;font-size:14px;color:#e2eff9}
+.azria-alliance-profile .ap-class .sprite.allianceclass.medium{flex-shrink:0}
+.azria-alliance-profile .ap-class-text{min-width:0}
+.azria-alliance-profile .ap-class-name{margin:0 0 6px;font-weight:bold;color:#e2eff9}
+.azria-alliance-profile .ap-bonus{margin:0;padding-left:18px;color:#a2bed2;font-size:12px}
+.azria-alliance-profile .ap-bonus li{margin:2px 0}
+.azria-alliance-profile .ap-empty{color:#7f97ab;font-style:italic}
+.azria-alliance-profile .ap-homepage{margin:14px 0 0;overflow-wrap:anywhere}
+.azria-alliance-profile .ap-homepage-label{color:#a2bed2;margin-right:6px}
+.azria-alliance-profile .ap-actions{margin-top:20px;text-align:center}
+.azria-alliance-profile .ap-actions .btn_blue{padding:5px 20px}
+.azria-alliance-profile .ap-actions .btn_blue[disabled]{opacity:.6;cursor:default}
+#allianceProfilePage.ap-page{max-width:600px;margin:0 auto}
+#allianceProfilePage .ap-page-title{margin:0 0 12px;color:#e4eff8;font-size:16px;overflow-wrap:anywhere}

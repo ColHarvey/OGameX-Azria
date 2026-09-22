@@ -793,6 +793,16 @@ return [
 
         // Info popup
         'info_title'                    => 'Alliantie-informatie',
+        'class_none_selected' => 'Geen alliantieklasse geselecteerd',
+        'profile_members' => 'Leden',
+        'profile_rank' => 'Algemene positie',
+        'profile_points' => 'Punten',
+        'profile_unranked' => 'Niet gerangschikt',
+        'profile_description_none' => 'Deze alliantie heeft nog geen openbare presentatie.',
+        'profile_missing' => 'Deze alliantie bestaat niet of is ontbonden.',
+        'profile_load_failed' => 'Het alliantieprofiel kon niet worden geladen. Probeer het zo opnieuw.',
+        'profile_logo_alt' => 'Logo van alliantie :tag',
+        'profile_applied' => 'Aanvraag verzonden',
         'apply_confirm'                 => 'Wil je je aanmelden bij deze alliantie?',
         'redirect_confirm'              => 'Door deze link te volgen, verlaat je OGame. Wil je doorgaan?',
 

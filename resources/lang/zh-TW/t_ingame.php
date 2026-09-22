@@ -693,6 +693,16 @@ return [
         'send_btn'                      => '發送',
 
         'info_title'                    => '聯盟資訊',
+        'class_none_selected' => '尚未選擇聯盟職業',
+        'profile_members' => '成員',
+        'profile_rank' => '總排名',
+        'profile_points' => '分數',
+        'profile_unranked' => '未列入排名',
+        'profile_description_none' => '此聯盟尚未提供公開簡介。',
+        'profile_missing' => '此聯盟不存在或已解散。',
+        'profile_load_failed' => '無法載入聯盟資訊，請稍後再試。',
+        'profile_logo_alt' => '聯盟 :tag 的標誌',
+        'profile_applied' => '已送出申請',
         'apply_confirm'                 => '您要申請加入此聯盟嗎？',
         'redirect_confirm'              => '點擊此連結將離開 OGame。您要繼續嗎？',
 

@@ -507,6 +507,24 @@
         };
     }
 
+    /*
+     * Cliquer un lien qui ouvre une FENETRE du jeu (un `.overlayDiv`). Le clic du bouton, lui, doit
+     * s'arreter la : `initHideElements()` du bundle herite ferme toute fenetre des qu'un clic remonte
+     * jusqu'a `html` hors d'un `.ui-dialog` — et le bouton de la fiche tactique est hors de la fenetre
+     * qu'il vient d'ouvrir. Le lien arrete son propre clic (comme les liens d'overlay du jeu, par
+     * `return false`) ; c'est celui du bouton qu'il faut arreter ici, sinon la fenetre s'ouvre puis se
+     * ferme dans le meme clic (mesure du 22 septembre 2026).
+     */
+    function cliquerPourOuvrirUneFenetre(lien) {
+        return function (evenement) {
+            if (evenement && typeof evenement.stopPropagation === 'function') {
+                evenement.stopPropagation();
+            }
+
+            lien.click();
+        };
+    }
+
     function ouvrir(adresse) {
         return function () {
             window.location.href = adresse;
@@ -716,7 +734,19 @@
                     return inactif(raison('noAlliance'));
                 }
 
-                return actif(ouvrir(joueur.isAllianceMember && droit.infoPageLink ? droit.infoPageLink : '/alliance/info/' + joueur.allianceId));
+                // Sa propre alliance : la page de gestion, comme avant. Une alliance etrangere : la fiche
+                // publique, ouverte en fenetre par le lien que l infobulle porte (`alliance-profile.js`),
+                // au lieu d une navigation qui quittait la Galaxie.
+                if (joueur.isAllianceMember && droit.infoPageLink) {
+                    return actif(ouvrir(droit.infoPageLink));
+                }
+
+                /* Le lien de la fiche vit dans l'infobulle de l'ALLIANCE (`#alliance<id>`, `getAllianceTooltip()`),
+                   pas dans celle du joueur : cherche dans `#player<id>`, il n'etait jamais trouve et l'action
+                   quittait la Galaxie par navigation (mesure du 22 septembre 2026). */
+                var fiche = chercherDansLInfobulle('alliance' + joueur.allianceId, 'a[data-alliance-profile]');
+
+                return fiche ? actif(cliquerPourOuvrirUneFenetre(fiche)) : actif(ouvrir('/alliance/info/' + joueur.allianceId));
             },
             coloniser: function () {
                 var m = mission(ligne, 7);
@@ -858,7 +888,8 @@
         if (decision.actif) {
             b.addEventListener('click', function (evenement) {
                 evenement.preventDefault();
-                decision.executer();
+                /* L'evenement est transmis : une decision qui ouvre une fenetre du jeu doit pouvoir l'arreter. */
+                decision.executer(evenement);
             });
         } else {
             var motif = element('small', 'gtActionReason');

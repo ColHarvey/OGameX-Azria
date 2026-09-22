@@ -30,6 +30,7 @@ const ingameScripts = [
     'resources/js/ingame/galaxy-tactical.js',
     'resources/js/ingame/messages-badge.js',
     'resources/js/ingame/resource-bar.js',
+    'resources/js/ingame/alliance-profile.js',
     // **La recompense quotidienne vient avant la liste des planetes, et pas apres.** La derniere place du
     // bundle est une protection rare — une exception du dernier fichier ne peut empecher aucun autre de
     // s executer — et `PlanetListConstructionBrowserTest` la lui garde. Ce fichier-ci ne fait que des

@@ -793,6 +793,16 @@ return [
 
         // Popup info
         'info_title'                    => 'Informazioni Alleanza',
+        'class_none_selected' => 'Nessuna classe di alleanza selezionata',
+        'profile_members' => 'Membri',
+        'profile_rank' => 'Posizione generale',
+        'profile_points' => 'Punti',
+        'profile_unranked' => 'Non classificata',
+        'profile_description_none' => 'Questa alleanza non ha ancora una presentazione pubblica.',
+        'profile_missing' => 'Questa alleanza non esiste o è stata sciolta.',
+        'profile_load_failed' => 'Impossibile caricare la scheda dell’alleanza. Riprova tra un istante.',
+        'profile_logo_alt' => 'Logo dell’alleanza :tag',
+        'profile_applied' => 'Candidatura inviata',
         'apply_confirm'                 => 'Vuoi candidarti a questa alleanza?',
         'redirect_confirm'              => 'Seguendo questo link, lascerai OGame. Desideri continuare?',
 

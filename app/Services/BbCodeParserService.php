@@ -37,17 +37,38 @@ class BbCodeParserService
             '/\[sub\](.*?)\[\/sub\]/is' => '<sub>$1</sub>',
             '/\[color=([a-zA-Z0-9#]+)\](.*?)\[\/color\]/is' => '<span style="color:$1">$2</span>',
             '/\[size=(\d+)\](.*?)\[\/size\]/is' => '<span style="font-size:$1px">$2</span>',
-            '/\[url=(.*?)\](.*?)\[\/url\]/is' => '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#6f9fc8;text-decoration:underline">$2</a>',
-            '/\[url\](.*?)\[\/url\]/is' => '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#6f9fc8;text-decoration:underline">$1</a>',
         ];
 
         foreach ($patterns as $pattern => $replacement) {
             $html = preg_replace($pattern, $replacement, $html) ?? $html;
         }
 
+        // **Un lien n est rendu que vers http ou https.** L echappement du dessus ne protege pas un `href` :
+        // `javascript:alert(1)` ne contient ni chevron ni guillemet, il traversait intact et devenait un lien
+        // executable (mesure du 22 septembre 2026, en eprouvant le parseur pour la fiche publique d alliance).
+        // Tout autre schema garde son texte et perd son lien.
+        $html = preg_replace_callback('/\[url=(.*?)\](.*?)\[\/url\]/is', static fn (array $m): string => self::link($m[1], $m[2]), $html) ?? $html;
+        $html = preg_replace_callback('/\[url\](.*?)\[\/url\]/is', static fn (array $m): string => self::link($m[1], $m[1]), $html) ?? $html;
+
         // Convert newlines to <br>.
         $html = nl2br($html);
 
         return $html;
+    }
+
+    /**
+     * Un lien vers une adresse http ou https, sinon le seul libelle.
+     *
+     * L adresse arrive deja echappee ; elle est decodee pour etre jugee, puis reechappee pour l attribut.
+     */
+    private static function link(string $escapedUrl, string $label): string
+    {
+        $url = trim(html_entity_decode($escapedUrl, ENT_QUOTES, 'UTF-8'));
+
+        if (!preg_match('#^https?://#i', $url) || filter_var($url, FILTER_VALIDATE_URL) === false) {
+            return $label;
+        }
+
+        return '<a href="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '" target="_blank" rel="noopener noreferrer" style="color:#6f9fc8;text-decoration:underline">' . $label . '</a>';
     }
 }

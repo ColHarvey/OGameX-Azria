@@ -1047,6 +1047,8 @@
                          mecanisme qui ignore : celui du bundle. La page Galaxie en portait une seconde, avec sa
                          propre requete, et un clic partait donc deux fois (mesure du 22 septembre 2026). --}}
                     'ignorePlayer'         => ['confirm' => __('t_ingame.buddy.ignore_confirm')],
+                    {{-- La fiche publique d alliance en fenetre : titre, chargement et panne, lus par `alliance-profile.js`. --}}
+                    'allianceProfile'      => ['title' => __('t_ingame.alliance.info_title'), 'loading' => __('t_ingame.layout.loading'), 'loadFailed' => __('t_ingame.alliance.profile_load_failed')],
                 ]) !!};
                 var constants = {
                     "espionage": 6,

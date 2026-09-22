@@ -103,7 +103,7 @@
                                 <div class="highscoreNameHolder">
                                     @if(!empty($highscorePlayer['alliance_tag']))
                                         <span class="ally-tag">
-                                            <a href="{{ route('alliance.info', ['alliance_id' => $highscorePlayer['alliance_id']]) }}" target="_ally">
+                                            <a href="{{ route('alliance.info', ['alliance_id' => $highscorePlayer['alliance_id']]) }}" data-alliance-profile="{{ $highscorePlayer['alliance_id'] }}" data-alliance-tag="{{ $highscorePlayer['alliance_tag'] }}">
                                                 [{{ $highscorePlayer['alliance_tag'] }}]
                                             </a>
                                         </span>

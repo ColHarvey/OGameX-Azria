@@ -6,15 +6,16 @@ use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\View\View;
 use Log;
+use OGame\Alliance\PublicProfile;
 use OGame\Enums\AllianceClass;
 use OGame\Models\Alliance;
 use OGame\Models\AllianceRank;
 use OGame\Services\AllianceClassService;
 use OGame\Services\AllianceService;
-use OGame\Services\HighscoreService;
 use OGame\Services\PlayerService;
 
 class AllianceController extends OGameController
@@ -1170,36 +1171,28 @@ class AllianceController extends OGameController
     }
 
     /**
-     * Show alliance information page (opens in new window)
+     * La fiche publique d une alliance : une route, deux enveloppes.
      *
-     * @param int $alliance_id
-     * @param AllianceService $allianceService
-     * @param HighscoreService $highscoreService
-     * @return View
+     * Avec `overlay=1`, la reponse est le seul fragment de contenu, que la fenetre du jeu injecte ; sans, une
+     * page autonome minimale qui charge les assets par Vite et le meme fragment. Le contenu vient d une seule
+     * source, `PublicProfile`, qui ne lit rien de reserve aux membres.
+     *
+     * Une alliance inconnue rend un fragment ou une page **404 avec un message propre** : la fenetre l affiche
+     * au lieu de rester sur son chargement, et l acces direct ne montre pas une page blanche.
      */
-    public function info(int $alliance_id, AllianceService $allianceService, HighscoreService $highscoreService, PlayerService $player): View
+    public function info(int $alliance_id, Request $request, PublicProfile $profiles, PlayerService $player): Response
     {
-        $alliance = $allianceService->getAllianceById($alliance_id);
+        $profil = $profiles->of($alliance_id);
+        $enOverlay = $request->boolean('overlay');
+        $vue = $enOverlay ? 'ingame.alliance.profile.fragment' : 'ingame.alliance.profile.page';
 
-        if (!$alliance) {
-            abort(404, 'Alliance not found');
+        if ($profil === null) {
+            return response()->view($vue, ['profile' => null, 'canApply' => false, 'overlay' => $enOverlay], 404);
         }
 
-        // Get member count
-        $memberCount = $allianceService->getAllianceMembers($alliance_id)->count();
+        // Le bouton ne s offre que si la candidature peut aboutir ; le serveur le reverifie au POST.
+        $canApply = $profil['is_open'] && $player->getUser()->alliance_id === null;
 
-        // Get alliance rank in highscore (default to overall points - type 0)
-        $highscoreService->setHighscoreType(0);
-        $allianceRank = $highscoreService->getHighscoreAllianceRank($alliance_id);
-
-        // Check if user can apply
-        $canApply = $alliance->is_open && !$player->getUser()->alliance_id;
-
-        return view('ingame.alliance.info')->with([
-            'alliance' => $alliance,
-            'memberCount' => $memberCount,
-            'allianceRank' => $allianceRank > 0 ? $allianceRank : null,
-            'canApply' => $canApply,
-        ]);
+        return response()->view($vue, ['profile' => $profil, 'canApply' => $canApply, 'overlay' => $enOverlay]);
     }
 }

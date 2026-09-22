@@ -35980,7 +35980,9 @@ function getAllianceTooltip(galaxyContentObject) {
   if (player.isAllianceMember) {
     infoPageLink = `<li><a href="${alliance.infoPageLink}">${alliance.infoPageTitle}</a></li>`;
   } else {
-    infoPageLink = `<li><a href="/alliance/info/${player.allianceId}" target="_blank">${alliance.infoPageTitle}</a></li>`;
+    // Fiche publique : adresse reelle, fenetre du jeu sur un clic simple (`alliance-profile.js`), onglet neuf
+    // sur Ctrl-clic. Plus de `target="_blank"`, qui emportait le joueur hors de la Galaxie.
+    infoPageLink = `<li><a href="/alliance/info/${player.allianceId}" data-alliance-profile="${player.allianceId}" data-alliance-tag="${player.allianceTag || ''}">${alliance.infoPageTitle}</a></li>`;
   }
 
   let applicationLink = "";
